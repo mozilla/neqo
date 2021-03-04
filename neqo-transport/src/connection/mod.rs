@@ -47,7 +47,7 @@ use crate::packet::{
 use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
-use crate::recv_stream::{recv_streams_write_frames, RecvStream, RecvStreams, RECV_BUFFER_SIZE};
+use crate::recv_stream::{recv_streams_write_frames, RecvStream, RecvStreams};
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
@@ -340,65 +340,6 @@ impl Connection {
             .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
     }
 
-    fn set_tp_defaults(tps: &mut TransportParameters) {
-        tps.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-        );
-        tps.set_integer(
-            tparams::IDLE_TIMEOUT,
-            u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
-        );
-        tps.set_integer(
-            tparams::ACTIVE_CONNECTION_ID_LIMIT,
-            u64::try_from(LOCAL_ACTIVE_CID_LIMIT).unwrap(),
-        );
-        tps.set_empty(tparams::DISABLE_MIGRATION);
-        tps.set_empty(tparams::GREASE_QUIC_BIT);
-    }
-
-    /// Read connection parameters and update transport parameters.
-    fn read_parameters(&mut self) -> Res<()> {
-        self.tps
-            .borrow_mut()
-            .local
-            .set_integer(tparams::INITIAL_MAX_DATA, self.conn_params.get_max_data());
-        self.tps.borrow_mut().local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            self.conn_params.get_max_stream_data(StreamType::BiDi),
-        );
-        self.tps.borrow_mut().local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_UNI,
-            self.conn_params.get_max_stream_data(StreamType::UniDi),
-        );
-        self.tps.borrow_mut().local.set_integer(
-            tparams::INITIAL_MAX_STREAMS_BIDI,
-            self.conn_params.get_max_streams(StreamType::BiDi).as_u64(),
-        );
-        self.tps.borrow_mut().local.set_integer(
-            tparams::INITIAL_MAX_STREAMS_UNI,
-            self.conn_params.get_max_streams(StreamType::UniDi).as_u64(),
-        );
-
-        // Set the preferred address transport parameter if this is a server.
-        if let PreferredAddressConfig::Address(preferred) = self.conn_params.get_preferred_address()
-        {
-            if self.role == Role::Server {
-                let (cid, srt) = self.cid_manager.preferred_address_cid()?;
-                self.tps.borrow_mut().local.set(
-                    tparams::PREFERRED_ADDRESS,
-                    TransportParameter::PreferredAddress {
-                        v4: preferred.ipv4(),
-                        v6: preferred.ipv6(),
-                        cid,
-                        srt,
-                    },
-                );
-            }
-        }
-        Ok(())
-    }
-
     fn new(
         role: Role,
         agent: Agent,
@@ -406,18 +347,18 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         conn_params: ConnectionParameters,
     ) -> Res<Self> {
-        let mut tps = TransportParametersHandler::default();
-        Self::set_tp_defaults(&mut tps.local);
         // Setup the local connection ID.
         let local_initial_source_cid = cid_generator
             .borrow_mut()
             .generate_cid()
             .ok_or(Error::ConnectionIdsExhausted)?;
+        let mut cid_manager =
+            ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
+        let mut tps = conn_params.create_transport_parameter(role, &mut cid_manager)?;
         tps.local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             local_initial_source_cid.to_vec(),
         );
-        let cid_manager = ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
 
         let tphandler = Rc::new(RefCell::new(tps));
         let crypto = Crypto::new(
@@ -433,7 +374,7 @@ impl Connection {
             conn_params.get_max_streams(StreamType::UniDi),
         );
 
-        let mut c = Self {
+        let c = Self {
             role,
             state: State::Init,
             paths: Paths::default(),
@@ -468,7 +409,6 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
         };
-        c.read_parameters()?;
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
     }

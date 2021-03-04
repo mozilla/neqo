@@ -4,10 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use crate::connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT, LOCAL_IDLE_TIMEOUT};
 use crate::recv_stream::RECV_BUFFER_SIZE;
 use crate::stream_id::{StreamIndex, StreamType};
-use crate::tparams::PreferredAddress;
-use crate::{CongestionControlAlgorithm, QuicVersion};
+use crate::tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler};
+use crate::{CongestionControlAlgorithm, QuicVersion, Res};
 use std::convert::TryFrom;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
@@ -136,5 +137,63 @@ impl ConnectionParameters {
 
     pub fn get_preferred_address(&self) -> &PreferredAddressConfig {
         &self.preferred_address
+    }
+
+    pub fn create_transport_parameter(
+        &self,
+        role: Role,
+        cid_manager: &mut ConnectionIdManager,
+    ) -> Res<TransportParametersHandler> {
+        let mut tps = TransportParametersHandler::default();
+        // default parameters
+        tps.local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+        );
+        tps.local.set_integer(
+            tparams::IDLE_TIMEOUT,
+            u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
+        );
+        tps.local.set_integer(
+            tparams::ACTIVE_CONNECTION_ID_LIMIT,
+            u64::try_from(LOCAL_ACTIVE_CID_LIMIT).unwrap(),
+        );
+        tps.local.set_empty(tparams::DISABLE_MIGRATION);
+        tps.local.set_empty(tparams::GREASE_QUIC_BIT);
+
+        // set configurable parameters
+        tps.local
+            .set_integer(tparams::INITIAL_MAX_DATA, self.max_data);
+        tps.local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            self.max_stream_data_bidi,
+        );
+        tps.local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            self.max_stream_data_uni,
+        );
+        tps.local.set_integer(
+            tparams::INITIAL_MAX_STREAMS_BIDI,
+            self.max_streams_bidi.as_u64(),
+        );
+        tps.local.set_integer(
+            tparams::INITIAL_MAX_STREAMS_UNI,
+            self.max_streams_uni.as_u64(),
+        );
+        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
+            if role == Role::Server {
+                let (cid, srt) = cid_manager.preferred_address_cid()?;
+                tps.local.set(
+                    tparams::PREFERRED_ADDRESS,
+                    TransportParameter::PreferredAddress {
+                        v4: preferred.ipv4(),
+                        v6: preferred.ipv6(),
+                        cid,
+                        srt,
+                    },
+                );
+            }
+        }
+        Ok(tps)
     }
 }
