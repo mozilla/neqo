@@ -655,7 +655,7 @@ fn ping_with_ack(fast: bool) {
 
     if !fast {
         // Wait at least one PTO, from the reciever's perspective.
-        // After this it should send a PING to force the sender to acknowledge.
+        // A receiver that hasn't received MAX_OUTSTANDING_UNACK won't send PING.
         now += receiver.pto() + Duration::from_micros(1);
         trickle(&mut sender, &mut receiver, 1, now);
         assert_eq!(receiver.stats().frame_tx.ping, 0);
