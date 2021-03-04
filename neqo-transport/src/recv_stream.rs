@@ -12,7 +12,6 @@ use std::cmp::max;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::mem;
-use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
 use smallvec::SmallVec;
@@ -69,10 +68,8 @@ impl RxStreamOrderer {
             return;
         }
 
-        let extend = if let Some((&prev_start, prev_vec)) = self
-            .data_ranges
-            .range_mut((Unbounded, Included(new_start)))
-            .next_back()
+        let extend = if let Some((&prev_start, prev_vec)) =
+            self.data_ranges.range_mut(..=new_start).next_back()
         {
             let prev_end = prev_start + u64::try_from(prev_vec.len()).unwrap();
             if new_end > prev_end {
@@ -150,7 +147,7 @@ impl RxStreamOrderer {
             if extend {
                 let (_, buf) = self
                     .data_ranges
-                    .range_mut((Unbounded, Included(new_start)))
+                    .range_mut(..=new_start)
                     .next_back()
                     .unwrap();
                 buf.extend_from_slice(to_add);
@@ -481,6 +478,26 @@ impl RecvStream {
                 self.flow_mgr
                     .borrow_mut()
                     .max_stream_data(self.stream_id, maybe_new_max)
+            }
+        }
+    }
+
+    /// Send a flow control update.
+    /// This is used when a peer declares that they are blocked.
+    /// This sends `MAX_STREAM_DATA` if there is any increase possible.
+    pub fn send_flowc_update(&mut self) {
+        if let RecvStreamState::Recv {
+            max_bytes,
+            max_stream_data,
+            recv_buf,
+        } = &mut self.state
+        {
+            let new_max = recv_buf.retired() + *max_bytes;
+            if new_max > *max_stream_data {
+                *max_stream_data = new_max;
+                self.flow_mgr
+                    .borrow_mut()
+                    .max_stream_data(self.stream_id, new_max)
             }
         }
     }
@@ -1070,7 +1087,10 @@ mod tests {
 
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
         flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        assert!(matches!(s.flow_mgr.borrow().peek().unwrap(), Frame::MaxStreamData{..}));
+        assert!(matches!(
+            s.flow_mgr.borrow().peek().unwrap(),
+            Frame::MaxStreamData { .. }
+        ));
         s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, &[])
             .unwrap();
         assert!(matches!(s.flow_mgr.borrow().peek(), None));
@@ -1105,6 +1125,9 @@ mod tests {
         assert!(matches!(s.flow_mgr.borrow().peek(), None));
         // But if lost, another frame is generated
         flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        assert!(matches!(s.flow_mgr.borrow_mut().next().unwrap(), Frame::MaxStreamData{..}));
+        assert!(matches!(
+            s.flow_mgr.borrow_mut().next().unwrap(),
+            Frame::MaxStreamData { .. }
+        ));
     }
 }

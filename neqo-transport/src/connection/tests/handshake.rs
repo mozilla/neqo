@@ -15,7 +15,10 @@ use crate::events::ConnectionEvent;
 use crate::path::PATH_MTU_V6;
 use crate::server::ValidateAddress;
 use crate::tparams::TransportParameter;
-use crate::{ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType};
+use crate::{
+    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, QuicVersion,
+    StreamType,
+};
 
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
@@ -108,6 +111,7 @@ fn no_alpn() {
         addr(),
         addr(),
         ConnectionParameters::default(),
+        now(),
     )
     .unwrap();
     let mut server = default_server();
@@ -236,6 +240,7 @@ fn chacha20poly1305() {
         addr(),
         addr(),
         ConnectionParameters::default(),
+        now(),
     )
     .expect("create a default client");
     client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();
@@ -379,12 +384,12 @@ fn reorder_05rtt_with_0rtt() {
     maybe_authenticate(&mut client);
     let c4 = client.process(None, now).dgram();
     assert_eq!(*client.state(), State::Connected);
-    assert_eq!(client.loss_recovery.rtt(), RTT);
+    assert_eq!(client.paths.rtt(), RTT);
 
     now += RTT / 2;
     server.process_input(c4.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.loss_recovery.rtt(), RTT);
+    assert_eq!(server.paths.rtt(), RTT);
 }
 
 /// Test that a server that coalesces 0.5 RTT with handshake packets
@@ -508,12 +513,12 @@ fn reorder_handshake() {
     now += RTT / 2;
     let s3 = server.process(c3, now).dgram();
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.loss_recovery.rtt(), RTT);
+    assert_eq!(server.paths.rtt(), RTT);
 
     now += RTT / 2;
     client.process_input(s3.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
-    assert_eq!(client.loss_recovery.rtt(), RTT);
+    assert_eq!(client.paths.rtt(), RTT);
 }
 
 #[test]
@@ -558,11 +563,11 @@ fn reorder_1rtt() {
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.loss_recovery.rtt(), RTT);
+    assert_eq!(server.paths.rtt(), RTT);
 
     now += RTT / 2;
     client.process_input(s2.unwrap(), now);
-    assert_eq!(client.loss_recovery.rtt(), RTT);
+    assert_eq!(client.paths.rtt(), RTT);
 
     // All the stream data that was sent should now be available.
     let streams = server
@@ -698,6 +703,63 @@ fn extra_initial_invalid_cid() {
     assert!(nothing.is_none());
 }
 
+fn connect_version(version: QuicVersion) {
+    fixture_init();
+    let mut client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        addr(),
+        addr(),
+        ConnectionParameters::default().quic_version(version),
+        now(),
+    )
+    .unwrap();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default().quic_version(version),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+}
+
+#[test]
+fn connect_v1() {
+    connect_version(QuicVersion::Version1);
+}
+
+#[test]
+fn connect_27() {
+    connect_version(QuicVersion::Draft27);
+}
+
+#[test]
+fn connect_28() {
+    connect_version(QuicVersion::Draft28);
+}
+
+#[test]
+fn connect_29() {
+    connect_version(QuicVersion::Draft29);
+}
+
+#[test]
+fn connect_30() {
+    connect_version(QuicVersion::Draft30);
+}
+
+#[test]
+fn connect_31() {
+    connect_version(QuicVersion::Draft31);
+}
+
+#[test]
+fn connect_32() {
+    connect_version(QuicVersion::Draft32);
+}
+
 #[test]
 fn anti_amplification() {
     let mut client = default_client();
@@ -715,6 +777,12 @@ fn anti_amplification() {
     assert_eq!(s_init1.len(), PATH_MTU_V6);
     let s_init2 = server.process_output(now).dgram().unwrap();
     assert_eq!(s_init2.len(), PATH_MTU_V6);
+
+    // Skip the gap for pacing here.
+    let s_pacing = server.process_output(now).callback();
+    assert_ne!(s_pacing, Duration::new(0, 0));
+    now += s_pacing;
+
     let s_init3 = server.process_output(now).dgram().unwrap();
     assert_eq!(s_init3.len(), PATH_MTU_V6);
     let cb = server.process_output(now).callback();

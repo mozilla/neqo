@@ -35,9 +35,9 @@ for d in "${dirs[@]}"; do
     print_all() { for e in "${all[@]}"; do echo "$e"; done; }
     if [[ -n "$verbose" ]]; then
         echo "$d:"
-        print_all | paste /dev/null /dev/stdin
+        print_all | sort -b | paste /dev/null /dev/stdin
     fi
-    unique=($(print_all | sort | uniq))
+    unique=($(print_all | sort -b | uniq))
     if [[ "${#all[@]}" -ne "${#unique[@]}" ]]; then
         echo "Found ${#all[@]} internal errors, but only ${#unique[@]} unique values." 1>&2
         err=1

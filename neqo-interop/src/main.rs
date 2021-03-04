@@ -460,6 +460,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
+        Instant::now(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -609,6 +610,7 @@ fn test_h3_rz(
             },
             max_concurrent_push_streams: 0,
         },
+        Instant::now(),
     );
     if handler.is_err() {
         return Err(String::from("ERROR: creating a client failed"));
@@ -672,7 +674,7 @@ impl Handler for VnHandler {
     }
 }
 
-fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
+fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Connection {
     let mut client = Connection::new_client(
         peer.host,
         &["hq-28"],
@@ -680,13 +682,13 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
+        Instant::now(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
     let _res = process_loop(nctx, &mut client, &mut h);
-
-    Ok(client)
+    client
 }
 
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
@@ -703,15 +705,12 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     };
 
     if let Test::VN = test {
-        let res = test_vn(&nctx, peer);
-        return match res {
-            Err(e) => (test, format!("ERROR: {}", e)),
-            Ok(client) => match client.state() {
-                State::Closed(ConnectionError::Transport(Error::VersionNegotiation)) => {
-                    (test, String::from("OK"))
-                }
-                _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
-            },
+        let client = test_vn(&nctx, peer);
+        return match client.state() {
+            State::Closed(ConnectionError::Transport(Error::VersionNegotiation)) => {
+                (test, String::from("OK"))
+            }
+            _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
         };
     }
 

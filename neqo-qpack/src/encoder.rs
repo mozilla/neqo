@@ -164,7 +164,7 @@ impl QPackEncoder {
         Ok(())
     }
 
-    fn header_ack(&mut self, stream_id: u64) -> Res<()> {
+    fn header_ack(&mut self, stream_id: u64) {
         self.stats.header_acks_recv += 1;
         let mut new_acked = self.table.get_acked_inserts_cnt();
         if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id) {
@@ -186,10 +186,9 @@ impl QPackEncoder {
             self.insert_count_instruction(new_acked - self.table.get_acked_inserts_cnt())
                 .expect("This should neve happen");
         }
-        Ok(())
     }
 
-    fn stream_cancellation(&mut self, stream_id: u64) -> Res<()> {
+    fn stream_cancellation(&mut self, stream_id: u64) {
         self.stats.stream_cancelled_recv += 1;
         let mut was_blocker = false;
         if let Some(mut hb_list) = self.unacked_header_blocks.remove(&stream_id) {
@@ -205,7 +204,6 @@ impl QPackEncoder {
             debug_assert!(self.blocked_stream_cnt > 0);
             self.blocked_stream_cnt -= 1;
         }
-        Ok(())
     }
 
     fn call_instruction(
@@ -224,9 +222,13 @@ impl QPackEncoder {
 
                 self.insert_count_instruction(increment)
             }
-            DecoderInstruction::HeaderAck { stream_id } => self.header_ack(stream_id),
+            DecoderInstruction::HeaderAck { stream_id } => {
+                self.header_ack(stream_id);
+                Ok(())
+            }
             DecoderInstruction::StreamCancellation { stream_id } => {
-                self.stream_cancellation(stream_id)
+                self.stream_cancellation(stream_id);
+                Ok(())
             }
             _ => Ok(()),
         }

@@ -31,10 +31,13 @@ pub const MAX_DATAGRAM_SIZE_F64: f64 = 1337.0;
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: NeqoQlog);
 
+    #[must_use]
     fn cwnd(&self) -> usize;
 
+    #[must_use]
     fn bytes_in_flight(&self) -> usize;
 
+    #[must_use]
     fn cwnd_avail(&self) -> usize;
 
     fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], min_rtt: Duration, now: Instant);
@@ -47,11 +50,14 @@ pub trait CongestionControl: Display + Debug {
         lost_packets: &[SentPacket],
     );
 
+    #[must_use]
     fn recovery_packet(&self) -> bool;
 
     fn discard(&mut self, pkt: &SentPacket);
 
     fn on_packet_sent(&mut self, pkt: &SentPacket);
+
+    fn discard_in_flight(&mut self);
 }
 
 #[derive(Debug, Copy, Clone)]

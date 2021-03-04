@@ -77,11 +77,11 @@ fn pto_works_full_cwnd() {
     assert_eq!(dgrams.len(), 2);
     assert_eq!(dgrams[0].len(), PATH_MTU_V6);
 
-    // Both datagrams contain a STREAM frame.
+    // Both datagrams contain one or more STREAM frames.
     for d in dgrams {
         let stream_before = server.stats().frame_rx.stream;
         server.process_input(d, now);
-        assert_eq!(server.stats().frame_rx.stream, stream_before + 1);
+        assert!(server.stats().frame_rx.stream > stream_before);
     }
 }
 

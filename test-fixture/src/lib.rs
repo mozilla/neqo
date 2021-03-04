@@ -68,7 +68,7 @@ pub const DEFAULT_SERVER_NAME: &str = "example.com";
 pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
-pub const DEFAULT_ALPN_H3: &[&str] = &["h3-29"];
+pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
 
 /// Create a default socket address.
 #[must_use]
@@ -122,6 +122,7 @@ pub fn default_client() -> Connection {
         addr(),
         addr(),
         ConnectionParameters::default(),
+        now(),
     )
     .expect("create a default client")
 }
@@ -169,7 +170,12 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut a = client;
     let mut b = server;
     let mut datagram = None;
-    let is_done = |c: &Connection| matches!(c.state(), State::Confirmed | State::Closing { .. } | State::Closed(..));
+    let is_done = |c: &Connection| {
+        matches!(
+            c.state(),
+            State::Confirmed | State::Closing { .. } | State::Closed(..)
+        )
+    };
     while !is_done(a) {
         let _ = maybe_authenticate(a);
         let d = a.process(datagram, now());
@@ -206,6 +212,7 @@ pub fn default_http3_client() -> Http3Client {
             },
             max_concurrent_push_streams: 10,
         },
+        now(),
     )
     .expect("create a default client")
 }
