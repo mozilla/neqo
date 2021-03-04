@@ -852,19 +852,23 @@ impl Connection {
     }
 
     fn process_timer(&mut self, now: Instant) {
-        if let State::Closing { error, timeout } | State::Draining { error, timeout } = &self.state
-        {
-            if *timeout <= now {
-                // Close timeout expired, move to Closed
-                let st = State::Closed(error.clone());
-                self.set_state(st);
-                qinfo!("Closing timer expired");
+        match &self.state {
+            // Only the client runs timers while waiting for Initial packets.
+            State::WaitInitial => debug_assert_eq!(self.role, Role::Client),
+            // If Closing or Draining, check if it is time to move to Closed.
+            State::Closing { error, timeout } | State::Draining { error, timeout } => {
+                if *timeout <= now {
+                    let st = State::Closed(error.clone());
+                    self.set_state(st);
+                    qinfo!("Closing timer expired");
+                    return;
+                }
+            }
+            State::Closed(_) => {
+                qdebug!("Timer fired while closed");
                 return;
             }
-        }
-        if let State::Closed(_) = self.state {
-            qdebug!("Timer fired while closed");
-            return;
+            _ => (),
         }
 
         let pto = self.pto();
@@ -974,13 +978,17 @@ impl Connection {
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
-        if self.state == State::Init {
-            if self.role == Role::Client {
+        match (&self.state, self.role) {
+            (State::Init, Role::Client) => {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
-        } else {
-            self.process_timer(now);
+            (State::Init, Role::Server) | (State::WaitInitial, Role::Server) => {
+                return Output::None;
+            }
+            _ => {
+                self.process_timer(now);
+            }
         }
 
         match self.output(now) {
