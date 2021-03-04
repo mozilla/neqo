@@ -1896,12 +1896,11 @@ impl Connection {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
 
-        let ack_token = if primary {
+        if primary {
+            let stats = &mut self.stats.borrow_mut().frame_tx;
             self.acks
-                .write_frame(space, now, builder, &mut self.stats.borrow_mut().frame_tx)?
-        } else {
-            None
-        };
+                .write_frame(space, now, builder, &mut tokens, stats)?;
+        }
         let ack_end = builder.len();
 
         // Avoid sending probes until the handshake completes,
@@ -1922,9 +1921,6 @@ impl Connection {
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send acks!
-            if let Some(t) = ack_token {
-                tokens.push(t);
-            }
             return Ok((tokens, false, false));
         }
 
@@ -1970,9 +1966,6 @@ impl Connection {
             false
         };
 
-        if let Some(t) = ack_token {
-            tokens.push(t);
-        }
         stats.all += tokens.len();
         Ok((tokens, ack_eliciting, padded))
     }
