@@ -2652,6 +2652,11 @@ impl Connection {
                             rs.max_stream_data_lost(*max_data);
                         }
                     }
+                    RecoveryToken::StopSending { stream_id } => {
+                        if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
+                            rs.stop_sending_lost();
+                        }
+                    }
                 }
             }
         }
@@ -2700,6 +2705,11 @@ impl Connection {
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
                     RecoveryToken::ResetStream { stream_id } => {
                         self.send_streams.reset_acked(*stream_id)
+                    }
+                    RecoveryToken::StopSending { stream_id } => {
+                        if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
+                            rs.stop_sending_acked();
+                        }
                     }
                     // We only worry when these are lost:
                     RecoveryToken::Flow(_)

@@ -17,36 +17,20 @@ use crate::frame::{write_varint_frame, Frame};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
-use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
-use crate::{AppError, Res};
+use crate::stream_id::{StreamIndex, StreamIndexes, StreamType};
+use crate::Res;
 
 type FlowFrame = Frame<'static>;
 pub type FlowControlRecoveryToken = FlowFrame;
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
-    // (id, discriminant) as key ensures only 1 of every frame type per stream
-    // will be queued.
-    from_streams: HashMap<(StreamId, mem::Discriminant<FlowFrame>), FlowFrame>,
-
     // (stream_type, discriminant) as key ensures only 1 of every frame type
     // per stream type will be queued.
     from_stream_types: HashMap<(StreamType, mem::Discriminant<FlowFrame>), FlowFrame>,
 }
 
 impl FlowMgr {
-    // -- frames scoped on stream --
-
-    /// Indicate to sending remote we are no longer interested in the stream
-    pub fn stop_sending(&mut self, stream_id: StreamId, application_error_code: AppError) {
-        let frame = Frame::StopSending {
-            stream_id,
-            application_error_code,
-        };
-        self.from_streams
-            .insert((stream_id, mem::discriminant(&frame)), frame);
-    }
-
     // -- frames scoped on stream type --
 
     pub fn max_streams(&mut self, stream_limit: StreamIndex, stream_type: StreamType) {
@@ -68,13 +52,10 @@ impl FlowMgr {
     }
 
     pub fn peek(&self) -> Option<&Frame> {
-        if let Some(key) = self.from_streams.keys().next() {
-            self.from_streams.get(key)
-        } else if let Some(key) = self.from_stream_types.keys().next() {
-            self.from_stream_types.get(key)
-        } else {
-            None
+        if let Some(key) = self.from_stream_types.keys().next() {
+            return self.from_stream_types.get(key);
         }
+        None
     }
 
     pub(crate) fn lost(&mut self, token: &FlowControlRecoveryToken, indexes: &mut StreamIndexes) {
@@ -101,11 +82,6 @@ impl FlowMgr {
                     }
                 }
             },
-            // Resend StopSending
-            Frame::StopSending {
-                stream_id,
-                application_error_code,
-            } => self.stop_sending(stream_id, application_error_code),
             _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", token),
         }
     }
@@ -120,26 +96,12 @@ impl FlowMgr {
             // All these frames are bags of varints, so we can just extract the
             // varints and use common code for writing.
             let (mut values, stat): (SmallVec<[_; 3]>, _) = match frame {
-                Frame::StopSending {
-                    stream_id,
-                    application_error_code,
-                } => (
-                    smallvec![stream_id.as_u64(), *application_error_code],
-                    &mut stats.stop_sending,
-                ),
                 Frame::MaxStreams {
                     maximum_streams, ..
                 } => (smallvec![maximum_streams.as_u64()], &mut stats.max_streams),
                 Frame::StreamsBlocked { stream_limit, .. } => {
                     (smallvec![stream_limit.as_u64()], &mut stats.streams_blocked)
                 }
-                Frame::MaxStreamData {
-                    stream_id,
-                    maximum_stream_data,
-                } => (
-                    smallvec![stream_id.as_u64(), *maximum_stream_data],
-                    &mut stats.max_stream_data,
-                ),
                 _ => unreachable!("{:?}", frame),
             };
             values.insert(0, frame.get_type());
@@ -161,16 +123,10 @@ impl Iterator for FlowMgr {
 
     /// Used by generator to get a flow control frame.
     fn next(&mut self) -> Option<Self::Item> {
-        let first_key = self.from_streams.keys().next();
-        if let Some(&first_key) = first_key {
-            return self.from_streams.remove(&first_key);
-        }
-
         let first_key = self.from_stream_types.keys().next();
         if let Some(&first_key) = first_key {
             return self.from_stream_types.remove(&first_key);
         }
-
         None
     }
 }

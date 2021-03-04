@@ -19,6 +19,7 @@ use smallvec::SmallVec;
 use crate::events::ConnectionEvents;
 use crate::fc::ReceiverFlowControl;
 use crate::flow_mgr::FlowMgr;
+use crate::frame::{write_varint_frame, FRAME_TYPE_STOP_SENDING};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
@@ -297,6 +298,10 @@ enum RecvStreamState {
         recv_buf: RxStreamOrderer,
     },
     DataRead,
+    AbortReading {
+        frame_needed: bool,
+        err: AppError,
+    },
     ResetRecvd,
     // Defined by spec but we don't use it: ResetRead
 }
@@ -315,6 +320,7 @@ impl RecvStreamState {
             Self::SizeKnown { .. } => "SizeKnown",
             Self::DataRecvd { .. } => "DataRecvd",
             Self::DataRead => "DataRead",
+            Self::AbortReading { .. } => "AbortReading",
             Self::ResetRecvd => "ResetRecvd",
         }
     }
@@ -324,7 +330,7 @@ impl RecvStreamState {
             Self::Recv { recv_buf, .. }
             | Self::SizeKnown { recv_buf, .. }
             | Self::DataRecvd { recv_buf } => Some(recv_buf),
-            Self::DataRead | Self::ResetRecvd => None,
+            Self::DataRead | Self::AbortReading { .. } | Self::ResetRecvd => None,
         }
     }
 
@@ -431,6 +437,7 @@ impl RecvStream {
             }
             RecvStreamState::DataRecvd { .. }
             | RecvStreamState::DataRead
+            | RecvStreamState::AbortReading { .. }
             | RecvStreamState::ResetRecvd => {
                 qtrace!("data received when we are in state {}", self.state.name())
             }
@@ -445,7 +452,9 @@ impl RecvStream {
 
     pub fn reset(&mut self, application_error_code: AppError) {
         match self.state {
-            RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
+            RecvStreamState::Recv { .. }
+            | RecvStreamState::SizeKnown { .. }
+            | RecvStreamState::AbortReading { .. } => {
                 self.conn_events
                     .recv_stream_reset(self.stream_id, application_error_code);
                 self.set_state(RecvStreamState::ResetRecvd);
@@ -505,7 +514,9 @@ impl RecvStream {
                 }
                 Ok((bytes_read, fin_read))
             }
-            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => Err(Error::NoMoreData),
+            RecvStreamState::DataRead
+            | RecvStreamState::AbortReading { .. }
+            | RecvStreamState::ResetRecvd => Err(Error::NoMoreData),
         };
         self.maybe_send_flowc_update();
         res
@@ -515,11 +526,15 @@ impl RecvStream {
         qtrace!("stop_sending called when in state {}", self.state.name());
         match &self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
-                self.set_state(RecvStreamState::ResetRecvd);
-                self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
+                self.set_state(RecvStreamState::AbortReading {
+                    frame_needed: true,
+                    err,
+                })
             }
             RecvStreamState::DataRecvd { .. } => self.set_state(RecvStreamState::DataRead),
-            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => {
+            RecvStreamState::DataRead
+            | RecvStreamState::AbortReading { .. }
+            | RecvStreamState::ResetRecvd => {
                 // Already in terminal state
             }
         }
@@ -532,16 +547,44 @@ impl RecvStream {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) -> Res<()> {
-        if let RecvStreamState::Recv { fc, .. } = &mut self.state {
-            fc.write_frames(builder, tokens, stats)
-        } else {
-            Ok(())
+        match &mut self.state {
+            // Maybe send MAX_STREAM_DATA
+            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats)?,
+            // Maybe send STOP_SENDING
+            RecvStreamState::AbortReading { frame_needed, err } => {
+                if *frame_needed
+                    && write_varint_frame(
+                        builder,
+                        &[FRAME_TYPE_STOP_SENDING, self.stream_id.as_u64(), *err],
+                    )?
+                {
+                    tokens.push(RecoveryToken::StopSending {
+                        stream_id: self.stream_id,
+                    });
+                    stats.stop_sending += 1;
+                    *frame_needed = false;
+                }
+            }
+            _ => {}
         }
+        Ok(())
     }
 
     pub fn max_stream_data_lost(&mut self, maximum_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.lost(maximum_data);
+        }
+    }
+
+    pub fn stop_sending_lost(&mut self) {
+        if let RecvStreamState::AbortReading { frame_needed, .. } = &mut self.state {
+            *frame_needed = true;
+        }
+    }
+
+    pub fn stop_sending_acked(&mut self) {
+        if let RecvStreamState::AbortReading { .. } = &mut self.state {
+            self.set_state(RecvStreamState::ResetRecvd);
         }
     }
 
