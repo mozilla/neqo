@@ -55,6 +55,7 @@ pub enum RecoveryToken {
     ResetStream { stream_id: StreamId },
     MaxData(u64),
     MaxStreamData { stream_id: StreamId, max_data: u64 },
+    StopSending { stream_id: StreamId },
 }
 
 /// `SendProfile` tells a sender how to send packets.
