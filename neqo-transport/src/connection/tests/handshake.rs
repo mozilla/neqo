@@ -814,3 +814,17 @@ fn anti_amplification() {
     server.process_input(fin.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
 }
+
+#[test]
+fn garbage_initial() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    let dgram = client.process_output(now()).dgram().unwrap();
+    let (initial, rest) = split_datagram(&dgram);
+    let mut corrupted = Vec::from(&initial[..initial.len() - 1]);
+    corrupted.push(initial[initial.len() - 1] ^ 0xb7);
+    corrupted.extend_from_slice(rest.as_ref().map_or(&[], |r| &r[..]));
+    let garbage = Datagram::new(addr(), addr(), corrupted);
+    assert_eq!(Output::None, server.process(Some(garbage), now()));
+}
