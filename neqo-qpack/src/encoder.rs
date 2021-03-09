@@ -531,7 +531,7 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 mod tests {
     use super::{Connection, Error, Header, QPackEncoder, Res};
     use crate::QpackSettings;
-    use neqo_transport::StreamType;
+    use neqo_transport::{ConnectionParameters, StreamType};
     use test_fixture::{
         default_client, default_server, default_server_max_stream_data, handshake, now,
     };
@@ -590,7 +590,11 @@ mod tests {
     fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = if let Some(max) = max_data {
-            default_server_max_stream_data(max)
+            default_server_max_stream_data(
+                ConnectionParameters::default()
+                    .max_stream_data(StreamType::UniDi, max)
+                    .max_stream_data(StreamType::BiDi, max),
+            )
         } else {
             default_server()
         };

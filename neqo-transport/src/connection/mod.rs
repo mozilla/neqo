@@ -47,7 +47,7 @@ use crate::packet::{
 use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
-use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
+use crate::recv_stream::{recv_streams_write_frames, RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
@@ -76,7 +76,6 @@ struct Packet(Vec<u8>);
 /// to receiving an undecryptable packet during the early part of the
 /// handshake.  This is a hack, but a useful one.
 const EXTRA_INITIALS: usize = 4;
-const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ZeroRttState {
@@ -341,7 +340,6 @@ impl Connection {
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
             u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
-        tps.set_integer(tparams::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
         tps.set_integer(
             tparams::IDLE_TIMEOUT,
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
@@ -356,6 +354,10 @@ impl Connection {
 
     /// Read connection parameters and update transport parameters.
     fn read_parameters(&mut self) -> Res<()> {
+        self.tps
+            .borrow_mut()
+            .local
+            .set_integer(tparams::INITIAL_MAX_DATA, self.conn_params.get_max_data());
         self.tps.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
             self.conn_params.get_max_stream_data(StreamType::BiDi),
@@ -448,7 +450,7 @@ impl Connection {
             flow_control_sender: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
             flow_control_receiver: Rc::new(RefCell::new(ReceiverFlowControl::new(
                 (),
-                LOCAL_MAX_DATA,
+                conn_params.get_max_data(),
             ))),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
@@ -1834,12 +1836,7 @@ impl Connection {
             return Ok(());
         }
 
-        for stream in self.recv_streams.values_mut() {
-            stream.write_frame(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
-            }
-        }
+        recv_streams_write_frames(&mut self.recv_streams, builder, tokens, stats)?;
 
         self.flow_mgr
             .borrow_mut()

@@ -33,6 +33,21 @@ pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
 
+pub fn recv_streams_write_frames(
+    streams: &mut RecvStreams,
+    builder: &mut PacketBuilder,
+    tokens: &mut Vec<RecoveryToken>,
+    stats: &mut FrameStats,
+) -> Res<()> {
+    for stream in streams.values_mut() {
+        stream.write_frame(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
 #[derive(Debug, Default)]
@@ -517,7 +532,6 @@ impl RecvStream {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) -> Res<()> {
-        // Send MAX_STREAM_DATA at normal priority always.
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.write_frames(builder, tokens, stats)
         } else {

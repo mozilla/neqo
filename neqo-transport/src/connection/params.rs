@@ -10,6 +10,7 @@ use crate::tparams::PreferredAddress;
 use crate::{CongestionControlAlgorithm, QuicVersion};
 use std::convert::TryFrom;
 
+const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 const LOCAL_STREAM_LIMIT_BIDI: StreamIndex = StreamIndex::new(16);
 const LOCAL_STREAM_LIMIT_UNI: StreamIndex = StreamIndex::new(16);
 
@@ -31,6 +32,7 @@ pub enum PreferredAddressConfig {
 pub struct ConnectionParameters {
     quic_version: QuicVersion,
     cc_algorithm: CongestionControlAlgorithm,
+    max_data: u64,
     max_stream_data_bidi: u64,
     max_stream_data_uni: u64,
     max_streams_bidi: StreamIndex,
@@ -43,6 +45,7 @@ impl Default for ConnectionParameters {
         Self {
             quic_version: QuicVersion::default(),
             cc_algorithm: CongestionControlAlgorithm::NewReno,
+            max_data: LOCAL_MAX_DATA,
             max_stream_data_bidi: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
             max_stream_data_uni: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
@@ -68,6 +71,15 @@ impl ConnectionParameters {
 
     pub fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
         self.cc_algorithm = v;
+        self
+    }
+
+    pub fn get_max_data(&self) -> u64 {
+        self.max_data
+    }
+
+    pub fn max_data(mut self, v: u64) -> Self {
+        self.max_data = v;
         self
     }
 
