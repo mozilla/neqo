@@ -172,7 +172,7 @@ where
     /// The thing that we're counting for.
     subject: T,
     /// The maximum amount of items that can be active (e.g., the size of the receive buffer).
-    max_acive: u64,
+    max_active: u64,
     // Last max data sent.
     max_data: u64,
     // Retired bytes.
@@ -188,7 +188,7 @@ where
     pub fn new(subject: T, max_bytes: u64) -> Self {
         Self {
             subject,
-            max_acive: max_bytes,
+            max_active: max_bytes,
             max_data: max_bytes,
             retired: 0,
             frame_pending: false,
@@ -208,7 +208,7 @@ where
         }
 
         self.retired = retired;
-        if self.retired + self.max_acive / 2 > self.max_data {
+        if self.retired + self.max_active / 2 > self.max_data {
             self.frame_pending = true;
         }
     }
@@ -216,14 +216,14 @@ where
     /// This function is called when STREAM_DATA_BLOCKED frame is received.
     /// The flow control willl try to send an update if possible.
     pub fn send_flowc_update(&mut self) {
-        if self.retired + self.max_acive > self.max_data {
+        if self.retired + self.max_active > self.max_data {
             self.frame_pending = true;
         }
     }
 
     pub fn max_data_needed(&self) -> Option<u64> {
         if self.frame_pending {
-            Some(self.retired + self.max_acive)
+            Some(self.retired + self.max_active)
         } else {
             None
         }

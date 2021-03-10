@@ -133,9 +133,9 @@ pub fn default_server() -> Connection {
     make_default_server(DEFAULT_ALPN)
 }
 
-/// Create a transport server with an initial `max_stream_data` value.
+/// Create a transport server with a configuration.
 #[must_use]
-pub fn default_server_max_stream_data(conn_param: ConnectionParameters) -> Connection {
+pub fn configure_server(conn_param: ConnectionParameters) -> Connection {
     fixture_init();
 
     let mut c = Connection::new_server(
