@@ -531,9 +531,8 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 mod tests {
     use super::{Connection, Error, Header, QPackEncoder, Res};
     use crate::QpackSettings;
-    use neqo_transport::tparams::{self, TransportParameter};
-    use neqo_transport::StreamType;
-    use test_fixture::{default_client, default_server, handshake, now};
+    use neqo_transport::{ConnectionParameters, StreamType};
+    use test_fixture::{configure_server, default_client, default_server, handshake, now};
 
     struct TestEncoder {
         encoder: QPackEncoder,
@@ -586,13 +585,18 @@ mod tests {
         }
     }
 
-    fn connect_generic<F>(huffman: bool, f: F) -> TestEncoder
-    where
-        F: FnOnce(&mut Connection, &mut Connection),
-    {
+    fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
-        let mut peer_conn = default_server();
-        f(&mut conn, &mut peer_conn);
+        let mut peer_conn = if let Some(max) = max_data {
+            configure_server(
+                ConnectionParameters::default()
+                    .max_stream_data(StreamType::UniDi, max)
+                    .max_stream_data(StreamType::BiDi, max),
+            )
+        } else {
+            default_server()
+        };
+        handshake(&mut conn, &mut peer_conn);
 
         // create a stream
         let recv_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
@@ -619,22 +623,11 @@ mod tests {
     }
 
     fn connect(huffman: bool) -> TestEncoder {
-        connect_generic(huffman, |client, server| {
-            handshake(client, server);
-        })
+        connect_generic(huffman, None)
     }
 
     fn connect_flow_control(max_data: u64) -> TestEncoder {
-        connect_generic(true, |client, server| {
-            server
-                .set_local_tparam(
-                    tparams::INITIAL_MAX_DATA,
-                    TransportParameter::Integer(max_data),
-                )
-                .unwrap();
-
-            handshake(client, server);
-        })
+        connect_generic(true, Some(max_data))
     }
 
     fn recv_instruction(encoder: &mut TestEncoder, decoder_instruction: &[u8]) {
@@ -1586,30 +1579,20 @@ mod tests {
 
     #[test]
     fn encoder_flow_controlled_blocked() {
-        const SMALL_MAX_DATA: u64 = 900;
-        const STREAM_DATA_LEN: usize = 900 - 20;
-        const STREAM_DATA: &[u8] = &[0; STREAM_DATA_LEN];
-        const ONE_INSTRUCTION: &[u8] = &[
+        const SMALL_MAX_DATA: u64 = 20;
+        const ONE_INSTRUCTION_1: &[u8] = &[
             0x67, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x7f, 0x83, 0x8, 0x99, 0x6b,
         ];
-        const TWO_INSTRUCTION: &[u8] = &[
-            0x67, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x37, 0x83, 0x8, 0x99, 0x6b, 0x67, 0x41,
-            0xe9, 0x2a, 0x67, 0x35, 0x53, 0x39, 0x88, 0x8, 0x99, 0x69, 0xb7, 0x1d, 0x79, 0xf0,
-            0x83,
+        const ONE_INSTRUCTION_2: &[u8] = &[
+            0x67, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x37, 0x83, 0x8, 0x99, 0x6b,
         ];
+
         let mut encoder = connect_flow_control(SMALL_MAX_DATA);
 
         // change capacity to 1000 and max_block streams to 20.
         encoder.encoder.set_max_blocked_streams(20).unwrap();
         assert!(encoder.encoder.set_max_capacity(1000).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_1000);
-
-        // Write some data to fill the flow control allowance.
-        let stream_id = encoder.conn.stream_create(StreamType::UniDi).unwrap();
-        assert_eq!(
-            encoder.conn.stream_send(stream_id, STREAM_DATA).unwrap(),
-            STREAM_DATA_LEN
-        );
 
         // Encode a header block with 2 headers. The first header will be added to the dynamic table.
         // The second will not be added to the dynamic table, because the corresponding instruction
@@ -1646,7 +1629,11 @@ mod tests {
         assert_eq!(buf2[2] & 0xf0, 0x20);
 
         // Ensure that we have sent only one instruction for (String::from("something"), String::from("1234"))
-        encoder.send_instructions(ONE_INSTRUCTION);
+        encoder.send_instructions(ONE_INSTRUCTION_1);
+
+        // exchange a flow control update.
+        let out = encoder.peer_conn.process(None, now());
+        let _ = encoder.conn.process(out.dgram(), now());
 
         // Try writing a new header block. Now, headers will be added to the dynamic table again, because
         // instructions can be sent.
@@ -1661,12 +1648,13 @@ mod tests {
                 3,
             )
             .unwrap();
-        // Assert that both headers are encoded as an index to the dynamic table (a post form).
+        // Assert that the first header is encoded as an index to the dynamic table (a post form).
         assert_eq!(buf3[2], 0x10);
-        assert_eq!(buf3[3], 0x11);
+        // Assert that the second header is encoded as a literal with a name literal
+        assert_eq!(buf3[3] & 0xf0, 0x20);
 
-        // Asset that 2 instruction has been sent
-        encoder.send_instructions(TWO_INSTRUCTION);
+        // Asset that one instruction has been sent
+        encoder.send_instructions(ONE_INSTRUCTION_2);
     }
 
     #[test]

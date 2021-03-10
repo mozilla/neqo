@@ -35,7 +35,7 @@ use crate::cid::{
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
-use crate::fc::SenderFlowControl;
+use crate::fc::{ReceiverFlowControl, SenderFlowControl};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{
     CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -47,7 +47,7 @@ use crate::packet::{
 use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
-use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
+use crate::recv_stream::{recv_streams_write_frames, RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
@@ -76,7 +76,6 @@ struct Packet(Vec<u8>);
 /// to receiving an undecryptable packet during the early part of the
 /// handshake.  This is a hack, but a useful one.
 const EXTRA_INITIALS: usize = 4;
-const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ZeroRttState {
@@ -252,7 +251,8 @@ pub struct Connection {
     pub(crate) indexes: StreamIndexes,
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
-    pub(crate) flow_control: Rc<RefCell<SenderFlowControl<()>>>,
+    pub(crate) flow_control_sender: Rc<RefCell<SenderFlowControl<()>>>,
+    pub(crate) flow_control_receiver: Rc<RefCell<ReceiverFlowControl<()>>>,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
@@ -342,18 +342,9 @@ impl Connection {
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-        );
-        tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
             u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
-        tps.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_UNI,
-            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-        );
-        tps.set_integer(tparams::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
         tps.set_integer(
             tparams::IDLE_TIMEOUT,
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
@@ -368,6 +359,18 @@ impl Connection {
 
     /// Read connection parameters and update transport parameters.
     fn read_parameters(&mut self) -> Res<()> {
+        self.tps
+            .borrow_mut()
+            .local
+            .set_integer(tparams::INITIAL_MAX_DATA, self.conn_params.get_max_data());
+        self.tps.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            self.conn_params.get_max_stream_data(StreamType::BiDi),
+        );
+        self.tps.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            self.conn_params.get_max_stream_data(StreamType::UniDi),
+        );
         self.tps.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAMS_BIDI,
             self.conn_params.get_max_streams(StreamType::BiDi).as_u64(),
@@ -449,7 +452,11 @@ impl Connection {
             connection_ids: ConnectionIdStore::default(),
             send_streams: SendStreams::default(),
             recv_streams: RecvStreams::default(),
-            flow_control: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
+            flow_control_sender: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
+            flow_control_receiver: Rc::new(RefCell::new(ReceiverFlowControl::new(
+                (),
+                conn_params.get_max_data(),
+            ))),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone()),
@@ -1831,12 +1838,22 @@ impl Connection {
         }
 
         // Send `DATA_BLOCKED` as necessary.
-        self.flow_control
+        self.flow_control_sender
             .borrow_mut()
             .write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
+
+        // Send `MAX_DATA` as necessary.
+        self.flow_control_receiver
+            .borrow_mut()
+            .write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        recv_streams_write_frames(&mut self.recv_streams, builder, tokens, stats)?;
 
         self.flow_mgr
             .borrow_mut()
@@ -2169,7 +2186,7 @@ impl Connection {
             StreamIndex::new(remote.get_integer(tparams::INITIAL_MAX_STREAMS_BIDI));
         self.indexes.remote_max_stream_uni =
             StreamIndex::new(remote.get_integer(tparams::INITIAL_MAX_STREAMS_UNI));
-        self.flow_control
+        self.flow_control_sender
             .borrow_mut()
             .update(remote.get_integer(tparams::INITIAL_MAX_DATA));
 
@@ -2341,8 +2358,8 @@ impl Connection {
     }
 
     fn handle_max_data(&mut self, maximum_data: u64) {
-        let conn_was_blocked = self.flow_control.borrow().available() == 0;
-        let conn_credit_increased = self.flow_control.borrow_mut().update(maximum_data);
+        let conn_was_blocked = self.flow_control_sender.borrow().available() == 0;
+        let conn_credit_increased = self.flow_control_sender.borrow_mut().update(maximum_data);
 
         if conn_was_blocked && conn_credit_increased {
             for (id, ss) in &mut self.send_streams {
@@ -2457,6 +2474,12 @@ impl Connection {
                 stream_id,
                 maximum_stream_data,
             } => {
+                qtrace!(
+                    [self],
+                    "Stream {} Received MaxStreamData {}",
+                    stream_id,
+                    maximum_stream_data
+                );
                 self.stats.borrow_mut().frame_rx.max_stream_data += 1;
                 if let (Some(ss), _) = self.obtain_stream(stream_id)? {
                     ss.set_max_stream_data(maximum_stream_data);
@@ -2485,10 +2508,10 @@ impl Connection {
                     data_limit
                 );
                 self.stats.borrow_mut().frame_rx.data_blocked += 1;
-                // But if it does, open it up all the way
-                self.flow_mgr.borrow_mut().max_data(LOCAL_MAX_DATA);
+                self.flow_control_receiver.borrow_mut().send_flowc_update();
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
+                qtrace!([self], "Received StreamDataBlocked");
                 self.stats.borrow_mut().frame_rx.stream_data_blocked += 1;
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)
@@ -2602,11 +2625,9 @@ impl Connection {
                     RecoveryToken::Ack(_) => {}
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
-                    RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                        &ft,
-                        &mut self.recv_streams,
-                        &mut self.indexes,
-                    ),
+                    RecoveryToken::Flow(ft) => {
+                        self.flow_mgr.borrow_mut().lost(&ft, &mut self.indexes)
+                    }
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                     RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
@@ -2615,10 +2636,21 @@ impl Connection {
                         self.send_streams.reset_lost(*stream_id)
                     }
                     RecoveryToken::DataBlocked(limit) => {
-                        self.flow_control.borrow_mut().lost(*limit)
+                        self.flow_control_sender.borrow_mut().lost(*limit)
                     }
                     RecoveryToken::StreamDataBlocked { stream_id, limit } => {
                         self.send_streams.blocked_lost(*stream_id, *limit)
+                    }
+                    RecoveryToken::MaxData(maximum_data) => {
+                        self.flow_control_receiver.borrow_mut().lost(*maximum_data)
+                    }
+                    RecoveryToken::MaxStreamData {
+                        stream_id,
+                        max_data,
+                    } => {
+                        if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
+                            rs.max_stream_data_lost(*max_data);
+                        }
                     }
                 }
             }
@@ -2673,7 +2705,9 @@ impl Connection {
                     RecoveryToken::Flow(_)
                     | RecoveryToken::DataBlocked(_)
                     | RecoveryToken::StreamDataBlocked { .. }
-                    | RecoveryToken::HandshakeDone => (),
+                    | RecoveryToken::HandshakeDone
+                    | RecoveryToken::MaxData(_)
+                    | RecoveryToken::MaxStreamData { .. } => (),
                 }
             }
         }
@@ -2902,7 +2936,7 @@ impl Connection {
                             SendStream::new(
                                 next_stream_id,
                                 send_initial_max_stream_data,
-                                Rc::clone(&self.flow_control),
+                                Rc::clone(&self.flow_control_sender),
                                 self.events.clone(),
                             ),
                         );
@@ -2972,7 +3006,7 @@ impl Connection {
                     SendStream::new(
                         new_id,
                         initial_max_stream_data,
-                        Rc::clone(&self.flow_control),
+                        Rc::clone(&self.flow_control_sender),
                         self.events.clone(),
                     ),
                 );
@@ -3011,7 +3045,7 @@ impl Connection {
                     SendStream::new(
                         new_id,
                         send_initial_max_stream_data,
-                        Rc::clone(&self.flow_control),
+                        Rc::clone(&self.flow_control_sender),
                         self.events.clone(),
                     ),
                 );
