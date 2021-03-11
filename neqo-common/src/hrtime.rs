@@ -190,7 +190,7 @@ mod mac {
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
         let policy = thread_time_constraint_policy {
-            period: base as u32,               // Base interval
+            period: base as u32, // Base interval
             computation: (base * 0.5) as u32,
             constraint: (base * 1.0) as u32,
             preemptible: 1,
