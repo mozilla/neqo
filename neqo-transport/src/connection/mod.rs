@@ -47,7 +47,7 @@ use crate::packet::{
 use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
-use crate::recv_stream::{recv_streams_write_frames, RecvStream, RecvStreams};
+use crate::recv_stream::{RecvStream, RecvStreams};
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
@@ -1793,7 +1793,7 @@ impl Connection {
             return Ok(());
         }
 
-        recv_streams_write_frames(&mut self.recv_streams, builder, tokens, stats)?;
+        self.recv_streams.write_frames(builder, tokens, stats)?;
 
         self.flow_mgr
             .borrow_mut()
@@ -2769,32 +2769,9 @@ impl Connection {
 
     fn cleanup_streams(&mut self) {
         self.send_streams.clear_terminal();
-        let recv_to_remove = self
-            .recv_streams
-            .iter()
-            .filter_map(|(id, stream)| {
-                // Remove all streams for which the receiving is done (or aborted).
-                // But only if they are unidirectional, or we have finished sending.
-                if stream.is_terminal() && (id.is_uni() || !self.send_streams.exists(*id)) {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let mut removed_bidi = 0;
-        let mut removed_uni = 0;
-        for id in &recv_to_remove {
-            self.recv_streams.remove(&id);
-            if id.is_remote_initiated(self.role()) {
-                if id.is_bidi() {
-                    removed_bidi += 1;
-                } else {
-                    removed_uni += 1;
-                }
-            }
-        }
+        let send_streams = &self.send_streams;
+        let (removed_bidi, removed_uni) =
+            self.recv_streams.clear_terminal(send_streams, self.role());
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         if removed_bidi > 0 {
@@ -2918,7 +2895,7 @@ impl Connection {
 
         Ok((
             self.send_streams.get_mut(stream_id).ok(),
-            self.recv_streams.get_mut(&stream_id),
+            self.recv_streams.get_mut(stream_id).ok(),
         ))
     }
 
@@ -3113,10 +3090,7 @@ impl Connection {
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
-        let stream = self
-            .recv_streams
-            .get_mut(&stream_id.into())
-            .ok_or(Error::InvalidStreamId)?;
+        let stream = self.recv_streams.get_mut(stream_id.into())?;
 
         let rb = stream.read(data)?;
         Ok((rb.0 as usize, rb.1))
@@ -3124,10 +3098,7 @@ impl Connection {
 
     /// Application is no longer interested in this stream.
     pub fn stream_stop_sending(&mut self, stream_id: u64, err: AppError) -> Res<()> {
-        let stream = self
-            .recv_streams
-            .get_mut(&stream_id.into())
-            .ok_or(Error::InvalidStreamId)?;
+        let stream = self.recv_streams.get_mut(stream_id.into())?;
 
         stream.stop_sending(err);
         Ok(())

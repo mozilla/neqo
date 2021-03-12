@@ -22,31 +22,78 @@ use crate::flow_mgr::FlowMgr;
 use crate::frame::{write_varint_frame, FRAME_TYPE_STOP_SENDING};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
+use crate::send_stream::SendStreams;
 use crate::stats::FrameStats;
 use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
-use neqo_common::qtrace;
+use neqo_common::{qtrace, Role};
 
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
 // Export as usize for consistency with SEND_BUFFER_SIZE
 pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
-pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
+#[derive(Debug, Default)]
+pub(crate) struct RecvStreams(BTreeMap<StreamId, RecvStream>);
 
-pub fn recv_streams_write_frames(
-    streams: &mut RecvStreams,
-    builder: &mut PacketBuilder,
-    tokens: &mut Vec<RecoveryToken>,
-    stats: &mut FrameStats,
-) -> Res<()> {
-    for stream in streams.values_mut() {
-        stream.write_frame(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+impl RecvStreams {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        for stream in self.0.values_mut() {
+            stream.write_frame(builder, tokens, stats)?;
+            if builder.remaining() < 2 {
+                return Ok(());
+            }
         }
+        Ok(())
     }
-    Ok(())
+
+    pub fn insert(&mut self, id: StreamId, stream: RecvStream) {
+        self.0.insert(id, stream);
+    }
+
+    pub fn get_mut(&mut self, id: StreamId) -> Res<&mut RecvStream> {
+        self.0.get_mut(&id).ok_or(Error::InvalidStreamId)
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub fn clear_terminal(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
+        let recv_to_remove = self
+            .0
+            .iter()
+            .filter_map(|(id, stream)| {
+                // Remove all streams for which the receiving is done (or aborted).
+                // But only if they are unidirectional, or we have finished sending.
+                if stream.is_terminal() && (id.is_uni() || !send_streams.exists(*id)) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut removed_bidi = 0;
+        let mut removed_uni = 0;
+        for id in &recv_to_remove {
+            self.0.remove(&id);
+            if id.is_remote_initiated(role) {
+                if id.is_bidi() {
+                    removed_bidi += 1;
+                } else {
+                    removed_uni += 1;
+                }
+            }
+        }
+
+        (removed_bidi, removed_uni)
+    }
 }
 
 /// Holds data not yet read by application. Orders and dedupes data ranges
