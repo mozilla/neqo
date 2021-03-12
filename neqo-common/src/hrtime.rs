@@ -168,7 +168,7 @@ mod mac {
 
     /// Set a thread time policy.
     pub fn set_thread_policy(mut policy: thread_time_constraint_policy) {
-        let r = unsafe {
+        let _ = unsafe {
             thread_policy_set(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
@@ -176,7 +176,6 @@ mod mac {
                 THREAD_TIME_CONSTRAINT_POLICY_COUNT,
             )
         };
-        assert_eq!(r, 0);
     }
 
     pub fn get_scale() -> f64 {
@@ -191,9 +190,9 @@ mod mac {
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
         let policy = thread_time_constraint_policy {
-            period: base as u32,               // Base interval
-            computation: (base * 5.0) as u32,  // Generous allowance
-            constraint: (base * 100.0) as u32, // Even more generous
+            period: base as u32, // Base interval
+            computation: (base * 0.5) as u32,
+            constraint: (base * 1.0) as u32,
             preemptible: 1,
         };
         set_thread_policy(policy);
@@ -213,7 +212,6 @@ mod mac {
                 &mut get_default,
             )
         };
-        assert_eq!(r, 0);
         policy
     }
 }
