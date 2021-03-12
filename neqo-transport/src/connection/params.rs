@@ -43,7 +43,7 @@ pub struct ConnectionParameters {
     max_stream_data_uni: u64,
     /// Initial limit on bidirectional streams that the peer creates.
     max_streams_bidi: StreamIndex,
-    /// Initial limit on bidirectional streams that this endpoint creates.
+    /// Initial limit on unidirectional streams that this endpoint creates.
     max_streams_uni: StreamIndex,
     preferred_address: PreferredAddressConfig,
 }
