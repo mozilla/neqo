@@ -203,7 +203,7 @@ mod mac {
         let mut policy = thread_time_constraint_policy::default();
         let mut count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
         let mut get_default = 0;
-        let r = unsafe {
+        let _ = unsafe {
             thread_policy_get(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
