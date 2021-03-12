@@ -17,7 +17,7 @@ use std::rc::Rc;
 use indexmap::IndexMap;
 use smallvec::SmallVec;
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace, Encoder};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, Encoder, Role};
 
 use crate::events::ConnectionEvents;
 use crate::fc::SenderFlowControl;
@@ -26,6 +26,7 @@ use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
 use crate::stream_id::StreamId;
+use crate::tparams::{self, TransportParameters};
 use crate::{AppError, Error, Res};
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
@@ -1143,6 +1144,18 @@ impl SendStreams {
             }
         }
         Ok(())
+    }
+
+    pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
+        for (id, ss) in self.0.iter_mut() {
+            let limit = if id.is_bidi() {
+                assert!(!id.is_remote_initiated(Role::Client));
+                remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+            } else {
+                remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)
+            };
+            ss.set_max_stream_data(limit);
+        }
     }
 }
 

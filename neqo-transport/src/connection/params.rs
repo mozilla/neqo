@@ -33,10 +33,17 @@ pub enum PreferredAddressConfig {
 pub struct ConnectionParameters {
     quic_version: QuicVersion,
     cc_algorithm: CongestionControlAlgorithm,
+    /// Initial connection-level flow control limit.
     max_data: u64,
-    max_stream_data_bidi: u64,
+    /// Initial flow control limit for receiving data on bidirectional streams that the peer creates.
+    max_stream_data_bidi_remote: u64,
+    /// Initial flow control limit for receiving data on bidirectional streams that this endpoint creates.
+    max_stream_data_bidi_local: u64,
+    /// Initial flow control limit for receiving data on unidirectional streams that the peer creates.
     max_stream_data_uni: u64,
+    /// Initial limit on bidirectional streams that the peer creates.
     max_streams_bidi: StreamIndex,
+    /// Initial limit on bidirectional streams that this endpoint creates.
     max_streams_uni: StreamIndex,
     preferred_address: PreferredAddressConfig,
 }
@@ -47,7 +54,8 @@ impl Default for ConnectionParameters {
             quic_version: QuicVersion::default(),
             cc_algorithm: CongestionControlAlgorithm::NewReno,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+            max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+            max_stream_data_bidi_local: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
             max_stream_data_uni: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
@@ -104,19 +112,33 @@ impl ConnectionParameters {
         self
     }
 
-    pub fn get_max_stream_data(&self, stream_type: StreamType) -> u64 {
-        match stream_type {
-            StreamType::BiDi => self.max_stream_data_bidi,
-            StreamType::UniDi => self.max_stream_data_uni,
+    /// Get the maximum stream data that we will accept on different types of streams.
+    /// Asserts if `StreamType::UniDi` and `false` are passed as that is not a valid combination.
+    pub fn get_max_stream_data(&self, stream_type: StreamType, remote: bool) -> u64 {
+        match (stream_type, remote) {
+            (StreamType::BiDi, false) => self.max_stream_data_bidi_local,
+            (StreamType::BiDi, true) => self.max_stream_data_bidi_remote,
+            (StreamType::UniDi, false) => {
+                panic!("Can't get receive limit on a stream that can only be sent.")
+            }
+            (StreamType::UniDi, true) => self.max_stream_data_uni,
         }
     }
 
-    pub fn max_stream_data(mut self, stream_type: StreamType, v: u64) -> Self {
-        match stream_type {
-            StreamType::BiDi => {
-                self.max_stream_data_bidi = v;
+    /// Set the maximum stream data that we will accept on different types of streams.
+    /// Asserts if `StreamType::UniDi` and `false` are passed as that is not a valid combination.
+    pub fn max_stream_data(mut self, stream_type: StreamType, remote: bool, v: u64) -> Self {
+        match (stream_type, remote) {
+            (StreamType::BiDi, false) => {
+                self.max_stream_data_bidi_local = v;
             }
-            StreamType::UniDi => {
+            (StreamType::BiDi, true) => {
+                self.max_stream_data_bidi_remote = v;
+            }
+            (StreamType::UniDi, false) => {
+                panic!("Can't set receive limit on a stream that can only be sent.")
+            }
+            (StreamType::UniDi, true) => {
                 self.max_stream_data_uni = v;
             }
         }
@@ -147,10 +169,6 @@ impl ConnectionParameters {
         let mut tps = TransportParametersHandler::default();
         // default parameters
         tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-        );
-        tps.local.set_integer(
             tparams::IDLE_TIMEOUT,
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
@@ -166,7 +184,11 @@ impl ConnectionParameters {
             .set_integer(tparams::INITIAL_MAX_DATA, self.max_data);
         tps.local.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            self.max_stream_data_bidi,
+            self.max_stream_data_bidi_local,
+        );
+        tps.local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            self.max_stream_data_bidi_remote,
         );
         tps.local.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_UNI,
