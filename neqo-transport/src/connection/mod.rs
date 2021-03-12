@@ -3122,6 +3122,20 @@ impl Connection {
         stream.stop_sending(err);
         Ok(())
     }
+
+    /// Increases max_stream_data for stream_id.
+    /// ###Errors
+    /// Returns `InvalidStreamId` if a stream_id does not exist or receiveing
+    /// side is closed.
+    pub fn change_max_stream_data(&mut self, stream_id: u64, max_data: u64) -> Res<()> {
+        let stream = self
+            .recv_streams
+            .get_mut(&stream_id.into())
+            .ok_or(Error::InvalidStreamId)?;
+
+        stream.change_max_stream_data(max_data);
+        Ok(())
+    }
 }
 
 impl EventProvider for Connection {

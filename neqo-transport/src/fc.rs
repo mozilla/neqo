@@ -239,6 +239,11 @@ where
         self.max_data = new_max;
         self.frame_pending = false;
     }
+
+    pub fn change_max_stream_data(&mut self, max_data: u64) {
+        self.frame_pending |= self.max_active < max_data;
+        self.max_active = max_data;
+    }
 }
 
 impl ReceiverFlowControl<()> {
