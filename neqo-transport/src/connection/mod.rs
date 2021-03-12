@@ -2135,6 +2135,12 @@ impl Connection {
             self.idle_timeout
                 .set_peer_timeout(Duration::from_millis(peer_timeout));
         }
+        // As a client, there are two sets of initial limits for sending stream data.
+        // If the second limit is higher and streams have been created, then
+        // ensure that streams are not blocked on the lower limit.
+        if self.role == Role::Client {
+            self.send_streams.update_initial_limit(&remote);
+        }
     }
 
     /// Process the final set of transport parameters.

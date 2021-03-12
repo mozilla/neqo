@@ -587,15 +587,14 @@ mod tests {
 
     fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
-        let mut peer_conn = if let Some(max) = max_data {
+        let mut peer_conn = max_data.map_or_else(default_server, |max| {
             configure_server(
                 ConnectionParameters::default()
-                    .max_stream_data(StreamType::UniDi, max)
-                    .max_stream_data(StreamType::BiDi, max),
+                    .max_stream_data(StreamType::UniDi, true, max)
+                    .max_stream_data(StreamType::BiDi, true, max)
+                    .max_stream_data(StreamType::BiDi, false, max),
             )
-        } else {
-            default_server()
-        };
+        });
         handshake(&mut conn, &mut peer_conn);
 
         // create a stream
