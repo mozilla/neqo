@@ -36,7 +36,6 @@ use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::fc::{ReceiverFlowControl, SenderFlowControl};
-use crate::flow_mgr::FlowMgr;
 use crate::frame::{
     CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
@@ -51,7 +50,7 @@ use crate::recv_stream::{RecvStream, RecvStreams};
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
-use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
+use crate::stream_id::{LocalStreamsFlowControls, RemoteStreamsFlowControls, StreamId, StreamType};
 use crate::tparams::{self, TransportParameter, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res};
@@ -248,12 +247,12 @@ pub struct Connection {
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
-    pub(crate) indexes: StreamIndexes,
+    remote_streams_fc: RemoteStreamsFlowControls,
+    local_streams_fc: LocalStreamsFlowControls,
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
     pub(crate) flow_control_sender: Rc<RefCell<SenderFlowControl<()>>>,
     pub(crate) flow_control_receiver: Rc<RefCell<ReceiverFlowControl<()>>>,
-    pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
@@ -369,9 +368,10 @@ impl Connection {
         )?;
 
         let stats = StatsCell::default();
-        let indexes = StreamIndexes::new(
+        let remote_streams_fc = RemoteStreamsFlowControls::new(
             conn_params.get_max_streams(StreamType::BiDi),
             conn_params.get_max_streams(StreamType::UniDi),
+            role,
         );
 
         let c = Self {
@@ -389,7 +389,8 @@ impl Connection {
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
-            indexes,
+            remote_streams_fc,
+            local_streams_fc: LocalStreamsFlowControls::new(role),
             connection_ids: ConnectionIdStore::default(),
             send_streams: SendStreams::default(),
             recv_streams: RecvStreams::default(),
@@ -398,7 +399,6 @@ impl Connection {
                 (),
                 conn_params.get_max_data(),
             ))),
-            flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone()),
             events: ConnectionEvents::default(),
@@ -1807,9 +1807,20 @@ impl Connection {
 
         self.recv_streams.write_frames(builder, tokens, stats)?;
 
-        self.flow_mgr
-            .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
+        self.remote_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+        self.remote_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.local_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+        self.local_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
@@ -2144,10 +2155,10 @@ impl Connection {
     fn set_initial_limits(&mut self) {
         let tps = self.tps.borrow();
         let remote = tps.remote();
-        self.indexes.remote_max_stream_bidi =
-            StreamIndex::new(remote.get_integer(tparams::INITIAL_MAX_STREAMS_BIDI));
-        self.indexes.remote_max_stream_uni =
-            StreamIndex::new(remote.get_integer(tparams::INITIAL_MAX_STREAMS_UNI));
+        let _ = self.local_streams_fc[StreamType::BiDi]
+            .update(remote.get_integer(tparams::INITIAL_MAX_STREAMS_BIDI));
+        let _ = self.local_streams_fc[StreamType::UniDi]
+            .update(remote.get_integer(tparams::INITIAL_MAX_STREAMS_UNI));
         self.flow_control_sender
             .borrow_mut()
             .update(remote.get_integer(tparams::INITIAL_MAX_DATA));
@@ -2458,13 +2469,7 @@ impl Connection {
                 maximum_streams,
             } => {
                 self.stats.borrow_mut().frame_rx.max_streams += 1;
-                let remote_max = match stream_type {
-                    StreamType::BiDi => &mut self.indexes.remote_max_stream_bidi,
-                    StreamType::UniDi => &mut self.indexes.remote_max_stream_uni,
-                };
-
-                if maximum_streams > *remote_max {
-                    *remote_max = maximum_streams;
+                if self.local_streams_fc[stream_type].update(maximum_streams) {
                     self.events.send_stream_creatable(stream_type);
                 }
             }
@@ -2493,14 +2498,7 @@ impl Connection {
             }
             Frame::StreamsBlocked { stream_type, .. } => {
                 self.stats.borrow_mut().frame_rx.streams_blocked += 1;
-                let local_max = match stream_type {
-                    StreamType::BiDi => &mut self.indexes.local_max_stream_bidi,
-                    StreamType::UniDi => &mut self.indexes.local_max_stream_uni,
-                };
-
-                self.flow_mgr
-                    .borrow_mut()
-                    .max_streams(*local_max, stream_type)
+                self.remote_streams_fc[stream_type].send_flowc_update();
             }
             Frame::NewConnectionId {
                 sequence_number,
@@ -2593,9 +2591,6 @@ impl Connection {
                     RecoveryToken::Ack(_) => {}
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
-                    RecoveryToken::Flow(ft) => {
-                        self.flow_mgr.borrow_mut().lost(&ft, &mut self.indexes)
-                    }
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                     RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
@@ -2624,6 +2619,15 @@ impl Connection {
                         if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
                             rs.stop_sending_lost();
                         }
+                    }
+                    RecoveryToken::StreamsBlocked { stream_type, limit } => {
+                        self.local_streams_fc[*stream_type].lost(*limit);
+                    }
+                    RecoveryToken::MaxStreams {
+                        stream_type,
+                        max_streams,
+                    } => {
+                        self.remote_streams_fc[*stream_type].max_streams_lost(*max_streams);
                     }
                 }
             }
@@ -2680,12 +2684,13 @@ impl Connection {
                         }
                     }
                     // We only worry when these are lost:
-                    RecoveryToken::Flow(_)
-                    | RecoveryToken::DataBlocked(_)
+                    RecoveryToken::DataBlocked(_)
                     | RecoveryToken::StreamDataBlocked { .. }
                     | RecoveryToken::HandshakeDone
                     | RecoveryToken::MaxData(_)
-                    | RecoveryToken::MaxStreamData { .. } => (),
+                    | RecoveryToken::MaxStreamData { .. }
+                    | RecoveryToken::StreamsBlocked { .. }
+                    | RecoveryToken::MaxStreams { .. } => (),
                 }
             }
         }
@@ -2709,10 +2714,12 @@ impl Connection {
 
         self.send_streams.clear();
         self.recv_streams.clear();
-        self.indexes = StreamIndexes::new(
+        self.remote_streams_fc = RemoteStreamsFlowControls::new(
             self.conn_params.get_max_streams(StreamType::BiDi),
             self.conn_params.get_max_streams(StreamType::UniDi),
+            self.role(),
         );
+        self.local_streams_fc = LocalStreamsFlowControls::new(self.role());
         self.crypto.states.discard_0rtt_keys();
         self.events.client_0rtt_rejected();
     }
@@ -2786,18 +2793,8 @@ impl Connection {
             self.recv_streams.clear_terminal(send_streams, self.role());
 
         // Send max_streams updates if we removed remote-initiated recv streams.
-        if removed_bidi > 0 {
-            self.indexes.local_max_stream_bidi += removed_bidi;
-            self.flow_mgr
-                .borrow_mut()
-                .max_streams(self.indexes.local_max_stream_bidi, StreamType::BiDi)
-        }
-        if removed_uni > 0 {
-            self.indexes.local_max_stream_uni += removed_uni;
-            self.flow_mgr
-                .borrow_mut()
-                .max_streams(self.indexes.local_max_stream_uni, StreamType::UniDi)
-        }
+        self.remote_streams_fc[StreamType::BiDi].add_retired(removed_bidi);
+        self.remote_streams_fc[StreamType::UniDi].add_retired(removed_uni);
     }
 
     /// Get or make a stream, and implicitly open additional streams as
@@ -2814,27 +2811,10 @@ impl Connection {
         {
             return Err(Error::ConnectionState);
         }
-
         // May require creating new stream(s)
         if stream_id.is_remote_initiated(self.role()) {
-            let next_stream_idx = if stream_id.is_bidi() {
-                &mut self.indexes.local_next_stream_bidi
-            } else {
-                &mut self.indexes.local_next_stream_uni
-            };
-            let stream_idx: StreamIndex = stream_id.into();
-
-            if stream_idx >= *next_stream_idx {
+            if self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)? {
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
-                    if stream_idx > self.indexes.local_max_stream_bidi {
-                        qwarn!(
-                            [self],
-                            "remote bidi stream create blocked, next={:?} max={:?}",
-                            stream_idx,
-                            self.indexes.local_max_stream_bidi
-                        );
-                        return Err(Error::StreamLimitError);
-                    }
                     // From the local perspective, this is a remote- originated BiDi stream. From
                     // the remote perspective, this is a local-originated BiDi stream. Therefore,
                     // look at the local transport parameters for the
@@ -2845,24 +2825,16 @@ impl Connection {
                         .local
                         .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
-                    if stream_idx > self.indexes.local_max_stream_uni {
-                        qwarn!(
-                            [self],
-                            "remote uni stream create blocked, next={:?} max={:?}",
-                            stream_idx,
-                            self.indexes.local_max_stream_uni
-                        );
-                        return Err(Error::StreamLimitError);
-                    }
                     self.tps
                         .borrow()
                         .local
                         .get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)
                 };
 
-                loop {
-                    let next_stream_id =
-                        next_stream_idx.to_stream_id(stream_id.stream_type(), stream_id.role());
+                while self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)? {
+                    let next_stream_id = self.remote_streams_fc[stream_id.stream_type()]
+                        .add_stream()
+                        .unwrap();
                     self.events.new_stream(next_stream_id);
 
                     self.recv_streams.insert(
@@ -2870,7 +2842,6 @@ impl Connection {
                         RecvStream::new(
                             next_stream_id,
                             recv_initial_max_stream_data,
-                            self.flow_mgr.clone(),
                             self.events.clone(),
                         ),
                     );
@@ -2895,11 +2866,6 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                    }
-
-                    *next_stream_idx += 1;
-                    if *next_stream_idx > stream_idx {
-                        break;
                     }
                 }
             }
@@ -2931,101 +2897,68 @@ impl Connection {
             _ => (),
         }
 
-        Ok(match st {
-            StreamType::UniDi => {
-                if self.indexes.remote_next_stream_uni >= self.indexes.remote_max_stream_uni {
-                    self.flow_mgr
-                        .borrow_mut()
-                        .streams_blocked(self.indexes.remote_max_stream_uni, StreamType::UniDi);
-                    qwarn!(
-                        [self],
-                        "local uni stream create blocked, next={:?} max={:?}",
-                        self.indexes.remote_next_stream_uni,
-                        self.indexes.remote_max_stream_uni
-                    );
-                    return Err(Error::StreamLimitError);
-                }
-                let new_id = self
-                    .indexes
-                    .remote_next_stream_uni
-                    .to_stream_id(StreamType::UniDi, self.role);
-                self.indexes.remote_next_stream_uni += 1;
-                let initial_max_stream_data = self
-                    .tps
-                    .borrow()
-                    .remote()
-                    .get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI);
-
-                self.send_streams.insert(
-                    new_id,
-                    SendStream::new(
-                        new_id,
-                        initial_max_stream_data,
-                        Rc::clone(&self.flow_control_sender),
-                        self.events.clone(),
-                    ),
-                );
-                new_id.as_u64()
+        match self.local_streams_fc.add_stream(st) {
+            None => {
+                self.local_streams_fc[st].blocked();
+                Err(Error::StreamLimitError)
             }
-            StreamType::BiDi => {
-                if self.indexes.remote_next_stream_bidi >= self.indexes.remote_max_stream_bidi {
-                    self.flow_mgr
-                        .borrow_mut()
-                        .streams_blocked(self.indexes.remote_max_stream_bidi, StreamType::BiDi);
-                    qwarn!(
-                        [self],
-                        "local bidi stream create blocked, next={:?} max={:?}",
-                        self.indexes.remote_next_stream_bidi,
-                        self.indexes.remote_max_stream_bidi
+            Some(new_id) => Ok(match st {
+                StreamType::UniDi => {
+                    let initial_max_stream_data = self
+                        .tps
+                        .borrow()
+                        .remote()
+                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI);
+
+                    self.send_streams.insert(
+                        new_id,
+                        SendStream::new(
+                            new_id,
+                            initial_max_stream_data,
+                            Rc::clone(&self.flow_control_sender),
+                            self.events.clone(),
+                        ),
                     );
-                    return Err(Error::StreamLimitError);
+                    new_id.as_u64()
                 }
-                let new_id = self
-                    .indexes
-                    .remote_next_stream_bidi
-                    .to_stream_id(StreamType::BiDi, self.role);
-                self.indexes.remote_next_stream_bidi += 1;
-                // From the local perspective, this is a local- originated BiDi stream. From the
-                // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
-                // the remote transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value
-                // to decide how much this endpoint is allowed to send its peer.
-                let send_initial_max_stream_data = self
-                    .tps
-                    .borrow()
-                    .remote()
-                    .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                StreamType::BiDi => {
+                    // From the local perspective, this is a local- originated BiDi stream. From the
+                    // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
+                    // the remote transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value
+                    // to decide how much this endpoint is allowed to send its peer.
+                    let send_initial_max_stream_data = self
+                        .tps
+                        .borrow()
+                        .remote()
+                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
 
-                self.send_streams.insert(
-                    new_id,
-                    SendStream::new(
+                    self.send_streams.insert(
                         new_id,
-                        send_initial_max_stream_data,
-                        Rc::clone(&self.flow_control_sender),
-                        self.events.clone(),
-                    ),
-                );
-                // From the local perspective, this is a local- originated BiDi stream. From the
-                // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
-                // the local transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value
-                // to decide how much this endpoint will allow its peer to send.
-                let recv_initial_max_stream_data = self
-                    .tps
-                    .borrow()
-                    .local
-                    .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                        SendStream::new(
+                            new_id,
+                            send_initial_max_stream_data,
+                            Rc::clone(&self.flow_control_sender),
+                            self.events.clone(),
+                        ),
+                    );
+                    // From the local perspective, this is a local- originated BiDi stream. From the
+                    // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
+                    // the local transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value
+                    // to decide how much this endpoint will allow its peer to send.
+                    let recv_initial_max_stream_data = self
+                        .tps
+                        .borrow()
+                        .local
+                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
 
-                self.recv_streams.insert(
-                    new_id,
-                    RecvStream::new(
+                    self.recv_streams.insert(
                         new_id,
-                        recv_initial_max_stream_data,
-                        self.flow_mgr.clone(),
-                        self.events.clone(),
-                    ),
-                );
-                new_id.as_u64()
-            }
-        })
+                        RecvStream::new(new_id, recv_initial_max_stream_data, self.events.clone()),
+                    );
+                    new_id.as_u64()
+                }
+            }),
+        }
     }
 
     /// Set the priority of a stream.

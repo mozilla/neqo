@@ -17,7 +17,6 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    stream_id::StreamIndex,
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, Error, Output, QuicVersion,
     State, StreamType,
 };
@@ -1054,8 +1053,8 @@ fn max_streams() {
         Box::new(AllowZeroRtt {}),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, StreamIndex::new(MAX_STREAMS))
-            .max_streams(StreamType::UniDi, StreamIndex::new(MAX_STREAMS)),
+            .max_streams(StreamType::BiDi, MAX_STREAMS)
+            .max_streams(StreamType::UniDi, MAX_STREAMS),
     )
     .expect("should create a server");
 
@@ -1085,9 +1084,9 @@ fn max_streams_default() {
 
     // Make sure that we can create streams up to the local limit.
     let local_limit_unidi = ConnectionParameters::default().get_max_streams(StreamType::UniDi);
-    can_create_streams(&mut client, StreamType::UniDi, local_limit_unidi.as_u64());
+    can_create_streams(&mut client, StreamType::UniDi, local_limit_unidi);
     let local_limit_bidi = ConnectionParameters::default().get_max_streams(StreamType::BiDi);
-    can_create_streams(&mut client, StreamType::BiDi, local_limit_bidi.as_u64());
+    can_create_streams(&mut client, StreamType::BiDi, local_limit_bidi);
 }
 
 #[derive(Debug)]
@@ -1109,8 +1108,8 @@ fn max_streams_after_0rtt_rejection() {
         Box::new(RejectZeroRtt {}),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, StreamIndex::new(MAX_STREAMS))
-            .max_streams(StreamType::UniDi, StreamIndex::new(MAX_STREAMS)),
+            .max_streams(StreamType::BiDi, MAX_STREAMS)
+            .max_streams(StreamType::UniDi, MAX_STREAMS),
     )
     .expect("should create a server");
     let token = get_ticket(&mut server);

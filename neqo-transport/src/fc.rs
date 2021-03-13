@@ -8,13 +8,14 @@
 // into flow control frames needing to be sent to the remote.
 
 use crate::frame::{
-    write_varint_frame, FRAME_TYPE_DATA_BLOCKED, FRAME_TYPE_MAX_DATA, FRAME_TYPE_MAX_STREAM_DATA,
-    FRAME_TYPE_STREAM_DATA_BLOCKED,
+    write_varint_frame, FRAME_TYPE_DATA_BLOCKED, FRAME_TYPE_MAX_DATA, FRAME_TYPE_MAX_STREAMS_BIDI,
+    FRAME_TYPE_MAX_STREAMS_UNIDI, FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_STREAMS_BLOCKED_BIDI,
+    FRAME_TYPE_STREAMS_BLOCKED_UNIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
 };
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
-use crate::stream_id::StreamId;
+use crate::stream_id::{StreamId, StreamType};
 use crate::Res;
 
 use std::convert::TryFrom;
@@ -164,6 +165,32 @@ impl SenderFlowControl<StreamId> {
     }
 }
 
+impl SenderFlowControl<StreamType> {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        if let Some(limit) = self.blocked_needed() {
+            let frame = if self.subject == StreamType::BiDi {
+                FRAME_TYPE_STREAMS_BLOCKED_BIDI
+            } else {
+                FRAME_TYPE_STREAMS_BLOCKED_UNIDI
+            };
+            if write_varint_frame(builder, &[frame, limit])? {
+                stats.streams_blocked += 1;
+                tokens.push(RecoveryToken::StreamsBlocked {
+                    stream_type: self.subject,
+                    limit,
+                });
+                self.blocked_sent();
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct ReceiverFlowControl<T>
 where
@@ -197,7 +224,7 @@ where
 
     /// Check if received data exceeds the allowed flow control limit.
     pub fn check_allowed(&self, new_end: u64) -> bool {
-        new_end <= self.max_data
+        new_end < self.max_data
     }
 
     /// Some data has been read, retired them and maybe send flow control
@@ -211,6 +238,10 @@ where
         if self.retired + self.max_active / 2 > self.max_data {
             self.frame_pending = true;
         }
+    }
+
+    pub fn add_retired(&mut self, retired: u64) {
+        self.retired(self.retired + retired);
     }
 
     /// This function is called when STREAM_DATA_BLOCKED frame is received.
@@ -283,6 +314,32 @@ impl ReceiverFlowControl<StreamId> {
                     max_data,
                 });
                 self.max_data_sent(max_data);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ReceiverFlowControl<StreamType> {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        if let Some(max_streams) = self.max_data_needed() {
+            let frame = if self.subject == StreamType::BiDi {
+                FRAME_TYPE_MAX_STREAMS_BIDI
+            } else {
+                FRAME_TYPE_MAX_STREAMS_UNIDI
+            };
+            if write_varint_frame(builder, &[frame, max_streams])? {
+                stats.max_streams += 1;
+                tokens.push(RecoveryToken::MaxStreams {
+                    stream_type: self.subject,
+                    max_streams,
+                });
+                self.max_data_sent(max_streams);
             }
         }
         Ok(())

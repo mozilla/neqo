@@ -17,7 +17,6 @@ mod crypto;
 mod dump;
 mod events;
 mod fc;
-mod flow_mgr;
 mod frame;
 mod pace;
 mod packet;

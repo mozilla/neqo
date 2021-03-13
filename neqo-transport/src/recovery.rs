@@ -21,14 +21,13 @@ use neqo_common::{qdebug, qlog::NeqoQlog, qtrace, qwarn};
 use crate::cid::ConnectionIdEntry;
 use crate::connection::LOCAL_IDLE_TIMEOUT;
 use crate::crypto::CryptoRecoveryToken;
-use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::packet::PacketNumber;
 use crate::path::{Path, PathRef};
 use crate::qlog::{self, QlogMetric};
 use crate::rtt::RttEstimate;
 use crate::send_stream::StreamRecoveryToken;
 use crate::stats::{Stats, StatsCell};
-use crate::stream_id::StreamId;
+use crate::stream_id::{StreamId, StreamType};
 use crate::tracking::{AckToken, PNSpace, PNSpaceSet, SentPacket};
 
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
@@ -51,17 +50,34 @@ pub enum RecoveryToken {
     Ack(AckToken),
     Stream(StreamRecoveryToken),
     Crypto(CryptoRecoveryToken),
-    Flow(FlowControlRecoveryToken),
     HandshakeDone,
     NewToken(usize),
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),
     RetireConnectionId(u64),
     DataBlocked(u64),
-    StreamDataBlocked { stream_id: StreamId, limit: u64 },
-    ResetStream { stream_id: StreamId },
+    StreamDataBlocked {
+        stream_id: StreamId,
+        limit: u64,
+    },
+    ResetStream {
+        stream_id: StreamId,
+    },
     MaxData(u64),
-    MaxStreamData { stream_id: StreamId, max_data: u64 },
-    StopSending { stream_id: StreamId },
+    MaxStreamData {
+        stream_id: StreamId,
+        max_data: u64,
+    },
+    StopSending {
+        stream_id: StreamId,
+    },
+    StreamsBlocked {
+        stream_type: StreamType,
+        limit: u64,
+    },
+    MaxStreams {
+        stream_type: StreamType,
+        max_streams: u64,
+    },
 }
 
 /// `SendProfile` tells a sender how to send packets.
