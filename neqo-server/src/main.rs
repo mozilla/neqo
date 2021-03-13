@@ -33,9 +33,8 @@ use neqo_crypto::{
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    server::ValidateAddress, stream_id::StreamIndex, tparams::PreferredAddress,
-    CongestionControlAlgorithm, ConnectionParameters, Output, RandomConnectionIdGenerator,
-    StreamType,
+    server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
+    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
 };
 
 use crate::old_https::Http09Server;
@@ -211,8 +210,8 @@ struct QuicParameters {
 impl QuicParameters {
     fn get(&self) -> ConnectionParameters {
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
-            .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
+            .max_streams(StreamType::BiDi, self.max_streams_bidi)
+            .max_streams(StreamType::UniDi, self.max_streams_uni)
             .cc_algorithm(self.congestion_control)
     }
 }
