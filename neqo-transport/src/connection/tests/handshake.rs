@@ -23,6 +23,7 @@ use crate::{
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
 use std::cell::RefCell;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::Duration;
 use test_fixture::{self, addr, assertions, fixture_init, now, split_datagram};
@@ -827,4 +828,56 @@ fn garbage_initial() {
     corrupted.extend_from_slice(rest.as_ref().map_or(&[], |r| &r[..]));
     let garbage = Datagram::new(addr(), addr(), corrupted);
     assert_eq!(Output::None, server.process(Some(garbage), now()));
+}
+
+#[test]
+fn drop_initial_packet_from_wrong_address() {
+    let mut client = default_client();
+    let out = client.process(None, now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
+
+    let mut server = default_server();
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
+
+    let p = out.dgram().unwrap();
+    let dgram = Datagram::new(
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
+        p.destination(),
+        &p[..],
+    );
+
+    let out = client.process(Some(dgram), now());
+    assert!(out.as_dgram_ref().is_none());
+}
+
+#[test]
+fn drop_handshake_packet_from_wrong_address() {
+    let mut client = default_client();
+    let out = client.process(None, now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
+
+    let mut server = default_server();
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
+
+    let (s_in, s_hs) = split_datagram(&out.dgram().unwrap());
+    assert!(s_hs.is_some());
+
+    // Pass the initial packet.
+    let _ = client.process(Some(s_in), now()).dgram();
+
+    let p = s_hs.unwrap();
+    let dgram = Datagram::new(
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
+        p.destination(),
+        &p[..],
+    );
+
+    let out = client.process(Some(dgram), now());
+    assert!(out.as_dgram_ref().is_none());
 }
