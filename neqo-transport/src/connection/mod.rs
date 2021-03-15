@@ -1893,27 +1893,37 @@ impl Connection {
             if space == PNSpace::ApplicationData {
                 self.write_appdata_frames(builder, &mut tokens)?;
             } else {
-                self.crypto.write_frame(
-                    space,
-                    builder,
-                    &mut tokens,
-                    &mut self.stats.borrow_mut().frame_tx,
-                )?;
+                let stats = &mut self.stats.borrow_mut().frame_tx;
+                self.crypto
+                    .write_frame(space, builder, &mut tokens, stats)?;
             }
         }
 
         let stats = &mut self.stats.borrow_mut().frame_tx;
         // Anything written after an ACK already elicits acknowledgment.
         // If we need to probe and nothing has been written, send a PING.
-        if builder.len() == ack_end && profile.should_probe(space) {
-            // Nothing ack-eliciting and we need to probe; send PING.
-            debug_assert_ne!(builder.remaining(), 0);
-            builder.encode_varint(crate::frame::FRAME_TYPE_PING);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(11));
+        if builder.len() == ack_end {
+            let probe = if profile.should_probe(space) {
+                // The packet might be empty, but we need to probe.
+                true
+            } else if !builder.packet_empty() {
+                // The packet only contains an ACK.  Check whether we want to
+                // force an ACK with a PING so we can stop tracking packets.
+                let pto = path.borrow().rtt().pto(PNSpace::ApplicationData);
+                self.loss_recovery.should_probe(pto, now)
+            } else {
+                false
+            };
+            if probe {
+                // Nothing ack-eliciting and we need to probe; send PING.
+                debug_assert_ne!(builder.remaining(), 0);
+                builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+                if builder.len() > builder.limit() {
+                    return Err(Error::InternalError(11));
+                }
+                stats.ping += 1;
+                stats.all += 1;
             }
-            stats.ping += 1;
-            stats.all += 1;
         }
         // If this is not the primary path, this should be ack-eliciting.
         let ack_eliciting = builder.len() > ack_end;

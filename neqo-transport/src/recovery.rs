@@ -38,6 +38,12 @@ pub(crate) const ACK_ONLY_SIZE_LIMIT: usize = 256;
 /// The number of packets we send on a PTO.
 /// And the number to declare lost when the PTO timer is hit.
 pub const PTO_PACKET_COUNT: usize = 2;
+/// The preferred limit on the number of packets that are tracked.
+/// If we exceed this number, we start sending `PING` frames sooner to
+/// force the peer to acknowledge some of them.
+pub(crate) const MAX_OUTSTANDING_UNACK: usize = 200;
+/// Disable PING until this many packets are outstanding.
+pub(crate) const MIN_OUTSTANDING_UNACK: usize = 16;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -137,11 +143,11 @@ pub(crate) struct LossRecoverySpace {
     /// The time used to calculate the PTO timer for this space.
     /// This is the time that the last ACK-eliciting packet in this space
     /// was sent.  This might be the time that a probe was sent.
-    pto_base_time: Option<Instant>,
+    last_ack_eliciting: Option<Instant>,
     /// The number of outstanding packets in this space that are in flight.
     /// This might be less than the number of ACK-eliciting packets,
     /// because PTO packets don't count.
-    in_flight_outstanding: u64,
+    in_flight_outstanding: usize,
     sent_packets: BTreeMap<u64, SentPacket>,
     /// The time that the first out-of-order packet was sent.
     /// This is `None` if there were no out-of-order packets detected.
@@ -155,7 +161,7 @@ impl LossRecoverySpace {
             space,
             largest_acked: None,
             largest_acked_sent_time: None,
-            pto_base_time: None,
+            last_ack_eliciting: None,
             in_flight_outstanding: 0,
             sent_packets: BTreeMap::default(),
             first_ooo_time: None,
@@ -195,8 +201,8 @@ impl LossRecoverySpace {
 
     pub fn pto_base_time(&self) -> Option<Instant> {
         if self.in_flight_outstanding() {
-            debug_assert!(self.pto_base_time.is_some());
-            self.pto_base_time
+            debug_assert!(self.last_ack_eliciting.is_some());
+            self.last_ack_eliciting
         } else if self.space == PNSpace::ApplicationData {
             None
         } else {
@@ -205,25 +211,43 @@ impl LossRecoverySpace {
             // of the handshake.  Technically, this has to stop once we receive
             // an ACK of Handshake or 1-RTT, or when we receive HANDSHAKE_DONE,
             // but a few extra probes won't hurt.
+            // It only means that we fail anti-amplification tests.
             // A server shouldn't arm its PTO timer this way. The server sends
             // ack-eliciting, in-flight packets immediately so this only
             // happens when the server has nothing outstanding.  If we had
             // client authentication, this might cause some extra probes,
             // but they would be harmless anyway.
-            self.pto_base_time
+            self.last_ack_eliciting
         }
     }
 
     pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
         if sent_packet.ack_eliciting() {
-            self.pto_base_time = Some(sent_packet.time_sent);
+            self.last_ack_eliciting = Some(sent_packet.time_sent);
             self.in_flight_outstanding += 1;
-        } else if self.space != PNSpace::ApplicationData && self.pto_base_time.is_none() {
+        } else if self.space != PNSpace::ApplicationData && self.last_ack_eliciting.is_none() {
             // For Initial and Handshake spaces, make sure that we have a PTO baseline
             // always. See `LossRecoverySpace::pto_base_time()` for details.
-            self.pto_base_time = Some(sent_packet.time_sent);
+            self.last_ack_eliciting = Some(sent_packet.time_sent);
         }
         self.sent_packets.insert(sent_packet.pn, sent_packet);
+    }
+
+    /// If we are only sending ACK frames, send a PING frame after 2 PTOs so that
+    /// the peer sends an ACK frame.  If we have received lots of packets and no ACK,
+    /// send a PING frame after 1 PTO.  Note that this can't be within a PTO, or
+    /// we would risk setting up a feedback loop; having this many packets
+    /// outstanding can be normal and we don't want to PING too often.
+    pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
+        let n_pto = if self.sent_packets.len() >= MAX_OUTSTANDING_UNACK {
+            1
+        } else if self.sent_packets.len() >= MIN_OUTSTANDING_UNACK {
+            2
+        } else {
+            return false;
+        };
+        self.last_ack_eliciting
+            .map_or(false, |t| now > t + (pto * n_pto))
     }
 
     fn remove_packet(&mut self, p: &SentPacket) {
@@ -232,12 +256,6 @@ impl LossRecoverySpace {
             self.in_flight_outstanding -= 1;
             if self.in_flight_outstanding == 0 {
                 qtrace!("remove_packet outstanding == 0 for space {}", self.space);
-
-                // See above comments; keep PTO armed for Initial/Handshake even
-                // if no outstanding packets.
-                if self.space == PNSpace::ApplicationData {
-                    self.pto_base_time = None;
-                }
             }
         }
     }
@@ -572,6 +590,13 @@ impl LossRecovery {
                 sent_packet.pn
             );
         }
+    }
+
+    pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
+        self.spaces
+            .get(PNSpace::ApplicationData)
+            .unwrap()
+            .should_probe(pto, now)
     }
 
     /// Record an RTT sample.
