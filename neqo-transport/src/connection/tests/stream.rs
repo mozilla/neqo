@@ -565,8 +565,8 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
 
     // create a stream
     let stream_id = server.stream_create(stream_type).unwrap();
-    let written = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written).unwrap(), RECV_BUFFER_START);
+    let written1 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    assert_eq!(u64::try_from(written1).unwrap(), RECV_BUFFER_START);
 
     // Send the stream to the client.
     let out = server.process(None, now());
@@ -582,11 +582,11 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     assert_eq!(server.stats().frame_rx.max_stream_data, expected);
 
     // If the flow control window has been increased, server can write more data.
-    let written = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    let written2 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
     if RECV_BUFFER_START < new_fc {
-        assert_eq!(u64::try_from(written).unwrap(), new_fc - RECV_BUFFER_START);
+        assert_eq!(u64::try_from(written2).unwrap(), new_fc - RECV_BUFFER_START);
     } else {
-        assert_eq!(written, 0);
+        assert_eq!(written2, 0);
     }
 
     // Exchange packets so that client gets all data.
@@ -602,8 +602,8 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     let out4 = client.process(None, now());
     let _ = server.process(out4.dgram(), now());
 
-    let written = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written).unwrap(), new_fc);
+    let written3 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    assert_eq!(u64::try_from(written3).unwrap(), new_fc);
 }
 
 #[test]
