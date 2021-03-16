@@ -23,6 +23,7 @@ mod agentio;
 mod auth;
 mod cert;
 pub mod constants;
+mod ech;
 mod err;
 pub mod ext;
 pub mod hkdf;
@@ -41,9 +42,13 @@ pub use self::agent::{
 };
 pub use self::auth::AuthenticationStatus;
 pub use self::constants::*;
+pub use self::ech::{
+    encode_config as encode_ech_config, generate_keys as generate_ech_keys, AeadId, KdfId, KemId,
+    SymmetricSuite,
+};
 pub use self::err::{Error, PRErrorCode, Res};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-pub use self::p11::{random, SymKey};
+pub use self::p11::{random, PrivateKey, PublicKey, SymKey};
 pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
 pub use self::ssl::Opt;

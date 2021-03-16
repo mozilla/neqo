@@ -12,24 +12,25 @@ pub use crate::cert::CertificateInfo;
 use crate::constants::{
     Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
 };
+use crate::ech;
 use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
-use crate::p11;
+use crate::p11::{self, PrivateKey, PublicKey};
 use crate::prio;
 use crate::replay::AntiReplay;
 use crate::secrets::SecretHolder;
 use crate::ssl::{self, PRBool};
 use crate::time::{Time, TimeHolder};
 
-use neqo_common::{hex_snip_middle, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qinfo, qtrace, qwarn};
 use std::cell::RefCell;
 use std::convert::TryFrom;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_uint, c_void};
 use std::pin::Pin;
-use std::ptr::{null, null_mut, NonNull};
+use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -94,12 +95,22 @@ pub struct SecretAgentPreInfo {
 }
 
 macro_rules! preinfo_arg {
+    ($v:ident, $m:ident, $f:ident: bool $(,)?) => {
+        #[must_use]
+        pub fn $v(&self) -> Option<bool> {
+            match self.info.valuesSet & ssl::$m {
+                0 => None,
+                _ => Some(self.info.$f != 0),
+            }
+        }
+    };
+
     ($v:ident, $m:ident, $f:ident: $t:ident $(,)?) => {
         #[must_use]
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some($t::from(self.info.$f)),
+                _ => Some($t::try_from(self.info.$f).unwrap()),
             }
         }
     };
@@ -132,6 +143,28 @@ impl SecretAgentPreInfo {
     pub fn max_early_data(&self) -> usize {
         usize::try_from(self.info.maxEarlyDataSize).unwrap()
     }
+    preinfo_arg!(ech_accepted, ssl_preinfo_ech, echAccepted: bool);
+
+    /// Get the public name that was used.  This will only be available
+    /// (that is, not `None`) if `ech_accepted()` returns `false`.
+    /// In this case, certificate validation needs to use this name rather
+    /// than the original name to validate the certificate.  If
+    /// that validation passes (that is, `SecretAgent::authenticated` is called
+    /// with `AuthenticationStatus::Ok`), then the handshake will still fail.
+    /// After the failed handshake, the state will be `Error::EchRetry`,
+    /// which contains a valid ECH configuration.
+    ///
+    /// # Errors
+    /// When the public name is not valid UTF-8.
+    pub fn ech_public_name(&self) -> Res<Option<&str>> {
+        if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 {
+            Ok(None)
+        } else {
+            let n = unsafe { CStr::from_ptr(self.info.echPublicName) };
+            Ok(Some(n.to_str()?))
+        }
+    }
+
     #[must_use]
     pub fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
@@ -151,6 +184,7 @@ pub struct SecretAgentInfo {
     group: Group,
     resumed: bool,
     early_data: bool,
+    ech_accepted: bool,
     alpn: Option<String>,
     signature_scheme: SignatureScheme,
 }
@@ -172,6 +206,7 @@ impl SecretAgentInfo {
             group: Group::try_from(info.keaGroup)?,
             resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
+            ech_accepted: info.echAccepted != 0,
             alpn: get_alpn(fd, false)?,
             signature_scheme: SignatureScheme::try_from(info.signatureScheme)?,
         })
@@ -195,6 +230,10 @@ impl SecretAgentInfo {
     #[must_use]
     pub fn early_data_accepted(&self) -> bool {
         self.early_data
+    }
+    #[must_use]
+    pub fn ech_accepted(&self) -> bool {
+        self.ech_accepted
     }
     #[must_use]
     pub fn alpn(&self) -> Option<&String> {
@@ -225,6 +264,10 @@ pub struct SecretAgent {
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
+
+    /// The encrypted client hello (ECH) configuration that is in use.
+    /// Empty if ECH is not enabled.
+    ech_config: Vec<u8>,
 }
 
 impl SecretAgent {
@@ -244,6 +287,8 @@ impl SecretAgent {
 
             extension_handlers: Vec::new(),
             inf: None,
+
+            ech_config: Vec::new(),
         })
     }
 
@@ -545,11 +590,14 @@ impl SecretAgent {
     }
 
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
-        if let Err(e) = &res {
+        if let Err(e) = res {
+            let e = ech::convert_ech_error(self.fd, e);
             qwarn!([self], "error: {:?}", e);
             self.state = HandshakeState::Failed(e.clone());
+            Err(e)
+        } else {
+            res
         }
-        res
     }
 
     fn update_state(&mut self, res: Res<()>) -> Res<()> {
@@ -662,15 +710,23 @@ impl SecretAgent {
     pub fn state(&self) -> &HandshakeState {
         &self.state
     }
+
     /// Take a read secret.  This will only return a non-`None` value once.
     #[must_use]
     pub fn read_secret(&mut self, epoch: Epoch) -> Option<p11::SymKey> {
         self.secrets.take_read(epoch)
     }
+
     /// Take a write secret.
     #[must_use]
     pub fn write_secret(&mut self, epoch: Epoch) -> Option<p11::SymKey> {
         self.secrets.take_write(epoch)
+    }
+
+    /// Get the active ECH configuration, which is empty if ECH is disabled.
+    #[must_use]
+    pub fn ech_config(&self) -> &[u8] {
+        &self.ech_config
     }
 }
 
@@ -821,6 +877,35 @@ impl Client {
             )
         }
     }
+
+    /// Enable encrypted client hello (ECH), using the encoded `ECHConfigList`.
+    ///
+    /// When ECH is enabled, a client needs to look for `Error::EchRetry` as a
+    /// failure code.  If `Error::EchRetry` is received when connecting, the
+    /// connection attempt should be retried and the included value provided
+    /// to this function (instead of what is received from DNS).
+    ///
+    /// Calling this function with an empty value for `ech_config_list` enables
+    /// ECH greasing.  When that is done, there is no need to look for `EchRetry`
+    ///
+    /// # Errors
+    /// Error returned when the configuration is invalid.
+    pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+        let config = ech_config_list.as_ref();
+        qdebug!([self], "Enable ECH for a server: {}", hex_with_len(&config));
+        self.ech_config = Vec::from(config);
+        if config.is_empty() {
+            unsafe { ech::SSL_EnableTls13GreaseEch(self.agent.fd, PRBool::from(true)) }
+        } else {
+            unsafe {
+                ech::SSL_SetClientEchConfigs(
+                    self.agent.fd,
+                    config.as_ptr(),
+                    c_uint::try_from(config.len())?,
+                )
+            }
+        }
+    }
 }
 
 impl Deref for Client {
@@ -834,6 +919,12 @@ impl Deref for Client {
 impl DerefMut for Client {
     fn deref_mut(&mut self) -> &mut SecretAgent {
         &mut self.agent
+    }
+}
+
+impl ::std::fmt::Display for Client {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Client {:p}", self.agent.fd)
     }
 }
 
@@ -899,17 +990,17 @@ impl Server {
 
         for n in certificates {
             let c = CString::new(n.as_ref())?;
-            let cert = match NonNull::new(unsafe {
-                p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut())
-            }) {
-                None => return Err(Error::CertificateLoading),
-                Some(ptr) => p11::Certificate::new(ptr),
+            let cert_ptr = unsafe { p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut()) };
+            let cert = if let Ok(c) = p11::Certificate::from_ptr(cert_ptr) {
+                c
+            } else {
+                return Err(Error::CertificateLoading);
             };
-            let key = match NonNull::new(unsafe {
-                p11::PK11_FindKeyByAnyCert(*cert.deref(), null_mut())
-            }) {
-                None => return Err(Error::CertificateLoading),
-                Some(ptr) => p11::PrivateKey::new(ptr),
+            let key_ptr = unsafe { p11::PK11_FindKeyByAnyCert(*cert.deref(), null_mut()) };
+            let key = if let Ok(k) = p11::PrivateKey::from_ptr(key_ptr) {
+                k
+            } else {
+                return Err(Error::CertificateLoading);
             };
             secstatus_to_res(unsafe {
                 ssl::SSL_ConfigServerCert(agent.fd, *cert.deref(), *key.deref(), null(), 0)
@@ -1003,6 +1094,32 @@ impl Server {
 
         Ok(*Pin::into_inner(records))
     }
+
+    /// Enable encrypted client hello (ECH).
+    ///
+    /// # Errors
+    /// Fails when NSS cannot create a key pair.
+    pub fn enable_ech(
+        &mut self,
+        config: u8,
+        public_name: &str,
+        sk: &PrivateKey,
+        pk: &PublicKey,
+    ) -> Res<()> {
+        let cfg = ech::encode_config(config, public_name, pk)?;
+        qdebug!([self], "Enable ECH for a server: {}", hex_with_len(&cfg));
+        unsafe {
+            ech::SSL_SetServerEchConfigs(
+                self.agent.fd,
+                **pk,
+                **sk,
+                cfg.as_ptr(),
+                c_uint::try_from(cfg.len())?,
+            )?;
+        };
+        self.ech_config = cfg;
+        Ok(())
+    }
 }
 
 impl Deref for Server {
@@ -1016,6 +1133,12 @@ impl Deref for Server {
 impl DerefMut for Server {
     fn deref_mut(&mut self) -> &mut SecretAgent {
         &mut self.agent
+    }
+}
+
+impl ::std::fmt::Display for Server {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Server {:p}", self.agent.fd)
     }
 }
 

@@ -13,7 +13,7 @@ use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEve
 use crate::settings::HttpZeroRttChecker;
 use crate::Res;
 use neqo_common::{qtrace, Datagram};
-use neqo_crypto::{AntiReplay, Cipher};
+use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey};
 use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{
@@ -85,6 +85,26 @@ impl Http3Server {
 
     pub fn set_preferred_address(&mut self, spa: PreferredAddress) {
         self.server.set_preferred_address(spa);
+    }
+
+    /// Enable encrypted client hello (ECH).
+    ///
+    /// # Errors
+    /// Only when NSS can't serialize a configuration.
+    pub fn enable_ech(
+        &mut self,
+        config: u8,
+        public_name: &str,
+        sk: &PrivateKey,
+        pk: &PublicKey,
+    ) -> Res<()> {
+        self.server.enable_ech(config, public_name, sk, pk)?;
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn ech_config(&self) -> &[u8] {
+        self.server.ech_config()
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {

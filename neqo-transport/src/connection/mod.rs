@@ -24,7 +24,8 @@ use neqo_common::{
 };
 use neqo_crypto::{
     agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
-    HandshakeState, ResumptionToken, SecretAgentInfo, Server, ZeroRttChecker,
+    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
+    Server, ZeroRttChecker,
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
@@ -323,15 +324,6 @@ impl Connection {
         )
     }
 
-    pub fn server_enable_0rtt(
-        &mut self,
-        anti_replay: &AntiReplay,
-        zero_rtt_checker: impl ZeroRttChecker + 'static,
-    ) -> Res<()> {
-        self.crypto
-            .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
-    }
-
     fn new(
         role: Role,
         agent: Agent,
@@ -392,6 +384,34 @@ impl Connection {
         };
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
+    }
+
+    pub fn server_enable_0rtt(
+        &mut self,
+        anti_replay: &AntiReplay,
+        zero_rtt_checker: impl ZeroRttChecker + 'static,
+    ) -> Res<()> {
+        self.crypto
+            .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
+    }
+
+    pub fn server_enable_ech(
+        &mut self,
+        config: u8,
+        public_name: &str,
+        sk: &PrivateKey,
+        pk: &PublicKey,
+    ) -> Res<()> {
+        self.crypto.server_enable_ech(config, public_name, sk, pk)
+    }
+
+    /// Get the active ECH configuration, which is empty if ECH is disabled.
+    pub fn ech_config(&self) -> &[u8] {
+        self.crypto.ech_config()
+    }
+
+    pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+        self.crypto.client_enable_ech(ech_config_list)
     }
 
     /// Set or clear the qlog for this connection.
@@ -677,6 +697,10 @@ impl Connection {
 
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
         self.crypto.tls.info()
+    }
+
+    pub fn tls_preinfo(&self) -> Res<SecretAgentPreInfo> {
+        Ok(self.crypto.tls.preinfo()?)
     }
 
     /// Get the peer's certificate chain and other info.

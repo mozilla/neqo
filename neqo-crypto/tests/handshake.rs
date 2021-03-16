@@ -45,7 +45,12 @@ fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
 
         if *b.state() == HandshakeState::AuthenticationPending {
             b.authenticated(AuthenticationStatus::Ok);
-            records = b.handshake_raw(now, None).unwrap();
+            records = if let Ok(r) = b.handshake_raw(now, None) {
+                r
+            } else {
+                // TODO(mt) - as above.
+                return;
+            }
         }
         mem::swap(&mut a, &mut b);
     }

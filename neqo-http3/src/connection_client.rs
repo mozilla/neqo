@@ -158,6 +158,15 @@ impl Http3Client {
         self.conn.set_qlog(qlog);
     }
 
+    /// Enable encrypted client hello (ECH).
+    ///
+    /// # Errors
+    /// Fails when the configuration provided is bad.
+    pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
+        self.conn.client_enable_ech(ech_config_list)?;
+        Ok(())
+    }
+
     /// Get the connection id, which is useful for disambiguating connections to
     /// the same origin.
     #[must_use]

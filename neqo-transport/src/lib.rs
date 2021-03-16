@@ -8,6 +8,7 @@
 #![warn(clippy::use_self)]
 
 use neqo_common::qinfo;
+use neqo_crypto::Error as CryptoError;
 
 mod addr_valid;
 mod cc;
@@ -70,9 +71,10 @@ pub enum Error {
     ProtocolViolation,
     InvalidToken,
     ApplicationError,
-    CryptoError(neqo_crypto::Error),
+    CryptoError(CryptoError),
     QlogError,
     CryptoAlert(u8),
+    EchRetry(Vec<u8>),
 
     // All internal errors from here.  Please keep these sorted.
     AckedUnsentPacket,
@@ -140,10 +142,13 @@ impl Error {
     }
 }
 
-impl From<neqo_crypto::Error> for Error {
-    fn from(err: neqo_crypto::Error) -> Self {
+impl From<CryptoError> for Error {
+    fn from(err: CryptoError) -> Self {
         qinfo!("Crypto operation failed {:?}", err);
-        Self::CryptoError(err)
+        match err {
+            CryptoError::EchRetry(config) => Self::EchRetry(config),
+            _ => Self::CryptoError(err),
+        }
     }
 }
 

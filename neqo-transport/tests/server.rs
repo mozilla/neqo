@@ -11,7 +11,7 @@ use neqo_common::{event::Provider, hex_with_len, qdebug, qtrace, Datagram, Decod
 use neqo_crypto::{
     aead::Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf,
+    generate_ech_keys, hkdf,
     hp::HpKey,
     AllowZeroRtt, AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker,
 };
@@ -1126,4 +1126,26 @@ fn max_streams_after_0rtt_rejection() {
     // Make sure that we can create MAX_STREAMS uni- and bidirectional streams.
     can_create_streams(&mut client, StreamType::UniDi, MAX_STREAMS_UNIDI);
     can_create_streams(&mut client, StreamType::BiDi, MAX_STREAMS_BIDI);
+}
+
+#[test]
+fn ech() {
+    // Check that ECH can be used.
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server.enable_ech(0x4a, "public.example", &sk, &pk).unwrap();
+
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+    let server_instance = connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server_instance.borrow().tls_info().unwrap().ech_accepted());
+    assert!(client.tls_preinfo().unwrap().ech_accepted().unwrap());
+    assert!(server_instance
+        .borrow()
+        .tls_preinfo()
+        .unwrap()
+        .ech_accepted()
+        .unwrap());
 }

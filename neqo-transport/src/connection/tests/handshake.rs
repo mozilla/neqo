@@ -6,9 +6,9 @@
 
 use super::super::{Connection, Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
-    assert_error, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
-    handshake, maybe_authenticate, send_something, CountingConnectionIdGenerator, AT_LEAST_PTO,
-    DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
+    get_tokens, handshake, maybe_authenticate, send_something, CountingConnectionIdGenerator,
+    AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
 };
 use crate::connection::AddressValidation;
 use crate::events::ConnectionEvent;
@@ -21,7 +21,9 @@ use crate::{
 };
 
 use neqo_common::{event::Provider, qdebug, Datagram};
-use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
+use neqo_crypto::{
+    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
+};
 use std::cell::RefCell;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
@@ -875,4 +877,81 @@ fn drop_handshake_packet_from_wrong_address() {
 
     let out = client.process(Some(dgram), now());
     assert!(out.as_dgram_ref().is_none());
+}
+
+#[test]
+fn ech() {
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(0x4a, "public.example", &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+    assert!(client.tls_preinfo().unwrap().ech_accepted().unwrap());
+    assert!(server.tls_preinfo().unwrap().ech_accepted().unwrap());
+}
+
+#[test]
+fn ech_retry() {
+    const PUBLIC_NAME: &str = "public.example";
+    const CONFIG_ID: u8 = 7;
+
+    fixture_init();
+    let mut server = default_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+
+    let mut client = default_client();
+    let mut cfg = Vec::from(server.ech_config());
+    // Ensure that the version and config_id is correct.
+    assert_eq!(cfg[2], 0xfe);
+    assert_eq!(cfg[3], 0x0a);
+    assert_eq!(cfg[6], CONFIG_ID);
+    // Change the config_id so that the server doesn't recognize this.
+    cfg[6] ^= 0x94;
+    client.client_enable_ech(&cfg).unwrap();
+
+    handshake(&mut client, &mut server, now(), Duration::new(0, 0));
+    assert_eq!(
+        client
+            .tls_preinfo()
+            .unwrap()
+            .ech_public_name()
+            .unwrap()
+            .unwrap(),
+        PUBLIC_NAME
+    );
+
+    let updated_config =
+        if let Some(ConnectionError::Transport(Error::EchRetry(c))) = client.state().error() {
+            c
+        } else {
+            panic!(
+                "Client state should be failed with EchRetry, is {:?}",
+                client.state()
+            );
+        };
+
+    let mut server = default_server();
+    server
+        .server_enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+    let mut client = default_client();
+    client.client_enable_ech(&updated_config).unwrap();
+
+    connect(&mut client, &mut server);
+
+    assert!(client.tls_info().unwrap().ech_accepted());
+    assert!(server.tls_info().unwrap().ech_accepted());
+    assert!(client.tls_preinfo().unwrap().ech_accepted().unwrap());
+    assert!(server.tls_preinfo().unwrap().ech_accepted().unwrap());
 }

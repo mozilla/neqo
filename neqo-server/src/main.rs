@@ -25,10 +25,10 @@ use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
 use structopt::StructOpt;
 
-use neqo_common::{qdebug, qinfo, Datagram};
+use neqo_common::{hex, qdebug, qinfo, Datagram};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init_db, AntiReplay, Cipher,
+    generate_ech_keys, init_db, random, AntiReplay, Cipher,
 };
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
@@ -110,6 +110,12 @@ struct Args {
     #[structopt(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     preferred_address_v6: Option<String>,
+
+    #[structopt(name = "ech", long)]
+    /// Enable encrypted client hello (ECH).
+    /// This generates a new set of ECH keys when it is invoked.
+    /// The resulting configuration is printed to stdout in hexadecimal format.
+    ech: bool,
 }
 
 impl Args {
@@ -255,6 +261,7 @@ trait HttpServer: Display {
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
     fn validate_address(&mut self, when: ValidateAddress);
+    fn enable_ech(&mut self) -> &[u8];
 }
 
 impl HttpServer for Http3Server {
@@ -324,6 +331,12 @@ impl HttpServer for Http3Server {
 
     fn set_ciphers(&mut self, ciphers: &[Cipher]) {
         Self::set_ciphers(self, ciphers);
+    }
+
+    fn enable_ech(&mut self) -> &[u8] {
+        let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
+        Self::enable_ech(self, random(1)[0], "public.example", &sk, &pk).unwrap();
+        self.ech_config()
     }
 }
 
@@ -477,6 +490,10 @@ impl ServersRunner {
         svr.set_qlog_dir(args.qlog_dir.clone());
         if args.retry {
             svr.validate_address(ValidateAddress::Always);
+        }
+        if args.ech {
+            let cfg = svr.enable_ech();
+            println!("ECHConfigList: {}", hex(cfg));
         }
         svr
     }

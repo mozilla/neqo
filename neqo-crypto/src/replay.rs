@@ -4,14 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::err::{Error, Res};
+use crate::err::Res;
 use crate::ssl::PRFileDesc;
 use crate::time::{Interval, PRTime, Time};
 
 use std::convert::{TryFrom, TryInto};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::c_uint;
-use std::ptr::{null_mut, NonNull};
+use std::ptr::null_mut;
 use std::time::{Duration, Instant};
 
 // This is an opaque struct in NSS.
@@ -65,12 +65,9 @@ impl AntiReplay {
             )
         }?;
 
-        match NonNull::new(ctx) {
-            Some(ctx_nn) => Ok(Self {
-                ctx: AntiReplayContext::new(ctx_nn),
-            }),
-            None => Err(Error::InternalError),
-        }
+        Ok(Self {
+            ctx: AntiReplayContext::from_ptr(ctx)?,
+        })
     }
 
     /// Configure the provided socket with this anti-replay context.
