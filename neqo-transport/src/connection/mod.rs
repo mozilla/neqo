@@ -1097,8 +1097,8 @@ impl Connection {
             && !path.borrow().is_primary()
         {
             // If we have received a packet from a different address than we have sent to
-            // we should ignore the packet. In such a case a path will be newly created
-            // temporary path, not a primary path.
+            // we should ignore the packet. In such a case a path will be a newly created
+            // temporary path, not the primary path.
             return Ok(PreprocessResult::Next);
         }
 

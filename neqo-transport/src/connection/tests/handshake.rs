@@ -835,12 +835,10 @@ fn drop_initial_packet_from_wrong_address() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
 
     let mut server = default_server();
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
 
     let p = out.dgram().unwrap();
     let dgram = Datagram::new(
@@ -858,15 +856,12 @@ fn drop_handshake_packet_from_wrong_address() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
 
     let mut server = default_server();
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
 
     let (s_in, s_hs) = split_datagram(&out.dgram().unwrap());
-    assert!(s_hs.is_some());
 
     // Pass the initial packet.
     let _ = client.process(Some(s_in), now()).dgram();
