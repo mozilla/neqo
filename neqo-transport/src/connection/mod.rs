@@ -1080,6 +1080,7 @@ impl Connection {
     fn preprocess_packet(
         &mut self,
         packet: &PublicPacket,
+        path: &PathRef,
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
@@ -1087,6 +1088,17 @@ impl Connection {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
+            return Ok(PreprocessResult::Next);
+        }
+
+        if (packet.packet_type() == PacketType::Initial
+            || packet.packet_type() == PacketType::Handshake)
+            && self.role == Role::Client
+            && !path.borrow().is_primary()
+        {
+            // If we have received a packet from a different address than we have sent to
+            // we should ignore the packet. In such a case a path will be a newly created
+            // temporary path, not the primary path.
             return Ok(PreprocessResult::Next);
         }
 
@@ -1273,7 +1285,7 @@ impl Connection {
                         break;
                     }
                 };
-            match self.preprocess_packet(&packet, dcid.as_ref(), now)? {
+            match self.preprocess_packet(&packet, &path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
                 PreprocessResult::End => return Ok(()),
