@@ -553,7 +553,7 @@ fn no_dupdata_readable_events_empty_last_frame() {
 }
 
 fn change_flow_control(stream_type: StreamType, new_fc: u64) {
-    const RECV_BUFFER_START: u64 = 3000;
+    const RECV_BUFFER_START: u64 = 300;
 
     let mut client = new_client(
         ConnectionParameters::default()
@@ -573,19 +573,15 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     let _ = client.process(out.dgram(), now());
 
     // change max_stream_data for stream_id.
-    client.change_max_stream_data(stream_id, new_fc).unwrap();
+    client.set_stream_max_data(stream_id, new_fc).unwrap();
 
     // server should receive a MAX_SREAM_DATA frame if the flow control window is updated.
-    let msd_before = server.stats().frame_rx.max_stream_data;
     let out2 = client.process(None, now());
     let out3 = server.process(out2.dgram(), now());
     let expected = if RECV_BUFFER_START < new_fc { 1 } else { 0 };
-    assert_eq!(
-        server.stats().frame_rx.max_stream_data,
-        msd_before + expected
-    );
+    assert_eq!(server.stats().frame_rx.max_stream_data, expected);
 
-    // If the flow control window has been increase, server can write more data.
+    // If the flow control window has been increased, server can write more data.
     let written = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
     if RECV_BUFFER_START < new_fc {
         assert_eq!(u64::try_from(written).unwrap(), new_fc - RECV_BUFFER_START);
@@ -596,9 +592,7 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     // Exchange packets so that client gets all data.
     let out4 = client.process(out3.dgram(), now());
     let out5 = server.process(out4.dgram(), now());
-    let out6 = client.process(out5.dgram(), now());
-    let out7 = server.process(out6.dgram(), now());
-    let _ = client.process(out7.dgram(), now());
+    let _ = client.process(out5.dgram(), now());
 
     // read all data by client
     let mut buf = [0x0; 10000];
@@ -614,8 +608,8 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
 
 #[test]
 fn increase_decrease_flow_control() {
-    const RECV_BUFFER_NEW_BIGGER: u64 = 4000;
-    const RECV_BUFFER_NEW_SMALLER: u64 = 2000;
+    const RECV_BUFFER_NEW_BIGGER: u64 = 400;
+    const RECV_BUFFER_NEW_SMALLER: u64 = 200;
 
     change_flow_control(StreamType::UniDi, RECV_BUFFER_NEW_BIGGER);
     change_flow_control(StreamType::BiDi, RECV_BUFFER_NEW_BIGGER);

@@ -240,9 +240,10 @@ where
         self.frame_pending = false;
     }
 
-    pub fn change_max_stream_data(&mut self, max_data: u64) {
-        self.frame_pending |= self.max_active < max_data;
-        self.max_active = max_data;
+    pub fn set_max_active(&mut self, max: u64) {
+        // If max_active has been increased, send an update immediately.
+        self.frame_pending |= self.max_active < max;
+        self.max_active = max;
     }
 }
 
@@ -442,5 +443,27 @@ mod test {
         assert_eq!(fc.max_data_needed(), None);
         fc.lost(151);
         assert_eq!(fc.max_data_needed(), Some(162));
+    }
+
+    #[test]
+    fn changing_max_active() {
+        let mut fc = ReceiverFlowControl::new((), 100);
+        fc.set_max_active(50);
+        // There is no MAX_STREAM_DATA frame needed.
+        assert_eq!(fc.max_data_needed(), None);
+        // We can still retire more than 50.
+        fc.retired(60);
+        // There is no MAX_STREAM_DATA fame needed yet.
+        assert_eq!(fc.max_data_needed(), None);
+        fc.retired(76);
+        assert_eq!(fc.max_data_needed(), Some(126));
+
+        // Increase max_active.
+        fc.set_max_active(60);
+        assert_eq!(fc.max_data_needed(), Some(136));
+
+        // We can retire more than 60.
+        fc.retired(136);
+        assert_eq!(fc.max_data_needed(), Some(196));
     }
 }

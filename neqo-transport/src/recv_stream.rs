@@ -482,9 +482,9 @@ impl RecvStream {
         }
     }
 
-    pub fn change_max_stream_data(&mut self, max_data: u64) {
+    pub fn set_stream_max_data(&mut self, max_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
-            fc.change_max_stream_data(max_data);
+            fc.set_max_active(max_data);
         }
     }
 
