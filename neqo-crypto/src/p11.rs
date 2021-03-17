@@ -161,7 +161,6 @@ impl std::fmt::Debug for PrivateKey {
     }
 }
 
-scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl Slot {
@@ -170,6 +169,8 @@ impl Slot {
         Slot::from_ptr(p)
     }
 }
+
+scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 
 impl SymKey {
     /// You really don't want to use this.
