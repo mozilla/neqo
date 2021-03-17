@@ -529,6 +529,12 @@ impl RecvStream {
         }
     }
 
+    pub fn set_stream_max_data(&mut self, max_data: u64) {
+        if let RecvStreamState::Recv { fc, .. } = &mut self.state {
+            fc.set_max_active(max_data);
+        }
+    }
+
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.state,

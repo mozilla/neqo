@@ -692,6 +692,15 @@ impl Http3Client {
         Ok(())
     }
 
+    /// Increases `max_stream_data` for a `stream_id`.
+    /// # Errors
+    /// Returns `InvalidStreamId` if a stream does not exist or the receiving
+    /// side is closed.
+    pub fn set_stream_max_data(&mut self, stream_id: u64, max_data: u64) -> Res<()> {
+        self.conn.set_stream_max_data(stream_id, max_data)?;
+        Ok(())
+    }
+
     #[must_use]
     pub fn qpack_decoder_stats(&self) -> QpackStats {
         self.base_handler.qpack_decoder.stats()

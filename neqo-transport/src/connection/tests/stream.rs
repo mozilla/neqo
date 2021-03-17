@@ -6,7 +6,7 @@
 
 use super::super::State;
 use super::{
-    connect, connect_force_idle, default_client, default_server, maybe_authenticate,
+    connect, connect_force_idle, default_client, default_server, maybe_authenticate, new_client,
     send_something, DEFAULT_STREAM_DATA,
 };
 use crate::events::ConnectionEvent;
@@ -14,9 +14,11 @@ use crate::recv_stream::RECV_BUFFER_SIZE;
 use crate::send_stream::{SendStreamState, SEND_BUFFER_SIZE};
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::MAX_UNACKED_PKTS;
+use crate::ConnectionParameters;
 use crate::{Error, StreamId, StreamType};
 
 use neqo_common::{event::Provider, qdebug};
+use std::cmp::max;
 use std::convert::TryFrom;
 use test_fixture::now;
 
@@ -548,4 +550,70 @@ fn no_dupdata_readable_events_empty_last_frame() {
     let out_second_data_frame = client.process(None, now());
     let _ = server.process(out_second_data_frame.dgram(), now());
     assert!(!server.events().any(stream_readable));
+}
+
+fn change_flow_control(stream_type: StreamType, new_fc: u64) {
+    const RECV_BUFFER_START: u64 = 300;
+
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .max_stream_data(StreamType::BiDi, true, RECV_BUFFER_START)
+            .max_stream_data(StreamType::UniDi, true, RECV_BUFFER_START),
+    );
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // create a stream
+    let stream_id = server.stream_create(stream_type).unwrap();
+    let written1 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    assert_eq!(u64::try_from(written1).unwrap(), RECV_BUFFER_START);
+
+    // Send the stream to the client.
+    let out = server.process(None, now());
+    let _ = client.process(out.dgram(), now());
+
+    // change max_stream_data for stream_id.
+    client.set_stream_max_data(stream_id, new_fc).unwrap();
+
+    // server should receive a MAX_SREAM_DATA frame if the flow control window is updated.
+    let out2 = client.process(None, now());
+    let out3 = server.process(out2.dgram(), now());
+    let expected = if RECV_BUFFER_START < new_fc { 1 } else { 0 };
+    assert_eq!(server.stats().frame_rx.max_stream_data, expected);
+
+    // If the flow control window has been increased, server can write more data.
+    let written2 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    if RECV_BUFFER_START < new_fc {
+        assert_eq!(u64::try_from(written2).unwrap(), new_fc - RECV_BUFFER_START);
+    } else {
+        assert_eq!(written2, 0);
+    }
+
+    // Exchange packets so that client gets all data.
+    let out4 = client.process(out3.dgram(), now());
+    let out5 = server.process(out4.dgram(), now());
+    let _ = client.process(out5.dgram(), now());
+
+    // read all data by client
+    let mut buf = [0x0; 10000];
+    let (read, _) = client.stream_recv(stream_id, &mut buf).unwrap();
+    assert_eq!(u64::try_from(read).unwrap(), max(RECV_BUFFER_START, new_fc));
+
+    let out4 = client.process(None, now());
+    let _ = server.process(out4.dgram(), now());
+
+    let written3 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    assert_eq!(u64::try_from(written3).unwrap(), new_fc);
+}
+
+#[test]
+fn increase_decrease_flow_control() {
+    const RECV_BUFFER_NEW_BIGGER: u64 = 400;
+    const RECV_BUFFER_NEW_SMALLER: u64 = 200;
+
+    change_flow_control(StreamType::UniDi, RECV_BUFFER_NEW_BIGGER);
+    change_flow_control(StreamType::BiDi, RECV_BUFFER_NEW_BIGGER);
+
+    change_flow_control(StreamType::UniDi, RECV_BUFFER_NEW_SMALLER);
+    change_flow_control(StreamType::BiDi, RECV_BUFFER_NEW_SMALLER);
 }
