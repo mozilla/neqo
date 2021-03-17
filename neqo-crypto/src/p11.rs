@@ -165,7 +165,7 @@ scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl Slot {
-    pub(crate) fn internal() -> Res<Self> {
+    pub fn internal() -> Res<Self> {
         let p = unsafe { PK11_GetInternalSlot() };
         Slot::from_ptr(p)
     }

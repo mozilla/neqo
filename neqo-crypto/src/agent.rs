@@ -95,16 +95,6 @@ pub struct SecretAgentPreInfo {
 }
 
 macro_rules! preinfo_arg {
-    ($v:ident, $m:ident, $f:ident: bool $(,)?) => {
-        #[must_use]
-        pub fn $v(&self) -> Option<bool> {
-            match self.info.valuesSet & ssl::$m {
-                0 => None,
-                _ => Some(self.info.$f != 0),
-            }
-        }
-    };
-
     ($v:ident, $m:ident, $f:ident: $t:ident $(,)?) => {
         #[must_use]
         pub fn $v(&self) -> Option<$t> {
@@ -135,17 +125,33 @@ impl SecretAgentPreInfo {
 
     preinfo_arg!(version, ssl_preinfo_version, protocolVersion: Version);
     preinfo_arg!(cipher_suite, ssl_preinfo_cipher_suite, cipherSuite: Cipher);
+    preinfo_arg!(
+        early_data_cipher,
+        ssl_preinfo_0rtt_cipher_suite,
+        zeroRttCipherSuite: Cipher,
+    );
+
     #[must_use]
     pub fn early_data(&self) -> bool {
         self.info.canSendEarlyData != 0
     }
+
     #[must_use]
     pub fn max_early_data(&self) -> usize {
         usize::try_from(self.info.maxEarlyDataSize).unwrap()
     }
-    preinfo_arg!(ech_accepted, ssl_preinfo_ech, echAccepted: bool);
 
-    /// Get the public name that was used.  This will only be available
+    /// Was ECH accepted.
+    #[must_use]
+    pub fn ech_accepted(&self) -> Option<bool> {
+        if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 {
+            None
+        } else {
+            Some(self.info.echAccepted != 0)
+        }
+    }
+
+    /// Get the ECH public name that was used.  This will only be available
     /// (that is, not `None`) if `ech_accepted()` returns `false`.
     /// In this case, certificate validation needs to use this name rather
     /// than the original name to validate the certificate.  If
@@ -155,7 +161,7 @@ impl SecretAgentPreInfo {
     /// which contains a valid ECH configuration.
     ///
     /// # Errors
-    /// When the public name is not valid UTF-8.
+    /// When the public name is not valid UTF-8.  (Note: names should be ASCII.)
     pub fn ech_public_name(&self) -> Res<Option<&str>> {
         if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 {
             Ok(None)
@@ -169,12 +175,6 @@ impl SecretAgentPreInfo {
     pub fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
-
-    preinfo_arg!(
-        early_data_cipher,
-        ssl_preinfo_0rtt_cipher_suite,
-        zeroRttCipherSuite: Cipher,
-    );
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

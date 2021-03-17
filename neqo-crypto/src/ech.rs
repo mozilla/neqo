@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)] // TODO remove
-
 use crate::err::{ssl::SSL_ERROR_ECH_RETRY_WITH_ECH, Error, Res};
 use crate::p11::{
     self, Item, PrivateKey, PublicKey, SECITEM_FreeItem, SECItem, SECKEYPrivateKey,
@@ -99,8 +97,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
 
     let mut public_ptr: *mut SECKEYPublicKey = null_mut();
 
-    // If we have tracing on, make sure that we can read the key data.
-    // This makes the key insensitive, which isn't ideal.
+    // If we have tracing on, try to ensure that key data can be read.
     let insensitive_secret_ptr = if log::log_enabled!(log::Level::Trace) {
         unsafe {
             p11::PK11_GenerateKeyPairWithOpFlags(
@@ -146,10 +143,10 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
 /// # Errors
 /// When NSS fails to generate a valid configuration encoding (i.e., unlikely).
 pub fn encode_config(config: u8, public_name: &str, pk: &PublicKey) -> Res<Vec<u8>> {
-    // A sensible default value for the maximum length of a name.
+    // A sensible fixed value for the maximum length of a name.
     const MAX_NAME_LEN: c_uint = 64;
     // Enable a selection of suites.
-    // NSS supports SHA-512 as well, which could be added too.
+    // NSS supports SHA-512 as well, which could be added here.
     const SUITES: &[SymmetricSuite] = &[
         SymmetricSuite {
             kdfId: KdfId::HpkeKdfHkdfSha256,

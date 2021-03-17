@@ -85,7 +85,7 @@ impl Aead {
             c_uint::try_from(p.len())?,
             &mut ctx,
         )?;
-        Ok(Aead {
+        Ok(Self {
             ctx: AeadContext::from_ptr(ctx)?,
         })
     }

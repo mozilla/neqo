@@ -101,10 +101,11 @@ impl HpKey {
         let mut output_len: c_uint = 0;
 
         let zero = vec![0_u8; block_size];
+        let mut wrapped_sample = Item::wrap(sample);
         let (iv, inbuf) = match () {
             _ if mech == CK_MECHANISM_TYPE::from(CKM_AES_ECB) => (null_mut(), sample),
             _ if mech == CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR) => {
-                (&mut Item::wrap(sample) as *mut SECItem, &zero[..])
+                (&mut wrapped_sample as *mut SECItem, &zero[..])
             }
             _ => unreachable!(),
         };
