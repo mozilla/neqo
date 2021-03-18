@@ -16,3 +16,7 @@ chrono = "0.4.10"
 [features]
 default = ["deny-warnings"]
 deny-warnings = []
+
+[target."cfg(windows)".dependencies.winapi]
+version = "0.3"
+features = ["timeapi"]
