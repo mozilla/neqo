@@ -3121,10 +3121,7 @@ impl Connection {
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
     pub fn set_stream_max_data(&mut self, stream_id: u64, max_data: u64) -> Res<()> {
-        let stream = self
-            .recv_streams
-            .get_mut(&stream_id.into())
-            .ok_or(Error::InvalidStreamId)?;
+        let stream = self.recv_streams.get_mut(stream_id.into())?;
 
         stream.set_stream_max_data(max_data);
         Ok(())
