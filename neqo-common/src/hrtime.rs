@@ -10,10 +10,10 @@ use std::convert::TryFrom;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-#[cfg(all(windows, feature = "gecko"))]
-use winapi::um::timeapi::{timeBeginPeriod, timeEndPeriod};
-#[cfg(all(windows, feature = "gecko"))]
+#[cfg(windows)]
 use winapi::shared::minwindef::UINT;
+#[cfg(windows)]
+use winapi::um::timeapi::{timeBeginPeriod, timeEndPeriod};
 
 /// A quantized `Duration`.  This currently just produces 16 discrete values
 /// corresponding to whole milliseconds.  Future implementations might choose
@@ -25,12 +25,7 @@ impl Period {
     const MAX: Period = Period(16);
     const MIN: Period = Period(1);
 
-    #[cfg(all(windows, not(feature = "gecko")))]
-    fn as_uint(&self) -> win::UINT {
-        win::UINT::from(self.0)
-    }
-
-    #[cfg(all(windows, feature = "gecko"))]
+    #[cfg(windows)]
     fn as_uint(&self) -> UINT {
         UINT::from(self.0)
     }
@@ -80,21 +75,6 @@ impl PeriodSet {
             }
         }
         None
-    }
-}
-
-#[cfg(all(windows, not(feature = "gecko")))]
-mod win {
-    // These are manually extracted from the 10Mb bindings generated
-    // by bindgen when provided with the simple header:
-    // #include <windows.h>
-    // #include <timeapi.h>
-    // The complete bindings don't compile and filtering them is work.
-    pub type UINT = ::std::os::raw::c_uint;
-    pub type MMRESULT = UINT;
-    extern "C" {
-        pub fn timeBeginPeriod(uPeriod: UINT) -> MMRESULT;
-        pub fn timeEndPeriod(uPeriod: UINT) -> MMRESULT;
     }
 }
 
@@ -315,13 +295,7 @@ impl Time {
             }
         }
 
-        #[cfg(all(windows, not(feature = "gecko")))]
-        {
-            if let Some(p) = self.active {
-                assert_eq!(0, unsafe { win::timeBeginPeriod(p.as_uint()) });
-            }
-        }
-        #[cfg(all(windows, feature = "gecko"))]
+        #[cfg(windows)]
         {
             if let Some(p) = self.active {
                 assert_eq!(0, unsafe { timeBeginPeriod(p.as_uint()) });
@@ -331,13 +305,7 @@ impl Time {
 
     #[allow(clippy::unused_self)] // Only on some platforms is it unused.
     fn stop(&self) {
-        #[cfg(all(windows, not(feature = "gecko")))]
-        {
-            if let Some(p) = self.active {
-                assert_eq!(0, unsafe { win::timeEndPeriod(p.as_uint()) });
-            }
-        }
-        #[cfg(all(windows, feature = "gecko"))]
+        #[cfg(windows)]
         {
             if let Some(p) = self.active {
                 assert_eq!(0, unsafe { timeEndPeriod(p.as_uint()) });
