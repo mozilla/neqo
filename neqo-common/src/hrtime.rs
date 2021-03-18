@@ -10,6 +10,11 @@ use std::convert::TryFrom;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
+#[cfg(all(windows, feature = "gecko"))]
+use winapi::um::timeapi::{timeBeginPeriod, timeEndPeriod};
+#[cfg(all(windows, feature = "gecko"))]
+use winapi::shared::minwindef::UINT;
+
 /// A quantized `Duration`.  This currently just produces 16 discrete values
 /// corresponding to whole milliseconds.  Future implementations might choose
 /// a different allocation, such as a logarithmic scale.
@@ -20,9 +25,14 @@ impl Period {
     const MAX: Period = Period(16);
     const MIN: Period = Period(1);
 
-    #[cfg(windows)]
+    #[cfg(all(windows, not(feature = "gecko")))]
     fn as_uint(&self) -> win::UINT {
         win::UINT::from(self.0)
+    }
+
+    #[cfg(all(windows, feature = "gecko"))]
+    fn as_uint(&self) -> UINT {
+        UINT::from(self.0)
     }
 
     #[cfg(target_os = "macos")]
@@ -73,7 +83,7 @@ impl PeriodSet {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(feature = "gecko")))]
 mod win {
     // These are manually extracted from the 10Mb bindings generated
     // by bindgen when provided with the simple header:
@@ -305,20 +315,32 @@ impl Time {
             }
         }
 
-        #[cfg(windows)]
+        #[cfg(all(windows, not(feature = "gecko")))]
         {
             if let Some(p) = self.active {
                 assert_eq!(0, unsafe { win::timeBeginPeriod(p.as_uint()) });
+            }
+        }
+        #[cfg(all(windows, feature = "gecko"))]
+        {
+            if let Some(p) = self.active {
+                assert_eq!(0, unsafe { timeBeginPeriod(p.as_uint()) });
             }
         }
     }
 
     #[allow(clippy::unused_self)] // Only on some platforms is it unused.
     fn stop(&self) {
-        #[cfg(windows)]
+        #[cfg(all(windows, not(feature = "gecko")))]
         {
             if let Some(p) = self.active {
                 assert_eq!(0, unsafe { win::timeEndPeriod(p.as_uint()) });
+            }
+        }
+        #[cfg(all(windows, feature = "gecko"))]
+        {
+            if let Some(p) = self.active {
+                assert_eq!(0, unsafe { timeEndPeriod(p.as_uint()) });
             }
         }
     }
