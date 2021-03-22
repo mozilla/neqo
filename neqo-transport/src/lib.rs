@@ -30,6 +30,7 @@ mod sender;
 pub mod server;
 mod stats;
 pub mod stream_id;
+pub mod streams;
 pub mod tparams;
 mod tracking;
 
