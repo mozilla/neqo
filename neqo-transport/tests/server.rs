@@ -1099,7 +1099,8 @@ impl ZeroRttChecker for RejectZeroRtt {
 
 #[test]
 fn max_streams_after_0rtt_rejection() {
-    const MAX_STREAMS: u64 = 40;
+    const MAX_STREAMS_BIDI: u64 = 40;
+    const MAX_STREAMS_UNIDI: u64 = 30;
     let mut server = Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
@@ -1108,8 +1109,8 @@ fn max_streams_after_0rtt_rejection() {
         Box::new(RejectZeroRtt {}),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, MAX_STREAMS)
-            .max_streams(StreamType::UniDi, MAX_STREAMS),
+            .max_streams(StreamType::BiDi, MAX_STREAMS_BIDI)
+            .max_streams(StreamType::UniDi, MAX_STREAMS_UNIDI),
     )
     .expect("should create a server");
     let token = get_ticket(&mut server);
@@ -1123,6 +1124,6 @@ fn max_streams_after_0rtt_rejection() {
     assert!(dgram.is_some()); // We're far enough along to complete the test now.
 
     // Make sure that we can create MAX_STREAMS uni- and bidirectional streams.
-    can_create_streams(&mut client, StreamType::UniDi, MAX_STREAMS);
-    can_create_streams(&mut client, StreamType::BiDi, MAX_STREAMS);
+    can_create_streams(&mut client, StreamType::UniDi, MAX_STREAMS_UNIDI);
+    can_create_streams(&mut client, StreamType::BiDi, MAX_STREAMS_BIDI);
 }

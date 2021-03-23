@@ -24,6 +24,14 @@ impl StreamId {
         Self(id)
     }
 
+    pub fn init(stream_type: StreamType, role: Role) -> Self {
+        let type_val = match stream_type {
+            StreamType::BiDi => 0,
+            StreamType::UniDi => 2,
+        };
+        Self(0 + type_val + Self::role_bit(role))
+    }
+
     pub fn as_u64(self) -> u64 {
         self.0
     }
@@ -78,6 +86,17 @@ impl StreamId {
 
     pub fn is_recv_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_remote_initiated(my_role)
+    }
+
+    pub fn next(&mut self) {
+        self.0 += 4;
+    }
+
+    pub fn role_bit(role: Role) -> u64 {
+        match role {
+            Role::Server => 1,
+            Role::Client => 0,
+        }
     }
 }
 
