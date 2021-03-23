@@ -286,71 +286,70 @@ impl Streams {
         self.remote_streams_fc[StreamType::UniDi].add_retired(removed_uni);
     }
 
+    fn ensure_created_if_remote(&mut self, stream_id: StreamId) -> Res<()> {
+        if !stream_id.is_remote_initiated(self.role)
+            || !self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)?
+        {
+            // If it is not a remote stream and stream already exist.
+            return Ok(());
+        }
+
+        let tp = match stream_id.stream_type() {
+            // From the local perspective, this is a remote- originated BiDi stream. From
+            // the remote perspective, this is a local-originated BiDi stream. Therefore,
+            // look at the local transport parameters for the
+            // INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value to decide how much this endpoint
+            // will allow its peer to send.
+            StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            StreamType::UniDi => tparams::INITIAL_MAX_STREAM_DATA_UNI,
+        };
+        let recv_initial_max_stream_data = self.tps.borrow().local.get_integer(tp);
+
+        while self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)? {
+            let next_stream_id = self.remote_streams_fc[stream_id.stream_type()].take_stream_id();
+            self.events.new_stream(next_stream_id);
+
+            self.recv_streams.insert(
+                next_stream_id,
+                RecvStream::new(
+                    next_stream_id,
+                    recv_initial_max_stream_data,
+                    self.events.clone(),
+                ),
+            );
+
+            if next_stream_id.is_bidi() {
+                // From the local perspective, this is a remote- originated BiDi stream.
+                // From the remote perspective, this is a local-originated BiDi stream.
+                // Therefore, look at the remote's transport parameters for the
+                // INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value to decide how much this endpoint
+                // is allowed to send its peer.
+                let send_initial_max_stream_data = self
+                    .tps
+                    .borrow()
+                    .remote()
+                    .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                self.send_streams.insert(
+                    next_stream_id,
+                    SendStream::new(
+                        next_stream_id,
+                        send_initial_max_stream_data,
+                        Rc::clone(&self.flow_control_sender),
+                        self.events.clone(),
+                    ),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Get or make a stream, and implicitly open additional streams as
     /// indicated by its stream id.
     pub fn obtain_stream(
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
-        // May require creating new stream(s)
-        if stream_id.is_remote_initiated(self.role) {
-            if self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)? {
-                let recv_initial_max_stream_data = if stream_id.is_bidi() {
-                    // From the local perspective, this is a remote- originated BiDi stream. From
-                    // the remote perspective, this is a local-originated BiDi stream. Therefore,
-                    // look at the local transport parameters for the
-                    // INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value to decide how much this endpoint
-                    // will allow its peer to send.
-                    self.tps
-                        .borrow()
-                        .local
-                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
-                } else {
-                    self.tps
-                        .borrow()
-                        .local
-                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)
-                };
-
-                while self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)? {
-                    let next_stream_id =
-                        self.remote_streams_fc[stream_id.stream_type()].take_stream_id();
-                    self.events.new_stream(next_stream_id);
-
-                    self.recv_streams.insert(
-                        next_stream_id,
-                        RecvStream::new(
-                            next_stream_id,
-                            recv_initial_max_stream_data,
-                            self.events.clone(),
-                        ),
-                    );
-
-                    if next_stream_id.is_bidi() {
-                        // From the local perspective, this is a remote- originated BiDi stream.
-                        // From the remote perspective, this is a local-originated BiDi stream.
-                        // Therefore, look at the remote's transport parameters for the
-                        // INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value to decide how much this endpoint
-                        // is allowed to send its peer.
-                        let send_initial_max_stream_data = self
-                            .tps
-                            .borrow()
-                            .remote()
-                            .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
-                        self.send_streams.insert(
-                            next_stream_id,
-                            SendStream::new(
-                                next_stream_id,
-                                send_initial_max_stream_data,
-                                Rc::clone(&self.flow_control_sender),
-                                self.events.clone(),
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-
+        self.ensure_created_if_remote(stream_id)?;
         Ok((
             self.send_streams.get_mut(stream_id).ok(),
             self.recv_streams.get_mut(stream_id).ok(),
