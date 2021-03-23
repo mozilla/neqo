@@ -186,7 +186,7 @@ fn max_data() {
     assert_eq!(client.events().count(), 0);
 
     // Increase max data. Avail space now limited by stream credit
-    client.handle_max_data(100_000_000);
+    client.streams.handle_max_data(100_000_000);
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
         SEND_BUFFER_SIZE - SMALL_MAX_DATA

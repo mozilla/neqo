@@ -35,7 +35,6 @@ use crate::cid::{
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
-use crate::fc::{ReceiverFlowControl, SenderFlowControl};
 use crate::frame::{
     CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
@@ -247,8 +246,6 @@ pub struct Connection {
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
     streams: Streams,
-    pub(crate) flow_control_sender: Rc<RefCell<SenderFlowControl<()>>>,
-    pub(crate) flow_control_receiver: Rc<RefCell<ReceiverFlowControl<()>>>,
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
@@ -365,7 +362,6 @@ impl Connection {
 
         let stats = StatsCell::default();
         let events = ConnectionEvents::default();
-        let flow_control_sender = Rc::new(RefCell::new(SenderFlowControl::new((), 0)));
 
         let c = Self {
             role,
@@ -382,18 +378,8 @@ impl Connection {
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
-            streams: Streams::new(
-                tphandler,
-                role,
-                events.clone(),
-                Rc::clone(&flow_control_sender),
-            ),
+            streams: Streams::new(tphandler, role, events.clone()),
             connection_ids: ConnectionIdStore::default(),
-            flow_control_sender,
-            flow_control_receiver: Rc::new(RefCell::new(ReceiverFlowControl::new(
-                (),
-                conn_params.get_max_data(),
-            ))),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone()),
             events,
@@ -1784,22 +1770,6 @@ impl Connection {
             return Ok(());
         }
 
-        // Send `DATA_BLOCKED` as necessary.
-        self.flow_control_sender
-            .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
-        // Send `MAX_DATA` as necessary.
-        self.flow_control_receiver
-            .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
         self.streams
             .write_frames(TransmissionPriority::Important, builder, tokens, stats)?;
         if builder.remaining() < 2 {
@@ -2128,14 +2098,12 @@ impl Connection {
     }
 
     fn set_initial_limits(&mut self) {
-        let tps = self.tps.borrow();
-        let remote = tps.remote();
         self.streams.set_initial_limits();
-        self.flow_control_sender
-            .borrow_mut()
-            .update(remote.get_integer(tparams::INITIAL_MAX_DATA));
-
-        let peer_timeout = remote.get_integer(tparams::IDLE_TIMEOUT);
+        let peer_timeout = self
+            .tps
+            .borrow()
+            .remote()
+            .get_integer(tparams::IDLE_TIMEOUT);
         if peer_timeout > 0 {
             self.idle_timeout
                 .set_peer_timeout(Duration::from_millis(peer_timeout));
@@ -2302,15 +2270,6 @@ impl Connection {
         Ok(())
     }
 
-    fn handle_max_data(&mut self, maximum_data: u64) {
-        let conn_was_blocked = self.flow_control_sender.borrow().available() == 0;
-        let conn_credit_increased = self.flow_control_sender.borrow_mut().update(maximum_data);
-
-        if conn_was_blocked && conn_credit_increased {
-            self.streams.send_stream_writable();
-        }
-    }
-
     fn input_frame(
         &mut self,
         path: &PathRef,
@@ -2345,28 +2304,6 @@ impl Connection {
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
                 self.handle_ack(space, largest_acknowledged, ranges, ack_delay, now);
             }
-            Frame::ResetStream {
-                stream_id,
-                application_error_code,
-                ..
-            } => {
-                // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
-                self.stats.borrow_mut().frame_rx.reset_stream += 1;
-                if let (_, Some(rs)) = self.streams.obtain_stream(stream_id)? {
-                    rs.reset(application_error_code);
-                }
-            }
-            Frame::StopSending {
-                stream_id,
-                application_error_code,
-            } => {
-                self.stats.borrow_mut().frame_rx.stop_sending += 1;
-                self.events
-                    .send_stream_stop_sending(stream_id, application_error_code);
-                if let (Some(ss), _) = self.streams.obtain_stream(stream_id)? {
-                    ss.reset(application_error_code);
-                }
-            }
             Frame::Crypto { offset, data } => {
                 qtrace!(
                     [self],
@@ -2392,73 +2329,6 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.new_token += 1;
                 self.new_token.save_token(token.to_vec());
                 self.create_resumption_token(now);
-            }
-            Frame::Stream {
-                fin,
-                stream_id,
-                offset,
-                data,
-                ..
-            } => {
-                self.stats.borrow_mut().frame_rx.stream += 1;
-                if let (_, Some(rs)) = self.streams.obtain_stream(stream_id)? {
-                    rs.inbound_stream_frame(fin, offset, data)?;
-                }
-            }
-            Frame::MaxData { maximum_data } => {
-                self.stats.borrow_mut().frame_rx.max_data += 1;
-                self.handle_max_data(maximum_data);
-            }
-            Frame::MaxStreamData {
-                stream_id,
-                maximum_stream_data,
-            } => {
-                qtrace!(
-                    [self],
-                    "Stream {} Received MaxStreamData {}",
-                    stream_id,
-                    maximum_stream_data
-                );
-                self.stats.borrow_mut().frame_rx.max_stream_data += 1;
-                if let (Some(ss), _) = self.streams.obtain_stream(stream_id)? {
-                    ss.set_max_stream_data(maximum_stream_data);
-                }
-            }
-            Frame::MaxStreams {
-                stream_type,
-                maximum_streams,
-            } => {
-                self.stats.borrow_mut().frame_rx.max_streams += 1;
-                self.streams
-                    .handle_max_streams(stream_type, maximum_streams);
-            }
-            Frame::DataBlocked { data_limit } => {
-                // Should never happen since we set data limit to max
-                qwarn!(
-                    [self],
-                    "Received DataBlocked with data limit {}",
-                    data_limit
-                );
-                self.stats.borrow_mut().frame_rx.data_blocked += 1;
-                self.flow_control_receiver.borrow_mut().send_flowc_update();
-            }
-            Frame::StreamDataBlocked { stream_id, .. } => {
-                qtrace!([self], "Received StreamDataBlocked");
-                self.stats.borrow_mut().frame_rx.stream_data_blocked += 1;
-                // Terminate connection with STREAM_STATE_ERROR if send-only
-                // stream (-transport 19.13)
-                if stream_id.is_send_only(self.role()) {
-                    return Err(Error::StreamStateError);
-                }
-
-                if let (_, Some(rs)) = self.streams.obtain_stream(stream_id)? {
-                    rs.send_flowc_update();
-                }
-            }
-            Frame::StreamsBlocked { .. } => {
-                self.stats.borrow_mut().frame_rx.streams_blocked += 1;
-                // We send an update evry time we retire a stream. There is no need to
-                // trigger flow updates here.
             }
             Frame::NewConnectionId {
                 sequence_number,
@@ -2535,6 +2405,18 @@ impl Connection {
                 self.discard_keys(PNSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
+            Frame::ResetStream { .. }
+            | Frame::StopSending { .. }
+            | Frame::Stream { .. }
+            | Frame::MaxData { .. }
+            | Frame::MaxStreamData { .. }
+            | Frame::MaxStreams { .. }
+            | Frame::DataBlocked { .. }
+            | Frame::StreamDataBlocked { .. }
+            | Frame::StreamsBlocked { .. } => {
+                self.streams
+                    .input_frame(frame, &mut self.stats.borrow_mut().frame_rx)?;
+            }
         };
 
         Ok(())
@@ -2554,19 +2436,15 @@ impl Connection {
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                     RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.lost_retire_cid(*seqno),
-                    RecoveryToken::DataBlocked(limit) => {
-                        self.flow_control_sender.borrow_mut().lost(*limit)
-                    }
-                    RecoveryToken::MaxData(maximum_data) => {
-                        self.flow_control_receiver.borrow_mut().lost(*maximum_data)
-                    }
                     RecoveryToken::Stream(_)
                     | RecoveryToken::ResetStream { .. }
                     | RecoveryToken::StreamDataBlocked { .. }
                     | RecoveryToken::MaxStreamData { .. }
                     | RecoveryToken::StopSending { .. }
                     | RecoveryToken::StreamsBlocked { .. }
-                    | RecoveryToken::MaxStreams { .. } => {
+                    | RecoveryToken::MaxStreams { .. }
+                    | RecoveryToken::DataBlocked(_)
+                    | RecoveryToken::MaxData(_) => {
                         self.streams.lost(token);
                     }
                 }
