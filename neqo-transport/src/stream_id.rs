@@ -29,7 +29,7 @@ impl StreamId {
             StreamType::BiDi => 0,
             StreamType::UniDi => 2,
         };
-        Self(0 + type_val + Self::role_bit(role))
+        Self(type_val + Self::role_bit(role))
     }
 
     pub fn as_u64(self) -> u64 {
