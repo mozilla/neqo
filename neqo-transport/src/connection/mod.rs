@@ -2455,9 +2455,10 @@ impl Connection {
                     rs.send_flowc_update();
                 }
             }
-            Frame::StreamsBlocked { stream_type, .. } => {
+            Frame::StreamsBlocked { .. } => {
                 self.stats.borrow_mut().frame_rx.streams_blocked += 1;
-                self.streams.send_flowc_update(stream_type);
+                // We send an update evry time we retire a stream. There is no need to
+                // trigger flow updates here.
             }
             Frame::NewConnectionId {
                 sequence_number,

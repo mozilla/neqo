@@ -21,6 +21,7 @@ use neqo_common::Role;
 
 use std::convert::TryFrom;
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 use std::ops::{Index, IndexMut};
 
 #[derive(Debug)]
@@ -242,8 +243,13 @@ where
         }
     }
 
-    pub fn add_retired(&mut self, retired: u64) {
-        self.retired(self.retired + retired);
+    /// Retire given amount of additional data.
+    /// This function will sen flow updates immediately.
+    pub fn add_retired(&mut self, count: u64) {
+        self.retired += count;
+        if count > 0 {
+            self.send_flowc_update();
+        }
     }
 
     /// This function is called when STREAM_DATA_BLOCKED frame is received.
@@ -348,38 +354,18 @@ impl ReceiverFlowControl<StreamType> {
     }
 }
 
-pub struct RemoteStreamsFlowControl {
+pub struct RemoteStreamLimit {
     streams_fc: ReceiverFlowControl<StreamType>,
-    next_stream: u64,
-    stream_type_bits: u64,
+    next_stream: StreamId,
 }
 
-impl RemoteStreamsFlowControl {
+impl RemoteStreamLimit {
     pub fn new(stream_type: StreamType, max_streams: u64, role: Role) -> Self {
-        let type_val = match stream_type {
-            StreamType::BiDi => 0,
-            StreamType::UniDi => 2,
-        };
-        // This is for a stream created by a peer, therefore the role bit is opposit.
-        let role_val = match role {
-            Role::Server => 0,
-            Role::Client => 1,
-        };
-
         Self {
             streams_fc: ReceiverFlowControl::new(stream_type, max_streams),
-            next_stream: 0,
-            stream_type_bits: type_val + role_val,
+            // // This is for a stream created by a peer, therefore we use role.remote().
+            next_stream: StreamId::init(stream_type, role.remote()),
         }
-    }
-
-    pub fn write_frames(
-        &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
-        stats: &mut FrameStats,
-    ) -> Res<()> {
-        self.streams_fc.write_frames(builder, tokens, stats)
     }
 
     pub fn is_new_stream(&mut self, stream_id: StreamId) -> Res<bool> {
@@ -387,46 +373,43 @@ impl RemoteStreamsFlowControl {
         if !self.streams_fc.check_allowed(stream_idx) {
             return Err(Error::StreamLimitError);
         }
-        Ok(stream_idx >= self.next_stream)
+        Ok(stream_id >= self.next_stream)
     }
 
-    pub fn add_stream(&mut self) -> Option<StreamId> {
+    pub fn take_stream_id(&mut self) -> StreamId {
         let new_stream = self.next_stream;
-        self.next_stream += 1;
-        assert!(self.streams_fc.check_allowed(new_stream));
-        Some(StreamId::from((new_stream << 2) + self.stream_type_bits))
-    }
-
-    pub fn send_flowc_update(&mut self) {
-        self.streams_fc.send_flowc_update();
-    }
-
-    pub fn max_streams_lost(&mut self, max_streams: u64) {
-        self.streams_fc.lost(max_streams);
-    }
-
-    pub fn add_retired(&mut self, removed: u64) {
-        self.streams_fc.add_retired(removed);
-        if removed > 0 {
-            // Send a update immediately.
-            self.streams_fc.send_flowc_update();
-        }
+        self.next_stream.next();
+        assert!(self.streams_fc.check_allowed(new_stream.as_u64() >> 2));
+        new_stream
     }
 }
 
-pub struct RemoteStreamsFlowControls([RemoteStreamsFlowControl; 2]);
+impl Deref for RemoteStreamLimit {
+    type Target = ReceiverFlowControl<StreamType>;
+    fn deref(&self) -> &Self::Target {
+        &self.streams_fc
+    }
+}
 
-impl RemoteStreamsFlowControls {
+impl DerefMut for RemoteStreamLimit {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.streams_fc
+    }
+}
+
+pub struct RemoteStreamLimits([RemoteStreamLimit; 2]);
+
+impl RemoteStreamLimits {
     pub fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
         Self([
-            RemoteStreamsFlowControl::new(StreamType::BiDi, local_max_stream_bidi, role),
-            RemoteStreamsFlowControl::new(StreamType::UniDi, local_max_stream_uni, role),
+            RemoteStreamLimit::new(StreamType::BiDi, local_max_stream_bidi, role),
+            RemoteStreamLimit::new(StreamType::UniDi, local_max_stream_uni, role),
         ])
     }
 }
 
-impl Index<StreamType> for RemoteStreamsFlowControls {
-    type Output = RemoteStreamsFlowControl;
+impl Index<StreamType> for RemoteStreamLimits {
+    type Output = RemoteStreamLimit;
 
     fn index(&self, idx: StreamType) -> &Self::Output {
         match idx {
@@ -436,7 +419,7 @@ impl Index<StreamType> for RemoteStreamsFlowControls {
     }
 }
 
-impl IndexMut<StreamType> for RemoteStreamsFlowControls {
+impl IndexMut<StreamType> for RemoteStreamLimits {
     fn index_mut(&mut self, idx: StreamType) -> &mut Self::Output {
         match idx {
             StreamType::BiDi => &mut self.0[0],
@@ -457,14 +440,11 @@ impl LocalStreamsFlowControls {
                 SenderFlowControl::new(StreamType::BiDi, 0),
                 SenderFlowControl::new(StreamType::UniDi, 0),
             ],
-            role_bit: match role {
-                Role::Server => 1,
-                Role::Client => 0,
-            },
+            role_bit: StreamId::role_bit(role),
         }
     }
 
-    pub fn add_stream(&mut self, stream_type: StreamType) -> Option<StreamId> {
+    pub fn take_stream_id(&mut self, stream_type: StreamType) -> Option<StreamId> {
         let fc = match stream_type {
             StreamType::BiDi => &mut self.fc[0],
             StreamType::UniDi => &mut self.fc[1],
@@ -478,6 +458,7 @@ impl LocalStreamsFlowControls {
             };
             Some(StreamId::from((new_stream << 2) + type_bit + self.role_bit))
         } else {
+            fc.blocked();
             None
         }
     }
@@ -506,7 +487,7 @@ impl IndexMut<StreamType> for LocalStreamsFlowControls {
 #[cfg(test)]
 mod test {
     use super::{
-        LocalStreamsFlowControls, ReceiverFlowControl, RemoteStreamsFlowControls, SenderFlowControl,
+        LocalStreamsFlowControls, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl,
     };
     use crate::packet::PacketBuilder;
     use crate::stats::FrameStats;
@@ -690,7 +671,7 @@ mod test {
 
     #[test]
     fn local_streams_flow_control_new_stream_client() {
-        let mut fc = RemoteStreamsFlowControls::new(2, 1, Role::Client);
+        let mut fc = RemoteStreamLimits::new(2, 1, Role::Client);
         assert!(fc[StreamType::BiDi]
             .is_new_stream(StreamId::from(1))
             .unwrap());
@@ -711,20 +692,12 @@ mod test {
             Err(Error::StreamLimitError)
         );
 
-        assert_eq!(
-            fc[StreamType::BiDi].add_stream().unwrap(),
-            StreamId::from(1)
-        );
-        assert_eq!(
-            fc[StreamType::BiDi].add_stream().unwrap(),
-            StreamId::from(5)
-        );
-        assert_eq!(
-            fc[StreamType::UniDi].add_stream().unwrap(),
-            StreamId::from(3)
-        );
+        assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(1));
+        assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(5));
+        assert_eq!(fc[StreamType::UniDi].take_stream_id(), StreamId::from(3));
 
         fc[StreamType::BiDi].add_retired(1);
+        fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let mut token = Vec::new();
@@ -735,10 +708,7 @@ mod test {
         assert!(fc[StreamType::BiDi]
             .is_new_stream(StreamId::from(9))
             .unwrap());
-        assert_eq!(
-            fc[StreamType::BiDi].add_stream().unwrap(),
-            StreamId::from(9)
-        );
+        assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(9));
         // 13 exeeds limits
         assert_eq!(
             fc[StreamType::BiDi].is_new_stream(StreamId::from(13)),
@@ -746,6 +716,7 @@ mod test {
         );
 
         fc[StreamType::UniDi].add_retired(1);
+        fc[StreamType::UniDi].send_flowc_update();
         // consume the frame
         fc[StreamType::UniDi]
             .write_frames(&mut builder, &mut token, &mut FrameStats::default())
@@ -755,10 +726,7 @@ mod test {
         assert!(fc[StreamType::UniDi]
             .is_new_stream(StreamId::from(7))
             .unwrap());
-        assert_eq!(
-            fc[StreamType::UniDi].add_stream().unwrap(),
-            StreamId::from(7)
-        );
+        assert_eq!(fc[StreamType::UniDi].take_stream_id(), StreamId::from(7));
         // 11 exeeds limits
         assert_eq!(
             fc[StreamType::UniDi].is_new_stream(StreamId::from(11)),
@@ -768,7 +736,7 @@ mod test {
 
     #[test]
     fn local_streams_flow_control_new_stream_server() {
-        let mut fc = RemoteStreamsFlowControls::new(2, 1, Role::Server);
+        let mut fc = RemoteStreamLimits::new(2, 1, Role::Server);
         assert!(fc[StreamType::BiDi]
             .is_new_stream(StreamId::from(0))
             .unwrap());
@@ -789,20 +757,12 @@ mod test {
             Err(Error::StreamLimitError)
         );
 
-        assert_eq!(
-            fc[StreamType::BiDi].add_stream().unwrap(),
-            StreamId::from(0)
-        );
-        assert_eq!(
-            fc[StreamType::BiDi].add_stream().unwrap(),
-            StreamId::from(4)
-        );
-        assert_eq!(
-            fc[StreamType::UniDi].add_stream().unwrap(),
-            StreamId::from(2)
-        );
+        assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(0));
+        assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(4));
+        assert_eq!(fc[StreamType::UniDi].take_stream_id(), StreamId::from(2));
 
         fc[StreamType::BiDi].add_retired(1);
+        fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let mut token = Vec::new();
@@ -813,10 +773,7 @@ mod test {
         assert!(fc[StreamType::BiDi]
             .is_new_stream(StreamId::from(8))
             .unwrap());
-        assert_eq!(
-            fc[StreamType::BiDi].add_stream().unwrap(),
-            StreamId::from(8)
-        );
+        assert_eq!(fc[StreamType::BiDi].take_stream_id(), StreamId::from(8));
         // 12 exeeds limits
         assert_eq!(
             fc[StreamType::BiDi].is_new_stream(StreamId::from(12)),
@@ -824,6 +781,7 @@ mod test {
         );
 
         fc[StreamType::UniDi].add_retired(1);
+        fc[StreamType::UniDi].send_flowc_update();
         // consume the frame
         fc[StreamType::UniDi]
             .write_frames(&mut builder, &mut token, &mut FrameStats::default())
@@ -832,10 +790,7 @@ mod test {
         assert!(fc[StreamType::UniDi]
             .is_new_stream(StreamId::from(6))
             .unwrap());
-        assert_eq!(
-            fc[StreamType::UniDi].add_stream().unwrap(),
-            StreamId::from(6)
-        );
+        assert_eq!(fc[StreamType::UniDi].take_stream_id(), StreamId::from(6));
         // 10 exeeds limits
         assert_eq!(
             fc[StreamType::UniDi].is_new_stream(StreamId::from(10)),
@@ -851,19 +806,34 @@ mod test {
         fc[StreamType::UniDi].update(1);
 
         // Add streams
-        assert_eq!(fc.add_stream(StreamType::BiDi).unwrap(), StreamId::from(0));
-        assert_eq!(fc.add_stream(StreamType::BiDi).unwrap(), StreamId::from(4));
-        assert_eq!(fc.add_stream(StreamType::BiDi), None);
-        assert_eq!(fc.add_stream(StreamType::UniDi).unwrap(), StreamId::from(2));
-        assert_eq!(fc.add_stream(StreamType::UniDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::BiDi).unwrap(),
+            StreamId::from(0)
+        );
+        assert_eq!(
+            fc.take_stream_id(StreamType::BiDi).unwrap(),
+            StreamId::from(4)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::BiDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::UniDi).unwrap(),
+            StreamId::from(2)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::UniDi), None);
 
         // Increase limit
         fc[StreamType::BiDi].update(3);
         fc[StreamType::UniDi].update(2);
-        assert_eq!(fc.add_stream(StreamType::BiDi).unwrap(), StreamId::from(8));
-        assert_eq!(fc.add_stream(StreamType::BiDi), None);
-        assert_eq!(fc.add_stream(StreamType::UniDi).unwrap(), StreamId::from(6));
-        assert_eq!(fc.add_stream(StreamType::UniDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::BiDi).unwrap(),
+            StreamId::from(8)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::BiDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::UniDi).unwrap(),
+            StreamId::from(6)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::UniDi), None);
     }
 
     #[test]
@@ -874,18 +844,33 @@ mod test {
         fc[StreamType::UniDi].update(1);
 
         // Add streams
-        assert_eq!(fc.add_stream(StreamType::BiDi).unwrap(), StreamId::from(1));
-        assert_eq!(fc.add_stream(StreamType::BiDi).unwrap(), StreamId::from(5));
-        assert_eq!(fc.add_stream(StreamType::BiDi), None);
-        assert_eq!(fc.add_stream(StreamType::UniDi).unwrap(), StreamId::from(3));
-        assert_eq!(fc.add_stream(StreamType::UniDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::BiDi).unwrap(),
+            StreamId::from(1)
+        );
+        assert_eq!(
+            fc.take_stream_id(StreamType::BiDi).unwrap(),
+            StreamId::from(5)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::BiDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::UniDi).unwrap(),
+            StreamId::from(3)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::UniDi), None);
 
         // Increase limit
         fc[StreamType::BiDi].update(3);
         fc[StreamType::UniDi].update(2);
-        assert_eq!(fc.add_stream(StreamType::BiDi).unwrap(), StreamId::from(9));
-        assert_eq!(fc.add_stream(StreamType::BiDi), None);
-        assert_eq!(fc.add_stream(StreamType::UniDi).unwrap(), StreamId::from(7));
-        assert_eq!(fc.add_stream(StreamType::UniDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::BiDi).unwrap(),
+            StreamId::from(9)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::BiDi), None);
+        assert_eq!(
+            fc.take_stream_id(StreamType::UniDi).unwrap(),
+            StreamId::from(7)
+        );
+        assert_eq!(fc.take_stream_id(StreamType::UniDi), None);
     }
 }
