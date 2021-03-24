@@ -867,10 +867,16 @@ impl Deref for DecryptedPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::{CryptoDxState, CryptoStates};
+    #[cfg(not(feature = "fuzzing_t"))]
+    use crate::crypto::CryptoStates;
+
+    use crate::crypto::CryptoDxState;
     use crate::{EmptyConnectionIdGenerator, QuicVersion, RandomConnectionIdGenerator};
     use neqo_common::Encoder;
-    use test_fixture::{fixture_init, now};
+    #[cfg(not(feature = "fuzzing_t"))]
+    use test_fixture::now;
+
+    use test_fixture::fixture_init;
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
@@ -880,6 +886,7 @@ mod tests {
         RandomConnectionIdGenerator::new(SERVER_CID.len())
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     const SAMPLE_INITIAL_PAYLOAD: &[u8] = &[
         0x02, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x40, 0x5a, 0x02, 0x00, 0x00, 0x56, 0x03, 0x03,
         0xee, 0xfc, 0xe7, 0xf7, 0xb3, 0x7b, 0xa1, 0xd1, 0x63, 0x2e, 0x96, 0x67, 0x78, 0x25, 0xdd,
@@ -889,6 +896,7 @@ mod tests {
         0x4e, 0xca, 0x68, 0x4d, 0x10, 0x81, 0x28, 0x7c, 0x83, 0x4d, 0x53, 0x11, 0xbc, 0xf3, 0x2b,
         0xb9, 0xda, 0x1a, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04,
     ];
+    #[cfg(not(feature = "fuzzing_t"))]
     const SAMPLE_INITIAL: &[u8] = &[
         0xcf, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
         0x00, 0x40, 0x75, 0xc0, 0xd9, 0x5a, 0x48, 0x2c, 0xd0, 0x99, 0x1c, 0xd2, 0x5b, 0x0a, 0xac,
@@ -901,6 +909,7 @@ mod tests {
         0x20, 0x39, 0x8c, 0x27, 0x64, 0x56, 0xcb, 0xc4, 0x21, 0x58, 0x40, 0x7d, 0xd0, 0x74, 0xee,
     ];
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn sample_server_initial() {
         fixture_init();
@@ -925,6 +934,7 @@ mod tests {
         assert_eq!(&packet[..], SAMPLE_INITIAL);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decrypt_initial() {
         const EXTRA: &[u8] = &[0xce; 33];
@@ -973,8 +983,10 @@ mod tests {
         0x40, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0xf4, 0xa8, 0x30, 0x39, 0xc4, 0x7d,
         0x99, 0xe3, 0x94, 0x1c, 0x9b, 0xb9, 0x7a, 0x30, 0x1d, 0xd5, 0x8f, 0xf3, 0xdd, 0xa9,
     ];
+    #[cfg(not(feature = "fuzzing_t"))]
     const SAMPLE_SHORT_PAYLOAD: &[u8] = &[0; 3];
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn build_short() {
         fixture_init();
@@ -1010,6 +1022,7 @@ mod tests {
         assert!(!firsts.iter().all(is_set(PACKET_BIT_SPIN)));
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_short() {
         fixture_init();
@@ -1023,6 +1036,7 @@ mod tests {
     }
 
     /// By telling the decoder that the connection ID is shorter than it really is, we get a decryption error.
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_short_bad_cid() {
         fixture_init();
@@ -1077,6 +1091,7 @@ mod tests {
         assert_eq!(encoder.len(), 45 + 29);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn build_long() {
         const EXPECTED: &[u8] = &[
@@ -1226,7 +1241,14 @@ mod tests {
         // The builder adds randomness, which makes expectations hard.
         // So only do a full check when that randomness matches up.
         if retry[0] == sample_retry[0] {
+            #[cfg(not(feature = "fuzzing_t"))]
             assert_eq!(&retry, &sample_retry);
+
+            #[cfg(feature = "fuzzing_t")]
+            assert_eq!(
+                &retry[..retry.len() - 16],
+                &sample_retry[..sample_retry.len() - 16]
+            );
         } else {
             // Otherwise, just check that the header is OK.
             assert_eq!(retry[0] & 0xf0, 0xf0);
@@ -1270,6 +1292,7 @@ mod tests {
         build_retry_single(QuicVersion::Draft32, SAMPLE_RETRY_32);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn build_retry_multiple() {
         // Run the build_retry test a few times.
@@ -1286,6 +1309,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     fn decode_retry(quic_version: QuicVersion, sample_retry: &[u8]) {
         fixture_init();
         let (packet, remainder) =
@@ -1298,37 +1322,44 @@ mod tests {
         assert!(remainder.is_empty());
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_retry_27() {
         decode_retry(QuicVersion::Draft27, SAMPLE_RETRY_27);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_retry_28() {
         decode_retry(QuicVersion::Draft28, SAMPLE_RETRY_28);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_retry_29() {
         decode_retry(QuicVersion::Draft29, SAMPLE_RETRY_29);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_retry_30() {
         decode_retry(QuicVersion::Draft30, SAMPLE_RETRY_30);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_retry_31() {
         decode_retry(QuicVersion::Draft31, SAMPLE_RETRY_31);
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn decode_retry_32() {
         decode_retry(QuicVersion::Draft32, SAMPLE_RETRY_32);
     }
 
     /// Check some packets that are clearly not valid Retry packets.
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn invalid_retry() {
         fixture_init();
@@ -1433,6 +1464,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[test]
     fn chacha20_sample() {
         const PACKET: &[u8] = &[

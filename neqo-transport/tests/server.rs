@@ -9,11 +9,10 @@
 
 use neqo_common::{event::Provider, hex_with_len, qdebug, qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{
-    aead::Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
     hp::HpKey,
-    AllowZeroRtt, AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker,
+    Aead, AllowZeroRtt, AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker,
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
@@ -26,7 +25,11 @@ use test_fixture::{
 
 use std::cell::RefCell;
 use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+#[cfg(not(feature = "fuzzing_t"))]
+use std::net::{IpAddr, Ipv4Addr};
+
+use std::net::SocketAddr;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -460,6 +463,7 @@ fn new_token_0rtt() {
     assert!(client.tls_info().unwrap().resumed());
 }
 
+#[cfg(not(feature = "fuzzing_t"))]
 #[test]
 fn retry_different_ip() {
     let mut server = default_server();
@@ -485,6 +489,7 @@ fn retry_different_ip() {
     assert!(dgram.is_none());
 }
 
+#[cfg(not(feature = "fuzzing_t"))]
 #[test]
 fn new_token_different_ip() {
     let mut server = default_server();
@@ -593,6 +598,7 @@ fn retry_after_initial() {
     connected_server(&mut server);
 }
 
+#[cfg(not(feature = "fuzzing_t"))]
 #[test]
 fn retry_bad_integrity() {
     let mut server = default_server();
@@ -616,6 +622,7 @@ fn retry_bad_integrity() {
     assert!(dgram.is_none());
 }
 
+#[cfg(not(feature = "fuzzing_t"))]
 #[test]
 fn retry_bad_token() {
     let mut client = default_client();

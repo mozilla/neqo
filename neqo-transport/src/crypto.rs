@@ -13,12 +13,12 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+
 use neqo_crypto::{
-    aead::Aead, hkdf, hp::HpKey, Agent, AntiReplay, Cipher, Epoch, HandshakeState, Record,
-    RecordList, ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
-    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
-    TLS_VERSION_1_3,
+    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, HandshakeState, Record, RecordList,
+    ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_EPOCH_APPLICATION_DATA,
+    TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT, TLS_VERSION_1_3,
 };
 
 use crate::packet::{PacketBuilder, PacketNumber, QuicVersion};
@@ -1058,6 +1058,7 @@ impl CryptoStates {
     }
 
     /// Make some state for removing protection in tests.
+    #[cfg(not(feature = "fuzzing_t"))]
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         let read = |epoch| {
@@ -1088,6 +1089,7 @@ impl CryptoStates {
         }
     }
 
+    #[cfg(not(feature = "fuzzing_t"))]
     #[cfg(test)]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
