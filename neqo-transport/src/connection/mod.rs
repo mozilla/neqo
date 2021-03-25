@@ -2524,7 +2524,7 @@ impl Connection {
         let dropped = self.loss_recovery.drop_0rtt(&self.paths.primary());
         self.handle_lost_packets(&dropped);
 
-        self.streams.client_0rtt_rejected();
+        self.streams.zero_rtt_rejected();
 
         self.crypto.states.discard_0rtt_keys();
         self.events.client_0rtt_rejected();
