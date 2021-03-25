@@ -946,7 +946,7 @@ fn ech_retry() {
         .server_enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk)
         .unwrap();
     let mut client = default_client();
-    client.client_enable_ech(&updated_config).unwrap();
+    client.client_enable_ech(updated_config).unwrap();
 
     connect(&mut client, &mut server);
 
