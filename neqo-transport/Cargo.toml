@@ -20,4 +20,4 @@ test-fixture = { path = "../test-fixture" }
 [features]
 default = ["deny-warnings"]
 deny-warnings = []
-fuzzing_t = ["neqo-crypto/fuzzing"]
+fuzzing = ["neqo-crypto/fuzzing"]

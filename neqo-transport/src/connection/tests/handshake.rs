@@ -590,7 +590,7 @@ fn reorder_1rtt() {
     }
 }
 
-#[cfg(not(feature = "fuzzing_t"))]
+#[cfg(not(feature = "fuzzing"))]
 #[test]
 fn corrupted_initial() {
     let mut client = default_client();
@@ -817,7 +817,7 @@ fn anti_amplification() {
     assert_eq!(*server.state(), State::Confirmed);
 }
 
-#[cfg(not(feature = "fuzzing_t"))]
+#[cfg(not(feature = "fuzzing"))]
 #[test]
 fn garbage_initial() {
     let mut client = default_client();

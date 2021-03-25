@@ -82,6 +82,18 @@ impl From<std::ffi::NulError> for Error {
     }
 }
 
+impl From<i32> for Error {
+    #[must_use]
+    fn from(code: i32) -> Self {
+        let name = wrap_str_fn(|| unsafe { PR_ErrorToName(code) }, "UNKNOWN_ERROR");
+        let desc = wrap_str_fn(
+            || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) },
+            "...",
+        );
+        Self::NssError { name, code, desc }
+    }
+}
+
 use std::ffi::CStr;
 
 fn wrap_str_fn<F>(f: F, dflt: &str) -> String

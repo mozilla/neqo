@@ -5,21 +5,25 @@
 // except according to those terms.
 
 use crate::constants::{Cipher, Version};
-use crate::err::{Error, Res};
+use crate::err::{sec::SEC_ERROR_BAD_DATA, Error, Res};
 use crate::p11::SymKey;
 use std::fmt;
 
+const FIXED_TAG: &[u8] = &[0x0; 16];
 pub struct Aead {}
 
 impl Aead {
     pub fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
+        #[cfg(not(debug_assertions))]
+        panic!("Trying to run a non-debug fuzzing build.");
+
         Ok(Self {})
     }
 
     #[must_use]
     #[allow(clippy::unused_self)]
     pub fn expansion(&self) -> usize {
-        16
+        FIXED_TAG.len()
     }
 
     #[allow(clippy::unused_self)]
@@ -32,7 +36,7 @@ impl Aead {
     ) -> Res<&'a [u8]> {
         let l = input.len();
         output[..l].copy_from_slice(input);
-        output[l..l + 16].copy_from_slice(&[0; 16]);
+        output[l..l + 16].copy_from_slice(FIXED_TAG);
         Ok(&output[..l + 16])
     }
 
@@ -43,26 +47,28 @@ impl Aead {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
-        let l = input.len();
+        if input.len() < FIXED_TAG.len() {
+            return Err(Error::from(SEC_ERROR_BAD_DATA));
+        }
+
+        let len_encrypted = input.len() - FIXED_TAG.len();
         // Check that:
         // 1) expansion is all zeros and
         // 2) if the encrypted data is also supplied that at least some values
         //    are no zero (otherwise padding will be interpreted as a valid packet)
-        if input[l - 16..l].iter().all(|x| *x == 0x0) && (l == 16  || input[..l - 16].iter().any(|x| *x != 0x0)) {
-            output[..l].copy_from_slice(input);
-            Ok(&output[..l - 16])
+        if &input[len_encrypted..] == FIXED_TAG
+            && (len_encrypted == 0 || input[..len_encrypted].iter().any(|x| *x != 0x0))
+        {
+            output[..len_encrypted].copy_from_slice(&input[..len_encrypted]);
+            Ok(&output[..len_encrypted])
         } else {
-            Err(Error::NssError {
-                name: "SEC_ERROR_BAD_DATA".to_string(),
-                code: -8190,
-                desc: "security library: received bad data.".to_string(),
-            })
+            Err(Error::from(SEC_ERROR_BAD_DATA))
         }
     }
 }
 
 impl fmt::Debug for Aead {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "[AEAD Context]")
+        write!(f, "[FUZZING AEAD]")
     }
 }

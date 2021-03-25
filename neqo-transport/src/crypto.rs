@@ -616,7 +616,7 @@ impl CryptoDxState {
         Ok(res.to_vec())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "fuzzing")))]
     pub(crate) fn test_default() -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1058,7 +1058,7 @@ impl CryptoStates {
     }
 
     /// Make some state for removing protection in tests.
-    #[cfg(not(feature = "fuzzing_t"))]
+    #[cfg(not(feature = "fuzzing"))]
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         let read = |epoch| {
@@ -1089,7 +1089,7 @@ impl CryptoStates {
         }
     }
 
-    #[cfg(not(feature = "fuzzing_t"))]
+    #[cfg(not(feature = "fuzzing"))]
     #[cfg(test)]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
