@@ -4,11 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Stream ID and stream index handling.
+// Stream management for a connection.
 
-use crate::fc::{
-    LocalStreamsFlowControls, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl,
-};
+use crate::fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
 use crate::frame::Frame;
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
@@ -27,12 +25,12 @@ pub struct Streams {
     role: Role,
     tps: Rc<RefCell<TransportParametersHandler>>,
     events: ConnectionEvents,
-    flow_control_sender: Rc<RefCell<SenderFlowControl<()>>>,
-    flow_control_receiver: Rc<RefCell<ReceiverFlowControl<()>>>,
+    sender_fc: Rc<RefCell<SenderFlowControl<()>>>,
+    receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
     remote_streams_fc: RemoteStreamLimits,
-    local_streams_fc: LocalStreamsFlowControls,
-    pub(crate) send_streams: SendStreams,
-    pub(crate) recv_streams: RecvStreams,
+    local_streams_fc: LocalStreamLimits,
+    pub(crate) send: SendStreams,
+    pub(crate) recv: RecvStreams,
 }
 
 impl Streams {
@@ -54,18 +52,18 @@ impl Streams {
             role,
             tps,
             events,
-            flow_control_sender: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
-            flow_control_receiver: Rc::new(RefCell::new(ReceiverFlowControl::new((), max_data))),
+            sender_fc: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
+            receiver_fc: Rc::new(RefCell::new(ReceiverFlowControl::new((), max_data))),
             remote_streams_fc: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
-            local_streams_fc: LocalStreamsFlowControls::new(role),
-            send_streams: SendStreams::default(),
-            recv_streams: RecvStreams::default(),
+            local_streams_fc: LocalStreamLimits::new(role),
+            send: SendStreams::default(),
+            recv: RecvStreams::default(),
         }
     }
 
-    pub fn client_0rtt_rejected(&mut self) {
-        self.send_streams.clear();
-        self.recv_streams.clear();
+    pub fn zero_rtt_rejected(&mut self) {
+        self.send.clear();
+        self.recv.clear();
         self.remote_streams_fc = RemoteStreamLimits::new(
             self.tps
                 .borrow()
@@ -77,7 +75,7 @@ impl Streams {
                 .get_integer(tparams::INITIAL_MAX_STREAMS_UNI),
             self.role,
         );
-        self.local_streams_fc = LocalStreamsFlowControls::new(self.role);
+        self.local_streams_fc = LocalStreamLimits::new(self.role);
     }
 
     pub fn input_frame(&mut self, frame: Frame, stats: &mut FrameStats) -> Res<()> {
@@ -87,7 +85,6 @@ impl Streams {
                 application_error_code,
                 ..
             } => {
-                // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
                     rs.reset(application_error_code);
@@ -170,6 +167,47 @@ impl Streams {
         Ok(())
     }
 
+    fn write_maintenance_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        // Send `DATA_BLOCKED` as necessary.
+        self.sender_fc
+            .borrow_mut()
+            .write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        // Send `MAX_DATA` as necessary.
+        self.receiver_fc
+            .borrow_mut()
+            .write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.recv.write_frames(builder, tokens, stats)?;
+
+        self.remote_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+        self.remote_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.local_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.local_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)
+    }
+
     pub fn write_frames(
         &mut self,
         priority: TransmissionPriority,
@@ -178,54 +216,21 @@ impl Streams {
         stats: &mut FrameStats,
     ) -> Res<()> {
         if priority == TransmissionPriority::Important {
-            // Send `DATA_BLOCKED` as necessary.
-            self.flow_control_sender
-                .borrow_mut()
-                .write_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
-            }
-
-            // Send `MAX_DATA` as necessary.
-            self.flow_control_receiver
-                .borrow_mut()
-                .write_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
-            }
-
-            self.recv_streams.write_frames(builder, tokens, stats)?;
-
-            self.remote_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
-            }
-            self.remote_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
-            }
-
-            self.local_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
-            }
-
-            self.local_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
+            self.write_maintenance_frames(builder, tokens, stats)?;
             if builder.remaining() < 2 {
                 return Ok(());
             }
         }
 
-        self.send_streams
-            .write_frames(priority, builder, tokens, stats)
+        self.send.write_frames(priority, builder, tokens, stats)
     }
 
     pub fn lost(&mut self, token: &RecoveryToken) {
         match token {
-            RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-            RecoveryToken::ResetStream { stream_id } => self.send_streams.reset_lost(*stream_id),
+            RecoveryToken::Stream(st) => self.send.lost(&st),
+            RecoveryToken::ResetStream { stream_id } => self.send.reset_lost(*stream_id),
             RecoveryToken::StreamDataBlocked { stream_id, limit } => {
-                self.send_streams.blocked_lost(*stream_id, *limit)
+                self.send.blocked_lost(*stream_id, *limit)
             }
             RecoveryToken::MaxStreamData {
                 stream_id,
@@ -241,17 +246,17 @@ impl Streams {
                 }
             }
             RecoveryToken::StreamsBlocked { stream_type, limit } => {
-                self.local_streams_fc[*stream_type].lost(*limit);
+                self.local_streams_fc[*stream_type].frame_lost(*limit);
             }
             RecoveryToken::MaxStreams {
                 stream_type,
                 max_streams,
             } => {
-                self.remote_streams_fc[*stream_type].lost(*max_streams);
+                self.remote_streams_fc[*stream_type].frame_lost(*max_streams);
             }
-            RecoveryToken::DataBlocked(limit) => self.flow_control_sender.borrow_mut().lost(*limit),
+            RecoveryToken::DataBlocked(limit) => self.sender_fc.borrow_mut().frame_lost(*limit),
             RecoveryToken::MaxData(maximum_data) => {
-                self.flow_control_receiver.borrow_mut().lost(*maximum_data)
+                self.receiver_fc.borrow_mut().frame_lost(*maximum_data)
             }
             _ => unreachable!("This is not a stream RecoveryToken"),
         }
@@ -259,8 +264,8 @@ impl Streams {
 
     pub fn acked(&mut self, token: &RecoveryToken) {
         match token {
-            RecoveryToken::Stream(st) => self.send_streams.acked(st),
-            RecoveryToken::ResetStream { stream_id } => self.send_streams.reset_acked(*stream_id),
+            RecoveryToken::Stream(st) => self.send.acked(st),
+            RecoveryToken::ResetStream { stream_id } => self.send.reset_acked(*stream_id),
             RecoveryToken::StopSending { stream_id } => {
                 if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
                     rs.stop_sending_acked();
@@ -271,14 +276,14 @@ impl Streams {
     }
 
     pub fn clear_streams(&mut self) {
-        self.send_streams.clear();
-        self.recv_streams.clear();
+        self.send.clear();
+        self.recv.clear();
     }
 
     pub fn cleanup_closed_streams(&mut self) {
-        self.send_streams.clear_terminal();
-        let send_streams = &self.send_streams;
-        let (removed_bidi, removed_uni) = self.recv_streams.clear_terminal(send_streams, self.role);
+        self.send.clear_terminal();
+        let send = &self.send;
+        let (removed_bidi, removed_uni) = self.recv.clear_terminal(send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         // The updates will be send if any steams has been removed.
@@ -309,7 +314,7 @@ impl Streams {
             let next_stream_id = self.remote_streams_fc[stream_id.stream_type()].take_stream_id();
             self.events.new_stream(next_stream_id);
 
-            self.recv_streams.insert(
+            self.recv.insert(
                 next_stream_id,
                 RecvStream::new(
                     next_stream_id,
@@ -329,12 +334,12 @@ impl Streams {
                     .borrow()
                     .remote()
                     .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
-                self.send_streams.insert(
+                self.send.insert(
                     next_stream_id,
                     SendStream::new(
                         next_stream_id,
                         send_initial_max_stream_data,
-                        Rc::clone(&self.flow_control_sender),
+                        Rc::clone(&self.sender_fc),
                         self.events.clone(),
                     ),
                 );
@@ -351,8 +356,8 @@ impl Streams {
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         self.ensure_created_if_remote(stream_id)?;
         Ok((
-            self.send_streams.get_mut(stream_id).ok(),
-            self.recv_streams.get_mut(stream_id).ok(),
+            self.send.get_mut(stream_id).ok(),
+            self.recv.get_mut(stream_id).ok(),
         ))
     }
 
@@ -365,12 +370,12 @@ impl Streams {
                     StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
                 };
                 let send_limit = self.tps.borrow().remote().get_integer(send_limit_tp);
-                self.send_streams.insert(
+                self.send.insert(
                     new_id,
                     SendStream::new(
                         new_id,
                         send_limit,
-                        Rc::clone(&self.flow_control_sender),
+                        Rc::clone(&self.sender_fc),
                         self.events.clone(),
                     ),
                 );
@@ -385,7 +390,7 @@ impl Streams {
                         .local
                         .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
 
-                    self.recv_streams.insert(
+                    self.recv.insert(
                         new_id,
                         RecvStream::new(new_id, recv_initial_max_stream_data, self.events.clone()),
                     );
@@ -396,11 +401,11 @@ impl Streams {
     }
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {
-        let conn_was_blocked = self.flow_control_sender.borrow().available() == 0;
-        let conn_credit_increased = self.flow_control_sender.borrow_mut().update(maximum_data);
+        let conn_was_blocked = self.sender_fc.borrow().available() == 0;
+        let conn_credit_increased = self.sender_fc.borrow_mut().update(maximum_data);
 
         if conn_was_blocked && conn_credit_increased {
-            for (id, ss) in &mut self.send_streams {
+            for (id, ss) in &mut self.send {
                 if ss.avail() > 0 {
                     // These may not actually all be writable if one
                     // uses up all the conn credit. Not our fault.
@@ -411,7 +416,7 @@ impl Streams {
     }
 
     pub fn handle_data_blocked(&mut self) {
-        self.flow_control_receiver.borrow_mut().send_flowc_update();
+        self.receiver_fc.borrow_mut().send_flowc_update();
     }
 
     pub fn set_initial_limits(&mut self) {
@@ -432,11 +437,10 @@ impl Streams {
         // If the second limit is higher and streams have been created, then
         // ensure that streams are not blocked on the lower limit.
         if self.role == Role::Client {
-            self.send_streams
-                .update_initial_limit(self.tps.borrow().remote());
+            self.send.update_initial_limit(self.tps.borrow().remote());
         }
 
-        self.flow_control_sender.borrow_mut().update(
+        self.sender_fc.borrow_mut().update(
             self.tps
                 .borrow()
                 .remote()
@@ -451,14 +455,14 @@ impl Streams {
     }
 
     pub fn get_send_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut SendStream> {
-        self.send_streams.get_mut(stream_id)
+        self.send.get_mut(stream_id)
     }
 
     pub fn get_send_stream(&self, stream_id: StreamId) -> Res<&SendStream> {
-        self.send_streams.get(stream_id)
+        self.send.get(stream_id)
     }
 
     pub fn get_recv_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
-        self.recv_streams.get_mut(stream_id)
+        self.recv.get_mut(stream_id)
     }
 }

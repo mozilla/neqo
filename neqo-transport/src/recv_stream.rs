@@ -616,7 +616,7 @@ impl RecvStream {
 
     pub fn max_stream_data_lost(&mut self, maximum_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
-            fc.lost(maximum_data);
+            fc.frame_lost(maximum_data);
         }
     }
 
@@ -635,7 +635,7 @@ impl RecvStream {
     #[cfg(test)]
     pub fn has_frames_to_write(&self) -> bool {
         if let RecvStreamState::Recv { fc, .. } = &self.state {
-            fc.max_data_needed().is_some()
+            fc.frame_needed().is_some()
         } else {
             false
         }

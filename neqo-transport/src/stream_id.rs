@@ -92,6 +92,7 @@ impl StreamId {
         self.0 += 4;
     }
 
+    /// This returns a bit that is shared by all streams created by this role.
     pub fn role_bit(role: Role) -> u64 {
         match role {
             Role::Server => 1,
