@@ -31,13 +31,7 @@ use crate::{Error, Res};
 use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder};
 use neqo_crypto::random;
 
-/// This is the MTU that we assume when using IPv6.
-/// We use this size for Initial packets, so we don't need to worry about probing for support.
-/// If the path doesn't support this MTU, we will assume that it doesn't support QUIC.
-///
-/// This is a multiple of 16 greater than the largest possible short header (1 + 20 + 4).
-pub const PATH_MTU_V6: usize = 1337;
-/// The path MTU for IPv4 can be 20 bytes larger than for v6.
+pub const PATH_MTU_V6: usize = 1200;
 pub const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 /// The number of times that a path will be probed before it is considered failed.
 const MAX_PATH_PROBES: usize = 3;

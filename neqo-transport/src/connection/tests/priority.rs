@@ -394,8 +394,9 @@ fn low() {
     // However, we can ensure that the next packet doesn't consist of just STREAM.
     let stats_before = server.stats().frame_tx;
     let _ = server.process_output(now);
+    let _ = server.process_output(now);
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto + 1);
     assert_eq!(stats_after.new_token, 1);
-    assert_eq!(stats_after.stream, stats_before.stream + 1);
+    assert_eq!(stats_after.stream, stats_before.stream + 2);
 }

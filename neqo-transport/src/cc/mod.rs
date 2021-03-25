@@ -26,7 +26,7 @@ pub use cubic::Cubic;
 pub use new_reno::NewReno;
 
 pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
-pub const MAX_DATAGRAM_SIZE_F64: f64 = 1337.0;
+pub const MAX_DATAGRAM_SIZE_F64: f64 = 1200.0;
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: NeqoQlog);
