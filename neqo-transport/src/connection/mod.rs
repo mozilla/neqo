@@ -50,7 +50,7 @@ use crate::stats::{Stats, StatsCell};
 use crate::stream_id::StreamType;
 use crate::streams::Streams;
 use crate::tparams::{self, TransportParameter, TransportParameters, TransportParametersHandler};
-use crate::tracking::{AckTracker, PNSpace, SentPacket};
+use crate::tracking::{AckTracker, PacketNumberSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
@@ -508,7 +508,7 @@ impl Connection {
             .primary()
             .borrow()
             .rtt()
-            .pto(PNSpace::ApplicationData)
+            .pto(PacketNumberSpace::ApplicationData)
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
@@ -693,7 +693,7 @@ impl Connection {
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         qinfo!([self], "Authenticated {:?}", status);
         self.crypto.tls.authenticated(status);
-        let res = self.handshake(now, PNSpace::Handshake, None);
+        let res = self.handshake(now, PacketNumberSpace::Handshake, None);
         self.absorb_error(now, res);
         self.process_saved(now);
     }
@@ -859,7 +859,7 @@ impl Connection {
         if let Some(p) = self.paths.primary_fallible() {
             let path = p.borrow();
             let rtt = path.rtt();
-            let pto = rtt.pto(PNSpace::ApplicationData);
+            let pto = rtt.pto(PacketNumberSpace::ApplicationData);
 
             let idle_time = self.idle_timeout.expiry(now, pto);
             qtrace!([self], "Idle timer {:?}", idle_time);
@@ -991,7 +991,7 @@ impl Connection {
         };
     }
 
-    fn discard_keys(&mut self, space: PNSpace, now: Instant) {
+    fn discard_keys(&mut self, space: PacketNumberSpace, now: Instant) {
         if self.crypto.discard(space) {
             qinfo!([self], "Drop packet number space {}", space);
             let primary = self.paths.primary();
@@ -1154,7 +1154,7 @@ impl Connection {
                     && self.cid_manager.is_valid(packet.dcid())
                     && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
                 {
-                    self.crypto.resend_unacked(PNSpace::Initial);
+                    self.crypto.resend_unacked(PacketNumberSpace::Initial);
                 }
             }
             (PacketType::VersionNegotiation, ..)
@@ -1185,7 +1185,7 @@ impl Connection {
                 } else {
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
                         // Server has received a Handshake packet -> discard Initial keys and states
-                        self.discard_keys(PNSpace::Initial, now);
+                        self.discard_keys(PacketNumberSpace::Initial, now);
                     }
                     PreprocessResult::Continue
                 }
@@ -1251,7 +1251,7 @@ impl Connection {
         let mut dcid = None;
 
         qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
-        let pto = path.borrow().rtt().pto(PNSpace::ApplicationData);
+        let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
@@ -1288,7 +1288,7 @@ impl Connection {
                     );
 
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
-                    let space = PNSpace::from(payload.packet_type());
+                    let space = PacketNumberSpace::from(payload.packet_type());
                     if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
                         qdebug!([self], "Duplicate packet {}-{}", space, payload.pn());
                         self.stats.borrow_mut().dups_rx += 1;
@@ -1376,7 +1376,7 @@ impl Connection {
         }
         let largest_received = self
             .acks
-            .get_mut(PNSpace::from(packet.packet_type()))
+            .get_mut(PacketNumberSpace::from(packet.packet_type()))
             .unwrap()
             .set_received(now, packet.pn(), ack_eliciting);
 
@@ -1699,7 +1699,7 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(256);
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
-        for space in PNSpace::iter() {
+        for space in PacketNumberSpace::iter() {
             let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
                 crypto
             } else {
@@ -1730,7 +1730,7 @@ impl Connection {
             debug_assert!(builder.limit() <= 2048);
 
             // ConnectionError::Application is only allowed at 1RTT.
-            let sanitized = if *space == PNSpace::ApplicationData {
+            let sanitized = if *space == PacketNumberSpace::ApplicationData {
                 None
             } else {
                 close.sanitize()
@@ -1801,7 +1801,7 @@ impl Connection {
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
         // Both of these are only used for resumption and so can be relatively low priority.
         self.crypto
-            .write_frame(PNSpace::ApplicationData, builder, tokens, stats)?;
+            .write_frame(PacketNumberSpace::ApplicationData, builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
@@ -1821,7 +1821,7 @@ impl Connection {
     fn write_frames(
         &mut self,
         path: &PathRef,
-        space: PNSpace,
+        space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut PacketBuilder,
         now: Instant,
@@ -1839,7 +1839,7 @@ impl Connection {
         // Avoid sending probes until the handshake completes,
         // but send them even when we don't have space.
         let full_mtu = profile.limit() == path.borrow().mtu();
-        if space == PNSpace::ApplicationData && self.state.connected() {
+        if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
             if path.borrow_mut().write_frames(
@@ -1858,7 +1858,7 @@ impl Connection {
         }
 
         if primary {
-            if space == PNSpace::ApplicationData {
+            if space == PacketNumberSpace::ApplicationData {
                 self.write_appdata_frames(builder, &mut tokens)?;
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
@@ -1877,7 +1877,7 @@ impl Connection {
             } else if !builder.packet_empty() {
                 // The packet only contains an ACK.  Check whether we want to
                 // force an ACK with a PING so we can stop tracking packets.
-                let pto = path.borrow().rtt().pto(PNSpace::ApplicationData);
+                let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
                 self.loss_recovery.should_probe(pto, now)
             } else {
                 false
@@ -1929,7 +1929,7 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(profile.limit());
-        for space in PNSpace::iter() {
+        for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
                 crypto
@@ -2018,13 +2018,13 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent);
             }
 
-            if *space == PNSpace::Handshake {
+            if *space == PacketNumberSpace::Handshake {
                 if self.role == Role::Client {
                     // Client can send Handshake packets -> discard Initial keys and states
-                    self.discard_keys(PNSpace::Initial, now);
+                    self.discard_keys(PacketNumberSpace::Initial, now);
                 } else if self.state == State::Confirmed {
                     // We could discard handshake keys in set_state, but wait until after sending an ACK.
-                    self.discard_keys(PNSpace::Handshake, now);
+                    self.discard_keys(PacketNumberSpace::Handshake, now);
                 }
             }
         }
@@ -2051,7 +2051,7 @@ impl Connection {
         if self.state == State::Confirmed {
             let la = self
                 .loss_recovery
-                .largest_acknowledged_pn(PNSpace::ApplicationData);
+                .largest_acknowledged_pn(PacketNumberSpace::ApplicationData);
             qinfo!([self], "Initiating key update");
             self.crypto.states.initiate_key_update(la)
         } else {
@@ -2069,7 +2069,7 @@ impl Connection {
         debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, &self.paths.primary());
 
-        self.handshake(now, PNSpace::Initial, None)?;
+        self.handshake(now, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
             qdebug!([self], "Enabled 0-RTT");
@@ -2238,7 +2238,12 @@ impl Connection {
         Ok(())
     }
 
-    fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
+    fn handshake(
+        &mut self,
+        now: Instant,
+        space: PacketNumberSpace,
+        data: Option<&[u8]>,
+    ) -> Res<()> {
         qtrace!([self], "Handshake space={} data={:0x?}", space, data);
 
         let try_update = data.is_some();
@@ -2282,7 +2287,7 @@ impl Connection {
             return Err(Error::ProtocolViolation);
         }
         self.stats.borrow_mut().frame_rx.all += 1;
-        let space = PNSpace::from(ptype);
+        let space = PacketNumberSpace::from(ptype);
         match frame {
             Frame::Padding => {
                 // Note: This counts contiguous padding as a single frame.
@@ -2402,7 +2407,7 @@ impl Connection {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
-                self.discard_keys(PNSpace::Handshake, now);
+                self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
             Frame::ResetStream { .. }
@@ -2465,7 +2470,7 @@ impl Connection {
 
     fn handle_ack<R>(
         &mut self,
-        space: PNSpace,
+        space: PacketNumberSpace,
         largest_acknowledged: u64,
         ack_ranges: R,
         ack_delay: u64,

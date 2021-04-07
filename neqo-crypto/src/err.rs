@@ -4,7 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
+#![allow(dead_code, clippy::upper_case_acronyms)]
+#![allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
 
 use std::os::raw::c_char;
 
