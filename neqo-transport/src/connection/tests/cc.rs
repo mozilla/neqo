@@ -15,7 +15,7 @@ use crate::recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD};
 use crate::sender::PACING_BURST_SIZE;
 use crate::stats::MAX_PTO_COUNTS;
 use crate::stream_id::StreamType;
-use crate::tracking::MAX_UNACKED_PKTS;
+use crate::tracking::DEFAULT_ACK_PACKET_TOLERANCE;
 
 use neqo_common::{qdebug, qinfo, qtrace, Datagram};
 use std::convert::TryFrom;
@@ -321,7 +321,7 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
         // Until we process all the packets, the congestion window remains the same.
         // Note that we need the client to process ACK frames in stages, so split the
         // datagrams into two, ensuring that we allow for an ACK for each batch.
-        let most = c_tx_dgrams.len() - MAX_UNACKED_PKTS - 1;
+        let most = c_tx_dgrams.len() - usize::try_from(DEFAULT_ACK_PACKET_TOLERANCE).unwrap() - 1;
         let s_tx_dgram = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
         for dgram in s_tx_dgram {
             assert_eq!(cwnd(&client), expected_cwnd);

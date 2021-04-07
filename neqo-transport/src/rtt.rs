@@ -18,7 +18,7 @@ use crate::tracking::PacketNumberSpace;
 
 /// The smallest time that the system timer (via `sleep()`, `nanosleep()`,
 /// `select()`, or similar) can reliably deliver; see `neqo_common::hrtime`.
-const GRANULARITY: Duration = Duration::from_millis(1);
+pub const GRANULARITY: Duration = Duration::from_millis(1);
 /// The default value for the maximum time a peer can delay acknowledgment
 /// of an ack-eliciting packet.
 const DEFAULT_MAX_ACK_DELAY: Duration = Duration::from_millis(25);
@@ -117,6 +117,7 @@ impl RttEstimate {
     }
 
     pub fn pto(&self, pn_space: PacketNumberSpace) -> Duration {
+        qtrace!("max_ack_delay is {:?}", self.max_ack_delay);
         self.estimate()
             + max(4 * self.rttvar, GRANULARITY)
             + if pn_space == PacketNumberSpace::ApplicationData {

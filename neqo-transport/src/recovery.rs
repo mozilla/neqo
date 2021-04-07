@@ -812,9 +812,17 @@ impl LossRecovery {
         pto_state: Option<&PtoState>,
         pn_space: PacketNumberSpace,
     ) -> Duration {
-        rtt.pto(pn_space)
+        let pto = rtt
+            .pto(pn_space)
             .checked_mul(1 << pto_state.map_or(0, |p| p.count))
-            .unwrap_or(LOCAL_IDLE_TIMEOUT * 2)
+            .unwrap_or(LOCAL_IDLE_TIMEOUT * 2);
+        qtrace!(
+            "{:?} PTO is {:?}, RTT is {:?}",
+            pn_space,
+            pto,
+            rtt.pto(pn_space)
+        );
+        pto
     }
 
     /// Get the current PTO period for the given packet number space.

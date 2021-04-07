@@ -6,8 +6,10 @@
 
 use crate::connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT, LOCAL_IDLE_TIMEOUT};
 use crate::recv_stream::RECV_BUFFER_SIZE;
+use crate::rtt::GRANULARITY;
 use crate::stream_id::StreamType;
 use crate::tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler};
+use crate::tracking::DEFAULT_ACK_DELAY;
 use crate::{CongestionControlAlgorithm, QuicVersion, Res};
 use std::convert::TryFrom;
 
@@ -178,6 +180,14 @@ impl ConnectionParameters {
         );
         tps.local.set_empty(tparams::DISABLE_MIGRATION);
         tps.local.set_empty(tparams::GREASE_QUIC_BIT);
+        tps.local.set_integer(
+            tparams::MAX_ACK_DELAY,
+            u64::try_from(DEFAULT_ACK_DELAY.as_millis()).unwrap(),
+        );
+        tps.local.set_integer(
+            tparams::MIN_ACK_DELAY,
+            u64::try_from(GRANULARITY.as_micros()).unwrap(),
+        );
 
         // set configurable parameters
         tps.local

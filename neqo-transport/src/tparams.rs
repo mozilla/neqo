@@ -47,6 +47,7 @@ tpids! {
     INITIAL_SOURCE_CONNECTION_ID = 0x0f,
     RETRY_SOURCE_CONNECTION_ID = 0x10,
     GREASE_QUIC_BIT = 0x2ab2,
+    MIN_ACK_DELAY = 0xff02de1a,
 }
 
 #[derive(Clone, Debug)]
@@ -245,6 +246,11 @@ impl TransportParameter {
 
             PREFERRED_ADDRESS => Self::decode_preferred_address(&mut d)?,
 
+            MIN_ACK_DELAY => match d.decode_varint() {
+                Some(v) if v < (1 << 24) => Self::Integer(v),
+                _ => return Err(Error::TransportParameterError),
+            },
+
             // Skip.
             _ => return Ok(None),
         };
@@ -310,6 +316,7 @@ impl TransportParameters {
             ACK_DELAY_EXPONENT => 3,
             MAX_ACK_DELAY => 25,
             ACTIVE_CONNECTION_ID_LIMIT => 2,
+            MIN_ACK_DELAY => 0,
             _ => panic!("Transport parameter not known or not an Integer"),
         };
         match self.params.get(&tp) {
@@ -332,7 +339,8 @@ impl TransportParameters {
             | MAX_UDP_PAYLOAD_SIZE
             | ACK_DELAY_EXPONENT
             | MAX_ACK_DELAY
-            | ACTIVE_CONNECTION_ID_LIMIT => {
+            | ACTIVE_CONNECTION_ID_LIMIT
+            | MIN_ACK_DELAY => {
                 self.set(tp, TransportParameter::Integer(value));
             }
             _ => panic!("Transport parameter not known"),

@@ -45,6 +45,7 @@ use crate::packet::{
 use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
+use crate::rtt::GRANULARITY;
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::stats::{Stats, StatsCell};
 use crate::stream_id::StreamType;
@@ -2298,6 +2299,10 @@ impl Connection {
                 // prepare to resend them.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
+                if space == PacketNumberSpace::ApplicationData {
+                    // Send an ACK immediately if we might not otherwise do so.
+                    self.acks.immediate_ack(now);
+                }
             }
             Frame::Ack {
                 largest_acknowledged,
@@ -2421,6 +2426,19 @@ impl Connection {
             | Frame::StreamsBlocked { .. } => {
                 self.streams
                     .input_frame(frame, &mut self.stats.borrow_mut().frame_rx)?;
+            }
+            Frame::AckFrequency {
+                seqno,
+                tolerance,
+                delay,
+                ignore_order,
+            } => {
+                let delay = Duration::from_millis(delay);
+                if delay < GRANULARITY {
+                    return Err(Error::ProtocolViolation);
+                }
+                self.acks
+                    .ack_freq(seqno, tolerance - 1, delay, ignore_order);
             }
         };
 

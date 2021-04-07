@@ -12,9 +12,10 @@ use super::{
 };
 use crate::path::PATH_MTU_V6;
 use crate::recovery::{MAX_OUTSTANDING_UNACK, MIN_OUTSTANDING_UNACK, PTO_PACKET_COUNT};
+use crate::rtt::GRANULARITY;
 use crate::stats::MAX_PTO_COUNTS;
 use crate::tparams::TransportParameter;
-use crate::tracking::ACK_DELAY;
+use crate::tracking::DEFAULT_ACK_DELAY;
 use crate::StreamType;
 
 use neqo_common::qdebug;
@@ -105,7 +106,7 @@ fn pto_works_ping() {
 
     // Nothing to do, should return callback
     let cb = client.process(None, now).callback();
-    assert_eq!(cb, Duration::from_millis(26)); // MAX_ACK_DELAY + GRANULARITY
+    assert_eq!(cb, DEFAULT_ACK_DELAY + GRANULARITY);
 
     // Process these by server, skipping pkt0
     let srv0 = server.process(Some(pkt1), now).dgram();
@@ -293,7 +294,7 @@ fn pto_handshake_complete() {
     // Let the client receive the ACK.
     // It should now be wait to acknowledge the HANDSHAKE_DONE.
     let cb = client.process(ack, now).callback();
-    assert_eq!(cb, ACK_DELAY);
+    assert_eq!(cb, DEFAULT_ACK_DELAY);
 
     // Let the ACK delay timer expire.
     now += cb;
@@ -304,7 +305,7 @@ fn pto_handshake_complete() {
     // We don't send another PING because the handshake space is done and there
     // is nothing to probe for.
 
-    assert_eq!(cb, LOCAL_IDLE_TIMEOUT - ACK_DELAY);
+    assert_eq!(cb, LOCAL_IDLE_TIMEOUT - DEFAULT_ACK_DELAY);
 }
 
 /// Test that PTO in the Handshake space contains the right frames.
@@ -667,7 +668,7 @@ fn ping_with_ack(fast: bool) {
     trickle(&mut sender, &mut receiver, 1, now);
     assert_eq!(receiver.stats().frame_tx.ping, 1);
     if let Output::Callback(t) = sender.process_output(now) {
-        assert_eq!(t, ACK_DELAY);
+        assert_eq!(t, DEFAULT_ACK_DELAY);
         assert!(sender.process_output(now + t).dgram().is_some());
     }
     assert_eq!(sender.stats().frame_tx.ack, sender_acks_before + 1);
