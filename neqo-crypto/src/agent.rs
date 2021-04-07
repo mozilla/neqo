@@ -268,7 +268,7 @@ impl SecretAgent {
         }
         let fd = unsafe {
             (*base_fd).secret = as_c_void(io).cast();
-            ssl::SSL_ImportFD(null_mut(), base_fd.cast::<ssl::PRFileDesc>())
+            ssl::SSL_ImportFD(null_mut(), base_fd.cast())
         };
         if fd.is_null() {
             unsafe { prio::PR_Close(base_fd) };
@@ -298,8 +298,7 @@ impl SecretAgent {
         let alert = alert.as_ref().unwrap();
         if alert.level == 2 {
             // Fatal alerts demand attention.
-            let p = arg.cast::<Option<Alert>>();
-            let st = p.as_mut().unwrap();
+            let st = arg.cast::<Option<Alert>>().as_mut().unwrap();
             if st.is_none() {
                 *st = Some(alert.description);
             } else {
@@ -655,11 +654,11 @@ impl SecretAgent {
         if let Some(true) = self.raw {
             // Need to hold the record list in scope until the close is done.
             let _records = self.setup_raw().expect("Can only close");
-            unsafe { prio::PR_Close(self.fd.cast::<prio::PRFileDesc>()) };
+            unsafe { prio::PR_Close(self.fd.cast()) };
         } else {
             // Need to hold the IO wrapper in scope until the close is done.
             let _io = self.io.wrap(&[]);
-            unsafe { prio::PR_Close(self.fd.cast::<prio::PRFileDesc>()) };
+            unsafe { prio::PR_Close(self.fd.cast()) };
         };
         let _output = self.io.take_output();
         self.fd = null_mut();
@@ -772,8 +771,7 @@ impl Client {
             // Ignore the token.
             return ssl::SECSuccess;
         }
-        let resumption_ptr = arg.cast::<Vec<ResumptionToken>>();
-        let resumption = resumption_ptr.as_mut().unwrap();
+        let resumption = arg.cast::<Vec<ResumptionToken>>().as_mut().unwrap();
         let len = usize::try_from(len).unwrap();
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(std::slice::from_raw_parts(token, len));
