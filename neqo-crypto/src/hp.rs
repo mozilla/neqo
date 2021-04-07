@@ -67,7 +67,7 @@ impl HpKey {
                 **prk,
                 null(),
                 0,
-                l.as_ptr().cast::<c_char>(),
+                l.as_ptr().cast(),
                 c_uint::try_from(l.len())?,
                 mech,
                 key_size,
