@@ -139,6 +139,8 @@ impl Error {
         matches!(self, Self::HttpGeneralProtocolStream | Self::InvalidHeader)
     }
 
+    /// # Panics
+    /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_send_errors(err: &TransportError) -> Self {
         match err {
@@ -153,6 +155,8 @@ impl Error {
         }
     }
 
+    /// # Panics
+    /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_create_errors(err: &TransportError) -> Self {
         match err {
@@ -165,6 +169,8 @@ impl Error {
         }
     }
 
+    /// # Panics
+    /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_recv_errors(err: &TransportError) -> Self {
         match err {
@@ -192,12 +198,14 @@ impl Error {
 
     /// # Errors
     ///   Any error is mapped to the indicated type.
+    /// # Panics
+    /// On internal errors, in debug mode.
     fn map_error<R>(r: Result<R, impl Into<Self>>, err: Self) -> Result<R, Self> {
-        Ok(r.map_err(|e| {
+        r.map_err(|e| {
             debug_assert!(!matches!(e.into(), Self::HttpInternal(..)));
             debug_assert!(!matches!(err, Self::HttpInternal(..)));
             err
-        })?)
+        })
     }
 }
 

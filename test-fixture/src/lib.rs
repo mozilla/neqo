@@ -53,12 +53,16 @@ fn earlier() -> Instant {
 
 /// The current time for the test.  Which is in the future,
 /// because 0-RTT tests need to run at least `ANTI_REPLAY_WINDOW` in the past.
+/// # Panics
+/// When the setup fails.
 #[must_use]
 pub fn now() -> Instant {
     earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
 }
 
 // Create a default anti-replay context.
+/// # Panics
+/// When the setup fails.
 #[must_use]
 pub fn anti_replay() -> AntiReplay {
     AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
@@ -201,6 +205,8 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     }
 }
 
+/// # Panics
+/// When the connection fails.
 #[must_use]
 pub fn connect() -> (Connection, Connection) {
     let mut client = default_client();
@@ -212,6 +218,8 @@ pub fn connect() -> (Connection, Connection) {
 }
 
 /// Create a http3 client with default configuration.
+/// # Panics
+/// When the client can't be created.
 #[must_use]
 pub fn default_http3_client() -> Http3Client {
     fixture_init();
@@ -235,6 +243,8 @@ pub fn default_http3_client() -> Http3Client {
 }
 
 /// Create a http3 server with default configuration.
+/// # Panics
+/// When the server can't be created.
 #[must_use]
 pub fn default_http3_server() -> Http3Server {
     fixture_init();
