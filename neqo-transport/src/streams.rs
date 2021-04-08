@@ -27,8 +27,8 @@ pub struct Streams {
     events: ConnectionEvents,
     sender_fc: Rc<RefCell<SenderFlowControl<()>>>,
     receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
-    remote_streams_fc: RemoteStreamLimits,
-    local_streams_fc: LocalStreamLimits,
+    remote_stream_limits: RemoteStreamLimits,
+    local_stream_limits: LocalStreamLimits,
     pub(crate) send: SendStreams,
     pub(crate) recv: RecvStreams,
 }
@@ -54,8 +54,8 @@ impl Streams {
             events,
             sender_fc: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
             receiver_fc: Rc::new(RefCell::new(ReceiverFlowControl::new((), max_data))),
-            remote_streams_fc: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
-            local_streams_fc: LocalStreamLimits::new(role),
+            remote_stream_limits: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
+            local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
             recv: RecvStreams::default(),
         }
@@ -64,7 +64,7 @@ impl Streams {
     pub fn zero_rtt_rejected(&mut self) {
         self.send.clear();
         self.recv.clear();
-        self.remote_streams_fc = RemoteStreamLimits::new(
+        self.remote_stream_limits = RemoteStreamLimits::new(
             self.tps
                 .borrow()
                 .local
@@ -75,7 +75,7 @@ impl Streams {
                 .get_integer(tparams::INITIAL_MAX_STREAMS_UNI),
             self.role,
         );
-        self.local_streams_fc = LocalStreamLimits::new(self.role);
+        self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
 
     pub fn input_frame(&mut self, frame: Frame, stats: &mut FrameStats) -> Res<()> {
@@ -191,21 +191,21 @@ impl Streams {
 
         self.recv.write_frames(builder, tokens, stats)?;
 
-        self.remote_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        self.remote_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
-        self.remote_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
-        self.local_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        self.remote_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
 
-        self.local_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)
+        self.local_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats)
     }
 
     pub fn write_frames(
@@ -246,13 +246,13 @@ impl Streams {
                 }
             }
             RecoveryToken::StreamsBlocked { stream_type, limit } => {
-                self.local_streams_fc[*stream_type].frame_lost(*limit);
+                self.local_stream_limits[*stream_type].frame_lost(*limit);
             }
             RecoveryToken::MaxStreams {
                 stream_type,
                 max_streams,
             } => {
-                self.remote_streams_fc[*stream_type].frame_lost(*max_streams);
+                self.remote_stream_limits[*stream_type].frame_lost(*max_streams);
             }
             RecoveryToken::DataBlocked(limit) => self.sender_fc.borrow_mut().frame_lost(*limit),
             RecoveryToken::MaxData(maximum_data) => {
@@ -287,13 +287,13 @@ impl Streams {
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         // The updates will be send if any steams has been removed.
-        self.remote_streams_fc[StreamType::BiDi].add_retired(removed_bidi);
-        self.remote_streams_fc[StreamType::UniDi].add_retired(removed_uni);
+        self.remote_stream_limits[StreamType::BiDi].add_retired(removed_bidi);
+        self.remote_stream_limits[StreamType::UniDi].add_retired(removed_uni);
     }
 
     fn ensure_created_if_remote(&mut self, stream_id: StreamId) -> Res<()> {
         if !stream_id.is_remote_initiated(self.role)
-            || !self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)?
+            || !self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id)?
         {
             // If it is not a remote stream and stream already exist.
             return Ok(());
@@ -310,8 +310,9 @@ impl Streams {
         };
         let recv_initial_max_stream_data = self.tps.borrow().local.get_integer(tp);
 
-        while self.remote_streams_fc[stream_id.stream_type()].is_new_stream(stream_id)? {
-            let next_stream_id = self.remote_streams_fc[stream_id.stream_type()].take_stream_id();
+        while self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id)? {
+            let next_stream_id =
+                self.remote_stream_limits[stream_id.stream_type()].take_stream_id();
             self.events.new_stream(next_stream_id);
 
             self.recv.insert(
@@ -362,7 +363,7 @@ impl Streams {
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
-        match self.local_streams_fc.take_stream_id(st) {
+        match self.local_stream_limits.take_stream_id(st) {
             None => Err(Error::StreamLimitError),
             Some(new_id) => {
                 let send_limit_tp = match st {
@@ -420,13 +421,13 @@ impl Streams {
     }
 
     pub fn set_initial_limits(&mut self) {
-        let _ = self.local_streams_fc[StreamType::BiDi].update(
+        let _ = self.local_stream_limits[StreamType::BiDi].update(
             self.tps
                 .borrow()
                 .remote()
                 .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI),
         );
-        let _ = self.local_streams_fc[StreamType::UniDi].update(
+        let _ = self.local_stream_limits[StreamType::UniDi].update(
             self.tps
                 .borrow()
                 .remote()
@@ -449,7 +450,7 @@ impl Streams {
     }
 
     pub fn handle_max_streams(&mut self, stream_type: StreamType, maximum_streams: u64) {
-        if self.local_streams_fc[stream_type].update(maximum_streams) {
+        if self.local_stream_limits[stream_type].update(maximum_streams) {
             self.events.send_stream_creatable(stream_type);
         }
     }

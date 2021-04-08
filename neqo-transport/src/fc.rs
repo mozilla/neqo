@@ -345,7 +345,7 @@ impl ReceiverFlowControl<StreamType> {
     }
 
     /// Retire given amount of additional data.
-    /// This function will sen flow updates immediately.
+    /// This function will send flow updates immediately.
     pub fn add_retired(&mut self, count: u64) {
         self.retired += count;
         if count > 0 {
