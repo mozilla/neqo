@@ -12,6 +12,7 @@ use std::fmt;
 const FIXED_TAG: &[u8] = &[0x0; 16];
 pub struct Aead {}
 
+#[allow(clippy::unused_self)]
 impl Aead {
     pub fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
         #[cfg(not(debug_assertions))]
@@ -21,12 +22,10 @@ impl Aead {
     }
 
     #[must_use]
-    #[allow(clippy::unused_self)]
     pub fn expansion(&self) -> usize {
         FIXED_TAG.len()
     }
 
-    #[allow(clippy::unused_self)]
     pub fn encrypt<'a>(
         &self,
         _count: u64,

@@ -84,7 +84,7 @@ impl From<std::ffi::NulError> for Error {
 
 impl From<i32> for Error {
     #[must_use]
-    fn from(code: i32) -> Self {
+    fn from(code: PRErrorCode) -> Self {
         let name = wrap_str_fn(|| unsafe { PR_ErrorToName(code) }, "UNKNOWN_ERROR");
         let desc = wrap_str_fn(
             || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) },
@@ -115,12 +115,7 @@ pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
     }
 
     let code = unsafe { PR_GetError() };
-    let name = wrap_str_fn(|| unsafe { PR_ErrorToName(code) }, "UNKNOWN_ERROR");
-    let desc = wrap_str_fn(
-        || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) },
-        "...",
-    );
-    Err(Error::NssError { name, code, desc })
+    Err(Error::from(code))
 }
 
 pub fn is_blocked(result: &Res<()>) -> bool {

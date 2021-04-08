@@ -7,18 +7,19 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
-use neqo_crypto::{
-    AllowZeroRtt, AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker,
+use common::{
+    apply_header_protection, client_initial_aead_and_hp, connect, connected_server,
+    decode_initial_header, default_server, get_ticket, remove_header_protection,
 };
+use neqo_common::{qtrace, Datagram, Decoder, Encoder};
+use neqo_crypto::{AllowZeroRtt, ZeroRttCheckResult, ZeroRttChecker};
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, Error, Output, QuicVersion,
+    Connection, ConnectionError, ConnectionParameters, Error, Output, QuicVersion,
     State, StreamType,
 };
 use test_fixture::{
-    self, apply_header_protection, assertions, client_initial_aead_and_hp, decode_initial_header,
-    default_client, now, remove_header_protection, split_datagram, CountingConnectionIdGenerator,
+    self, assertions, default_client, now, split_datagram, CountingConnectionIdGenerator,
 };
 
 use std::cell::RefCell;
@@ -28,68 +29,12 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
 
-// Different than the one in the fixture, which is a single connection.
-fn default_server() -> Server {
-    Server::new(
-        now(),
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        test_fixture::anti_replay(),
-        Box::new(AllowZeroRtt {}),
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
-    )
-    .expect("should create a server")
-}
-
-// Check that there is at least one connection.  Returns a ref to the first confirmed connection.
-fn connected_server(server: &mut Server) -> ActiveConnectionRef {
-    let server_connections = server.active_connections();
-    // Find confirmed connections.  There should only be one.
-    let mut confirmed = server_connections
-        .iter()
-        .filter(|c: &&ActiveConnectionRef| *c.borrow().state() == State::Confirmed);
-    let c = confirmed.next().expect("one confirmed");
-    assert!(confirmed.next().is_none(), "only one confirmed");
-    c.clone()
-}
-
-/// Connect.  This returns a reference to the server connection.
-fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
-    server.set_validation(ValidateAddress::Never);
-
-    assert_eq!(*client.state(), State::Init);
-    let dgram = client.process(None, now()).dgram(); // ClientHello
-    assert!(dgram.is_some());
-    let dgram = server.process(dgram, now()).dgram(); // ServerHello...
-    assert!(dgram.is_some());
-
-    // Ingest the server Certificate.
-    let dgram = client.process(dgram, now()).dgram();
-    assert!(dgram.is_some()); // This should just be an ACK.
-    let dgram = server.process(dgram, now()).dgram();
-    assert!(dgram.is_none()); // So the server should have nothing to say.
-
-    // Now mark the server as authenticated.
-    client.authenticated(AuthenticationStatus::Ok, now());
-    let dgram = client.process(None, now()).dgram();
-    assert!(dgram.is_some());
-    assert_eq!(*client.state(), State::Connected);
-    let dgram = server.process(dgram, now()).dgram();
-    assert!(dgram.is_some()); // ACK + HANDSHAKE_DONE + NST
-
-    // Have the client process the HANDSHAKE_DONE.
-    let dgram = client.process(dgram, now()).dgram();
-    assert!(dgram.is_none());
-    assert_eq!(*client.state(), State::Confirmed);
-
-    connected_server(server)
-}
+mod common;
 
 /// Take a pair of connections in any state and complete the handshake.
 /// The `datagram` argument is a packet that was received from the server.
 /// See `connect` for what this returns.
-fn complete_connection(
+pub fn complete_connection(
     client: &mut Connection,
     server: &mut Server,
     mut datagram: Option<Datagram>,
@@ -309,34 +254,6 @@ fn zero_rtt() {
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
-}
-
-fn get_ticket(server: &mut Server) -> ResumptionToken {
-    let mut client = default_client();
-    let mut server_conn = connect(&mut client, server);
-
-    server_conn.borrow_mut().send_ticket(now(), &[]).unwrap();
-    let dgram = server.process(None, now()).dgram();
-    client.process_input(dgram.unwrap(), now()); // Consume ticket, ignore output.
-
-    let ticket = client
-        .events()
-        .find_map(|e| {
-            if let ConnectionEvent::ResumptionToken(token) = e {
-                Some(token)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-
-    // Have the client close the connection and then let the server clean up.
-    client.close(now(), 0, "got a ticket");
-    let dgram = client.process_output(now()).dgram();
-    let _ = server.process(dgram, now());
-    // Calling active_connections clears the set of active connections.
-    assert_eq!(server.active_connections().len(), 1);
-    ticket
 }
 
 #[test]
