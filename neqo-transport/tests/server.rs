@@ -15,8 +15,8 @@ use neqo_common::{qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{AllowZeroRtt, ZeroRttCheckResult, ZeroRttChecker};
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionParameters, Error, Output, QuicVersion,
-    State, StreamType,
+    Connection, ConnectionError, ConnectionParameters, Error, Output, QuicVersion, State,
+    StreamType,
 };
 use test_fixture::{
     self, assertions, default_client, now, split_datagram, CountingConnectionIdGenerator,
