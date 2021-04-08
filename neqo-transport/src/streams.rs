@@ -165,7 +165,7 @@ impl Streams {
                 // We send an update evry time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
-            _ => unreachable!("This is not a stream RecoveryToken"),
+            _ => unreachable!("This is not a stream Frame"),
         }
         Ok(())
     }
@@ -274,6 +274,12 @@ impl Streams {
                     rs.stop_sending_acked();
                 }
             }
+            // We only worry when these are lost
+            RecoveryToken::DataBlocked(_)
+            | RecoveryToken::StreamDataBlocked { .. }
+            | RecoveryToken::MaxStreamData { .. }
+            | RecoveryToken::StreamsBlocked { .. }
+            | RecoveryToken::MaxStreams { .. } => (),
             _ => unreachable!("This is not a stream RecoveryToken"),
         }
     }

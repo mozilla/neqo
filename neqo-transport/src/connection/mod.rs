@@ -2288,6 +2288,11 @@ impl Connection {
         }
         self.stats.borrow_mut().frame_rx.all += 1;
         let space = PacketNumberSpace::from(ptype);
+        if frame.is_stream() {
+            return self
+                .streams
+                .input_frame(frame, &mut self.stats.borrow_mut().frame_rx);
+        }
         match frame {
             Frame::Padding => {
                 // Note: This counts contiguous padding as a single frame.
@@ -2410,18 +2415,7 @@ impl Connection {
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
-            Frame::ResetStream { .. }
-            | Frame::StopSending { .. }
-            | Frame::Stream { .. }
-            | Frame::MaxData { .. }
-            | Frame::MaxStreamData { .. }
-            | Frame::MaxStreams { .. }
-            | Frame::DataBlocked { .. }
-            | Frame::StreamDataBlocked { .. }
-            | Frame::StreamsBlocked { .. } => {
-                self.streams
-                    .input_frame(frame, &mut self.stats.borrow_mut().frame_rx)?;
-            }
+            _ => unreachable!("All other frames are for streams"),
         };
 
         Ok(())
@@ -2434,23 +2428,19 @@ impl Connection {
         for lost in lost_packets {
             for token in &lost.tokens {
                 qdebug!([self], "Lost: {:?}", token);
-                match token {
-                    RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
-                    RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
-                    RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
-                    RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
-                    RecoveryToken::RetireConnectionId(seqno) => self.paths.lost_retire_cid(*seqno),
-                    RecoveryToken::Stream(_)
-                    | RecoveryToken::ResetStream { .. }
-                    | RecoveryToken::StreamDataBlocked { .. }
-                    | RecoveryToken::MaxStreamData { .. }
-                    | RecoveryToken::StopSending { .. }
-                    | RecoveryToken::StreamsBlocked { .. }
-                    | RecoveryToken::MaxStreams { .. }
-                    | RecoveryToken::DataBlocked(_)
-                    | RecoveryToken::MaxData(_) => {
-                        self.streams.lost(token);
+                if token.is_stream() {
+                    self.streams.lost(token);
+                } else {
+                    match token {
+                        RecoveryToken::Ack(_) => {}
+                        RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
+                        RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
+                        RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
+                        RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
+                        RecoveryToken::RetireConnectionId(seqno) => {
+                            self.paths.lost_retire_cid(*seqno)
+                        }
+                        _ => unreachable!("The rest of tokens are for streams"),
                     }
                 }
             }
@@ -2491,23 +2481,21 @@ impl Connection {
         );
         for acked in acked_packets {
             for token in &acked.tokens {
-                match token {
-                    RecoveryToken::Ack(at) => self.acks.acked(at),
-                    RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
-                    RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
-                    RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
-                    RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
-                    RecoveryToken::Stream(_)
-                    | RecoveryToken::ResetStream { .. }
-                    | RecoveryToken::StopSending { .. } => self.streams.acked(token),
-                    // We only worry when these are lost:
-                    RecoveryToken::DataBlocked(_)
-                    | RecoveryToken::StreamDataBlocked { .. }
-                    | RecoveryToken::HandshakeDone
-                    | RecoveryToken::MaxData(_)
-                    | RecoveryToken::MaxStreamData { .. }
-                    | RecoveryToken::StreamsBlocked { .. }
-                    | RecoveryToken::MaxStreams { .. } => (),
+                if token.is_stream() {
+                    self.streams.acked(token);
+                } else {
+                    match token {
+                        RecoveryToken::Ack(at) => self.acks.acked(at),
+                        RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
+                        RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
+                        RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
+                        RecoveryToken::RetireConnectionId(seqno) => {
+                            self.paths.acked_retire_cid(*seqno)
+                        }
+                        // We only worry when these are lost
+                        RecoveryToken::HandshakeDone => (),
+                        _ => unreachable!("These are stream RecoveryTokens"),
+                    }
                 }
             }
         }

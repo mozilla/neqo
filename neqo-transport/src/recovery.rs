@@ -80,6 +80,23 @@ pub enum RecoveryToken {
     },
 }
 
+impl RecoveryToken {
+    pub fn is_stream(&self) -> bool {
+        matches!(
+            self,
+            Self::Stream(_)
+                | Self::ResetStream { .. }
+                | Self::StreamDataBlocked { .. }
+                | Self::MaxStreamData { .. }
+                | Self::StopSending { .. }
+                | Self::StreamsBlocked { .. }
+                | Self::MaxStreams { .. }
+                | Self::DataBlocked(_)
+                | Self::MaxData(_)
+        )
+    }
+}
+
 /// `SendProfile` tells a sender how to send packets.
 #[derive(Debug)]
 pub struct SendProfile {
