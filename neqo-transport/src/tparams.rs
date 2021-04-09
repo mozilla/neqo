@@ -444,9 +444,8 @@ impl TransportParameters {
         }
     }
 
-    #[cfg(test)]
     #[must_use]
-    fn was_sent(&self, tp: TransportParameterId) -> bool {
+    pub fn has_value(&self, tp: TransportParameterId) -> bool {
         self.params.contains_key(&tp)
     }
 }
@@ -592,10 +591,10 @@ mod tests {
         assert_eq!(tps2.get_bytes(ORIGINAL_DESTINATION_CONNECTION_ID), None);
         assert_eq!(tps2.get_bytes(INITIAL_SOURCE_CONNECTION_ID), None);
         assert_eq!(tps2.get_bytes(RETRY_SOURCE_CONNECTION_ID), None);
-        assert_eq!(tps2.was_sent(ORIGINAL_DESTINATION_CONNECTION_ID), false);
-        assert_eq!(tps2.was_sent(INITIAL_SOURCE_CONNECTION_ID), false);
-        assert_eq!(tps2.was_sent(RETRY_SOURCE_CONNECTION_ID), false);
-        assert_eq!(tps2.was_sent(STATELESS_RESET_TOKEN), true);
+        assert_eq!(tps2.has_value(ORIGINAL_DESTINATION_CONNECTION_ID), false);
+        assert_eq!(tps2.has_value(INITIAL_SOURCE_CONNECTION_ID), false);
+        assert_eq!(tps2.has_value(RETRY_SOURCE_CONNECTION_ID), false);
+        assert_eq!(tps2.has_value(STATELESS_RESET_TOKEN), true);
 
         let mut enc = Encoder::default();
         tps.encode(&mut enc);

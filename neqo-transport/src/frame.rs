@@ -98,7 +98,7 @@ pub struct AckRange {
 /// A lot of frames here are just a collection of varints.
 /// This helper functions writes a frame like that safely, returning `true` if
 /// a frame was written.
-pub fn write_varint_frame(builder: &mut PacketBuilder, values: &[u64]) -> Res<bool> {
+pub fn write_varint_frame(builder: &mut PacketBuilder, values: &[u64]) -> bool {
     let write = builder.remaining()
         >= values
             .iter()
@@ -108,11 +108,9 @@ pub fn write_varint_frame(builder: &mut PacketBuilder, values: &[u64]) -> Res<bo
         for v in values {
             builder.encode_varint(*v);
         }
-        if builder.len() > builder.limit() {
-            return Err(Error::InternalError(16));
-        }
+        debug_assert!(builder.len() <= builder.limit());
     };
-    Ok(write)
+    write
 }
 
 #[derive(PartialEq, Debug, Clone)]

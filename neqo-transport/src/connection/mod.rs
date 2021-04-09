@@ -1723,7 +1723,7 @@ impl Connection {
                 self.loss_recovery.largest_acknowledged_pn(*space),
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
-            if builder.remaining() < 2 {
+            if builder.is_full() {
                 encoder = builder.abort();
                 break;
             }
@@ -1766,36 +1766,36 @@ impl Connection {
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+            .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
+        if builder.is_full() {
             return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Important, builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+            .write_frames(TransmissionPriority::Important, builder, tokens, stats);
+        if builder.is_full() {
             return Ok(());
         }
 
-        // NEW_CONNECTION_ID and RETIRE_CONNECTION_ID.
+        // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
         self.cid_manager.write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+        if builder.is_full() {
             return Ok(());
         }
         self.paths.write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+        if builder.is_full() {
             return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::High, builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+            .write_frames(TransmissionPriority::High, builder, tokens, stats);
+        if builder.is_full() {
             return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+            .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
+        if builder.is_full() {
             return Ok(());
         }
 
@@ -1803,16 +1803,16 @@ impl Connection {
         // Both of these are only used for resumption and so can be relatively low priority.
         self.crypto
             .write_frame(PacketNumberSpace::ApplicationData, builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+        if builder.is_full() {
             return Ok(());
         }
         self.new_token.write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
+        if builder.is_full() {
             return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, stats)?;
+            .write_frames(TransmissionPriority::Low, builder, tokens, stats);
         Ok(())
     }
 
@@ -1954,7 +1954,7 @@ impl Connection {
                 self.loss_recovery.largest_acknowledged_pn(*space),
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
-            if builder.remaining() < 2 {
+            if builder.is_full() {
                 encoder = builder.abort();
                 break;
             }
@@ -1964,7 +1964,7 @@ impl Connection {
             builder.set_limit(profile.limit() - aead_expansion);
             builder.enable_padding(needs_padding);
             debug_assert!(builder.limit() <= 2048);
-            if builder.remaining() < 2 {
+            if builder.is_full() {
                 encoder = builder.abort();
                 break;
             }
@@ -2140,8 +2140,19 @@ impl Connection {
                 .borrow_mut()
                 .set_reset_token(reset_token);
 
-            let mad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
-            self.paths.primary().borrow_mut().set_max_ack_delay(mad);
+            let max_ad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
+            let min_ad = if remote.has_value(tparams::MIN_ACK_DELAY) {
+                Some(Duration::from_micros(
+                    remote.get_integer(tparams::MIN_ACK_DELAY),
+                ))
+            } else {
+                None
+            };
+            self.paths.primary().borrow_mut().set_ack_delay(
+                max_ad,
+                min_ad,
+                self.conn_params.get_ack_ratio(),
+            );
 
             let max_active_cids = remote.get_integer(tparams::ACTIVE_CONNECTION_ID_LIMIT);
             self.cid_manager.set_limit(max_active_cids);
@@ -2433,7 +2444,8 @@ impl Connection {
                 delay,
                 ignore_order,
             } => {
-                let delay = Duration::from_millis(delay);
+                self.stats.borrow_mut().frame_rx.ack_frequency += 1;
+                let delay = Duration::from_micros(delay);
                 if delay < GRANULARITY {
                     return Err(Error::ProtocolViolation);
                 }
@@ -2459,6 +2471,7 @@ impl Connection {
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                     RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.lost_retire_cid(*seqno),
+                    RecoveryToken::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
                     RecoveryToken::Stream(_)
                     | RecoveryToken::ResetStream { .. }
                     | RecoveryToken::StreamDataBlocked { .. }
@@ -2515,6 +2528,7 @@ impl Connection {
                     RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
                     RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
+                    RecoveryToken::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
                     RecoveryToken::Stream(_)
                     | RecoveryToken::ResetStream { .. }
                     | RecoveryToken::StopSending { .. } => self.streams.acked(token),

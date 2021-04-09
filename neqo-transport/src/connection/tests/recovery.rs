@@ -106,7 +106,10 @@ fn pto_works_ping() {
 
     // Nothing to do, should return callback
     let cb = client.process(None, now).callback();
-    assert_eq!(cb, DEFAULT_ACK_DELAY + GRANULARITY);
+    // The PTO timer is calculated with:
+    //   RTT + max(rttvar * 4, GRANULARITY) + max_ack_delay
+    // With zero RTT and rttvar, max_ack_delay is minimum too (GRANULARITY)
+    assert_eq!(cb, GRANULARITY * 2);
 
     // Process these by server, skipping pkt0
     let srv0 = server.process(Some(pkt1), now).dgram();
@@ -199,6 +202,8 @@ fn pto_initial() {
 /// A complete handshake that involves a PTO in the Handshake space.
 #[test]
 fn pto_handshake_complete() {
+    const HALF_RTT: Duration = Duration::from_millis(10);
+
     let mut now = now();
     // start handshake
     let mut client = default_client();
@@ -208,22 +213,22 @@ fn pto_handshake_complete() {
     let cb = client.process(None, now).callback();
     assert_eq!(cb, Duration::from_millis(300));
 
-    now += Duration::from_millis(10);
+    now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
 
-    now += Duration::from_millis(10);
+    now += HALF_RTT;
     let pkt = client.process(pkt, now).dgram();
 
     let cb = client.process(None, now).callback();
     // The client now has a single RTT estimate (20ms), so
     // the handshake PTO is set based on that.
-    assert_eq!(cb, Duration::from_millis(60));
+    assert_eq!(cb, HALF_RTT * 6);
 
-    now += Duration::from_millis(10);
+    now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
     assert!(pkt.is_none());
 
-    now += Duration::from_millis(10);
+    now += HALF_RTT;
     client.authenticated(AuthenticationStatus::Ok, now);
 
     qdebug!("---- client: SH..FIN -> FIN");
@@ -232,7 +237,7 @@ fn pto_handshake_complete() {
     assert_eq!(*client.state(), State::Connected);
 
     let cb = client.process(None, now).callback();
-    assert_eq!(cb, Duration::from_millis(60));
+    assert_eq!(cb, HALF_RTT * 6);
 
     let mut pto_counts = [0; MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -240,7 +245,7 @@ fn pto_handshake_complete() {
     // Wait for PTO to expire and resend a handshake packet.
     // Wait long enough that the 1-RTT PTO also fires.
     qdebug!("---- client: PTO");
-    now += Duration::from_millis(60);
+    now += HALF_RTT * 6;
     let pkt2 = client.process(None, now).dgram();
 
     pto_counts[0] = 1;
@@ -256,13 +261,13 @@ fn pto_handshake_complete() {
 
     // PTO has been doubled.
     let cb = client.process(None, now).callback();
-    assert_eq!(cb, Duration::from_millis(120));
+    assert_eq!(cb, HALF_RTT * 12);
 
     // We still have only a single PTO
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
     qdebug!("---- server: receive FIN and send ACK");
-    now += Duration::from_millis(10);
+    now += HALF_RTT;
     // Now let the server have pkt1 and expect an immediate Handshake ACK.
     // The output will be a Handshake packet with ACK and 1-RTT packet with
     // HANDSHAKE_DONE and (because of pkt3_1rtt) an ACK.
@@ -289,12 +294,14 @@ fn pto_handshake_complete() {
     assert_eq!(1, server.stats().dropped_rx - dropped_before2);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
-    now += Duration::from_millis(10);
+    now += HALF_RTT;
 
     // Let the client receive the ACK.
     // It should now be wait to acknowledge the HANDSHAKE_DONE.
     let cb = client.process(ack, now).callback();
-    assert_eq!(cb, DEFAULT_ACK_DELAY);
+    // The default ack delay is the RTT divided by the default ACK ratio of 4.
+    let expected_ack_delay = HALF_RTT * 2 / 4;
+    assert_eq!(cb, expected_ack_delay);
 
     // Let the ACK delay timer expire.
     now += cb;
@@ -305,7 +312,7 @@ fn pto_handshake_complete() {
     // We don't send another PING because the handshake space is done and there
     // is nothing to probe for.
 
-    assert_eq!(cb, LOCAL_IDLE_TIMEOUT - DEFAULT_ACK_DELAY);
+    assert_eq!(cb, LOCAL_IDLE_TIMEOUT - expected_ack_delay);
 }
 
 /// Test that PTO in the Handshake space contains the right frames.

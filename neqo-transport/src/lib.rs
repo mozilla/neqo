@@ -9,6 +9,7 @@
 
 use neqo_common::qinfo;
 
+mod ackrate;
 mod addr_valid;
 mod cc;
 mod cid;

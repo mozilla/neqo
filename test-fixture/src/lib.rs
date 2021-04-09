@@ -125,7 +125,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
     .expect("create a default client")
@@ -167,7 +167,7 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().ack_ratio(255),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})

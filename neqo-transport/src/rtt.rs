@@ -13,15 +13,16 @@ use std::time::{Duration, Instant};
 
 use neqo_common::{qlog::NeqoQlog, qtrace};
 
+use crate::ackrate::{AckRate, PeerAckDelay};
+use crate::packet::PacketBuilder;
 use crate::qlog::{self, QlogMetric};
+use crate::recovery::RecoveryToken;
+use crate::stats::FrameStats;
 use crate::tracking::PacketNumberSpace;
 
 /// The smallest time that the system timer (via `sleep()`, `nanosleep()`,
 /// `select()`, or similar) can reliably deliver; see `neqo_common::hrtime`.
 pub const GRANULARITY: Duration = Duration::from_millis(1);
-/// The default value for the maximum time a peer can delay acknowledgment
-/// of an ack-eliciting packet.
-const DEFAULT_MAX_ACK_DELAY: Duration = Duration::from_millis(25);
 // Defined in -recovery 6.2 as 333ms but using lower value.
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 
@@ -33,7 +34,7 @@ pub struct RttEstimate {
     smoothed_rtt: Duration,
     rttvar: Duration,
     min_rtt: Duration,
-    max_ack_delay: Duration,
+    ack_delay: PeerAckDelay,
 }
 
 impl RttEstimate {
@@ -54,8 +55,12 @@ impl RttEstimate {
         self.rttvar = rtt / 2;
     }
 
-    pub fn set_max_ack_delay(&mut self, mad: Duration) {
-        self.max_ack_delay = mad;
+    pub fn set_ack_delay(&mut self, ack_delay: PeerAckDelay) {
+        self.ack_delay = ack_delay;
+    }
+
+    pub fn update_ack_delay(&mut self, cwnd: usize, mtu: usize) {
+        self.ack_delay.update(cwnd, mtu, self.smoothed_rtt);
     }
 
     pub fn update(
@@ -67,8 +72,9 @@ impl RttEstimate {
         now: Instant,
     ) {
         // Limit ack delay by max_ack_delay if confirmed.
-        let ack_delay = if confirmed && ack_delay > self.max_ack_delay {
-            self.max_ack_delay
+        let mad = self.ack_delay.max();
+        let ack_delay = if confirmed && ack_delay > mad {
+            mad
         } else {
             ack_delay
         };
@@ -117,14 +123,11 @@ impl RttEstimate {
     }
 
     pub fn pto(&self, pn_space: PacketNumberSpace) -> Duration {
-        qtrace!("max_ack_delay is {:?}", self.max_ack_delay);
-        self.estimate()
-            + max(4 * self.rttvar, GRANULARITY)
-            + if pn_space == PacketNumberSpace::ApplicationData {
-                self.max_ack_delay
-            } else {
-                Duration::from_millis(0)
-            }
+        let mut t = self.estimate() + max(4 * self.rttvar, GRANULARITY);
+        if pn_space == PacketNumberSpace::ApplicationData {
+            t += self.ack_delay.max()
+        }
+        t
     }
 
     /// Calculate the loss delay based on the current estimate and the last
@@ -154,6 +157,23 @@ impl RttEstimate {
     pub fn minimum(&self) -> Duration {
         self.min_rtt
     }
+
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) {
+        self.ack_delay.write_frames(builder, tokens, stats);
+    }
+
+    pub fn frame_lost(&mut self, lost: &AckRate) {
+        self.ack_delay.frame_lost(lost);
+    }
+
+    pub fn frame_acked(&mut self, acked: &AckRate) {
+        self.ack_delay.frame_acked(acked);
+    }
 }
 
 impl Default for RttEstimate {
@@ -164,7 +184,7 @@ impl Default for RttEstimate {
             smoothed_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
             min_rtt: INITIAL_RTT,
-            max_ack_delay: DEFAULT_MAX_ACK_DELAY,
+            ack_delay: PeerAckDelay::default(),
         }
     }
 }

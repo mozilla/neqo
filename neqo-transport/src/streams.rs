@@ -172,40 +172,40 @@ impl Streams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         // Send `DATA_BLOCKED` as necessary.
         self.sender_fc
             .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+            .write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
 
         // Send `MAX_DATA` as necessary.
         self.receiver_fc
             .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+            .write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
 
-        self.recv.write_frames(builder, tokens, stats)?;
+        self.recv.write_frames(builder, tokens, stats);
 
-        self.remote_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+        self.remote_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
-        self.remote_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
-        self.local_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+        self.remote_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
 
-        self.local_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats)
+        self.local_streams_fc[StreamType::BiDi].write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
+        }
+
+        self.local_streams_fc[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
     pub fn write_frames(
@@ -214,15 +214,15 @@ impl Streams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         if priority == TransmissionPriority::Important {
-            self.write_maintenance_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
+            self.write_maintenance_frames(builder, tokens, stats);
+            if builder.is_full() {
+                return;
             }
         }
 
-        self.send.write_frames(priority, builder, tokens, stats)
+        self.send.write_frames(priority, builder, tokens, stats);
     }
 
     pub fn lost(&mut self, token: &RecoveryToken) {
