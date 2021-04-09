@@ -415,7 +415,13 @@ impl TransportParameters {
             if let Some(v_self) = self.params.get(k) {
                 match (v_self, v_rem) {
                     (TransportParameter::Integer(i_self), TransportParameter::Integer(i_rem)) => {
-                        if *i_self < *i_rem {
+                        if *k == MIN_ACK_DELAY {
+                            // MIN_ACK_DELAY is backwards:
+                            // it can only be reduced safely.
+                            if *i_self > *i_rem {
+                                return false;
+                            }
+                        } else if *i_self < *i_rem {
                             return false;
                         }
                     }
@@ -847,6 +853,7 @@ mod tests {
             INITIAL_MAX_STREAMS_BIDI,
             INITIAL_MAX_STREAMS_UNI,
             MAX_UDP_PAYLOAD_SIZE,
+            MIN_ACK_DELAY,
         ];
         for i in INTEGER_KEYS {
             tps_a.set(*i, TransportParameter::Integer(12));
@@ -856,17 +863,19 @@ mod tests {
         assert!(tps_a.ok_for_0rtt(&tps_b));
         assert!(tps_b.ok_for_0rtt(&tps_a));
 
-        // For each integer key, increase the value by one.
+        // For each integer key, choose a new value that will be accepted.
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
-            tps_b.set(*i, TransportParameter::Integer(13));
+            // Set a safe new value; reducing MIN_ACK_DELAY instead.
+            let safe_value = if *i == MIN_ACK_DELAY { 11 } else { 13 };
+            tps_b.set(*i, TransportParameter::Integer(safe_value));
             // If an increased value is remembered, then we can't attempt 0-RTT with these parameters.
             assert!(!tps_a.ok_for_0rtt(&tps_b));
             // If an increased value is lower, then we can attempt 0-RTT with these parameters.
             assert!(tps_b.ok_for_0rtt(&tps_a));
         }
 
-        // Drop integer values and check.
+        // Drop integer values and check that that is OK.
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
             tps_b.remove(*i);
@@ -877,8 +886,9 @@ mod tests {
         }
     }
 
+    /// `ACTIVE_CONNECTION_ID_LIMIT` can't be less than 2.
     #[test]
-    fn active_connection_id_limit_lt_2_is_error() {
+    fn active_connection_id_limit_min_2() {
         let mut tps = TransportParameters::default();
 
         // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport parameter.

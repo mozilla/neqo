@@ -882,4 +882,23 @@ mod tests {
         };
         just_dec(&f, "40af0a0547d001");
     }
+
+    #[test]
+    fn ack_frequency_ignore_error_error() {
+        let enc = Encoder::from_hex("40af0a0547d003"); // ignore_order of 3
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncodingError
+        );
+    }
+
+    /// Hopefully this test is eventually redundant.
+    #[test]
+    fn ack_frequency_zero_packets() {
+        let enc = Encoder::from_hex("40af0a000101"); // packets of 0
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncodingError
+        );
+    }
 }
