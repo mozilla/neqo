@@ -64,16 +64,19 @@ impl Streams {
     pub fn zero_rtt_rejected(&mut self) {
         self.send.clear();
         self.recv.clear();
-        self.remote_stream_limits = RemoteStreamLimits::new(
+        debug_assert_eq!(
+            self.remote_stream_limits[StreamType::BiDi].max_active(),
             self.tps
                 .borrow()
                 .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI),
+                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)
+        );
+        debug_assert_eq!(
+            self.remote_stream_limits[StreamType::UniDi].max_active(),
             self.tps
                 .borrow()
                 .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI),
-            self.role,
+                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
