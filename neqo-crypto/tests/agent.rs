@@ -428,7 +428,26 @@ fn ech_retry() {
     cfg[6] ^= 0x94;
     client.enable_ech(&cfg).unwrap();
 
-    connect_fail(&mut client, &mut server);
+    // Long version of connect() so that we can check the state.
+    let records = client.handshake_raw(now(), None).unwrap(); // ClientHello
+    let records = forward_records(now(), &mut server, records).unwrap(); // ServerHello...
+    let records = forward_records(now(), &mut client, records).unwrap(); // (empty)
+    assert!(records.is_empty());
+
+    // The client should now be expecting authentication.
+    assert_eq!(
+        *client.state(),
+        HandshakeState::EchFallbackAuthenticationPending(String::from(PUBLIC_NAME))
+    );
+    client.authenticated(AuthenticationStatus::Ok);
+    let updated_config = if let Err(Error::EchRetry(c)) = client.handshake_raw(now(), None) {
+        c
+    } else {
+        panic!(
+            "Handshake should fail with EchRetry, state is instead {:?}",
+            client.state()
+        );
+    };
     assert_eq!(
         client
             .preinfo()
@@ -438,15 +457,9 @@ fn ech_retry() {
             .unwrap(),
         PUBLIC_NAME
     );
-
-    let updated_config = if let HandshakeState::Failed(Error::EchRetry(c)) = client.state() {
-        c
-    } else {
-        panic!(
-            "Handshake state should be EchRetry, is {:?}",
-            client.state()
-        );
-    };
+    // We don't forward alerts, so we can't tell the server about them.
+    // An ech_required alert should be set though.
+    assert_eq!(client.alert(), Some(&121));
 
     let mut server = Server::new(&["key"]).unwrap();
     server.enable_ech(CONFIG_ID, PUBLIC_NAME, &sk, &pk).unwrap();

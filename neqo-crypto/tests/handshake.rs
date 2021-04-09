@@ -9,6 +9,7 @@ use std::mem;
 use std::time::Instant;
 use test_fixture::{anti_replay, fixture_init, now};
 
+/// Consume records until the handshake state changes.
 pub fn forward_records(
     now: Instant,
     agent: &mut SecretAgent,

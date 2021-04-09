@@ -136,6 +136,9 @@ impl Error {
             Self::ApplicationError => ERROR_APPLICATION_CLOSE,
             Self::NoAvailablePath => 16,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
+            // As we have a special error code for ECH fallbacks, we lose the alert.
+            // Send the server "ech_required" directly.
+            Self::EchRetry(_) => 0x100 + 121,
             // All the rest are internal errors.
             _ => 1,
         }

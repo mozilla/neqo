@@ -2269,6 +2269,9 @@ impl Connection {
         match self.crypto.handshake(now, space, data)? {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
             HandshakeState::AuthenticationPending => self.events.authentication_needed(),
+            HandshakeState::EchFallbackAuthenticationPending(public_name) => self
+                .events
+                .ech_fallback_authentication_needed(public_name.clone()),
             HandshakeState::Complete(_) => {
                 if !self.state.connected() {
                     self.set_connected(now)?;

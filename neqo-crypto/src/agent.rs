@@ -42,6 +42,10 @@ pub enum HandshakeState {
     New,
     InProgress,
     AuthenticationPending,
+    /// When encrypted client hello is enabled, the server might engage a fallback.
+    /// This is the status that is returned.  The included value is the public
+    /// name of the server, which should be used to validated the certificate.
+    EchFallbackAuthenticationPending(String),
     Authenticated(PRErrorCode),
     Complete(SecretAgentInfo),
     Failed(Error),
@@ -56,6 +60,14 @@ impl HandshakeState {
     #[must_use]
     pub fn is_final(&self) -> bool {
         matches!(self, Self::Complete(_) | Self::Failed(_))
+    }
+
+    #[must_use]
+    pub fn authentication_needed(&self) -> bool {
+        matches!(
+            self,
+            Self::AuthenticationPending | Self::EchFallbackAuthenticationPending(_)
+        )
     }
 }
 
@@ -164,6 +176,8 @@ impl SecretAgentPreInfo {
     /// When the public name is not valid UTF-8.  (Note: names should be ASCII.)
     pub fn ech_public_name(&self) -> Res<Option<&str>> {
         if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 {
+            Ok(None)
+        } else if self.info.echPublicName.is_null() {
             Ok(None)
         } else {
             let n = unsafe { CStr::from_ptr(self.info.echPublicName) };
@@ -581,10 +595,10 @@ impl SecretAgent {
     }
 
     /// Call this function to mark the peer as authenticated.
-    /// Only call this function if `handshake/handshake_raw` returns
-    /// `HandshakeState::AuthenticationPending`, or it will panic.
+    /// # Panics
+    /// If authentication is not pending for any reason.
     pub fn authenticated(&mut self, status: AuthenticationStatus) {
-        assert_eq!(self.state, HandshakeState::AuthenticationPending);
+        assert!(self.state.authentication_needed());
         *self.auth_required = false;
         self.state = HandshakeState::Authenticated(status.into());
     }
@@ -603,7 +617,11 @@ impl SecretAgent {
     fn update_state(&mut self, res: Res<()>) -> Res<()> {
         self.state = if is_blocked(&res) {
             if *self.auth_required {
-                HandshakeState::AuthenticationPending
+                if let Some(public_name) = self.preinfo()?.ech_public_name()? {
+                    HandshakeState::EchFallbackAuthenticationPending(public_name.to_owned())
+                } else {
+                    HandshakeState::AuthenticationPending
+                }
             } else {
                 HandshakeState::InProgress
             }

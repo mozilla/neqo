@@ -571,6 +571,9 @@ impl Http3Client {
                     self.events.new_requests_creatable(stream_type)
                 }
                 ConnectionEvent::AuthenticationNeeded => self.events.authentication_needed(),
+                ConnectionEvent::EchFallbackAuthenticationNeeded { public_name } => {
+                    self.events.ech_fallback_authentication_needed(public_name)
+                }
                 ConnectionEvent::StateChange(state) => {
                     if self
                         .base_handler
