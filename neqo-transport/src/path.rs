@@ -896,13 +896,13 @@ impl Path {
         lost_packets: &[SentPacket],
     ) {
         debug_assert!(self.is_primary());
-        let congestion = self.sender.on_packets_lost(
+        let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,
             self.rtt.pto(space), // Important: the base PTO, not adjusted.
             lost_packets,
         );
-        if congestion {
+        if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
         }
     }

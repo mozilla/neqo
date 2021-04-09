@@ -61,8 +61,8 @@ mod state;
 
 use idle::IdleTimeout;
 pub use idle::LOCAL_IDLE_TIMEOUT;
-pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
+pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
 use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};

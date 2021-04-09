@@ -258,13 +258,13 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         qdebug!([self], "Pkts lost {}", lost_packets.len());
 
         let congestion = self.on_congestion_event(lost_packets.last().unwrap());
-        self.detect_persistent_congestion(
+        let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
             lost_packets,
         );
-        congestion
+        congestion || persistent_congestion
     }
 
     fn discard(&mut self, pkt: &SentPacket) {
@@ -383,9 +383,9 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
-    ) {
+    ) -> bool {
         if first_rtt_sample_time.is_none() {
-            return;
+            return false;
         }
 
         let pc_period = pto * PERSISTENT_CONG_THRESH;
@@ -421,12 +421,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                         &mut self.qlog,
                         &[QlogMetric::CongestionWindow(self.congestion_window)],
                     );
-                    return;
+                    return true;
                 }
             } else {
                 start = Some(p.time_sent);
             }
         }
+        false
     }
 
     #[must_use]

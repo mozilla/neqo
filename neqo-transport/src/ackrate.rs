@@ -40,15 +40,7 @@ impl AckRate {
         let packets = max(MIN_PACKETS, min(packets, MAX_PACKETS)) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         let delay = max(minimum, min(delay, MAX_DELAY));
-        qtrace!(
-            "Set ACK rate: {}/{}/{}, {:?} = {}, {:?}",
-            cwnd,
-            mtu,
-            ratio,
-            rtt,
-            packets,
-            delay,
-        );
+        qtrace!("AckRate inputs: {}/{}/{}, {:?}", cwnd, mtu, ratio, rtt);
         Self { packets, delay }
     }
 
@@ -66,12 +58,14 @@ impl AckRate {
     }
 
     /// Determine whether to send an update frame.
-    pub fn needs_update(&self, other: &Self) -> bool {
+    pub fn needs_update(&self, target: &Self) -> bool {
+        if self.packets != target.packets {
+            return true;
+        }
         // Allow more flexibility for delays, as those can change
         // by small amounts fairly easily.
-        self.packets != other.packets
-            || other.delay * 2 < self.delay
-            || other.delay > self.delay * 2
+        let delta = target.delay / 4;
+        target.delay + delta < self.delay || target.delay > self.delay + delta
     }
 }
 
@@ -94,7 +88,12 @@ impl FlexibleAckRate {
         mtu: usize,
         rtt: Duration,
     ) -> Self {
-        qtrace!("ACK rate: {:?} {:?}", max_ack_delay, min_ack_delay);
+        qtrace!(
+            "FlexibleAckRate: {:?} {:?} {}",
+            max_ack_delay,
+            min_ack_delay,
+            ratio
+        );
         let ratio = max(ACK_RATIO_SCALE, ratio); // clamp it
         Self {
             current: AckRate {
@@ -119,6 +118,7 @@ impl FlexibleAckRate {
             && self.current.needs_update(&self.target)
             && self.target.write_frame(builder, self.next_frame_seqno)
         {
+            qtrace!("FlexibleAckRate: write frame {:?}", self.target);
             self.frame_outstanding = true;
             self.next_frame_seqno += 1;
             tokens.push(RecoveryToken::AckFrequency(self.target.clone()));
@@ -137,6 +137,7 @@ impl FlexibleAckRate {
 
     fn update(&mut self, cwnd: usize, mtu: usize, rtt: Duration) {
         self.target = AckRate::new(self.min_ack_delay, self.ratio, cwnd, mtu, rtt);
+        qtrace!("FlexibleAckRate: {:?} -> {:?}", self.current, self.target);
     }
 
     fn peer_ack_delay(&self) -> Duration {

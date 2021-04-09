@@ -163,7 +163,9 @@ fn handshake(
         now += rtt / 2;
         mem::swap(&mut a, &mut b);
     }
-    let _ = a.process(input, now);
+    if let Some(d) = input {
+        a.process_input(d, now);
+    }
     now
 }
 
@@ -277,21 +279,8 @@ fn connect_force_idle(client: &mut Connection, server: &mut Connection) {
     connect_rtt_idle(client, server, Duration::new(0, 0));
 }
 
-/// This fills the congestion window from a single source.
-/// As the pacer will interfere with this, this moves time forward
-/// as `Output::Callback` is received.  Because it is hard to tell
-/// from the return value whether a timeout is an ACK delay, PTO, or
-/// pacing, this looks at the congestion window to tell when to stop.
-/// Returns a list of datagrams and the new time.
-fn fill_cwnd(c: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram>, Instant) {
+fn fill_stream(c: &mut Connection, stream: u64) {
     const BLOCK_SIZE: usize = 4_096;
-    // Train wreck function to get the remaining congestion window on the primary path.
-    fn cwnd(c: &Connection) -> usize {
-        c.paths.primary().borrow().sender().cwnd_avail()
-    }
-
-    qtrace!("fill_cwnd starting cwnd: {}", cwnd(c));
-
     loop {
         let bytes_sent = c.stream_send(stream, &[0x42; BLOCK_SIZE]).unwrap();
         qtrace!("fill_cwnd wrote {} bytes", bytes_sent);
@@ -299,6 +288,22 @@ fn fill_cwnd(c: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram
             break;
         }
     }
+}
+
+/// This fills the congestion window from a single source.
+/// As the pacer will interfere with this, this moves time forward
+/// as `Output::Callback` is received.  Because it is hard to tell
+/// from the return value whether a timeout is an ACK delay, PTO, or
+/// pacing, this looks at the congestion window to tell when to stop.
+/// Returns a list of datagrams and the new time.
+fn fill_cwnd(c: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram>, Instant) {
+    // Train wreck function to get the remaining congestion window on the primary path.
+    fn cwnd(c: &Connection) -> usize {
+        c.paths.primary().borrow().sender().cwnd_avail()
+    }
+
+    qtrace!("fill_cwnd starting cwnd: {}", cwnd(c));
+    fill_stream(c, stream);
 
     let mut total_dgrams = Vec::new();
     loop {

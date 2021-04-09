@@ -67,7 +67,7 @@ impl PacketSender {
         self.cc.on_packets_acked(acked_pkts, min_rtt, now);
     }
 
-    /// Called when packets are lost.  Returns true if this was a congestion event.
+    /// Called when packets are lost.  Returns true if the congestion window was reduced.
     pub fn on_packets_lost(
         &mut self,
         first_rtt_sample_time: Option<Instant>,
