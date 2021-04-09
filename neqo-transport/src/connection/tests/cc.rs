@@ -630,9 +630,11 @@ fn ack_rate_exit_slow_start() {
     assert_eq!(client.stats().frame_tx.ack_frequency, 1);
 }
 
-/// When the congestion window collapses, the
+/// When the congestion window collapses, `ACK_FREQUENCY` is updated.
 #[test]
 fn ack_rate_persistent_congestion() {
+    // Use a configuration that results in the value being set after exiting
+    // the handshake.
     const RTT: Duration = Duration::from_millis(3);
     let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
     let mut server = default_server();
