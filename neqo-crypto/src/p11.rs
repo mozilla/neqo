@@ -18,7 +18,8 @@ use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_int, c_uint};
 use std::ptr::null_mut;
 
-#[allow(clippy::unreadable_literal)]
+#[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
+#[allow(clippy::unreadable_literal, clippy::upper_case_acronyms)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }
@@ -76,6 +77,8 @@ impl PublicKey {
     ///
     /// # Errors
     /// When the key cannot be exported, which can be because the type is not supported.
+    /// # Panics
+    /// When keys are too large to fit in `c_uint/usize`.  So only on programming error.
     pub fn key_data(&self) -> Res<Vec<u8>> {
         let mut buf = vec![0; 100];
         let mut len: c_uint = 0;
@@ -119,12 +122,14 @@ impl PrivateKey {
     /// # Errors
     /// When the key cannot be exported, which can be because the type is not supported
     /// or because the key data cannot be extracted from the PKCS#11 module.
+    /// # Panics
+    /// When the values are too large to fit.  So never.
     pub fn key_data(&self) -> Res<Vec<u8>> {
         let mut key_item = Item::make_empty();
         secstatus_to_res(unsafe {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePrivKey,
-                **self as *mut _,
+                (**self).cast(),
                 CK_ATTRIBUTE_TYPE::from(CKA_VALUE),
                 &mut key_item,
             )
@@ -249,6 +254,8 @@ impl Item {
 }
 
 /// Generate a randomized buffer.
+/// # Panics
+/// When `size` is too large or NSS fails.
 #[must_use]
 pub fn random(size: usize) -> Vec<u8> {
     let mut buf = vec![0; size];

@@ -20,7 +20,9 @@ fn assert_default_version(dec: &mut Decoder) {
     assert_eq!(version, QuicVersion::default());
 }
 
-// Do a simple decode of the datagram to verify that it is coalesced.
+/// Do a simple decode of the datagram to verify that it is coalesced.
+/// # Panics
+/// If the tests fail.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
     assert!(payload.len() >= 1200);
     let mut dec = Decoder::from(payload);
@@ -36,10 +38,14 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
     assert_eq!(zrtt_type & PACKET_TYPE_MASK, 0b1001_0000);
 }
 
+/// # Panics
+/// If the tests fail.
 pub fn assert_retry(payload: &[u8]) {
     assert_eq!(payload[0] & PACKET_TYPE_MASK, 0b1011_0000);
 }
 
+/// # Panics
+/// If the tests fail.
 pub fn assert_initial(payload: &[u8], expect_token: bool) {
     assert_eq!(payload[0] & PACKET_TYPE_MASK, 0b1000_0000);
 
@@ -52,6 +58,8 @@ pub fn assert_initial(payload: &[u8], expect_token: bool) {
     assert_eq!(expect_token, !token.is_empty());
 }
 
+/// # Panics
+/// If the tests fail.
 pub fn assert_no_1rtt(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
     while let Some(b1) = dec.decode_byte() {

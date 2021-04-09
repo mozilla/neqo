@@ -56,12 +56,16 @@ pub use self::ssl::Opt;
 use self::once::OnceResult;
 
 use std::ffi::CString;
-use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
 mod nss {
-    #![allow(clippy::redundant_static_lifetimes, non_upper_case_globals)]
+    #![allow(
+        non_upper_case_globals,
+        clippy::redundant_static_lifetimes,
+        clippy::upper_case_acronyms
+    )]
+    #![allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
@@ -123,6 +127,9 @@ fn enable_ssl_trace() {
         .expect("SSL_OptionGetDefault failed");
 }
 
+/// Initialize with a database.
+/// # Panics
+/// If NSS cannot be initialized.
 pub fn init_db<P: Into<PathBuf>>(dir: P) {
     time::init();
     unsafe {
@@ -140,7 +147,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
                 dircstr.as_ptr(),
                 empty.as_ptr(),
                 empty.as_ptr(),
-                nss::SECMOD_DB.as_ptr() as *const c_char,
+                nss::SECMOD_DB.as_ptr().cast(),
                 nss::NSS_INIT_READONLY,
             ))
             .expect("NSS_Initialize failed");
@@ -162,7 +169,8 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
     }
 }
 
-/// Panic if NSS isn't initialized.
+/// # Panics
+/// If NSS isn't initialized.
 pub fn assert_initialized() {
     unsafe {
         INITIALIZED.call_once(|| {

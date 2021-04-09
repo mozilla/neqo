@@ -13,7 +13,7 @@ use crate::ssl::{PRBool, PRFileDesc};
 use neqo_common::qtrace;
 use std::convert::TryFrom;
 use std::ffi::CString;
-use std::os::raw::{c_char, c_uint, c_void};
+use std::os::raw::{c_char, c_uint};
 use std::ptr::null_mut;
 
 pub use crate::p11::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId};
@@ -83,6 +83,8 @@ pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
 ///
 /// # Errors
 /// When NSS fails to generate a key pair or when the KEM is not supported.
+/// # Panics
+/// When underlying types aren't large enough to hold keys.  So never.
 pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     let slot = Slot::internal()?;
 
@@ -103,7 +105,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
-                &mut Item::wrap(&params) as *mut _ as *mut c_void,
+                (&mut Item::wrap(&params) as *mut SECItem).cast(),
                 &mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_INSENSITIVE | p11::PK11_ATTR_PUBLIC,
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
@@ -120,7 +122,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
                 p11::CK_MECHANISM_TYPE::from(p11::CKM_EC_KEY_PAIR_GEN),
-                &mut Item::wrap(&params) as *mut _ as *mut c_void,
+                (&mut Item::wrap(&params) as *mut SECItem).cast(),
                 &mut public_ptr,
                 p11::PK11_ATTR_SESSION | p11::PK11_ATTR_SENSITIVE | p11::PK11_ATTR_PRIVATE,
                 p11::CK_FLAGS::from(p11::CKF_DERIVE),
