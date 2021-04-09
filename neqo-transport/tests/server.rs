@@ -7,6 +7,8 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
+mod common;
+
 use common::{
     apply_header_protection, client_initial_aead_and_hp, connect, connected_server,
     decode_initial_header, default_server, get_ticket, remove_header_protection,
@@ -28,8 +30,6 @@ use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
-
-mod common;
 
 /// Take a pair of connections in any state and complete the handshake.
 /// The `datagram` argument is a packet that was received from the server.

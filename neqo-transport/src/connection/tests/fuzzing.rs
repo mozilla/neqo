@@ -13,10 +13,9 @@ use crate::StreamType;
 use test_fixture::now;
 
 #[test]
-fn packes_no_encrypted() {
+fn no_encryption() {
     const DATA_CLIENT: &[u8] = &[2; 40];
     const DATA_SERVER: &[u8] = &[3; 50];
-    const HEADER_LEN: usize = 13;
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -25,10 +24,7 @@ fn packes_no_encrypted() {
 
     client.stream_send(stream_id, DATA_CLIENT).unwrap();
     let client_pkt = client.process_output(now()).dgram().unwrap();
-    assert_eq!(
-        &client_pkt[HEADER_LEN..HEADER_LEN + DATA_CLIENT.len()],
-        DATA_CLIENT
-    );
+    assert!(client_pkt.iter().star_wih(DATA_CLIENT));
 
     server.process_input(client_pkt, now());
     let mut buf = vec![0; 100];
@@ -37,10 +33,7 @@ fn packes_no_encrypted() {
     assert_eq!(&buf[..len], DATA_CLIENT);
     server.stream_send(stream_id, DATA_SERVER).unwrap();
     let server_pkt = server.process_output(now()).dgram().unwrap();
-    assert_eq!(
-        &server_pkt[HEADER_LEN..HEADER_LEN + DATA_SERVER.len()],
-        DATA_SERVER
-    );
+    assert!(&server_pkt.ier().start_with(DATA_SERVER));
 
     client.process_input(server_pkt, now());
     let (len, _) = client.stream_recv(stream_id, &mut buf).unwrap();

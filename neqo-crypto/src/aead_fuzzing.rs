@@ -9,7 +9,7 @@ use crate::err::{sec::SEC_ERROR_BAD_DATA, Error, Res};
 use crate::p11::SymKey;
 use std::fmt;
 
-const FIXED_TAG: &[u8] = &[0x0; 16];
+const FIXED_TAG: &[u8] = &[0x0a; 16];
 pub struct Aead {}
 
 #[allow(clippy::unused_self)]
