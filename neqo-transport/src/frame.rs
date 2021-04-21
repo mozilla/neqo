@@ -255,6 +255,21 @@ impl<'a> Frame<'a> {
         }
     }
 
+    pub fn is_stream(&self) -> bool {
+        matches!(
+            self,
+            Self::ResetStream { .. }
+                | Self::StopSending { .. }
+                | Self::Stream { .. }
+                | Self::MaxData { .. }
+                | Self::MaxStreamData { .. }
+                | Self::MaxStreams { .. }
+                | Self::DataBlocked { .. }
+                | Self::StreamDataBlocked { .. }
+                | Self::StreamsBlocked { .. }
+        )
+    }
+
     pub fn stream_type(fin: bool, nonzero_offset: bool, fill: bool) -> u64 {
         let mut t = FRAME_TYPE_STREAM;
         if fin {
