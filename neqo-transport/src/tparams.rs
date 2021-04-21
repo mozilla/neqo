@@ -47,7 +47,7 @@ tpids! {
     INITIAL_SOURCE_CONNECTION_ID = 0x0f,
     RETRY_SOURCE_CONNECTION_ID = 0x10,
     GREASE_QUIC_BIT = 0x2ab2,
-    MIN_ACK_DELAY = 0xff02de1a,
+    MIN_ACK_DELAY = 0xff02_de1a,
 }
 
 #[derive(Clone, Debug)]
