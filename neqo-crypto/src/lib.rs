@@ -17,7 +17,12 @@ mod exp;
 #[macro_use]
 mod p11;
 
-pub mod aead;
+#[cfg(not(feature = "fuzzing"))]
+mod aead;
+
+#[cfg(feature = "fuzzing")]
+mod aead_fuzzing;
+
 pub mod agent;
 mod agentio;
 mod auth;
@@ -34,6 +39,15 @@ mod secrets;
 pub mod selfencrypt;
 mod ssl;
 mod time;
+
+#[cfg(not(feature = "fuzzing"))]
+pub use self::aead::Aead;
+
+#[cfg(feature = "fuzzing")]
+pub use self::aead_fuzzing::Aead;
+
+#[cfg(feature = "fuzzing")]
+pub use self::aead_fuzzing::FIXED_TAG_FUZZING;
 
 pub use self::agent::{
     Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken, SecretAgent,

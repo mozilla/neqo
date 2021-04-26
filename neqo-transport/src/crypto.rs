@@ -13,12 +13,12 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
+
 use neqo_crypto::{
-    aead::Aead, hkdf, hp::HpKey, Agent, AntiReplay, Cipher, Epoch, HandshakeState, Record,
-    RecordList, ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
-    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
-    TLS_VERSION_1_3,
+    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, HandshakeState, Record, RecordList,
+    ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_EPOCH_APPLICATION_DATA,
+    TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT, TLS_VERSION_1_3,
 };
 
 use crate::packet::{PacketBuilder, PacketNumber, QuicVersion};
@@ -616,7 +616,7 @@ impl CryptoDxState {
         Ok(res.to_vec())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "fuzzing")))]
     pub(crate) fn test_default() -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1058,6 +1058,7 @@ impl CryptoStates {
     }
 
     /// Make some state for removing protection in tests.
+    #[cfg(not(feature = "fuzzing"))]
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         let read = |epoch| {
@@ -1088,7 +1089,7 @@ impl CryptoStates {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(not(feature = "fuzzing"), test))]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
             0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
