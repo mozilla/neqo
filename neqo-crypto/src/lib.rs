@@ -46,6 +46,9 @@ pub use self::aead::Aead;
 #[cfg(feature = "fuzzing")]
 pub use self::aead_fuzzing::Aead;
 
+#[cfg(feature = "fuzzing")]
+pub use self::aead_fuzzing::FIXED_TAG_FUZZING;
+
 pub use self::agent::{
     Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken, SecretAgent,
     SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,

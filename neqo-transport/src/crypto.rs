@@ -1089,8 +1089,7 @@ impl CryptoStates {
         }
     }
 
-    #[cfg(not(feature = "fuzzing"))]
-    #[cfg(test)]
+    #[cfg(all(not(feature = "fuzzing"), test))]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
             0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
