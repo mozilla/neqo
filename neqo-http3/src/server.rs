@@ -13,7 +13,7 @@ use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEve
 use crate::settings::HttpZeroRttChecker;
 use crate::Res;
 use neqo_common::{qtrace, Datagram};
-use neqo_crypto::{AntiReplay, Cipher};
+use neqo_crypto::{AntiReplay, Cipher, ZeroRttChecker};
 use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{
@@ -54,7 +54,7 @@ impl Http3Server {
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         qpack_settings: QpackSettings,
-        zero_rtt_checker: Option<HttpZeroRttChecker>,
+        zero_rtt_checker: Option<Box<dyn ZeroRttChecker>>,
     ) -> Res<Self> {
         Ok(Self {
             server: Server::new(
@@ -63,7 +63,7 @@ impl Http3Server {
                 protocols,
                 anti_replay,
                 if let Some(c) = zero_rtt_checker {
-                    Box::new(c)
+                    c
                 } else {
                     Box::new(HttpZeroRttChecker::new(qpack_settings))
                 },
@@ -237,9 +237,9 @@ fn prepare_data(
 #[cfg(test)]
 mod tests {
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, Header, HttpZeroRttChecker};
+    use crate::{Error, Header};
     use neqo_common::event::Provider;
-    use neqo_crypto::AuthenticationStatus;
+    use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_qpack::QpackSettings;
     use neqo_transport::{
@@ -1135,12 +1135,16 @@ mod tests {
         assert_eq!(requests.len(), 2);
     }
 
+    #[derive(Debug, Default)]
+    pub struct RejectZeroRtt {}
+    impl ZeroRttChecker for RejectZeroRtt {
+        fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
+            ZeroRttCheckResult::Reject
+        }
+    }
+
     #[test]
     fn reject_zero_server() {
-        const DIFFERENT_SETTINGS: QpackSettings = QpackSettings {
-            max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
-            ..DEFAULT_SETTINGS
-        };
         fixture_init();
         let mut server = Http3Server::new(
             now(),
@@ -1149,7 +1153,7 @@ mod tests {
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             DEFAULT_SETTINGS,
-            Some(HttpZeroRttChecker::new(DIFFERENT_SETTINGS)),
+            Some(Box::new(RejectZeroRtt::default())),
         )
         .expect("create a server");
         let mut client = create_client_and_connect_with_server(&mut server);
