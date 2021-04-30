@@ -62,11 +62,8 @@ impl Http3Server {
                 certs,
                 protocols,
                 anti_replay,
-                if let Some(c) = zero_rtt_checker {
-                    c
-                } else {
-                    Box::new(HttpZeroRttChecker::new(qpack_settings))
-                },
+                zero_rtt_checker
+                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(qpack_settings))),
                 cid_manager,
                 ConnectionParameters::default(),
             )?,
@@ -457,7 +454,7 @@ mod tests {
     }
 
     // Connect transport, send and receive settings.
-    fn create_client_and_connect_with_server(server: &mut Http3Server) -> PeerConnection {
+    fn connect_to(server: &mut Http3Server) -> PeerConnection {
         let mut neqo_trans_conn = connect_and_receive_settings_with_server(server);
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let mut sent = neqo_trans_conn.stream_send(
@@ -493,7 +490,7 @@ mod tests {
 
     fn connect() -> (Http3Server, PeerConnection) {
         let mut server = default_server();
-        let client = create_client_and_connect_with_server(&mut server);
+        let client = connect_to(&mut server);
         (server, client)
     }
 
@@ -1156,7 +1153,7 @@ mod tests {
             Some(Box::new(RejectZeroRtt::default())),
         )
         .expect("create a server");
-        let mut client = create_client_and_connect_with_server(&mut server);
+        let mut client = connect_to(&mut server);
         let token = client.events().find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
                 Some(token)
