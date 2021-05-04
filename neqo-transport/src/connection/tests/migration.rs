@@ -4,10 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Output, State, StreamType};
+use super::super::{Connection, Output, State, StreamType, ACK_RATIO_SCALE};
 use super::{
-    connect_fail, connect_force_idle, default_client, default_server, maybe_authenticate,
-    new_client, new_server, send_something,
+    ack_bytes, connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
+    fill_cwnd, increase_cwnd, maybe_authenticate, new_client, new_server, send_something,
+    DEFAULT_RTT,
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::{self, PreferredAddress, TransportParameter};
@@ -220,6 +221,62 @@ fn migrate_immediate() {
     now = skip_pacing(&mut client, now);
     let client3 = send_something(&mut client, now);
     assert_v4_path(&client3, false);
+}
+
+/// RTT estimates for paths should be preserved across migrations.
+#[test]
+fn migrate_rtt() {
+    const RTT: Duration = Duration::from_millis(20);
+    let mut client = default_client();
+    let mut server = default_server();
+    let now = connect_rtt_idle(&mut client, &mut server, RTT);
+
+    client
+        .migrate(Some(addr_v4()), Some(addr_v4()), true, now)
+        .unwrap();
+    // The RTT might be increased for the new path, so allow a little flexibility.
+    let rtt = client.paths.rtt();
+    assert!(rtt > RTT);
+    assert!(rtt < RTT * 2);
+}
+
+/// ACK delay calculations are path-specific,
+/// so check that they can be sent on new paths.
+#[test]
+fn migrate_ack_delay() {
+    // Have the client send ACK_FREQUENCY frames at a normal-ish rate.
+    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    client
+        .migrate(Some(addr_v4()), Some(addr_v4()), true, now)
+        .unwrap();
+
+    let client1 = send_something(&mut client, now);
+    assert_v4_path(&client1, true); // Contains PATH_CHALLENGE.
+    let client2 = send_something(&mut client, now);
+    assert_v4_path(&client2, false); // Doesn't.  Is dropped.
+    now += DEFAULT_RTT / 2;
+    server.process_input(client1, now);
+
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    let now = increase_cwnd(&mut client, &mut server, stream, now);
+    let now = increase_cwnd(&mut client, &mut server, stream, now);
+    let now = increase_cwnd(&mut client, &mut server, stream, now);
+
+    // Now lose a packet and force the client to update
+    let (mut pkts, mut now) = fill_cwnd(&mut client, stream, now);
+    pkts.remove(0);
+    now += DEFAULT_RTT / 2;
+    let ack = ack_bytes(&mut server, stream, pkts, now);
+
+    // After noticing this new loss, the client sends ACK_FREQUENCY.
+    // It has sent a few before (as we dropped `client2`), so ignore those.
+    let ad_before = client.stats().frame_tx.ack_frequency;
+    let af = client.process(Some(ack), now).dgram();
+    assert!(af.is_some());
+    assert_eq!(client.stats().frame_tx.ack_frequency, ad_before + 1);
 }
 
 #[test]

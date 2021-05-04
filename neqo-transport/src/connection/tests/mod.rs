@@ -331,6 +331,69 @@ fn fill_cwnd(c: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram
     (total_dgrams, now)
 }
 
+/// This function is like the combination of `fill_cwnd` and `ack_bytes`.
+/// However, it acknowledges everything inline and preserves an RTT of `DEFAULT_RTT`.
+fn increase_cwnd(
+    sender: &mut Connection,
+    receiver: &mut Connection,
+    stream: u64,
+    mut now: Instant,
+) -> Instant {
+    fill_stream(sender, stream);
+    loop {
+        let pkt = sender.process_output(now);
+        match pkt {
+            Output::Datagram(dgram) => {
+                receiver.process_input(dgram, now + DEFAULT_RTT / 2);
+            }
+            Output::Callback(t) => {
+                if t < DEFAULT_RTT {
+                    now += t;
+                } else {
+                    break; // We're on PTO now.
+                }
+            }
+            Output::None => panic!(),
+        }
+    }
+
+    // Now acknowledge all those packets at once.
+    now += DEFAULT_RTT / 2;
+    let ack = receiver.process_output(now).dgram();
+    now += DEFAULT_RTT / 2;
+    sender.process_input(ack.unwrap(), now);
+    now
+}
+
+/// Receive multiple packets and generate an ack-only packet.
+/// # Panics
+/// The caller is responsible for ensuring that `dest` has received
+/// enough data that it wants to generate an ACK.  This panics if
+/// no ACK frame is generated.
+fn ack_bytes<D>(dest: &mut Connection, stream: u64, in_dgrams: D, now: Instant) -> Datagram
+where
+    D: IntoIterator<Item = Datagram>,
+    D::IntoIter: ExactSizeIterator,
+{
+    let mut srv_buf = [0; 4_096];
+
+    let in_dgrams = in_dgrams.into_iter();
+    qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
+    for dgram in in_dgrams {
+        dest.process_input(dgram, now);
+    }
+
+    loop {
+        let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
+        qtrace!([dest], "ack_bytes read {} bytes", bytes_read);
+        if bytes_read == 0 {
+            break;
+        }
+    }
+
+    dest.process_output(now).dgram().unwrap()
+}
+
 /// This magic number is the size of the client's CWND after the handshake completes.
 /// This is the same as the initial congestion window, because during the handshake
 /// the cc is app limited and cwnd is not increased.
