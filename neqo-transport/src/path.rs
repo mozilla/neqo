@@ -94,7 +94,7 @@ impl Paths {
             .unwrap_or_else(|| {
                 let mut p = Path::temporary(local, remote, cc, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
-                    p.set_initial_rtt(primary.borrow().rtt().estimate());
+                    p.prime_rtt(primary.borrow().rtt())
                 }
                 Rc::new(RefCell::new(p))
             })
@@ -854,8 +854,8 @@ impl Path {
     }
 
     /// Initialize the RTT for the path based on an existing estimate.
-    pub fn set_initial_rtt(&mut self, rtt: Duration) {
-        self.rtt.set_initial(rtt);
+    pub fn prime_rtt(&mut self, rtt: &RttEstimate) {
+        self.rtt.prime_rtt(rtt);
     }
 
     /// Record received bytes for the path.

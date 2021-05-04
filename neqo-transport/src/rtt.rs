@@ -38,6 +38,15 @@ pub struct RttEstimate {
 }
 
 impl RttEstimate {
+    fn init(&mut self, rtt: Duration) {
+        // Only allow this when there are no samples.
+        debug_assert!(self.first_sample_time.is_none());
+        self.latest_rtt = rtt;
+        self.min_rtt = rtt;
+        self.smoothed_rtt = rtt;
+        self.rttvar = rtt / 2;
+    }
+
     pub fn set_initial(&mut self, rtt: Duration) {
         qtrace!("initial RTT={:?}", rtt);
         if rtt >= GRANULARITY {
@@ -46,13 +55,10 @@ impl RttEstimate {
         }
     }
 
-    fn init(&mut self, rtt: Duration) {
-        // Only allow this when there are no samples.
-        debug_assert!(self.first_sample_time.is_none());
-        self.latest_rtt = rtt;
-        self.min_rtt = rtt;
-        self.smoothed_rtt = rtt;
-        self.rttvar = rtt / 2;
+    /// For a new path, prime the RTT based on the state of another path.
+    pub fn prime_rtt(&mut self, other: &Self) {
+        self.set_initial(other.smoothed_rtt + other.rttvar);
+        self.ack_delay = other.ack_delay.clone();
     }
 
     pub fn set_ack_delay(&mut self, ack_delay: PeerAckDelay) {

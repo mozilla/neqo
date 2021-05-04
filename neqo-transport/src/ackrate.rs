@@ -69,7 +69,7 @@ impl AckRate {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FlexibleAckRate {
     current: AckRate,
     target: AckRate,
@@ -145,7 +145,7 @@ impl FlexibleAckRate {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PeerAckDelay {
     Fixed(Duration),
     Flexible(FlexibleAckRate),

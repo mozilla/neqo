@@ -495,6 +495,12 @@ impl RecvdPackets {
             let ack_time = if immediate_ack {
                 now
             } else {
+                // Note that `ack_delay` can change and that won't take effect if
+                // we are waiting on the previous delay timer.
+                // If ACK delay increases, we might send an ACK a bit early;
+                // if ACK delay decreases, we might send an ACK a bit later.
+                // We could use min() here, but change is rare and the size
+                // of the change is very small.
                 self.ack_time.unwrap_or_else(|| now + self.ack_delay)
             };
             qdebug!([self], "Set ACK timer to {:?}", ack_time);
@@ -869,22 +875,6 @@ mod tests {
 
         // Anything other than packet 0 is acknowledged immediately.
         rp.set_received(*NOW, 1, true);
-        assert_eq!(Some(*NOW), rp.ack_time());
-        assert!(rp.ack_now(*NOW));
-    }
-
-    #[test]
-    fn ooo_no_ack_delay_gap() {
-        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
-        assert!(rp.ack_time().is_none());
-        assert!(!rp.ack_now(*NOW));
-
-        // Packet number 0 causes delayed acknowledgment.
-        rp.set_received(*NOW, 0, true);
-        assert_ne!(Some(*NOW), rp.ack_time());
-
-        // A gap causes immediate acknowledgment.
-        rp.set_received(*NOW, 2, true);
         assert_eq!(Some(*NOW), rp.ack_time());
         assert!(rp.ack_now(*NOW));
     }

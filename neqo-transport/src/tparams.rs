@@ -869,9 +869,10 @@ mod tests {
             // Set a safe new value; reducing MIN_ACK_DELAY instead.
             let safe_value = if *i == MIN_ACK_DELAY { 11 } else { 13 };
             tps_b.set(*i, TransportParameter::Integer(safe_value));
-            // If an increased value is remembered, then we can't attempt 0-RTT with these parameters.
+            // If the new value is not safe relative to the remembered value,
+            // then we can't attempt 0-RTT with these parameters.
             assert!(!tps_a.ok_for_0rtt(&tps_b));
-            // If an increased value is lower, then we can attempt 0-RTT with these parameters.
+            // The opposite situation is fine.
             assert!(tps_b.ok_for_0rtt(&tps_a));
         }
 
