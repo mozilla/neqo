@@ -4,81 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, ConnectionParameters, Output, ACK_RATIO_SCALE};
+use super::super::Output;
 use super::{
-    ack_bytes, assert_full_cwnd, connect_rtt_idle, cwnd_packets, default_client, default_server,
-    fill_cwnd, increase_cwnd, new_client, new_server, send_something, AT_LEAST_PTO, DEFAULT_RTT,
+    ack_bytes, assert_full_cwnd, connect_rtt_idle, cwnd, cwnd_avail, cwnd_packets, default_client,
+    default_server, fill_cwnd, induce_persistent_congestion, send_something, DEFAULT_RTT,
     FORCE_IDLE_CLIENT_1RTT_PACKETS, POST_HANDSHAKE_CWND,
 };
-use crate::cc::{CWND_MIN, MAX_DATAGRAM_SIZE};
+use crate::cc::MAX_DATAGRAM_SIZE;
 use crate::packet::PacketNumber;
 use crate::recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD};
 use crate::sender::PACING_BURST_SIZE;
-use crate::stats::MAX_PTO_COUNTS;
 use crate::stream_id::StreamType;
 use crate::tracking::DEFAULT_ACK_PACKET_TOLERANCE;
 
-use neqo_common::{qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{qdebug, qinfo, Datagram};
 use std::convert::TryFrom;
 use std::mem;
-use std::time::{Duration, Instant};
-
-// Get the current congestion window for the connection.
-fn cwnd(c: &Connection) -> usize {
-    c.paths.primary().borrow().sender().cwnd()
-}
-fn cwnd_avail(c: &Connection) -> usize {
-    c.paths.primary().borrow().sender().cwnd_avail()
-}
-
-fn induce_persistent_congestion(
-    client: &mut Connection,
-    server: &mut Connection,
-    stream: u64,
-    mut now: Instant,
-) -> Instant {
-    // Note: wait some arbitrary time that should be longer than pto
-    // timer. This is rather brittle.
-    qtrace!([client], "induce_persistent_congestion");
-    now += AT_LEAST_PTO;
-
-    let mut pto_counts = [0; MAX_PTO_COUNTS];
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
-
-    qtrace!([client], "first PTO");
-    let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
-    now = next_now;
-    assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
-
-    pto_counts[0] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
-
-    qtrace!([client], "second PTO");
-    now += AT_LEAST_PTO * 2;
-    let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
-    now = next_now;
-    assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
-
-    pto_counts[0] = 0;
-    pto_counts[1] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
-
-    qtrace!([client], "third PTO");
-    now += AT_LEAST_PTO * 4;
-    let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
-    now = next_now;
-    assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
-
-    pto_counts[1] = 0;
-    pto_counts[2] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
-
-    // An ACK for the third PTO causes persistent congestion.
-    let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
-    client.process_input(s_ack, now);
-    assert_eq!(cwnd(client), CWND_MIN);
-    now
-}
+use std::time::Duration;
 
 #[test]
 /// Verify initial CWND is honored.
@@ -479,131 +421,4 @@ fn pace() {
     let fin = client.process_output(now).callback();
     assert_ne!(fin, Duration::new(0, 0));
     assert_ne!(fin, gap);
-}
-
-/// With the default RTT here (100ms) and default ratio (4), endpoints won't send
-/// `ACK_FREQUENCY` as the ACK delay isn't different enough from the default.
-#[test]
-fn ack_rate_default() {
-    let mut client = default_client();
-    let mut server = default_server();
-    let _ = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
-
-    assert_eq!(client.stats().frame_tx.ack_frequency, 0);
-    assert_eq!(server.stats().frame_tx.ack_frequency, 0);
-}
-
-/// When the congestion window increases, the rate doesn't change.
-#[test]
-fn ack_rate_slow_start() {
-    let mut client = default_client();
-    let mut server = default_server();
-    let now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
-
-    // Increase the congestion window a few times.
-    let stream = client.stream_create(StreamType::UniDi).unwrap();
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-    let _ = increase_cwnd(&mut client, &mut server, stream, now);
-
-    // The client should not have sent an ACK_FREQUENCY frame, even
-    // though the value would have updated.
-    assert_eq!(client.stats().frame_tx.ack_frequency, 0);
-    assert_eq!(server.stats().frame_rx.ack_frequency, 0);
-}
-
-/// When the congestion window decreases, a frame is sent.
-#[test]
-fn ack_rate_exit_slow_start() {
-    let mut client = default_client();
-    let mut server = default_server();
-    let now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
-
-    // Increase the congestion window a few times, enough that after a loss,
-    // there are enough packets in the window to increase the packet
-    // count in ACK_FREQUENCY frames.
-    let stream = client.stream_create(StreamType::UniDi).unwrap();
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-
-    // Now fill the congestion window and drop the first packet.
-    let (mut pkts, mut now) = fill_cwnd(&mut client, stream, now);
-    pkts.remove(0);
-
-    // After acknowledging the other packets the client will notice the loss.
-    now += DEFAULT_RTT / 2;
-    let ack = ack_bytes(&mut server, stream, pkts, now);
-
-    // Receiving the ACK will cause the client to reduce its congestion window
-    // and to send ACK_FREQUENCY.
-    now += DEFAULT_RTT / 2;
-    assert_eq!(client.stats().frame_tx.ack_frequency, 0);
-    let af = client.process(Some(ack), now).dgram();
-    assert!(af.is_some());
-    assert_eq!(client.stats().frame_tx.ack_frequency, 1);
-}
-
-/// When the congestion window collapses, `ACK_FREQUENCY` is updated.
-#[test]
-fn ack_rate_persistent_congestion() {
-    // Use a configuration that results in the value being set after exiting
-    // the handshake.
-    const RTT: Duration = Duration::from_millis(3);
-    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
-    let mut server = default_server();
-    let now = connect_rtt_idle(&mut client, &mut server, RTT);
-
-    // The client should have sent a frame.
-    assert_eq!(client.stats().frame_tx.ack_frequency, 1);
-
-    // Now crash the congestion window.
-    let stream = client.stream_create(StreamType::UniDi).unwrap();
-    let (dgrams, mut now) = fill_cwnd(&mut client, stream, now);
-    now += RTT / 2;
-    mem::drop(ack_bytes(&mut server, stream, dgrams, now));
-
-    let now = induce_persistent_congestion(&mut client, &mut server, stream, now);
-
-    // The client sends a second ACK_FREQUENCY frame with an increased rate.
-    let af = client.process_output(now).dgram();
-    assert!(af.is_some());
-    assert_eq!(client.stats().frame_tx.ack_frequency, 2);
-}
-
-/// Validate that the configuration works for the client.
-#[test]
-fn ack_rate_client_one_rtt() {
-    // This has to be chosen so that the resulting ACK delay is between 1ms and 50ms.
-    // We also have to avoid values between 20..30ms (approximately). The default
-    // maximum ACK delay is 25ms and an ACK_FREQUENCY frame won't be sent when the
-    // change to the maximum ACK delay is too small.
-    const RTT: Duration = Duration::from_millis(3);
-    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
-    let mut server = default_server();
-    let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
-
-    // A single packet from the client will cause the server to engage its delayed
-    // acknowledgment timer, which should now be equal to RTT.
-    let d = send_something(&mut client, now);
-    now += RTT / 2;
-    let delay = server.process(Some(d), now).callback();
-    assert_eq!(delay, RTT);
-
-    assert_eq!(client.stats().frame_tx.ack_frequency, 1);
-}
-
-/// Validate that the configuration works for the server.
-#[test]
-fn ack_rate_server_half_rtt() {
-    const RTT: Duration = Duration::from_millis(10);
-    let mut client = default_client();
-    let mut server = new_server(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE * 2));
-    let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
-
-    let d = send_something(&mut server, now);
-    now += RTT / 2;
-    let delay = client.process(Some(d), now).callback();
-    assert_eq!(delay, RTT / 2);
-
-    assert_eq!(server.stats().frame_tx.ack_frequency, 1);
 }

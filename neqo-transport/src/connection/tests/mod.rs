@@ -10,10 +10,11 @@ use super::{
     Connection, ConnectionError, ConnectionId, ConnectionIdRef, Output, State, LOCAL_IDLE_TIMEOUT,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
-use crate::cc::CWND_INITIAL_PKTS;
+use crate::cc::{CWND_INITIAL_PKTS, CWND_MIN};
 use crate::events::ConnectionEvent;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
+use crate::stats::MAX_PTO_COUNTS;
 use crate::{ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamType};
 
 use std::cell::RefCell;
@@ -27,6 +28,7 @@ use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{self, addr, fixture_init, now};
 
 // All the tests.
+mod ackrate;
 mod cc;
 mod close;
 mod fuzzing;
@@ -392,6 +394,63 @@ where
     }
 
     dest.process_output(now).dgram().unwrap()
+}
+
+// Get the current congestion window for the connection.
+fn cwnd(c: &Connection) -> usize {
+    c.paths.primary().borrow().sender().cwnd()
+}
+fn cwnd_avail(c: &Connection) -> usize {
+    c.paths.primary().borrow().sender().cwnd_avail()
+}
+
+fn induce_persistent_congestion(
+    client: &mut Connection,
+    server: &mut Connection,
+    stream: u64,
+    mut now: Instant,
+) -> Instant {
+    // Note: wait some arbitrary time that should be longer than pto
+    // timer. This is rather brittle.
+    qtrace!([client], "induce_persistent_congestion");
+    now += AT_LEAST_PTO;
+
+    let mut pto_counts = [0; MAX_PTO_COUNTS];
+    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+
+    qtrace!([client], "first PTO");
+    let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
+    now = next_now;
+    assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
+
+    pto_counts[0] = 1;
+    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+
+    qtrace!([client], "second PTO");
+    now += AT_LEAST_PTO * 2;
+    let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
+    now = next_now;
+    assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
+
+    pto_counts[0] = 0;
+    pto_counts[1] = 1;
+    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+
+    qtrace!([client], "third PTO");
+    now += AT_LEAST_PTO * 4;
+    let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
+    now = next_now;
+    assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
+
+    pto_counts[1] = 0;
+    pto_counts[2] = 1;
+    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+
+    // An ACK for the third PTO causes persistent congestion.
+    let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
+    client.process_input(s_ack, now);
+    assert_eq!(cwnd(client), CWND_MIN);
+    now
 }
 
 /// This magic number is the size of the client's CWND after the handshake completes.

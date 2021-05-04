@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::mem;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -81,6 +81,13 @@ pub fn addr() -> SocketAddr {
     // These could be const functions, but they aren't...
     let v6ip = IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1));
     SocketAddr::new(v6ip, 443)
+}
+
+/// An IPv4 version of the default socket address.
+#[must_use]
+pub fn addr_v4() -> SocketAddr {
+    let localhost_v4 = IpAddr::V4(Ipv4Addr::from(0xc000_0201));
+    SocketAddr::new(localhost_v4, addr().port())
 }
 
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.

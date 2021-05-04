@@ -4,11 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Output, State, StreamType, ACK_RATIO_SCALE};
+use super::super::{Connection, Output, State, StreamType};
 use super::{
-    ack_bytes, connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
-    fill_cwnd, increase_cwnd, maybe_authenticate, new_client, new_server, send_something,
-    DEFAULT_RTT,
+    connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
+    maybe_authenticate, new_client, new_server, send_something,
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::{self, PreferredAddress, TransportParameter};
@@ -16,10 +15,14 @@ use crate::{ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, E
 
 use neqo_common::Datagram;
 use std::cell::RefCell;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-use test_fixture::{self, addr, fixture_init, now};
+use test_fixture::{
+    self, addr, addr_v4,
+    assertions::{assert_v4_path, assert_v6_path},
+    fixture_init, now,
+};
 
 /// This should be a valid-seeming transport parameter.
 /// And it should have different values to `addr` and `addr_v4`.
@@ -34,10 +37,6 @@ const SAMPLE_PREFERRED_ADDRESS: &[u8] = &[
 // Migrations move to a path with the same IPv4 address on both ends.
 // This simplifies validation as the same assertions can be used for client and server.
 // The risk is that there is a place where source/destination local/remote is inverted.
-fn addr_v4() -> SocketAddr {
-    let localhost_v4 = IpAddr::V4(Ipv4Addr::from(0xc000_0201));
-    SocketAddr::new(localhost_v4, addr().port())
-}
 
 fn loopback() -> SocketAddr {
     SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)
@@ -54,25 +53,6 @@ fn new_port(a: SocketAddr) -> SocketAddr {
 
 fn change_source_port(d: &Datagram) -> Datagram {
     Datagram::new(new_port(d.source()), d.destination(), &d[..])
-}
-
-fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
-    assert_eq!(dgram.source(), path_addr);
-    assert_eq!(dgram.destination(), path_addr);
-}
-
-fn assert_v4_path(dgram: &Datagram, padded: bool) {
-    assert_path(dgram, addr_v4());
-    if padded {
-        assert_eq!(dgram.len(), PATH_MTU_V4);
-    }
-}
-
-fn assert_v6_path(dgram: &Datagram, padded: bool) {
-    assert_path(dgram, addr());
-    if padded {
-        assert_eq!(dgram.len(), PATH_MTU_V6);
-    }
 }
 
 /// As these tests use a new path, that path often has a non-zero RTT.
@@ -238,45 +218,6 @@ fn migrate_rtt() {
     let rtt = client.paths.rtt();
     assert!(rtt > RTT);
     assert!(rtt < RTT * 2);
-}
-
-/// ACK delay calculations are path-specific,
-/// so check that they can be sent on new paths.
-#[test]
-fn migrate_ack_delay() {
-    // Have the client send ACK_FREQUENCY frames at a normal-ish rate.
-    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
-    let mut server = default_server();
-    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
-
-    client
-        .migrate(Some(addr_v4()), Some(addr_v4()), true, now)
-        .unwrap();
-
-    let client1 = send_something(&mut client, now);
-    assert_v4_path(&client1, true); // Contains PATH_CHALLENGE.
-    let client2 = send_something(&mut client, now);
-    assert_v4_path(&client2, false); // Doesn't.  Is dropped.
-    now += DEFAULT_RTT / 2;
-    server.process_input(client1, now);
-
-    let stream = client.stream_create(StreamType::UniDi).unwrap();
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-    let now = increase_cwnd(&mut client, &mut server, stream, now);
-
-    // Now lose a packet and force the client to update
-    let (mut pkts, mut now) = fill_cwnd(&mut client, stream, now);
-    pkts.remove(0);
-    now += DEFAULT_RTT / 2;
-    let ack = ack_bytes(&mut server, stream, pkts, now);
-
-    // After noticing this new loss, the client sends ACK_FREQUENCY.
-    // It has sent a few before (as we dropped `client2`), so ignore those.
-    let ad_before = client.stats().frame_tx.ack_frequency;
-    let af = client.process(Some(ack), now).dgram();
-    assert!(af.is_some());
-    assert_eq!(client.stats().frame_tx.ack_frequency, ad_before + 1);
 }
 
 #[test]
