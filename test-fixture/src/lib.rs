@@ -8,6 +8,7 @@
 #![warn(clippy::pedantic)]
 
 use neqo_common::{event::Provider, Datagram, Decoder};
+
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
@@ -259,6 +260,7 @@ pub fn default_http3_server() -> Http3Server {
             max_table_size_decoder: 100,
             max_blocked_streams: 100,
         },
+        None,
     )
     .expect("create a default server")
 }

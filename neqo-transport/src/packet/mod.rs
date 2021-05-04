@@ -871,7 +871,7 @@ impl Deref for DecryptedPacket {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "fuzzing")))]
 mod tests {
     use super::*;
     use crate::crypto::{CryptoDxState, CryptoStates};
