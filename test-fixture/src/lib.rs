@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::mem;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -83,6 +83,13 @@ pub fn addr() -> SocketAddr {
     SocketAddr::new(v6ip, 443)
 }
 
+/// An IPv4 version of the default socket address.
+#[must_use]
+pub fn addr_v4() -> SocketAddr {
+    let localhost_v4 = IpAddr::V4(Ipv4Addr::from(0xc000_0201));
+    SocketAddr::new(localhost_v4, addr().port())
+}
+
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
 /// It produces a connection ID with a length byte, 4 counter bytes and random padding.
 #[derive(Debug, Default)]
@@ -126,7 +133,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
     .expect("create a default client")
@@ -168,7 +175,7 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().ack_ratio(255),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
