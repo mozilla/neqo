@@ -2387,7 +2387,7 @@ impl Connection {
                 sequence_number,
                 connection_id,
                 stateless_reset_token,
-                ..
+                retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
                 self.connection_ids.add_remote(ConnectionIdEntry::new(
@@ -2395,6 +2395,12 @@ impl Connection {
                     ConnectionId::from(connection_id),
                     stateless_reset_token.to_owned(),
                 ))?;
+                self.paths
+                    .retire_cids(retire_prior, &mut self.connection_ids);
+                if self.connection_ids.len() >= LOCAL_ACTIVE_CID_LIMIT {
+                    qinfo!([self], "received too many connection IDs");
+                    return Err(Error::ConnectionIdLimitExceeded);
+                }
             }
             Frame::RetireConnectionId { sequence_number } => {
                 self.stats.borrow_mut().frame_rx.retire_connection_id += 1;
