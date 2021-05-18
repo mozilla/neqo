@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use crate::ackrate::{AckRate, PeerAckDelay};
 use crate::cc::CongestionControlAlgorithm;
-use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
+use crate::cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry};
 use crate::frame::{
     FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID,
 };
@@ -55,7 +55,7 @@ pub type PathRef = Rc<RefCell<Path>>;
 /// is exposed to too many paths.
 #[derive(Debug, Default)]
 pub struct Paths {
-    /// All of the paths.
+    /// All of the paths.  All of these paths will be permanent.
     paths: Vec<PathRef>,
     /// This is the primary path.  This will only be `None` initially, so
     /// care needs to be taken regarding that only during the handshake.
@@ -196,8 +196,8 @@ impl Paths {
     }
 
     /// Select a path as the primary.  Returns the old primary path.
-    /// The old path is only necessary if this change in path is a reaction to a
-    /// migration from a peer, in which case the old path needs to be probed.
+    /// Using the old path is only necessary if this change in path is a reaction
+    /// to a migration from a peer, in which case the old path needs to be probed.
     #[must_use]
     fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
         qinfo!([path.borrow()], "set as primary path");
@@ -349,6 +349,34 @@ impl Paths {
             }
         }
         false
+    }
+
+    /// Retire all of the connection IDs prior to the indicated sequence number.
+    /// Keep active paths if possible by pulling new connection IDs from the provided store.
+    /// One slightly non-obvious consequence of this is that if migration is being attempted
+    /// and the new path cannot obtain a new connection ID, the migration attempt will fail.
+    pub fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<[u8; 16]>) {
+        let to_retire = &mut self.to_retire;
+
+        // First, tell the store to release any connection IDs that are too old.
+        let mut retired = store.retire_prior_to(retire_prior);
+        to_retire.append(&mut retired);
+
+        self.paths.retain(|p| {
+            let current = p.borrow().remote_cid.as_ref().unwrap().sequence_number();
+            if current < retire_prior {
+                to_retire.push(current);
+                let new_cid = store.next();
+                let has_replacement = new_cid.is_some();
+                // There must be a connection ID available for the primary path as we
+                // keep that path at the first index.
+                debug_assert!(!p.borrow().is_primary() || has_replacement);
+                p.borrow_mut().remote_cid = new_cid;
+                has_replacement
+            } else {
+                true
+            }
+        });
     }
 
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
