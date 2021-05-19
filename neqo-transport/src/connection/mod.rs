@@ -58,6 +58,8 @@ mod idle;
 pub mod params;
 mod saved;
 mod state;
+#[cfg(test)]
+pub mod test_internal;
 
 use idle::IdleTimeout;
 pub use idle::LOCAL_IDLE_TIMEOUT;
@@ -258,6 +260,12 @@ pub struct Connection {
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
+
+    /// For testing purposes it is sometimes necessary to inject frames that wouldn't
+    /// otherwise be sent, just to see how a connection handles them.  Inserting them
+    /// into packets proper mean that the frames follow the entire processing path.
+    #[cfg(test)]
+    pub test_frame_writer: Option<Box<dyn test_internal::FrameWriter>>,
 }
 
 impl Debug for Connection {
@@ -390,6 +398,8 @@ impl Connection {
             release_resumption_token_timer: None,
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
+            #[cfg(test)]
+            test_frame_writer: None,
         };
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
@@ -1813,6 +1823,12 @@ impl Connection {
 
         self.streams
             .write_frames(TransmissionPriority::Low, builder, tokens, stats);
+
+        #[cfg(test)]
+        if let Some(w) = &mut self.test_frame_writer {
+            w.write_frames(builder);
+        }
+
         Ok(())
     }
 
