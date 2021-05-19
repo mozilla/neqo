@@ -1849,8 +1849,10 @@ impl Connection {
             .write_frames(TransmissionPriority::Low, builder, tokens, stats);
 
         #[cfg(test)]
-        if let Some(w) = &mut self.test_frame_writer {
-            w.write_frames(builder);
+        {
+            if let Some(w) = &mut self.test_frame_writer {
+                w.write_frames(builder);
+            }
         }
 
         Ok(())
