@@ -16,7 +16,7 @@ use smallvec::SmallVec;
 
 use crate::events::ConnectionEvents;
 use crate::fc::ReceiverFlowControl;
-use crate::frame::{write_varint_frame, FRAME_TYPE_STOP_SENDING};
+use crate::frame::FRAME_TYPE_STOP_SENDING;
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::send_stream::SendStreams;
@@ -598,10 +598,11 @@ impl RecvStream {
             // Maybe send STOP_SENDING
             RecvStreamState::AbortReading { frame_needed, err } => {
                 if *frame_needed
-                    && write_varint_frame(
-                        builder,
-                        &[FRAME_TYPE_STOP_SENDING, self.stream_id.as_u64(), *err],
-                    )
+                    && builder.write_varint_frame(&[
+                        FRAME_TYPE_STOP_SENDING,
+                        self.stream_id.as_u64(),
+                        *err,
+                    ])
                 {
                     tokens.push(RecoveryToken::StopSending {
                         stream_id: self.stream_id,
