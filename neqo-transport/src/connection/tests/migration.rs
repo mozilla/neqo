@@ -9,11 +9,14 @@ use super::{
     connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
     maybe_authenticate, new_client, new_server, send_something, CountingConnectionIdGenerator,
 };
+use crate::cid::LOCAL_ACTIVE_CID_LIMIT;
+use crate::frame::FRAME_TYPE_NEW_CONNECTION_ID;
+use crate::packet::PacketBuilder;
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::{self, PreferredAddress, TransportParameter};
 use crate::{
-    ConnectionError, ConnectionId, ConnectionIdDecoder, ConnectionIdRef, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error,
+    ConnectionError, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
+    ConnectionParameters, EmptyConnectionIdGenerator, Error,
 };
 
 use neqo_common::{Datagram, Decoder};
@@ -767,4 +770,169 @@ fn migration_invalid_address() {
             .unwrap_err(),
         Error::InvalidMigration
     );
+}
+
+/// This inserts a frame into packets that provides a single new
+/// connection ID and retires all others.
+struct RetireAll {
+    cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>,
+}
+
+impl crate::connection::test_internal::FrameWriter for RetireAll {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        // Use a sequence number that is large enough that all existing values
+        // will be lower (so they get retired).  As the code doesn't care about
+        // gaps in sequence numbers, this is safe, even though the gap might
+        // hint that there are more outstanding connection IDs that are allowed.
+        const SEQNO: u64 = 100;
+        let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
+        builder
+            .encode_varint(FRAME_TYPE_NEW_CONNECTION_ID)
+            .encode_varint(SEQNO)
+            .encode_varint(SEQNO) // Retire Prior To
+            .encode_vec(1, &cid)
+            .encode(&[0x7f; 16]);
+    }
+}
+
+/// Test that forcing retirement of connection IDs forces retirement of all active
+/// connection IDs and the use of of newer one.
+#[test]
+fn retire_all() {
+    let mut client = default_client();
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+
+    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+
+    server.test_frame_writer = Some(Box::new(RetireAll { cid_gen }));
+    let ncid = send_something(&mut server, now());
+    server.test_frame_writer = None;
+
+    let ncid_before = client.stats().frame_rx.new_connection_id;
+    let rcid_before = client.stats().frame_tx.retire_connection_id;
+    client.process_input(ncid, now());
+    let retire = send_something(&mut client, now());
+    assert_eq!(client.stats().frame_rx.new_connection_id, ncid_before + 1);
+    assert_eq!(
+        client.stats().frame_tx.retire_connection_id,
+        rcid_before + LOCAL_ACTIVE_CID_LIMIT
+    );
+
+    assert_ne!(get_cid(&retire), original_cid);
+}
+
+/// During a graceful migration, if the probed path can't get a new connection ID due
+/// to being forced to retire the one it is using, the migration will fail.
+#[test]
+fn retire_prior_to_migration_failure() {
+    let mut client = default_client();
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+
+    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+
+    client
+        .migrate(Some(addr_v4()), Some(addr_v4()), false, now())
+        .unwrap();
+
+    // The client now probes the new path.
+    let probe = client.process_output(now()).dgram().unwrap();
+    assert_v4_path(&probe, true);
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    assert_ne!(original_cid, probe_cid);
+
+    // Have the server receive the probe, but separately have it decide to
+    // retire all of the available connection IDs.
+    server.test_frame_writer = Some(Box::new(RetireAll { cid_gen }));
+    let retire_all = send_something(&mut server, now());
+    server.test_frame_writer = None;
+
+    let resp = server.process(Some(probe), now()).dgram().unwrap();
+    assert_v4_path(&resp, true);
+    assert_eq!(server.stats().frame_tx.path_response, 1);
+    assert_eq!(server.stats().frame_tx.path_challenge, 1);
+
+    // Have the client receive the NEW_CONNECTION_ID with Retire Prior To.
+    client.process_input(retire_all, now());
+    // This packet contains the probe response, which should be fine, but it
+    // also includes PATH_CHALLENGE for the new path, and the client can't
+    // respond without a connection ID.  We treat this as a connection error.
+    client.process_input(resp, now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: ConnectionError::Transport(Error::InvalidMigration),
+            ..
+        }
+    ));
+}
+
+/// The timing of when frames arrive can mean that the migration path can
+/// get the last available connection ID.
+#[test]
+fn retire_prior_to_migration_success() {
+    let mut client = default_client();
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+
+    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+
+    client
+        .migrate(Some(addr_v4()), Some(addr_v4()), false, now())
+        .unwrap();
+
+    // The client now probes the new path.
+    let probe = client.process_output(now()).dgram().unwrap();
+    assert_v4_path(&probe, true);
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    assert_ne!(original_cid, probe_cid);
+
+    // Have the server receive the probe, but separately have it decide to
+    // retire all of the available connection IDs.
+    server.test_frame_writer = Some(Box::new(RetireAll { cid_gen }));
+    let retire_all = send_something(&mut server, now());
+    server.test_frame_writer = None;
+
+    let resp = server.process(Some(probe), now()).dgram().unwrap();
+    assert_v4_path(&resp, true);
+    assert_eq!(server.stats().frame_tx.path_response, 1);
+    assert_eq!(server.stats().frame_tx.path_challenge, 1);
+
+    // Have the client receive the NEW_CONNECTION_ID with Retire Prior To second.
+    // As this occurs in a very specific order, migration succeeds.
+    client.process_input(resp, now());
+    client.process_input(retire_all, now());
+
+    // Migration succeeds and the new path gets the last connection ID.
+    let dgram = send_something(&mut client, now());
+    assert_v4_path(&dgram, false);
+    assert_ne!(get_cid(&dgram), original_cid);
+    assert_ne!(get_cid(&dgram), probe_cid);
 }

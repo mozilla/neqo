@@ -184,6 +184,17 @@ impl Paths {
             debug_assert_eq!(self.paths.len(), MAX_PATHS);
             let removed = self.paths.remove(1);
             Self::retire(&mut self.to_retire, &removed);
+            if self
+                .migration_target
+                .as_ref()
+                .map_or(false, |target| Rc::ptr_eq(target, &removed))
+            {
+                qinfo!(
+                    [path.borrow()],
+                    "The migration target path had to be removed"
+                );
+                self.migration_target = None;
+            }
             debug_assert_eq!(Rc::strong_count(&removed), 1);
         }
 
@@ -357,6 +368,7 @@ impl Paths {
     /// and the new path cannot obtain a new connection ID, the migration attempt will fail.
     pub fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<[u8; 16]>) {
         let to_retire = &mut self.to_retire;
+        let migration_target = &mut self.migration_target;
 
         // First, tell the store to release any connection IDs that are too old.
         let mut retired = store.retire_prior_to(retire_prior);
@@ -372,6 +384,17 @@ impl Paths {
                 // keep that path at the first index.
                 debug_assert!(!p.borrow().is_primary() || has_replacement);
                 p.borrow_mut().remote_cid = new_cid;
+                if !has_replacement
+                    && migration_target
+                        .as_ref()
+                        .map_or(false, |target| Rc::ptr_eq(target, p))
+                {
+                    qinfo!(
+                        [p.borrow()],
+                        "NEW_CONNECTION_ID with Retire Prior To forced migration to fail"
+                    );
+                    *migration_target = None;
+                }
                 has_replacement
             } else {
                 true

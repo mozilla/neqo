@@ -21,7 +21,7 @@ use neqo_common::{qdebug, qerror, qinfo, qtrace, Encoder, Role};
 
 use crate::events::ConnectionEvents;
 use crate::fc::SenderFlowControl;
-use crate::frame::{write_varint_frame, Frame, FRAME_TYPE_RESET_STREAM};
+use crate::frame::{Frame, FRAME_TYPE_RESET_STREAM};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
@@ -776,15 +776,12 @@ impl SendStream {
             if *priority != Some(p) {
                 return false;
             }
-            if write_varint_frame(
-                builder,
-                &[
-                    FRAME_TYPE_RESET_STREAM,
-                    self.stream_id.as_u64(),
-                    err,
-                    final_size,
-                ],
-            ) {
+            if builder.write_varint_frame(&[
+                FRAME_TYPE_RESET_STREAM,
+                self.stream_id.as_u64(),
+                err,
+                final_size,
+            ]) {
                 tokens.push(RecoveryToken::ResetStream {
                     stream_id: self.stream_id,
                 });
