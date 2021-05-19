@@ -7,13 +7,16 @@
 use super::super::{Connection, Output, State, StreamType};
 use super::{
     connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something,
+    maybe_authenticate, new_client, new_server, send_something, CountingConnectionIdGenerator,
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::{self, PreferredAddress, TransportParameter};
-use crate::{ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error};
+use crate::{
+    ConnectionError, ConnectionId, ConnectionIdDecoder, ConnectionIdRef, ConnectionParameters,
+    EmptyConnectionIdGenerator, Error,
+};
 
-use neqo_common::Datagram;
+use neqo_common::{Datagram, Decoder};
 use std::cell::RefCell;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
@@ -344,6 +347,14 @@ fn migrate_same_fail() {
     ));
 }
 
+/// This gets the connection ID from a datagram using the default
+/// connection ID generator/decoder.
+fn get_cid(d: &Datagram) -> ConnectionIdRef {
+    let gen = CountingConnectionIdGenerator::default();
+    assert_eq!(d[0] & 0x80, 0); // Only support short packets for now.
+    gen.decode_cid(&mut Decoder::from(&d[1..])).unwrap()
+}
+
 fn migration(mut client: Connection) {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -356,6 +367,7 @@ fn migration(mut client: Connection) {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    let probe_cid = ConnectionId::from(&get_cid(&probe));
 
     let resp = server.process(Some(probe), now).dgram().unwrap();
     assert_v4_path(&resp, true);
@@ -364,6 +376,7 @@ fn migration(mut client: Connection) {
 
     // Data continues to be exchanged on the new path.
     let client_data = send_something(&mut client, now);
+    assert_ne!(get_cid(&client_data), probe_cid);
     assert_v6_path(&client_data, false);
     server.process_input(client_data, now);
     let server_data = send_something(&mut server, now);
