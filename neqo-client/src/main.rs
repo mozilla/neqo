@@ -25,12 +25,14 @@ use neqo_transport::{
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::fmt::{self, Display};
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::time::Instant;
 
 use structopt::StructOpt;
@@ -38,6 +40,7 @@ use url::{Origin, Url};
 
 #[derive(Debug)]
 pub enum ClientError {
+    ArgumentError(&'static str),
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
     QlogError,
@@ -65,6 +68,13 @@ impl From<qlog::Error> for ClientError {
 impl From<neqo_transport::Error> for ClientError {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
+    }
+}
+
+impl Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error: {:?}", self)?;
+        Ok(())
     }
 }
 
@@ -100,6 +110,38 @@ impl KeyUpdateState {
 
     fn needed(&self) -> bool {
         self.0
+    }
+}
+
+#[derive(Debug)]
+struct HexArg(Vec<u8>);
+impl FromStr for HexArg {
+    type Err = ClientError;
+
+    fn from_str(s: &str) -> Res<Self> {
+        fn v(c: u8) -> Res<u8> {
+            match c {
+                b'A'..=b'F' => Ok(c - b'A' + 10),
+                b'a'..=b'f' => Ok(c - b'a' + 10),
+                b'0'..=b'9' => Ok(c - b'0'),
+                _ => Err(ClientError::ArgumentError("non-hex character")),
+            }
+        }
+        let s: &[u8] = s.as_ref();
+        if s.len() % 2 != 0 {
+            return Err(ClientError::ArgumentError("invalid length"));
+        }
+        let mut buf = vec![0; s.len() / 2];
+        for i in 0..buf.len() {
+            buf[i] = (v(s[i * 2])? << 4) | v(s[i * 2 + 1])?;
+        }
+        Ok(Self(buf))
+    }
+}
+
+impl AsRef<[u8]> for HexArg {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -177,6 +219,11 @@ pub struct Args {
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
+
+    #[structopt(name = "ech", long)]
+    /// Enable encrypted client hello (ECH).
+    /// This takes an encoded ECH configuration in hexadecimal format.
+    ech: Option<HexArg>,
 
     #[structopt(flatten)]
     quic_parameters: QuicParameters,
@@ -552,6 +599,9 @@ fn client(
 
     let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
+    if let Some(ech) = &args.ech {
+        client.enable_ech(ech).expect("enable ECH");
+    }
 
     let key_update = KeyUpdateState(args.key_update);
     let mut h = Handler {

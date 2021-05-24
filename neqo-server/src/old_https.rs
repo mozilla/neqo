@@ -17,7 +17,7 @@ use std::time::Instant;
 use regex::Regex;
 
 use neqo_common::{event::Provider, hex, qdebug, Datagram};
-use neqo_crypto::{AllowZeroRtt, AntiReplay, Cipher};
+use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
@@ -238,6 +238,14 @@ impl HttpServer for Http09Server {
 
     fn set_ciphers(&mut self, ciphers: &[Cipher]) {
         self.server.set_ciphers(ciphers);
+    }
+
+    fn enable_ech(&mut self) -> &[u8] {
+        let (sk, pk) = generate_ech_keys().expect("generate ECH keys");
+        self.server
+            .enable_ech(random(1)[0], "public.example", &sk, &pk)
+            .expect("enable ECH");
+        self.server.ech_config()
     }
 }
 
