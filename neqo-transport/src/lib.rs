@@ -10,6 +10,7 @@
 use neqo_common::qinfo;
 use neqo_crypto::Error as CryptoError;
 
+mod ackrate;
 mod addr_valid;
 mod cc;
 mod cid;
@@ -40,7 +41,9 @@ pub use self::cid::{
     ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
     EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
 };
-pub use self::connection::{params::ConnectionParameters, Connection, Output, State, ZeroRttState};
+pub use self::connection::{
+    params::ConnectionParameters, params::ACK_RATIO_SCALE, Connection, Output, State, ZeroRttState,
+};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::packet::QuicVersion;

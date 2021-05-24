@@ -40,6 +40,7 @@ pub use hframe::HFrameReader;
 pub use neqo_qpack::Header;
 pub use server::Http3Server;
 pub use server_events::{ClientRequestStream, Http3ServerEvent};
+pub use settings::HttpZeroRttChecker;
 
 type Res<T> = Result<T, Error>;
 

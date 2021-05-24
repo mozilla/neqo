@@ -6144,6 +6144,7 @@ mod tests {
                 max_table_size_decoder: MAX_TABLE_SIZE,
                 max_blocked_streams: MAX_BLOCKED_STREAMS,
             },
+            None,
         )
         .unwrap();
 

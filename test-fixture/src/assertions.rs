@@ -4,11 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom;
-use std::convert::TryInto;
-
-use neqo_common::Decoder;
+use crate::{addr, addr_v4};
+use neqo_common::{Datagram, Decoder};
 use neqo_transport::QuicVersion;
+use std::convert::{TryFrom, TryInto};
+use std::net::SocketAddr;
 
 const PACKET_TYPE_MASK: u8 = 0b1011_0000;
 
@@ -76,5 +76,30 @@ pub fn assert_no_1rtt(payload: &[u8]) {
             dec.skip_vvec(); // Initial token.
         }
         dec.skip_vvec(); // Skip the payload.
+    }
+}
+
+/// # Panics
+/// When the path doesn't use the given socket address at both ends.
+pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
+    assert_eq!(dgram.source(), path_addr);
+    assert_eq!(dgram.destination(), path_addr);
+}
+
+/// # Panics
+/// When the path doesn't use the default v4 socket address at both ends.
+pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
+    assert_path(dgram, addr_v4());
+    if padded {
+        assert_eq!(dgram.len(), 1357 /* PATH_MTU_V4 */);
+    }
+}
+
+/// # Panics
+/// When the path doesn't use the default v6 socket address at both ends.
+pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
+    assert_path(dgram, addr());
+    if padded {
+        assert_eq!(dgram.len(), 1337 /* PATH_MTU_V6 */);
     }
 }

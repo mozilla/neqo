@@ -64,16 +64,19 @@ impl Streams {
     pub fn zero_rtt_rejected(&mut self) {
         self.send.clear();
         self.recv.clear();
-        self.remote_stream_limits = RemoteStreamLimits::new(
+        debug_assert_eq!(
+            self.remote_stream_limits[StreamType::BiDi].max_active(),
             self.tps
                 .borrow()
                 .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI),
+                .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)
+        );
+        debug_assert_eq!(
+            self.remote_stream_limits[StreamType::UniDi].max_active(),
             self.tps
                 .borrow()
                 .local
-                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI),
-            self.role,
+                .get_integer(tparams::INITIAL_MAX_STREAMS_UNI)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -162,7 +165,7 @@ impl Streams {
                 // We send an update evry time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
-            _ => unreachable!("This is not a stream RecoveryToken"),
+            _ => unreachable!("This is not a stream Frame"),
         }
         Ok(())
     }
@@ -172,40 +175,40 @@ impl Streams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         // Send `DATA_BLOCKED` as necessary.
         self.sender_fc
             .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+            .write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
 
         // Send `MAX_DATA` as necessary.
         self.receiver_fc
             .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+            .write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
 
-        self.recv.write_frames(builder, tokens, stats)?;
+        self.recv.write_frames(builder, tokens, stats);
 
-        self.remote_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+        self.remote_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
-        self.remote_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
-        self.local_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
+        self.remote_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
         }
 
-        self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats)
+        self.local_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return;
+        }
+
+        self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
     pub fn write_frames(
@@ -214,15 +217,15 @@ impl Streams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         if priority == TransmissionPriority::Important {
-            self.write_maintenance_frames(builder, tokens, stats)?;
-            if builder.remaining() < 2 {
-                return Ok(());
+            self.write_maintenance_frames(builder, tokens, stats);
+            if builder.is_full() {
+                return;
             }
         }
 
-        self.send.write_frames(priority, builder, tokens, stats)
+        self.send.write_frames(priority, builder, tokens, stats);
     }
 
     pub fn lost(&mut self, token: &RecoveryToken) {
@@ -271,6 +274,12 @@ impl Streams {
                     rs.stop_sending_acked();
                 }
             }
+            // We only worry when these are lost
+            RecoveryToken::DataBlocked(_)
+            | RecoveryToken::StreamDataBlocked { .. }
+            | RecoveryToken::MaxStreamData { .. }
+            | RecoveryToken::StreamsBlocked { .. }
+            | RecoveryToken::MaxStreams { .. } => (),
             _ => unreachable!("This is not a stream RecoveryToken"),
         }
     }
