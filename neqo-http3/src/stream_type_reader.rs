@@ -8,6 +8,7 @@
 
 use neqo_common::{qdebug, Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub(crate) struct NewStreamTypeReader {
@@ -57,5 +58,41 @@ impl NewStreamTypeReader {
 
     pub fn fin(&self) -> bool {
         self.fin
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NewStreamsDecoder(HashMap<u64, NewStreamTypeReader>);
+
+impl NewStreamsDecoder {
+    /// Returns true if a new stream has been decoded.
+    pub fn handle_new_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
+        let stream_type;
+        let fin;
+        {
+            let ns = self
+                .0
+                .entry(stream_id)
+                .or_insert_with(NewStreamTypeReader::new);
+            stream_type = ns.get_type(conn, stream_id);
+            fin = ns.fin();
+        }
+
+        if fin || stream_type.is_some() {
+            self.0.remove(&stream_id);
+        }
+        if fin {
+            None
+        } else {
+            stream_type
+        }
+    }
+
+    pub fn is_new_stream(&self, stream_id: &u64) -> bool {
+        self.0.get(stream_id).is_some()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
     }
 }
