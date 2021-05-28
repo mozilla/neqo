@@ -13,6 +13,7 @@ use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
+use crate::wt::WebTransportController;
 use crate::{
     Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType, SendStream,
 };
@@ -69,6 +70,7 @@ pub(crate) struct Http3Connection {
     streams_have_data_to_send: BTreeSet<u64>,
     pub send_streams: HashMap<u64, Box<dyn SendStream>>,
     pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
+    web_transport: Option<WebTransportController>,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -79,7 +81,7 @@ impl ::std::fmt::Display for Http3Connection {
 
 impl Http3Connection {
     /// Create a new connection.
-    pub fn new(local_qpack_settings: QpackSettings) -> Self {
+    pub fn new(local_qpack_settings: QpackSettings, enable_wt: bool) -> Self {
         if (local_qpack_settings.max_table_size_encoder >= QPACK_TABLE_SIZE_LIMIT)
             || (local_qpack_settings.max_table_size_decoder >= QPACK_TABLE_SIZE_LIMIT)
         {
@@ -95,6 +97,11 @@ impl Http3Connection {
             streams_have_data_to_send: BTreeSet::new(),
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
+            web_transport: if enable_wt {
+                Some(WebTransportController::default())
+            } else {
+                None
+            },
         }
     }
 
@@ -108,18 +115,43 @@ impl Http3Connection {
     }
 
     fn send_settings(&mut self) {
-        qdebug!([self], "Send settings.");
+        qdebug!(
+            [self],
+            "Send settings, web_transport is {}.",
+            if self.web_transport.is_some() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
         self.control_stream_local.queue_frame(&HFrame::Settings {
-            settings: HSettings::new(&[
-                HSetting {
-                    setting_type: HSettingType::MaxTableCapacity,
-                    value: self.qpack_decoder.borrow().get_max_table_size(),
-                },
-                HSetting {
-                    setting_type: HSettingType::BlockedStreams,
-                    value: self.qpack_decoder.borrow().get_blocked_streams().into(),
-                },
-            ]),
+            settings: if self.web_transport.is_some() {
+                HSettings::new(&[
+                    HSetting {
+                        setting_type: HSettingType::MaxTableCapacity,
+                        value: self.qpack_decoder.borrow().get_max_table_size(),
+                    },
+                    HSetting {
+                        setting_type: HSettingType::BlockedStreams,
+                        value: self.qpack_decoder.borrow().get_blocked_streams().into(),
+                    },
+                    HSetting {
+                        setting_type: HSettingType::EnableWebTransport,
+                        value: 1,
+                    },
+                ])
+            } else {
+                HSettings::new(&[
+                    HSetting {
+                        setting_type: HSettingType::MaxTableCapacity,
+                        value: self.qpack_decoder.borrow().get_max_table_size(),
+                    },
+                    HSetting {
+                        setting_type: HSettingType::BlockedStreams,
+                        value: self.qpack_decoder.borrow().get_blocked_streams().into(),
+                    },
+                ])
+            },
         });
         self.control_stream_local.queue_frame(&HFrame::Grease);
     }
@@ -377,6 +409,7 @@ impl Http3Connection {
 
     /// This is called when 0RTT has been reseted to clear `send_streams`, `recv_streams` and settings.
     pub fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
+        qtrace!([self], "handle_zero_rtt_rejected");
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
             self.control_stream_local = ControlStreamLocal::new();
@@ -573,7 +606,7 @@ impl Http3Connection {
                     .qpack_encoder
                     .borrow_mut()
                     .set_max_blocked_streams(s.value)?,
-                HSettingType::MaxHeaderListSize => (),
+                HSettingType::MaxHeaderListSize | HSettingType::EnableWebTransport => (),
             }
         }
         Ok(())
@@ -584,10 +617,22 @@ impl Http3Connection {
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
+                if self.web_transport.is_some() {
+                    self.web_transport
+                        .as_mut()
+                        .unwrap()
+                        .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
+                }
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
+                if self.web_transport.is_some() {
+                    self.web_transport
+                        .as_mut()
+                        .unwrap()
+                        .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
+                }
                 let mut qpack_changed = false;
                 for st in &[
                     HSettingType::MaxHeaderListSize,
@@ -688,5 +733,9 @@ impl Http3Connection {
         } else {
             false
         }
+    }
+
+    pub fn web_transport_enabled(&self) -> bool {
+        self.web_transport.as_ref().map_or(false, |v| v.enabled())
     }
 }

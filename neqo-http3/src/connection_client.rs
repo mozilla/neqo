@@ -73,6 +73,7 @@ fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
 pub struct Http3Parameters {
     pub qpack_settings: QpackSettings,
     pub max_concurrent_push_streams: u64,
+    pub enable_wt: bool,
 }
 
 pub struct Http3Client {
@@ -120,7 +121,10 @@ impl Http3Client {
         let events = Http3ClientEvents::default();
         Self {
             conn: c,
-            base_handler: Http3Connection::new(http3_parameters.qpack_settings),
+            base_handler: Http3Connection::new(
+                http3_parameters.qpack_settings,
+                http3_parameters.enable_wt,
+            ),
             events: events.clone(),
             push_handler: Rc::new(RefCell::new(PushController::new(
                 http3_parameters.max_concurrent_push_streams,
@@ -782,6 +786,10 @@ impl Http3Client {
             rs.stream_reset(app_error, ResetType::Local).unwrap();
         }
     }
+
+    pub fn web_transport_enabled(&self) -> bool {
+        self.base_handler.web_transport_enabled()
+    }
 }
 
 impl EventProvider for Http3Client {
@@ -855,6 +863,7 @@ mod tests {
                     max_blocked_streams: 100,
                 },
                 max_concurrent_push_streams: 5,
+                enable_wt: false,
             },
             now(),
         )
@@ -6548,6 +6557,7 @@ mod tests {
                 max_table_size_decoder: MAX_TABLE_SIZE,
                 max_blocked_streams: MAX_BLOCKED_STREAMS,
             },
+            false,
             None,
         )
         .unwrap();

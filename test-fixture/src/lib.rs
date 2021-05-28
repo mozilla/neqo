@@ -244,6 +244,7 @@ pub fn default_http3_client() -> Http3Client {
                 max_blocked_streams: 100,
             },
             max_concurrent_push_streams: 10,
+            enable_wt: false,
         },
         now(),
     )
@@ -267,6 +268,7 @@ pub fn default_http3_server() -> Http3Server {
             max_table_size_decoder: 100,
             max_blocked_streams: 100,
         },
+        false,
         None,
     )
     .expect("create a default server")

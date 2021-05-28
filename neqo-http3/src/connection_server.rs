@@ -30,9 +30,9 @@ impl ::std::fmt::Display for Http3ServerHandler {
 }
 
 impl Http3ServerHandler {
-    pub(crate) fn new(qpack_settings: QpackSettings) -> Self {
+    pub(crate) fn new(qpack_settings: QpackSettings, enable_wt: bool) -> Self {
         Self {
-            base_handler: Http3Connection::new(qpack_settings),
+            base_handler: Http3Connection::new(qpack_settings, enable_wt),
             events: Http3ServerConnEvents::default(),
             needs_processing: false,
         }

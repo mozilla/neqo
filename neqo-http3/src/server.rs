@@ -33,6 +33,7 @@ const MAX_EVENT_DATA_SIZE: usize = 1024;
 pub struct Http3Server {
     server: Server,
     qpack_settings: QpackSettings,
+    enable_wt: bool,
     http3_handlers: HashMap<ActiveConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
 }
@@ -54,6 +55,7 @@ impl Http3Server {
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         qpack_settings: QpackSettings,
+        enable_wt: bool,
         zero_rtt_checker: Option<Box<dyn ZeroRttChecker>>,
     ) -> Res<Self> {
         Ok(Self {
@@ -68,6 +70,7 @@ impl Http3Server {
                 ConnectionParameters::default(),
             )?,
             qpack_settings,
+            enable_wt,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
         })
@@ -149,11 +152,14 @@ impl Http3Server {
             .iter()
             .for_each(|conn| self.server.add_to_waiting(conn.clone()));
         let qpack_settings = self.qpack_settings;
+        let enable_wt = self.enable_wt;
         for mut conn in active_conns {
-            let handler = self
-                .http3_handlers
-                .entry(conn.clone())
-                .or_insert_with(|| Rc::new(RefCell::new(Http3ServerHandler::new(qpack_settings))));
+            let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
+                Rc::new(RefCell::new(Http3ServerHandler::new(
+                    qpack_settings,
+                    enable_wt,
+                )))
+            });
 
             handler
                 .borrow_mut()
@@ -292,6 +298,7 @@ mod tests {
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             settings,
+            false,
             None,
         )
         .expect("create a server")
@@ -1238,6 +1245,7 @@ mod tests {
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             DEFAULT_SETTINGS,
+            false,
             Some(Box::new(RejectZeroRtt::default())),
         )
         .expect("create a server");

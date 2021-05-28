@@ -606,6 +606,7 @@ fn client(
                 max_blocked_streams: args.max_blocked_streams,
             },
             max_concurrent_push_streams: args.max_concurrent_push_streams,
+            enable_wt: false,
         },
     );
 

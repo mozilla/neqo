@@ -28,6 +28,7 @@ mod server_connection_events;
 mod server_events;
 mod settings;
 mod stream_type_reader;
+mod wt;
 
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;

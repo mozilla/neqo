@@ -21,6 +21,7 @@ const SETTINGS_ZERO_RTT_VERSION: u64 = 1;
 const SETTINGS_MAX_HEADER_LIST_SIZE: SettingsType = 0x6;
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: SettingsType = 0x1;
 const SETTINGS_QPACK_BLOCKED_STREAMS: SettingsType = 0x7;
+const SETTINGS_ENABLE_WEB_TRANSPORT: SettingsType = 0x2b603742;
 
 pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 
@@ -29,12 +30,15 @@ pub enum HSettingType {
     MaxHeaderListSize,
     MaxTableCapacity,
     BlockedStreams,
+    EnableWebTransport,
 }
 
 fn hsetting_default(setting_type: HSettingType) -> u64 {
     match setting_type {
         HSettingType::MaxHeaderListSize => 1 << 62,
-        HSettingType::MaxTableCapacity | HSettingType::BlockedStreams => 0,
+        HSettingType::MaxTableCapacity
+        | HSettingType::BlockedStreams
+        | HSettingType::EnableWebTransport => 0,
     }
 }
 
@@ -88,6 +92,10 @@ impl HSettings {
                         enc_inner.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS as u64);
                         enc_inner.encode_varint(iter.value);
                     }
+                    HSettingType::EnableWebTransport => {
+                        enc_inner.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT as u64);
+                        enc_inner.encode_varint(iter.value);
+                    }
                 }
             }
         });
@@ -113,6 +121,9 @@ impl HSettings {
                 (Some(SETTINGS_QPACK_BLOCKED_STREAMS), Some(value)) => self
                     .settings
                     .push(HSetting::new(HSettingType::BlockedStreams, value)),
+                (Some(SETTINGS_ENABLE_WEB_TRANSPORT), Some(value)) => self
+                    .settings
+                    .push(HSetting::new(HSettingType::EnableWebTransport, value)),
                 // other supported settings here
                 (Some(_), Some(_)) => {} // ignore unknown setting, it is fine.
                 _ => return Err(Error::NotEnoughData),
@@ -177,7 +188,7 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                 u64::from(self.settings.max_blocked_streams) >= setting.value
             }
             HSettingType::MaxTableCapacity => self.settings.max_table_size_decoder >= setting.value,
-            HSettingType::MaxHeaderListSize => true,
+            HSettingType::MaxHeaderListSize | HSettingType::EnableWebTransport => true,
         }) {
             ZeroRttCheckResult::Accept
         } else {

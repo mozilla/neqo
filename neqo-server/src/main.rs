@@ -477,6 +477,7 @@ impl ServersRunner {
                     max_table_size_decoder: args.max_table_size_decoder,
                     max_blocked_streams: args.max_blocked_streams,
                 },
+                false,
                 None,
             )
             .expect("We cannot make a server!");
