@@ -18,6 +18,8 @@ pub mod hframe;
 mod push_controller;
 mod push_stream;
 mod qlog;
+mod qpack_decoder_receiver;
+mod qpack_encoder_receiver;
 mod recv_message;
 mod send_message;
 pub mod server;
@@ -26,7 +28,6 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
 use neqo_transport::{AppError, Connection, Error as TransportError};
@@ -36,7 +37,7 @@ pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
 pub use connection_client::Http3Parameters;
-pub use hframe::HFrameReader;
+pub use hframe::{HFrame, HFrameReader};
 pub use neqo_qpack::Header;
 pub use server::Http3Server;
 pub use server_events::{ClientRequestStream, Http3ServerEvent};
@@ -273,23 +274,38 @@ impl ::std::fmt::Display for Error {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Http3StreamType {
+    Control,
+    Decoder,
+    Encoder,
+    NewStream,
+    HttpResponse,
+    Push,
+}
+
+pub enum ReceiveOutput {
+    NoOutput,
+    PushStream,
+    ControlFrames(Vec<HFrame>),
+    UnblockedStreams(Vec<u64>),
+    NewStream(u64),
+}
+
 pub trait RecvStream: Debug {
-    fn stream_reset(&self, error: AppError, decoder: &mut QPackDecoder, reset_type: ResetType);
+    fn stream_reset(&self, error: AppError, reset_type: ResetType) -> Res<()>;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
+    fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput>;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn header_unblocked(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()>;
     fn done(&self) -> bool;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn read_data(
-        &mut self,
-        conn: &mut Connection,
-        decoder: &mut QPackDecoder,
-        buf: &mut [u8],
-    ) -> Res<(usize, bool)>;
+    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)>;
+
+    fn stream_type(&self) -> Http3StreamType;
 }
 
 pub(crate) trait RecvMessageEvents: Debug {

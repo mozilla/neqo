@@ -6,19 +6,21 @@
 
 #![allow(clippy::module_name_repetitions)]
 
+use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType};
 use neqo_common::{qdebug, Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub(crate) struct NewStreamTypeReader {
+    stream_id: u64,
     reader: IncrementalDecoderUint,
     fin: bool,
 }
 
 impl NewStreamTypeReader {
-    pub fn new() -> Self {
+    pub fn new(stream_id: u64) -> Self {
         Self {
+            stream_id,
             reader: IncrementalDecoderUint::default(),
             fin: false,
         }
@@ -61,36 +63,33 @@ impl NewStreamTypeReader {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct NewStreamsDecoder {
-    streams: HashMap<u64, NewStreamTypeReader>,
-}
+impl RecvStream for NewStreamTypeReader {
+    fn stream_reset(&self, _error: AppError, _reset_type: ResetType) -> Res<()> {
+        Ok(())
+    }
 
-impl NewStreamsDecoder {
-    /// Returns true if a new stream has been decoded.
-    pub fn handle_new_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
-        let stream_type;
-        let fin;
-        {
-            let ns = self
-                .streams
-                .entry(stream_id)
-                .or_insert_with(NewStreamTypeReader::new);
-            stream_type = ns.get_type(conn, stream_id);
-            fin = ns.fin();
-        }
-
-        if fin || stream_type.is_some() {
-            self.streams.remove(&stream_id);
-        }
-        if fin {
-            None
+    fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
+        let stream_type = self.get_type(conn, self.stream_id);
+        if let Some(t) = stream_type {
+            Ok(ReceiveOutput::NewStream(t))
         } else {
-            stream_type
+            Ok(ReceiveOutput::NoOutput)
         }
     }
 
-    pub fn is_new_stream(&self, stream_id: u64) -> bool {
-        self.streams.contains_key(&stream_id)
+    fn header_unblocked(&mut self, _conn: &mut Connection) -> Res<()> {
+        Err(Error::HttpInternal(8))
+    }
+
+    fn done(&self) -> bool {
+        self.fin
+    }
+
+    fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
+        Err(Error::HttpInternal(9))
+    }
+
+    fn stream_type(&self) -> Http3StreamType {
+        Http3StreamType::NewStream
     }
 }

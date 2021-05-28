@@ -8,7 +8,7 @@ use crate::client_events::Http3ClientEvents;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::stream_type_reader::NewStreamTypeReader;
-use crate::{Error, RecvStream, Res, ResetType};
+use crate::{Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
@@ -61,6 +61,7 @@ pub(crate) struct PushStream {
     state: PushStreamState,
     stream_id: u64,
     push_handler: Rc<RefCell<PushController>>,
+    qpack_decoder: Rc<RefCell<QPackDecoder>>,
     events: Http3ClientEvents,
 }
 
@@ -68,12 +69,14 @@ impl PushStream {
     pub fn new(
         stream_id: u64,
         push_handler: Rc<RefCell<PushController>>,
+        qpack_decoder: Rc<RefCell<QPackDecoder>>,
         events: Http3ClientEvents,
     ) -> Self {
         Self {
-            state: PushStreamState::ReadPushId(NewStreamTypeReader::new()),
+            state: PushStreamState::ReadPushId(NewStreamTypeReader::new(stream_id)),
             stream_id,
             push_handler,
+            qpack_decoder,
             events,
         }
     }
@@ -86,7 +89,7 @@ impl Display for PushStream {
 }
 
 impl RecvStream for PushStream {
-    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+    fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
         loop {
             match &mut self.state {
                 PushStreamState::ReadPushId(id_reader) => {
@@ -94,7 +97,7 @@ impl RecvStream for PushStream {
                     let fin = id_reader.fin();
                     if fin {
                         self.state = PushStreamState::Closed;
-                        return Ok(());
+                        return Ok(ReceiveOutput::NoOutput);
                     }
                     if let Some(p) = push_id {
                         if self
@@ -107,6 +110,7 @@ impl RecvStream for PushStream {
                                 response: RecvMessage::new(
                                     MessageType::Response,
                                     self.stream_id,
+                                    self.qpack_decoder.clone(),
                                     Box::new(RecvPushEvents::new(p, self.push_handler.clone())),
                                     None,
                                 ),
@@ -117,33 +121,36 @@ impl RecvStream for PushStream {
                                 Error::HttpRequestCancelled.code(),
                             ));
                             self.state = PushStreamState::Closed;
-                            return Ok(());
+                            return Ok(ReceiveOutput::NoOutput);
                         }
                     }
                 }
                 PushStreamState::ReadResponse { response, push_id } => {
-                    response.receive(conn, decoder)?;
+                    response.receive(conn)?;
                     if response.done() {
                         self.push_handler.borrow_mut().close(*push_id);
                         self.state = PushStreamState::Closed;
                     }
-                    return Ok(());
+                    return Ok(ReceiveOutput::NoOutput);
                 }
-                PushStreamState::Closed => return Ok(()),
+                PushStreamState::Closed => return Ok(ReceiveOutput::NoOutput),
             }
         }
     }
 
-    fn header_unblocked(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        self.receive(conn, decoder)
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
+        self.receive(conn)?;
+        Ok(())
     }
     fn done(&self) -> bool {
         matches!(self.state, PushStreamState::Closed)
     }
 
-    fn stream_reset(&self, app_error: AppError, decoder: &mut QPackDecoder, reset_type: ResetType) {
+    fn stream_reset(&self, app_error: AppError, reset_type: ResetType) -> Res<()> {
         if !self.done() {
-            decoder.cancel_stream(self.stream_id);
+            self.qpack_decoder
+                .borrow_mut()
+                .cancel_stream(self.stream_id);
         }
         match reset_type {
             ResetType::App => {}
@@ -155,16 +162,12 @@ impl RecvStream for PushStream {
                 }
             }
         }
+        Ok(())
     }
 
-    fn read_data(
-        &mut self,
-        conn: &mut Connection,
-        decoder: &mut QPackDecoder,
-        buf: &mut [u8],
-    ) -> Res<(usize, bool)> {
+    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {
         if let PushStreamState::ReadResponse { response, push_id } = &mut self.state {
-            let res = response.read_data(conn, decoder, buf);
+            let res = response.read_data(conn, buf);
             if response.done() {
                 self.push_handler.borrow_mut().close(*push_id);
             }
@@ -172,5 +175,9 @@ impl RecvStream for PushStream {
         } else {
             Err(Error::InvalidStreamId)
         }
+    }
+
+    fn stream_type(&self) -> Http3StreamType {
+        Http3StreamType::Push
     }
 }
