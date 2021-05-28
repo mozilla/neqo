@@ -11,10 +11,11 @@ use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::HFrame;
 use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;
-use crate::send_message::SendMessage;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
-use crate::{Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType};
+use crate::{
+    Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType, SendStream,
+};
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
@@ -66,7 +67,7 @@ pub(crate) struct Http3Connection {
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
     streams_have_data_to_send: BTreeSet<u64>,
-    pub send_streams: HashMap<u64, SendMessage>,
+    pub send_streams: HashMap<u64, Box<dyn SendStream>>,
     pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
 }
 
@@ -165,7 +166,7 @@ impl Http3Connection {
         for stream_id in to_send {
             let mut remove = false;
             if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
-                s.send(conn, &mut self.qpack_encoder.borrow_mut())?;
+                s.send(conn)?;
                 if s.has_data_to_send() {
                     self.streams_have_data_to_send.insert(stream_id);
                 }
@@ -640,7 +641,7 @@ impl Http3Connection {
     pub fn add_streams(
         &mut self,
         stream_id: u64,
-        send_stream: SendMessage,
+        send_stream: Box<dyn SendStream>,
         recv_stream: Box<dyn RecvStream>,
     ) {
         if send_stream.has_data_to_send() {

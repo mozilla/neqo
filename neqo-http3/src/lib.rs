@@ -327,6 +327,18 @@ pub(crate) trait RecvMessageEvents: Debug {
     fn reset(&self, stream_id: u64, error: AppError, local: bool);
 }
 
+pub trait SendStream: Debug {
+    fn send(&mut self, conn: &mut Connection) -> Res<()>;
+    fn has_data_to_send(&self) -> bool;
+    fn stream_writable(&self);
+    fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()>;
+    fn send_body(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize>;
+    fn done(&self) -> bool;
+    fn stop_sending(&mut self, error: AppError);
+    fn close(&mut self, conn: &mut Connection) -> Res<()>;
+    fn stream_type(&self) -> Http3StreamType;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResetType {
     App,

@@ -125,7 +125,11 @@ impl Http3ServerHandler {
                 ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
                     StreamType::BiDi => self.base_handler.add_streams(
                         stream_id.as_u64(),
-                        SendMessage::new(stream_id.as_u64(), Box::new(self.events.clone())),
+                        Box::new(SendMessage::new(
+                            stream_id.as_u64(),
+                            self.base_handler.qpack_encoder.clone(),
+                            Box::new(self.events.clone()),
+                        )),
                         Box::new(RecvMessage::new(
                             MessageType::Request,
                             stream_id.as_u64(),
