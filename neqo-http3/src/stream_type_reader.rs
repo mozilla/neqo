@@ -6,7 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{AppError, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
 use neqo_common::{qdebug, Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
 
@@ -77,19 +77,15 @@ impl RecvStream for NewStreamTypeReader {
         }
     }
 
-    fn header_unblocked(&mut self, _conn: &mut Connection) -> Res<()> {
-        Err(Error::HttpInternal(8))
-    }
-
     fn done(&self) -> bool {
         self.fin
     }
 
-    fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
-        Err(Error::HttpInternal(9))
-    }
-
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::NewStream
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        None
     }
 }

@@ -396,8 +396,8 @@ impl Http3Client {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?;
 
-        let res = recv_stream.read_data(&mut self.conn, buf);
-        match res {
+        let hs = recv_stream.http_stream().ok_or(Error::InvalidStreamId)?;
+        match hs.read_data(&mut self.conn, buf) {
             Ok((amount, fin)) => {
                 if recv_stream.done() {
                     self.base_handler.recv_streams.remove(&stream_id);
@@ -880,10 +880,7 @@ mod tests {
                 conn: default_server_h3(),
                 control_stream_id: None,
                 encoder: qpack.clone(),
-                encoder_receiver: EncoderRecvStream::new(
-                    CLIENT_SIDE_DECODER_STREAM_ID,
-                    qpack.clone(),
-                ),
+                encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack),
                 encoder_stream_id: None,
                 decoder_stream_id: None,
             }
@@ -905,10 +902,7 @@ mod tests {
                 conn,
                 control_stream_id: None,
                 encoder: qpack.clone(),
-                encoder_receiver: EncoderRecvStream::new(
-                    CLIENT_SIDE_DECODER_STREAM_ID,
-                    qpack.clone(),
-                ),
+                encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack),
                 encoder_stream_id: None,
                 decoder_stream_id: None,
             }
@@ -5542,7 +5536,8 @@ mod tests {
         // Cancel request.
         server
             .conn
-            .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code()).unwrap();
+            .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
+            .unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = server.conn.process(None, now());
         let out = client.process(out.dgram(), now());
@@ -5678,20 +5673,20 @@ mod tests {
         mem::drop(server.conn.process(out.dgram(), now()));
         let _ = server.encoder_receiver.receive(&mut server.conn).unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
-
     }
 
     #[test]
     fn qpack_stream_reset_dynamic_table_zero() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         // Cancel request.
-        let _ = client.stream_reset(request_stream_id, Error::HttpRequestCancelled.code()).unwrap();
+        client
+            .stream_reset(request_stream_id, Error::HttpRequestCancelled.code())
+            .unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
         let _ = server.encoder_receiver.receive(&mut server.conn).unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
-
     }
 
     #[test]
@@ -6239,5 +6234,43 @@ mod tests {
 
         // The header ack for the first request has been received.
         assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
+    }
+
+    fn manipulate_conrol_stream(client: &mut Http3Client, stream_id: u64) {
+        assert_eq!(
+            client
+                .stream_reset(stream_id, Error::HttpNoError.code())
+                .unwrap_err(),
+            Error::InvalidStreamId
+        );
+        assert_eq!(
+            client.stream_close_send(stream_id).unwrap_err(),
+            Error::InvalidStreamId
+        );
+        let mut buf = [0; 2];
+        assert_eq!(
+            client.send_request_body(stream_id, &buf).unwrap_err(),
+            Error::InvalidStreamId
+        );
+        assert_eq!(
+            client
+                .read_response_data(now(), stream_id, &mut buf)
+                .unwrap_err(),
+            Error::InvalidStreamId
+        );
+    }
+
+    #[test]
+    fn manipulate_conrol_streams() {
+        let (mut client, server, request_stream_id) = connect_and_send_request(false);
+        manipulate_conrol_stream(&mut client, CLIENT_SIDE_CONTROL_STREAM_ID);
+        manipulate_conrol_stream(&mut client, CLIENT_SIDE_ENCODER_STREAM_ID);
+        manipulate_conrol_stream(&mut client, CLIENT_SIDE_DECODER_STREAM_ID);
+        manipulate_conrol_stream(&mut client, server.control_stream_id.unwrap());
+        manipulate_conrol_stream(&mut client, server.encoder_stream_id.unwrap());
+        manipulate_conrol_stream(&mut client, server.decoder_stream_id.unwrap());
+        client
+            .stream_reset(request_stream_id, Error::HttpNoError.code())
+            .unwrap();
     }
 }

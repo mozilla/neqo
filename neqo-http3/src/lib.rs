@@ -280,7 +280,7 @@ pub enum Http3StreamType {
     Decoder,
     Encoder,
     NewStream,
-    HttpResponse,
+    Http,
     Push,
 }
 
@@ -293,19 +293,24 @@ pub enum ReceiveOutput {
 }
 
 pub trait RecvStream: Debug {
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, etc.
     fn stream_reset(&self, error: AppError, reset_type: ResetType) -> Res<()>;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput>;
+    fn done(&self) -> bool;
+    fn stream_type(&self) -> Http3StreamType;
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream>;
+}
+
+pub trait HttpRecvStream: Debug {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()>;
-    fn done(&self) -> bool;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)>;
-
-    fn stream_type(&self) -> Http3StreamType;
 }
 
 pub(crate) trait RecvMessageEvents: Debug {

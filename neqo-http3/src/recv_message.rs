@@ -7,8 +7,10 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::qlog;
-use crate::{Error, Header, Http3StreamType, ReceiveOutput, Res};
-use crate::{RecvMessageEvents, RecvStream, ResetType};
+use crate::{
+    Error, Header, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvMessageEvents, RecvStream,
+    Res, ResetType,
+};
 
 use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
@@ -432,28 +434,6 @@ impl RecvStream for RecvMessage {
         Ok(ReceiveOutput::NoOutput)
     }
 
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
-        while let Some(p) = self.blocked_push_promise.front() {
-            if let Some(headers) = self
-                .qpack_decoder
-                .borrow_mut()
-                .decode_header_block(&p.header_block, self.stream_id)?
-            {
-                self.push_handler
-                    .as_ref()
-                    .ok_or(Error::HttpFrameUnexpected)?
-                    .borrow_mut()
-                    .new_push_promise(p.push_id, self.stream_id, headers)?;
-                self.blocked_push_promise.pop_front();
-            }
-        }
-
-        if self.blocked_push_promise.is_empty() {
-            return self.receive_internal(conn, true);
-        }
-        Ok(())
-    }
-
     fn done(&self) -> bool {
         matches!(self.state, RecvMessageState::Closed)
     }
@@ -472,6 +452,38 @@ impl RecvStream for RecvMessage {
                 self.conn_events.reset(self.stream_id, app_error, false);
             }
             ResetType::App => {}
+        }
+        Ok(())
+    }
+
+    fn stream_type(&self) -> Http3StreamType {
+        Http3StreamType::Http
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        Some(self)
+    }
+}
+
+impl HttpRecvStream for RecvMessage {
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
+        while let Some(p) = self.blocked_push_promise.front() {
+            if let Some(headers) = self
+                .qpack_decoder
+                .borrow_mut()
+                .decode_header_block(&p.header_block, self.stream_id)?
+            {
+                self.push_handler
+                    .as_ref()
+                    .ok_or(Error::HttpFrameUnexpected)?
+                    .borrow_mut()
+                    .new_push_promise(p.push_id, self.stream_id, headers)?;
+                self.blocked_push_promise.pop_front();
+            }
+        }
+
+        if self.blocked_push_promise.is_empty() {
+            return self.receive_internal(conn, true);
         }
         Ok(())
     }
@@ -515,9 +527,5 @@ impl RecvStream for RecvMessage {
                 _ => break Ok((written, false)),
             }
         }
-    }
-
-    fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::HttpResponse
     }
 }

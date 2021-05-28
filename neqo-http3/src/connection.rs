@@ -223,18 +223,15 @@ impl Http3Connection {
     fn stream_receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<ReceiveOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
-        let r = self.recv_streams.get_mut(&stream_id);
-
-        if r.is_none() {
-            return Ok(ReceiveOutput::NoOutput);
+        if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
+            let output = recv_stream.receive(conn);
+            if recv_stream.done() {
+                self.recv_streams.remove(&stream_id);
+            }
+            output
+        } else {
+            Ok(ReceiveOutput::NoOutput)
         }
-
-        let recv_stream = r.unwrap();
-        let output = recv_stream.receive(conn);
-        if recv_stream.done() {
-            self.recv_streams.remove(&stream_id);
-        }
-        output
     }
 
     /// This function handles reading from all streams, i.e. control, qpack, request/response
@@ -267,20 +264,18 @@ impl Http3Connection {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
                 for stream_id in unblocked_streams {
                     qdebug!([self], "Stream {} is unblocked", stream_id);
-                    let blocked = self.recv_streams.get_mut(&stream_id);
-                    if let Some(r) = blocked {
-                        if r.stream_type() != Http3StreamType::HttpResponse {
-                            return Err(Error::HttpInternal(10));
-                        }
-                        r.header_unblocked(conn)?;
+                    if let Some(r) = self.recv_streams.get_mut(&stream_id) {
+                        r.http_stream()
+                            .ok_or(Error::HttpInternal(10))?
+                            .header_unblocked(conn)?;
                     }
                 }
                 Ok(ReceiveOutput::NoOutput)
             }
-            ReceiveOutput::ControlFrames(control_frames) => {
+            ReceiveOutput::ControlFrames(mut control_frames) => {
                 let mut rest = Vec::new();
-                for f in control_frames {
-                    if let Some(not_handled) = self.handle_control_frame(f)? {
+                for cf in control_frames.drain(..) {
+                    if let Some(not_handled) = self.handle_control_frame(cf)? {
                         rest.push(not_handled);
                     }
                 }
@@ -399,11 +394,11 @@ impl Http3Connection {
         }
     }
 
-    fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
+    fn check_stream_exists(&self, stream_type: &Http3StreamType) -> Res<()> {
         if self
             .recv_streams
             .values()
-            .any(|c| c.stream_type() == stream_type)
+            .any(|c| c.stream_type() == *stream_type)
         {
             Err(Error::HttpStreamCreation)
         } else {
@@ -421,7 +416,7 @@ impl Http3Connection {
     ) -> Res<bool> {
         match stream_type {
             HTTP3_UNI_STREAM_TYPE_CONTROL => {
-                self.check_stream_exists(Http3StreamType::Control)?;
+                self.check_stream_exists(&Http3StreamType::Control)?;
                 self.recv_streams
                     .insert(stream_id, Box::new(ControlStreamRemote::new(stream_id)));
                 Ok(true)
@@ -433,7 +428,7 @@ impl Http3Connection {
             }
             QPACK_UNI_STREAM_TYPE_ENCODER => {
                 qinfo!([self], "A new remote qpack encoder stream {}", stream_id);
-                self.check_stream_exists(Http3StreamType::Decoder)?;
+                self.check_stream_exists(&Http3StreamType::Decoder)?;
                 self.recv_streams.insert(
                     stream_id,
                     Box::new(DecoderRecvStream::new(
@@ -445,7 +440,7 @@ impl Http3Connection {
             }
             QPACK_UNI_STREAM_TYPE_DECODER => {
                 qinfo!([self], "A new remote qpack decoder stream {}", stream_id);
-                self.check_stream_exists(Http3StreamType::Encoder)?;
+                self.check_stream_exists(&Http3StreamType::Encoder)?;
                 self.recv_streams.insert(
                     stream_id,
                     Box::new(EncoderRecvStream::new(
@@ -483,21 +478,30 @@ impl Http3Connection {
     ) -> Res<()> {
         qinfo!([self], "Reset stream {} error={}.", stream_id, error);
 
-        let mut found = self.send_streams.remove(&stream_id).is_some();
+        // Make sure that an application cannot reset a control stream.
+        // self.send_streams holds only http streams therefore if the stream
+        // is present in self.send_streams we don not need to check recv_streams.
+        if self.send_streams.get(&stream_id).is_none()
+            && !matches!(
+                self.recv_streams
+                    .get(&stream_id)
+                    .ok_or(Error::InvalidStreamId)?
+                    .stream_type(),
+                Http3StreamType::Http | Http3StreamType::Push
+            )
+        {
+            return Err(Error::InvalidStreamId);
+        }
+        self.send_streams.remove(&stream_id);
         if let Some(s) = self.recv_streams.remove(&stream_id) {
             s.stream_reset(error, ResetType::App)?;
-            found = true;
         }
 
-        // Stream may be already be closed and we may get an error here, but we do not care.
+        // Stream maybe already be closed and we may get an error here, but we do not care.
         mem::drop(conn.stream_reset_send(stream_id, error));
-        // Stream may be already be closed and we may get an error here, but we do not care.
+        // Stream maybe already be closed and we may get an error here, but we do not care.
         mem::drop(conn.stream_stop_sending(stream_id, error));
-        if found {
-            Ok(())
-        } else {
-            Err(Error::InvalidStreamId)
-        }
+        Ok(())
     }
 
     /// This is called when an application wants to close the sending side of a stream.
