@@ -44,7 +44,6 @@ pub struct QPackEncoder {
     max_entries: u64,
     instruction_reader: DecoderInstructionReader,
     local_stream: LocalStreamState,
-    remote_stream_id: Option<u64>,
     max_blocked_streams: u16,
     // Remember header blocks that are referring to dynamic table.
     // There can be multiple header blocks in one stream, headers, trailer, push stream request, etc.
@@ -66,7 +65,6 @@ impl QPackEncoder {
             max_entries: 0,
             instruction_reader: DecoderInstructionReader::new(),
             local_stream: LocalStreamState::NoStream,
-            remote_stream_id: None,
             max_blocked_streams: 0,
             unacked_header_blocks: HashMap::new(),
             blocked_stream_cnt: 0,
@@ -117,19 +115,9 @@ impl QPackEncoder {
     /// # Errors
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn recv_if_encoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        match self.remote_stream_id {
-            Some(id) => {
-                if id == stream_id {
-                    self.read_instructions(conn, stream_id)
-                        .map_err(|e| map_error(&e))?;
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            None => Ok(false),
-        }
+    pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+        self.read_instructions(conn, stream_id)
+            .map_err(|e| map_error(&e))
     }
 
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
@@ -485,18 +473,6 @@ impl QPackEncoder {
         }
     }
 
-    /// We have received a remote decoder stream. Remember its stream id.
-    /// # Errors
-    ///    If we receive multiple decoder streams this function will return `WrongStreamCount`.
-    pub fn add_recv_stream(&mut self, stream_id: u64) -> Res<()> {
-        if self.remote_stream_id.is_some() {
-            Err(Error::WrongStreamCount)
-        } else {
-            self.remote_stream_id = Some(stream_id);
-            Ok(())
-        }
-    }
-
     #[must_use]
     pub fn stats(&self) -> Stats {
         self.stats.clone()
@@ -505,11 +481,6 @@ impl QPackEncoder {
     #[must_use]
     pub fn local_stream_id(&self) -> Option<u64> {
         self.local_stream.stream_id().map(StreamId::as_u64)
-    }
-
-    #[must_use]
-    pub fn remote_stream_id(&self) -> Option<u64> {
-        self.remote_stream_id
     }
 
     #[cfg(test)]

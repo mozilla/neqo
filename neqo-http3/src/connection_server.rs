@@ -4,12 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{HandleReadableOutput, Http3Connection, Http3State};
+use crate::connection::{Http3Connection, Http3State};
 use crate::hframe::HFrame;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{Error, Header, Res};
+use crate::{Error, Header, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
@@ -128,6 +128,7 @@ impl Http3ServerHandler {
                         Box::new(RecvMessage::new(
                             MessageType::Request,
                             stream_id.as_u64(),
+                            self.base_handler.qpack_decoder.clone(),
                             Box::new(self.events.clone()),
                             None,
                         )),
@@ -181,8 +182,8 @@ impl Http3ServerHandler {
 
     fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         match self.base_handler.handle_stream_readable(conn, stream_id)? {
-            HandleReadableOutput::PushStream => Err(Error::HttpStreamCreation),
-            HandleReadableOutput::ControlFrames(control_frames) => {
+            ReceiveOutput::PushStream => Err(Error::HttpStreamCreation),
+            ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
                         HFrame::MaxPushId { .. } => {
@@ -222,7 +223,8 @@ impl Http3ServerHandler {
                 Err(Error::Internal)
             }
             Some(recv_stream) => {
-                match recv_stream.read_data(conn, &mut self.base_handler.qpack_decoder, buf) {
+                let output = recv_stream.read_data(conn, buf);
+                match output {
                     Ok((amount, fin)) => {
                         if recv_stream.done() {
                             self.base_handler.recv_streams.remove(&stream_id);
