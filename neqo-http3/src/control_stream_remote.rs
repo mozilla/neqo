@@ -5,7 +5,9 @@
 // except according to those terms.
 
 use crate::hframe::{HFrame, HFrameReader};
-use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{
+    AppError, Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType,
+};
 use neqo_common::qdebug;
 use neqo_transport::Connection;
 
@@ -59,19 +61,15 @@ impl RecvStream for ControlStreamRemote {
         }
     }
 
-    fn header_unblocked(&mut self, _conn: &mut Connection) -> Res<()> {
-        Err(Error::HttpInternal(4))
-    }
-
     fn done(&self) -> bool {
         false
     }
 
-    fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
-        Err(Error::HttpInternal(5))
-    }
-
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::Control
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        None
     }
 }
