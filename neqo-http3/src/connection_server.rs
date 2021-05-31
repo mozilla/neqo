@@ -190,7 +190,8 @@ impl Http3ServerHandler {
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
-                        HFrame::MaxPushId { .. } => {
+                        HFrame::MaxPushId { .. } | HFrame::Settings { .. } => {
+                            // Settings frame is only handled by the client.
                             // TODO implement push
                             Ok(())
                         }

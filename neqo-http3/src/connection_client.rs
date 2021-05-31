@@ -645,6 +645,12 @@ impl Http3Client {
                         | HFrame::PriorityUpdateRequest { .. }
                         | HFrame::PriorityUpdatePush { .. } => Err(Error::HttpFrameUnexpected),
                         HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
+                        HFrame::Settings { .. } => {
+                            self.events.web_transport_negotiation_done(
+                                self.base_handler.web_transport_enabled(),
+                            );
+                            Ok(())
+                        }
                         _ => {
                             unreachable!(
                                 "we should only put MaxPushId, Goaway and PriorityUpdates into control_frames."

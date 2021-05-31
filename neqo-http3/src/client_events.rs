@@ -62,6 +62,8 @@ pub enum Http3ClientEvent {
     PushReset { push_id: u64, error: AppError },
     /// New stream can be created
     RequestsCreatable,
+    /// WebTransport successfully negotiated
+    WebTransportNegotiated(bool),
     /// Cert authentication needed
     AuthenticationNeeded,
     /// Encrypted client hello fallback occurred.  The certificate for the
@@ -162,6 +164,10 @@ impl Http3ClientEvents {
         if stream_type == StreamType::BiDi {
             self.insert(Http3ClientEvent::RequestsCreatable);
         }
+    }
+
+    pub(crate) fn web_transport_negotiation_done(&self, enabled: bool) {
+        self.insert(Http3ClientEvent::WebTransportNegotiated(enabled));
     }
 
     /// Add a new `AuthenticationNeeded` event

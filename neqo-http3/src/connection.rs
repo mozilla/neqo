@@ -582,9 +582,13 @@ impl Http3Connection {
             return Err(Error::HttpMissingSettings);
         }
         match f {
-            HFrame::Settings { settings } => {
+            HFrame::Settings { ref settings } => {
                 self.handle_settings(settings)?;
-                Ok(None)
+                if self.web_transport.is_some() {
+                    Ok(Some(f))
+                } else {
+                    Ok(None)
+                }
             }
             HFrame::Goaway { .. }
             | HFrame::MaxPushId { .. }
@@ -612,7 +616,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_settings(&mut self, new_settings: HSettings) -> Res<()> {
+    fn handle_settings(&mut self, new_settings: &HSettings) -> Res<()> {
         qinfo!([self], "Handle SETTINGS frame.");
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
@@ -623,7 +627,7 @@ impl Http3Connection {
                         .unwrap()
                         .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
                 }
-                self.settings_state = Http3RemoteSettingsState::Received(new_settings);
+                self.settings_state = Http3RemoteSettingsState::Received(new_settings.clone());
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
@@ -670,7 +674,7 @@ impl Http3Connection {
                     qdebug!([self], "Settings after zero rtt differ.");
                     self.set_qpack_settings(&(new_settings))?;
                 }
-                self.settings_state = Http3RemoteSettingsState::Received(new_settings);
+                self.settings_state = Http3RemoteSettingsState::Received(new_settings.clone());
                 Ok(())
             }
             Http3RemoteSettingsState::Received { .. } => Err(Error::HttpFrameUnexpected),
