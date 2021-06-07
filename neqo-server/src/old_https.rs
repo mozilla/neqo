@@ -153,7 +153,7 @@ impl Http09Server {
                 if args.qns_test.is_some() {
                     qns_read_response(path)
                 } else {
-                    let count = usize::from_str_radix(path, 10).unwrap();
+                    let count = path.parse().unwrap();
                     Some(vec![b'a'; count])
                 }
             }

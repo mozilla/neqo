@@ -13,6 +13,7 @@ use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
 use std::fmt::Display;
+use std::mem;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -111,10 +112,10 @@ impl RecvStream for PushStream {
                                 ),
                             };
                         } else {
-                            let _ = conn.stream_stop_sending(
+                            mem::drop(conn.stream_stop_sending(
                                 self.stream_id,
                                 Error::HttpRequestCancelled.code(),
-                            );
+                            ));
                             self.state = PushStreamState::Closed;
                             return Ok(());
                         }

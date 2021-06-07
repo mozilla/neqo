@@ -424,7 +424,9 @@ impl<'a> Handler<'a> {
                     "Successfully created stream id {} for {}",
                     client_stream_id, url
                 );
-                let _ = client.stream_close_send(client_stream_id);
+                client
+                    .stream_close_send(client_stream_id)
+                    .expect("failed to close send stream");
 
                 let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
 
@@ -843,10 +845,10 @@ mod old {
                 Ok(client_stream_id) => {
                     println!("Created stream {} for {}", client_stream_id, url);
                     let req = format!("GET {}\r\n", url.path());
-                    client
+                    let _ = client
                         .stream_send(client_stream_id, req.as_bytes())
                         .unwrap();
-                    let _ = client.stream_close_send(client_stream_id);
+                    client.stream_close_send(client_stream_id).unwrap();
                     let out_file =
                         get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
                     self.streams.insert(client_stream_id, out_file);

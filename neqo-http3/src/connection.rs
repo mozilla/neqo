@@ -545,10 +545,10 @@ impl Http3Connection {
             found = true;
         }
 
-        // Stream maybe already be closed and we may get an error here, but we do not care.
-        let _ = conn.stream_reset_send(stream_id, error);
-        // Stream maybe already be closed and we may get an error here, but we do not care.
-        let _ = conn.stream_stop_sending(stream_id, error);
+        // Stream may be already be closed and we may get an error here, but we do not care.
+        mem::drop(conn.stream_reset_send(stream_id, error));
+        // Stream may be already be closed and we may get an error here, but we do not care.
+        mem::drop(conn.stream_stop_sending(stream_id, error));
         if found {
             Ok(())
         } else {
@@ -564,9 +564,9 @@ impl Http3Connection {
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?;
-        // The following funcion may return InvalidStreamId from the transport layer if the stream has been cloesd
+        // The following function may return InvalidStreamId from the transport layer if the stream has been cloesd
         // already. It is ok to ignore it here.
-        let _ = send_stream.close(conn);
+        mem::drop(send_stream.close(conn));
         if send_stream.done() {
             self.send_streams.remove(&stream_id);
         }

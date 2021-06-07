@@ -27,7 +27,7 @@ use test_fixture::{
 
 use std::cell::RefCell;
 use std::convert::TryFrom;
-
+use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
@@ -235,12 +235,12 @@ fn zero_rtt() {
     let c4 = client_send();
 
     // 0-RTT packets that arrive before the handshake get dropped.
-    let _ = server.process(Some(c2), now);
+    mem::drop(server.process(Some(c2), now));
     assert!(server.active_connections().is_empty());
 
     // Now handshake and let another 0-RTT packet in.
     let shs = server.process(Some(c1), now).dgram();
-    let _ = server.process(Some(c3), now);
+    mem::drop(server.process(Some(c3), now));
     // The server will have received two STREAM frames now if it processed both packets.
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
@@ -250,10 +250,10 @@ fn zero_rtt() {
     // a little so that the pacer doesn't prevent the Finished from being sent.
     now += now - start_time;
     let cfin = client.process(shs, now).dgram();
-    let _ = server.process(cfin, now);
+    mem::drop(server.process(cfin, now));
 
     // The server will drop this last 0-RTT packet.
-    let _ = server.process(Some(c4), now);
+    mem::drop(server.process(Some(c4), now));
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);

@@ -543,6 +543,7 @@ mod tests {
     use super::{Connection, Error, Header, QPackEncoder, Res};
     use crate::QpackSettings;
     use neqo_transport::{ConnectionParameters, StreamType};
+    use std::mem;
     use test_fixture::{configure_server, default_client, default_server, handshake, now};
 
     struct TestEncoder {
@@ -585,7 +586,7 @@ mod tests {
             self.encoder.send(&mut self.conn).unwrap();
             let out = self.conn.process(None, now());
             let out2 = self.peer_conn.process(out.dgram(), now());
-            let _ = self.conn.process(out2.dgram(), now());
+            mem::drop(self.conn.process(out2.dgram(), now()));
             let mut buf = [0_u8; 100];
             let (amount, fin) = self
                 .peer_conn
@@ -646,7 +647,7 @@ mod tests {
             .stream_send(encoder.recv_stream_id, decoder_instruction)
             .unwrap();
         let out = encoder.peer_conn.process(None, now());
-        let _ = encoder.conn.process(out.dgram(), now());
+        mem::drop(encoder.conn.process(out.dgram(), now()));
         assert!(encoder
             .encoder
             .read_instructions(&mut encoder.conn, encoder.recv_stream_id)
@@ -1643,7 +1644,7 @@ mod tests {
 
         // exchange a flow control update.
         let out = encoder.peer_conn.process(None, now());
-        let _ = encoder.conn.process(out.dgram(), now());
+        mem::drop(encoder.conn.process(out.dgram(), now()));
 
         // Try writing a new header block. Now, headers will be added to the dynamic table again, because
         // instructions can be sent.
@@ -1690,7 +1691,7 @@ mod tests {
 
         encoder.encoder.send(&mut encoder.conn).unwrap();
         let out = encoder.conn.process(None, now());
-        let _ = encoder.peer_conn.process(out.dgram(), now());
+        mem::drop(encoder.peer_conn.process(out.dgram(), now()));
         // receive an insert count increment.
         recv_instruction(&mut encoder, &[0x01]);
 

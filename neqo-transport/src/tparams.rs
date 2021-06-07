@@ -570,6 +570,7 @@ where
 #[allow(unused_variables)]
 mod tests {
     use super::*;
+    use std::mem;
 
     #[test]
     fn basic_tps() {
@@ -756,7 +757,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_neither() {
-        let _ = PreferredAddress::new(None, None);
+        mem::drop(PreferredAddress::new(None, None));
     }
 
     #[test]
