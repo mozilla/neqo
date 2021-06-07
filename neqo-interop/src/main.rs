@@ -19,6 +19,7 @@ use neqo_transport::{
 use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::HashSet;
+use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::rc::Rc;
 // use std::path::PathBuf;
@@ -537,7 +538,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
         .h3
         .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
-    let _ = hc.h3.stream_close_send(client_stream_id);
+    hc.h3.stream_close_send(client_stream_id).unwrap();
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, false, *test != Test::D) {
@@ -557,7 +558,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
                 &[(String::from("something1"), String::from("something2"))],
             )
             .unwrap();
-        let _ = hc.h3.stream_close_send(client_stream_id);
+        hc.h3.stream_close_send(client_stream_id).unwrap();
         hc.streams.insert(client_stream_id);
         if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
             return Err(format!("ERROR: {}", e));
@@ -588,7 +589,7 @@ fn test_h3_rz(
         .h3
         .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
-    let _ = hc.h3.stream_close_send(client_stream_id);
+    hc.h3.stream_close_send(client_stream_id).unwrap();
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
@@ -639,7 +640,7 @@ fn test_h3_rz(
             .h3
             .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
             .unwrap();
-        let _ = hc.h3.stream_close_send(client_stream_id);
+        mem::drop(hc.h3.stream_close_send(client_stream_id));
         hc.streams.insert(client_stream_id);
         if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
             return Err(format!("ERROR: {}", e));
@@ -701,9 +702,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let remote_addr = peer.addr();
 
     let nctx = NetworkCtx {
-        socket,
         local_addr,
         remote_addr,
+        socket,
     };
 
     if let Test::VN = test {

@@ -322,7 +322,7 @@ fn setup_standalone() -> Vec<String> {
 fn setup_for_gecko() -> Vec<String> {
     let mut flags: Vec<String> = Vec::new();
 
-    let fold_libs = env::var("MOZ_FOLD_LIBS").unwrap_or("".to_string()) == "1";
+    let fold_libs = env::var("MOZ_FOLD_LIBS").unwrap_or_default() == "1";
     let libs = if fold_libs {
         vec!["nss3"]
     } else {

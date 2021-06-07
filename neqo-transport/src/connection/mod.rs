@@ -1462,7 +1462,7 @@ impl Connection {
                 self.setup_handshake_path(&path, now);
             } else {
                 // Otherwise try to get a usable connection ID.
-                let _ = self.ensure_permanent(&path);
+                mem::drop(self.ensure_permanent(&path));
             }
         }
     }

@@ -312,11 +312,7 @@ impl Server {
     }
 
     fn connection(&self, cid: &ConnectionIdRef) -> Option<StateRef> {
-        if let Some(c) = self.connections.borrow().get(&cid[..]) {
-            Some(Rc::clone(&c))
-        } else {
-            None
-        }
+        self.connections.borrow().get(&cid[..]).map(Rc::clone)
     }
 
     fn handle_initial(

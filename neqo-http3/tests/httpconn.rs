@@ -9,6 +9,7 @@
 use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State};
+use std::mem;
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
@@ -86,7 +87,7 @@ fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     let out = hconn_c.process(None, now()); // Initial
     let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
     let out = hconn_c.process(out.dgram(), now()); // ACK
-    let _ = hconn_s.process(out.dgram(), now()); //consume ACK
+    mem::drop(hconn_s.process(out.dgram(), now())); //consume ACK
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
@@ -120,13 +121,13 @@ fn test_fetch() {
     let out = hconn_c.process(dgram, now());
     eprintln!("-----server");
     let out = hconn_s.process(out.dgram(), now());
-    let _ = hconn_c.process(out.dgram(), now());
+    mem::drop(hconn_c.process(out.dgram(), now()));
     process_server_events(&mut hconn_s);
     let out = hconn_s.process(None, now());
 
     eprintln!("-----client");
-    let _ = hconn_c.process(out.dgram(), now());
+    mem::drop(hconn_c.process(out.dgram(), now()));
     let out = hconn_s.process(None, now());
-    let _ = hconn_c.process(out.dgram(), now());
+    mem::drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
 }

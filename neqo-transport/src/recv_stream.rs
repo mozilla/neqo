@@ -31,7 +31,9 @@ const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 #[derive(Debug, Default)]
-pub(crate) struct RecvStreams(BTreeMap<StreamId, RecvStream>);
+pub(crate) struct RecvStreams {
+    streams: BTreeMap<StreamId, RecvStream>,
+}
 
 impl RecvStreams {
     pub fn write_frames(
@@ -40,7 +42,7 @@ impl RecvStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        for stream in self.0.values_mut() {
+        for stream in self.streams.values_mut() {
             stream.write_frame(builder, tokens, stats);
             if builder.is_full() {
                 return;
@@ -49,20 +51,20 @@ impl RecvStreams {
     }
 
     pub fn insert(&mut self, id: StreamId, stream: RecvStream) {
-        self.0.insert(id, stream);
+        self.streams.insert(id, stream);
     }
 
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut RecvStream> {
-        self.0.get_mut(&id).ok_or(Error::InvalidStreamId)
+        self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
 
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.streams.clear();
     }
 
     pub fn clear_terminal(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
         let recv_to_remove = self
-            .0
+            .streams
             .iter()
             .filter_map(|(id, stream)| {
                 // Remove all streams for which the receiving is done (or aborted).
@@ -78,7 +80,7 @@ impl RecvStreams {
         let mut removed_bidi = 0;
         let mut removed_uni = 0;
         for id in &recv_to_remove {
-            self.0.remove(&id);
+            self.streams.remove(&id);
             if id.is_remote_initiated(role) {
                 if id.is_bidi() {
                     removed_bidi += 1;
