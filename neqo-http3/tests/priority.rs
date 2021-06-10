@@ -37,6 +37,7 @@ pub fn default_http3_client() -> Http3Client {
         &Http3Parameters {
             qpack_settings: DEFAULT_SETTINGS,
             max_concurrent_push_streams: 5,
+            enable_wt: false,
         },
         now(),
     )
@@ -51,6 +52,7 @@ pub fn default_http3_server() -> Http3Server {
         anti_replay(),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         DEFAULT_SETTINGS,
+        false,
         None,
     )
     .expect("create a server")

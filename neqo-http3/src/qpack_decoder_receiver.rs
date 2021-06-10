@@ -6,6 +6,7 @@
 
 use crate::{
     AppError, Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType,
+    WtRecvStream,
 };
 use neqo_qpack::QPackDecoder;
 use neqo_transport::Connection;
@@ -44,6 +45,10 @@ impl RecvStream for DecoderRecvStream {
     }
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        None
+    }
+
+    fn wt_stream(&mut self) -> Option<&mut dyn WtRecvStream> {
         None
     }
 }

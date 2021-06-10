@@ -8,8 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
-use crate::Header;
-use crate::RecvMessageEvents;
+use crate::{Header, RecvMessageEvents, WtEvents};
 
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
@@ -29,9 +28,13 @@ pub enum Http3ClientEvent {
         fin: bool,
     },
     /// A stream can accept new data.
-    DataWritable { stream_id: u64 },
+    DataWritable {
+        stream_id: u64,
+    },
     /// New bytes available for reading.
-    DataReadable { stream_id: u64 },
+    DataReadable {
+        stream_id: u64,
+    },
     /// Peer reset the stream or there was an parsing error.
     Reset {
         stream_id: u64,
@@ -39,7 +42,10 @@ pub enum Http3ClientEvent {
         local: bool,
     },
     /// Peer has sent a STOP_SENDING.
-    StopSending { stream_id: u64, error: AppError },
+    StopSending {
+        stream_id: u64,
+        error: AppError,
+    },
     /// A new push promise.
     PushPromise {
         push_id: u64,
@@ -54,22 +60,29 @@ pub enum Http3ClientEvent {
         fin: bool,
     },
     /// New bytes are available on a push stream for reading.
-    PushDataReadable { push_id: u64 },
+    PushDataReadable {
+        push_id: u64,
+    },
     /// A push has been canceled.
-    PushCanceled { push_id: u64 },
+    PushCanceled {
+        push_id: u64,
+    },
     /// A push stream was been reset due to a HttpGeneralProtocol error.
     /// Most common case are malformed response headers.
-    PushReset { push_id: u64, error: AppError },
+    PushReset {
+        push_id: u64,
+        error: AppError,
+    },
     /// New stream can be created
     RequestsCreatable,
-    /// WebTransport successfully negotiated
-    WebTransportNegotiated(bool),
     /// Cert authentication needed
     AuthenticationNeeded,
     /// Encrypted client hello fallback occurred.  The certificate for the
     /// name `public_name` needs to be authenticated in order to get
     /// an updated ECH configuration.
-    EchFallbackAuthenticationNeeded { public_name: String },
+    EchFallbackAuthenticationNeeded {
+        public_name: String,
+    },
     /// A new resumption token.
     ResumptionToken(ResumptionToken),
     /// Zero Rtt has been rejected.
@@ -78,6 +91,29 @@ pub enum Http3ClientEvent {
     GoawayReceived,
     /// Connection state change.
     StateChange(Http3State),
+    /// WebTransport successfully negotiated
+    WebTransportNegotiated(bool),
+    WebTransportSessionNegotiated {
+        stream_id: u64,
+        success: bool,
+    },
+    WebTransportNewStream {
+        stream_id: u64,
+    },
+    WebTransportDataReadable {
+        stream_id: u64,
+    },
+    WebTransportStreamReset {
+        stream_id: u64,
+        error: AppError,
+    },
+    WebTransportDataWritable {
+        stream_id: u64,
+    },
+    WebTransportStreamStopSending {
+        stream_id: u64,
+        error: AppError,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -116,6 +152,8 @@ impl RecvMessageEvents for Http3ClientEvents {
             local,
         });
     }
+
+    fn web_transport_new_session(&self, _stream_id: u64, _headers: Vec<Header>) {}
 }
 
 impl SendMessageEvents for Http3ClientEvents {
@@ -137,6 +175,36 @@ impl SendMessageEvents for Http3ClientEvents {
         // The stream has received a STOP_SENDING frame, we should remove any DataWritable event.
         self.remove_send_side_event(stream_id);
         self.insert(Http3ClientEvent::StopSending { stream_id, error });
+    }
+}
+
+impl WtEvents for Http3ClientEvents {
+    fn web_transport_session_negotiated(&self, stream_id: u64, success: bool) {
+        self.insert(Http3ClientEvent::WebTransportSessionNegotiated { stream_id, success });
+    }
+
+    fn web_transport_new_stream(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::WebTransportNewStream { stream_id });
+    }
+
+    fn web_transport_data_readable(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::WebTransportDataReadable { stream_id });
+    }
+
+    fn web_transport_stream_reset(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3ClientEvent::WebTransportStreamReset { stream_id, error });
+    }
+
+    fn web_transport_data_writable(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::WebTransportDataWritable { stream_id });
+    }
+
+    fn web_transport_stream_stop_sending(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3ClientEvent::WebTransportStreamStopSending { stream_id, error });
+    }
+
+    fn clone_box(&self) -> Box<dyn WtEvents> {
+        Box::new(self.clone())
     }
 }
 
@@ -164,10 +232,6 @@ impl Http3ClientEvents {
         if stream_type == StreamType::BiDi {
             self.insert(Http3ClientEvent::RequestsCreatable);
         }
-    }
-
-    pub(crate) fn web_transport_negotiation_done(&self, enabled: bool) {
-        self.insert(Http3ClientEvent::WebTransportNegotiated(enabled));
     }
 
     /// Add a new `AuthenticationNeeded` event
@@ -252,6 +316,10 @@ impl Http3ClientEvents {
                 | Http3ClientEvent::PushDataReadable{ push_id: x, .. }
                 | Http3ClientEvent::PushCanceled{ push_id: x, .. } if *x == push_id)
         });
+    }
+
+    pub(crate) fn web_transport_negotiation_done(&self, enabled: bool) {
+        self.insert(Http3ClientEvent::WebTransportNegotiated(enabled));
     }
 }
 

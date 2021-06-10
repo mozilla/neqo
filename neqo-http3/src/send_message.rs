@@ -6,8 +6,9 @@
 
 use crate::hframe::HFrame;
 use crate::qlog;
+use crate::wt::WebTransportSession;
 use crate::Header;
-use crate::{Error, Http3StreamType, Res, SendStream};
+use crate::{Error, HttpSendStream, Res, SendStream, WtSendStream};
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
@@ -216,6 +217,37 @@ impl SendStream for SendMessage {
         )
     }
 
+    fn stream_writable(&self) {
+        if self.state.is_state_sending_data() {
+            self.conn_events.data_writable(self.stream_id);
+        }
+    }
+
+    fn done(&self) -> bool {
+        self.state.done()
+    }
+
+    fn stop_sending(&mut self, app_err: AppError) {
+        if !self.state.is_sending_closed() {
+            self.conn_events.remove_send_side_event(self.stream_id);
+            self.conn_events.stop_sending(self.stream_id, app_err);
+        }
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
+        Some(self)
+    }
+
+    fn get_wt_session(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
+        None
+    }
+
+    fn wt_stream(&mut self) -> Option<&mut dyn WtSendStream> {
+        None
+    }
+}
+
+impl HttpSendStream for SendMessage {
     fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()> {
         if !matches!(self.state, SendMessageState::Uninitialized) {
             return Err(Error::AlreadyInitialized);
@@ -288,16 +320,6 @@ impl SendStream for SendMessage {
         }
     }
 
-    fn stream_writable(&self) {
-        if self.state.is_state_sending_data() {
-            self.conn_events.data_writable(self.stream_id);
-        }
-    }
-
-    fn done(&self) -> bool {
-        self.state.done()
-    }
-
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
         match self.state {
             SendMessageState::SendingInitialMessage { ref mut fin, .. }
@@ -312,16 +334,5 @@ impl SendStream for SendMessage {
 
         self.conn_events.remove_send_side_event(self.stream_id);
         Ok(())
-    }
-
-    fn stop_sending(&mut self, app_err: AppError) {
-        if !self.state.is_sending_closed() {
-            self.conn_events.remove_send_side_event(self.stream_id);
-            self.conn_events.stop_sending(self.stream_id, app_err);
-        }
-    }
-
-    fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::Http
     }
 }

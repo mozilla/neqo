@@ -12,6 +12,7 @@ use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
+use crate::wt::WebTransportSession;
 use crate::{
     Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvMessageEvents, ResetType,
 };
@@ -327,6 +328,7 @@ impl Http3Client {
                 Box::new(self.events.clone()),
                 Some(Rc::clone(&self.push_handler)),
                 PriorityHandler::new(false, priority),
+                false,
             )),
         );
 
@@ -396,6 +398,8 @@ impl Http3Client {
         self.base_handler
             .send_streams
             .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
             .ok_or(Error::InvalidStreamId)?
             .send_body(&mut self.conn, buf)
     }
@@ -470,6 +474,144 @@ impl Http3Client {
             .ok_or(Error::InvalidStreamId)?;
         self.conn.stream_keep_alive(stream_id, true)?;
         self.read_response_data(now, stream_id, buf)
+    }
+
+    // API WebTransport
+
+    pub fn create_web_transport(
+        &mut self,
+        now: Instant,
+        host: &str,
+        path: &str,
+        origin: &str,
+    ) -> Res<u64> {
+        qinfo!(
+            [self],
+            "Create WebTransport host={}, path={} origin={}",
+            host,
+            path,
+            origin
+        );
+        self.check_web_transport_available()?;
+
+        let id = WebTransportSession::create_session(
+            host,
+            path,
+            origin,
+            &mut self.conn,
+            &mut self.base_handler,
+            Box::new(self.events.clone()),
+        )?;
+
+        // Call immediately send so that at least headers get sent. This will make Firefox faster, since
+        // it can send request body immediatly in most cases and does not need to do a complete process loop.
+        let output = self
+            .base_handler
+            .send_streams
+            .get_mut(&id)
+            .ok_or(Error::InvalidStreamId)?
+            .send(&mut self.conn);
+        if let Err(e) = output {
+            if e.connection_error() {
+                self.close(now, e.code(), "");
+            }
+            return Err(e);
+        }
+
+        Ok(id)
+    }
+
+    pub fn web_transport_create_new_stream(
+        &mut self,
+        stream_id: u64,
+        stream_type: StreamType,
+    ) -> Res<u64> {
+        qtrace!("Create new WT stream");
+        let wt_session = self
+            .base_handler
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .get_wt_session()
+            .ok_or(Error::InvalidStreamId)?;
+
+        match WebTransportSession::create_new_stream_local(wt_session, stream_type, &mut self.conn)?
+        {
+            (id, s, Some(r)) => {
+                self.base_handler.add_streams(id, s, r);
+                Ok(id)
+            }
+            (id, s, None) => {
+                let _ = self.base_handler.send_streams.insert(id, s);
+                Ok(id)
+            }
+        }
+    }
+
+    pub fn web_transport_send_data(&mut self, stream_id: u64, buf: &[u8]) -> Res<usize> {
+        qinfo!(
+            [self],
+            "WebTransport send data from stream {} sending {} bytes.",
+            stream_id,
+            buf.len()
+        );
+        self.base_handler
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .wt_stream()
+            .ok_or(Error::InvalidStreamId)?
+            .send_data(&mut self.conn, buf)
+    }
+
+    pub fn web_transport_read_data(
+        &mut self,
+        now: Instant,
+        stream_id: u64,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)> {
+        qinfo!([self], "read_data from stream {}.", stream_id);
+        let recv_stream = self
+            .base_handler
+            .recv_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .wt_stream()
+            .ok_or(Error::InvalidStreamId)?;
+
+        match recv_stream.read_data(&mut self.conn, buf) {
+            Ok((amount, fin)) => {
+                if fin {
+                    self.base_handler.recv_streams.remove(&stream_id);
+                }
+                Ok((amount, fin))
+            }
+            Err(e) => {
+                if e.stream_reset_error() {
+                    self.reset_stream_on_error(stream_id, e.code());
+                    Ok((0, false))
+                } else if e.connection_error() {
+                    self.close(now, e.code(), "");
+                    Err(e)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    fn check_web_transport_available(&self) -> Res<()> {
+        match self.base_handler.state() {
+            Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
+                return Err(Error::AlreadyClosed)
+            }
+            Http3State::Initializing => return Err(Error::Unavailable),
+            _ => {}
+        }
+        if !self.base_handler.web_transport_enabled() {
+            return Err(Error::Unavailable);
+        }
+        Ok(())
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
@@ -559,12 +701,9 @@ impl Http3Client {
         while let Some(e) = self.conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
-                    StreamType::BiDi => return Err(Error::HttpStreamCreation),
-                    StreamType::UniDi => self
-                        .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64(), Role::Client),
-                },
+                ConnectionEvent::NewStream { stream_id } => self
+                    .base_handler
+                    .add_new_stream(stream_id.as_u64(), Role::Client),
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
                         s.stream_writable();
@@ -634,6 +773,7 @@ impl Http3Client {
             ReceiveOutput::NewStream(NewStreamType::Push(push_id)) => {
                 self.handle_new_push_stream(stream_id, push_id)
             }
+            ReceiveOutput::NewStream(NewStreamType::Http) => Err(Error::HttpStreamCreation),
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {

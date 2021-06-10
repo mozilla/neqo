@@ -6,8 +6,7 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
-use crate::RecvMessageEvents;
-use crate::{Header, Priority};
+use crate::{Header, Priority, RecvMessageEvents, WtEvents};
 
 use neqo_transport::AppError;
 
@@ -36,6 +35,27 @@ pub(crate) enum Http3ServerConnEvent {
     //Reset { stream_id: u64, error: AppError },
     /// Connection state change.
     StateChange(Http3State),
+    WebTransportNewSession {
+        stream_id: u64,
+        headers: Vec<Header>,
+    },
+    WebTransportNewStream {
+        stream_id: u64,
+    },
+    WebTransportDataReadable {
+        stream_id: u64,
+    },
+    WebTransportStreamReset {
+        stream_id: u64,
+        error: AppError,
+    },
+    WebTransportDataWritable {
+        stream_id: u64,
+    },
+    WebTransportStreamStopSending {
+        stream_id: u64,
+        error: AppError,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -59,6 +79,10 @@ impl RecvMessageEvents for Http3ServerConnEvents {
     }
 
     fn reset(&self, _stream_id: u64, _error: AppError, _local: bool) {}
+
+    fn web_transport_new_session(&self, stream_id: u64, headers: Vec<Header>) {
+        self.insert(Http3ServerConnEvent::WebTransportNewSession { stream_id, headers });
+    }
 }
 
 impl SendMessageEvents for Http3ServerConnEvents {
@@ -69,6 +93,34 @@ impl SendMessageEvents for Http3ServerConnEvents {
     fn remove_send_side_event(&self, _stream_id: u64) {}
 
     fn stop_sending(&self, _stream_id: u64, _app_err: AppError) {}
+}
+
+impl WtEvents for Http3ServerConnEvents {
+    fn web_transport_session_negotiated(&self, _stream_id: u64, _success: bool) {}
+
+    fn web_transport_new_stream(&self, stream_id: u64) {
+        self.insert(Http3ServerConnEvent::WebTransportNewStream { stream_id });
+    }
+
+    fn web_transport_data_readable(&self, stream_id: u64) {
+        self.insert(Http3ServerConnEvent::WebTransportDataReadable { stream_id });
+    }
+
+    fn web_transport_stream_reset(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3ServerConnEvent::WebTransportStreamReset { stream_id, error });
+    }
+
+    fn web_transport_data_writable(&self, stream_id: u64) {
+        self.insert(Http3ServerConnEvent::WebTransportDataWritable { stream_id });
+    }
+
+    fn web_transport_stream_stop_sending(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3ServerConnEvent::WebTransportStreamStopSending { stream_id, error });
+    }
+
+    fn clone_box(&self) -> Box<dyn WtEvents> {
+        Box::new(self.clone())
+    }
 }
 
 impl Http3ServerConnEvents {

@@ -7,7 +7,10 @@
 use crate::priority::PriorityHandler;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
-use crate::{Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{
+    Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res, ResetType,
+    WtRecvStream,
+};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
@@ -57,6 +60,7 @@ impl PushStream {
                 Box::new(RecvPushEvents::new(push_id, push_handler.clone())),
                 None,
                 PriorityHandler::new(true, priority),
+                false,
             ),
             stream_id,
             push_id,
@@ -110,14 +114,13 @@ impl RecvStream for PushStream {
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
     }
+
+    fn wt_stream(&mut self) -> Option<&mut dyn WtRecvStream> {
+        None
+    }
 }
 
 impl HttpRecvStream for PushStream {
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
-        self.receive(conn)?;
-        Ok(())
-    }
-
     fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {
         let res = self.response.read_data(conn, buf);
         if self.response.done() {
@@ -128,5 +131,10 @@ impl HttpRecvStream for PushStream {
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
         self.response.priority_handler_mut()
+    }
+
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
+        self.receive(conn)?;
+        Ok(())
     }
 }

@@ -258,7 +258,7 @@ impl HFrameReader {
 
     /// # Errors
     /// May return `HttpFrame` if a frame cannot be decoded.
-    fn consume(&mut self, mut input: Decoder) -> Res<Option<HFrame>> {
+    pub fn consume(&mut self, mut input: Decoder) -> Res<Option<HFrame>> {
         match &mut self.state {
             HFrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {

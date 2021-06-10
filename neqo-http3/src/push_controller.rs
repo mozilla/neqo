@@ -485,4 +485,6 @@ impl RecvMessageEvents for RecvPushEvents {
     }
 
     fn reset(&self, _stream_id: u64, _error: AppError, _local: bool) {}
+
+    fn web_transport_new_session(&self, _stream_id: u64, _headers: Vec<Header>) {}
 }

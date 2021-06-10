@@ -13,7 +13,7 @@ use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
-use crate::wt::WebTransportController;
+use crate::wt::{WebTransportController, WebTransportSession};
 use crate::{
     Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType, SendStream,
 };
@@ -21,7 +21,7 @@ use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_qpack::QpackSettings;
-use neqo_transport::{AppError, Connection, ConnectionError, State, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionError, State, StreamId, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
@@ -70,7 +70,7 @@ pub(crate) struct Http3Connection {
     streams_have_data_to_send: BTreeSet<u64>,
     pub send_streams: HashMap<u64, Box<dyn SendStream>>,
     pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
-    web_transport: Option<WebTransportController>,
+    pub web_transport: WebTransportController,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -97,11 +97,7 @@ impl Http3Connection {
             streams_have_data_to_send: BTreeSet::new(),
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
-            web_transport: if enable_wt {
-                Some(WebTransportController::default())
-            } else {
-                None
-            },
+            web_transport: WebTransportController::new(enable_wt),
         }
     }
 
@@ -118,14 +114,14 @@ impl Http3Connection {
         qdebug!(
             [self],
             "Send settings, web_transport is {}.",
-            if self.web_transport.is_some() {
+            if self.web_transport.locally_enabled() {
                 "enabled"
             } else {
                 "disabled"
             }
         );
         self.control_stream_local.queue_frame(&HFrame::Settings {
-            settings: if self.web_transport.is_some() {
+            settings: if self.web_transport.locally_enabled() {
                 HSettings::new(&[
                     HSetting {
                         setting_type: HSettingType::MaxTableCapacity,
@@ -236,7 +232,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_new_unidi_stream(&mut self, stream_id: u64, role: Role) {
+    pub fn add_new_stream(&mut self, stream_id: u64, role: Role) {
         qtrace!([self], "A new stream: {}.", stream_id);
         self.recv_streams.insert(
             stream_id,
@@ -321,7 +317,8 @@ impl Http3Connection {
                 }
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
-            ReceiveOutput::NewStream(NewStreamType::Push(_)) => Ok(output),
+            ReceiveOutput::NewStream(NewStreamType::Push(_))
+            | ReceiveOutput::NewStream(NewStreamType::Http) => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
@@ -469,6 +466,9 @@ impl Http3Connection {
                     push_id
                 );
             }
+            NewStreamType::Http => {
+                qinfo!([self], "A new http stream {}.", stream_id);
+            }
             NewStreamType::Decoder => {
                 qinfo!([self], "A new remote qpack encoder stream {}", stream_id);
                 self.check_stream_exists(Http3StreamType::Decoder)?;
@@ -491,16 +491,44 @@ impl Http3Connection {
                     )),
                 );
             }
+            NewStreamType::WebTransportStream(session_id) => {
+                qinfo!(
+                    [self],
+                    "A new remote WebTransport stream session={} wt-state={:?}",
+                    session_id,
+                    self.web_transport
+                );
+                if self
+                    .web_transport
+                    .accept_stream(StreamId::new(stream_id).stream_type())?
+                {
+                    if let Some(s) = self.send_streams.get_mut(&session_id) {
+                        let wt = s.get_wt_session().ok_or(Error::HttpGeneralProtocol)?;
+                        match WebTransportSession::create_new_stream_remote(wt, stream_id) {
+                            (r, Some(s)) => self.add_streams(stream_id, s, r),
+                            (r, None) => {
+                                self.recv_streams.insert(stream_id, r);
+                            }
+                        }
+                    } else {
+                        conn.stream_stop_sending(stream_id, Error::HttpRequestRejected.code())?;
+                    }
+                } else {
+                    conn.stream_stop_sending(stream_id, Error::HttpRequestRejected.code())?;
+                }
+            }
             _ => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
         };
 
         match stream_type {
-            NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
-                self.stream_receive(conn, stream_id)
-            }
+            NewStreamType::Control
+            | NewStreamType::Decoder
+            | NewStreamType::Encoder
+            | NewStreamType::WebTransportStream(_) => self.stream_receive(conn, stream_id),
             NewStreamType::Push(_) => Ok(ReceiveOutput::NewStream(stream_type)),
+            NewStreamType::Http => Ok(ReceiveOutput::NewStream(NewStreamType::Http)),
             _ => Ok(ReceiveOutput::NoOutput),
         }
     }
@@ -559,6 +587,8 @@ impl Http3Connection {
         let send_stream = self
             .send_streams
             .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
             .ok_or(Error::InvalidStreamId)?;
         // The following function may return InvalidStreamId from the transport layer if the stream has been closed
         // already. It is ok to ignore it here.
@@ -584,7 +614,7 @@ impl Http3Connection {
         match f {
             HFrame::Settings { ref settings } => {
                 self.handle_settings(settings)?;
-                if self.web_transport.is_some() {
+                if self.web_transport.locally_enabled() {
                     Ok(Some(f))
                 } else {
                     Ok(None)
@@ -621,22 +651,14 @@ impl Http3Connection {
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
-                if self.web_transport.is_some() {
-                    self.web_transport
-                        .as_mut()
-                        .unwrap()
-                        .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
-                }
+                self.web_transport
+                    .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings.clone());
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
-                if self.web_transport.is_some() {
-                    self.web_transport
-                        .as_mut()
-                        .unwrap()
-                        .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
-                }
+                self.web_transport
+                    .set_negotiated(new_settings.get(HSettingType::EnableWebTransport) == 1);
                 let mut qpack_changed = false;
                 for st in &[
                     HSettingType::MaxHeaderListSize,
@@ -667,7 +689,7 @@ impl Http3Connection {
                             qpack_changed = true;
                         }
                         HSettingType::BlockedStreams => qpack_changed = true,
-                        HSettingType::MaxHeaderListSize => (),
+                        HSettingType::MaxHeaderListSize | HSettingType::EnableWebTransport => (),
                     }
                 }
                 if qpack_changed {
@@ -693,16 +715,20 @@ impl Http3Connection {
         send_stream: Box<dyn SendStream>,
         recv_stream: Box<dyn RecvStream>,
     ) {
-        if send_stream.has_data_to_send() {
-            self.streams_have_data_to_send.insert(stream_id);
-        }
-        self.send_streams.insert(stream_id, send_stream);
-        self.recv_streams.insert(stream_id, recv_stream);
+        self.add_send_stream(stream_id, send_stream);
+        self.add_recv_stream(stream_id, recv_stream);
     }
 
     /// Add a new recv stream. This is used for push streams.
     pub fn add_recv_stream(&mut self, stream_id: u64, recv_stream: Box<dyn RecvStream>) {
         self.recv_streams.insert(stream_id, recv_stream);
+    }
+
+    pub fn add_send_stream(&mut self, stream_id: u64, send_stream: Box<dyn SendStream>) {
+        if send_stream.has_data_to_send() {
+            self.streams_have_data_to_send.insert(stream_id);
+        }
+        self.send_streams.insert(stream_id, send_stream);
     }
 
     pub fn queue_control_frame(&mut self, frame: &HFrame) {
@@ -740,6 +766,6 @@ impl Http3Connection {
     }
 
     pub fn web_transport_enabled(&self) -> bool {
-        self.web_transport.as_ref().map_or(false, |v| v.enabled())
+        self.web_transport.enabled()
     }
 }
