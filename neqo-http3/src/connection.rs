@@ -410,7 +410,6 @@ impl Http3Connection {
             self.state = Http3State::Initializing;
             self.control_stream_local = ControlStreamLocal::new();
             self.control_stream_remote = ControlStreamRemote::new();
-            self.new_streams.clear();
             self.qpack_encoder = QPackEncoder::new(self.local_qpack_settings, true);
             self.qpack_decoder = QPackDecoder::new(self.local_qpack_settings);
             self.settings_state = Http3RemoteSettingsState::NotReceived;
