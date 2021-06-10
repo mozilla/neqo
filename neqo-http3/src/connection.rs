@@ -286,7 +286,7 @@ impl Http3Connection {
             Ok(HandleReadableOutput::NoOutput)
         } else if self.recv_decoder(conn, stream_id)? {
             Ok(HandleReadableOutput::NoOutput)
-        } else if self.new_streams.is_new_stream(&stream_id) {
+        } else if self.new_streams.is_new_stream(stream_id) {
             self.new_streams.handle_new_stream(conn, stream_id).map_or(
                 Ok(HandleReadableOutput::NoOutput),
                 |t| {
