@@ -93,8 +93,4 @@ impl NewStreamsDecoder {
     pub fn is_new_stream(&self, stream_id: u64) -> bool {
         self.streams.contains_key(&stream_id)
     }
-
-    pub fn clear(&mut self) {
-        self.streams.clear();
-    }
 }
