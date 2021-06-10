@@ -62,7 +62,9 @@ impl NewStreamTypeReader {
 }
 
 #[derive(Debug, Default)]
-pub struct NewStreamsDecoder(HashMap<u64, NewStreamTypeReader>);
+pub struct NewStreamsDecoder {
+    streams: HashMap<u64, NewStreamTypeReader>,
+}
 
 impl NewStreamsDecoder {
     /// Returns true if a new stream has been decoded.
@@ -71,7 +73,7 @@ impl NewStreamsDecoder {
         let fin;
         {
             let ns = self
-                .0
+                .streams
                 .entry(stream_id)
                 .or_insert_with(NewStreamTypeReader::new);
             stream_type = ns.get_type(conn, stream_id);
@@ -79,7 +81,7 @@ impl NewStreamsDecoder {
         }
 
         if fin || stream_type.is_some() {
-            self.0.remove(&stream_id);
+            self.streams.remove(&stream_id);
         }
         if fin {
             None
@@ -88,11 +90,11 @@ impl NewStreamsDecoder {
         }
     }
 
-    pub fn is_new_stream(&self, stream_id: &u64) -> bool {
-        self.0.get(stream_id).is_some()
+    pub fn is_new_stream(&self, stream_id: u64) -> bool {
+        self.streams.contains_key(&stream_id)
     }
 
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.streams.clear();
     }
 }
