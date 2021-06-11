@@ -30,12 +30,9 @@ impl RecvStream for DecoderRecvStream {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
-        let unblocked_streams = self.decoder.borrow_mut().receive(conn, self.stream_id)?;
-        if unblocked_streams.is_empty() {
-            Ok(ReceiveOutput::NoOutput)
-        } else {
-            Ok(ReceiveOutput::UnblockedStreams(unblocked_streams))
-        }
+        Ok(ReceiveOutput::UnblockedStreams(
+            self.decoder.borrow_mut().receive(conn, self.stream_id)?,
+        ))
     }
 
     fn done(&self) -> bool {

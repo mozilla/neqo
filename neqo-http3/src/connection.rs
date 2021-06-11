@@ -473,9 +473,9 @@ impl Http3Connection {
             s.stream_reset(error, ResetType::App)?;
         }
 
-        // Stream maybe already be closed and we may get an error here, but we do not care.
+        // Stream may be already be closed and we may get an error here, but we do not care.
         mem::drop(conn.stream_reset_send(stream_id, error));
-        // Stream maybe already be closed and we may get an error here, but we do not care.
+        // Stream may be already be closed and we may get an error here, but we do not care.
         mem::drop(conn.stream_stop_sending(stream_id, error));
         Ok(())
     }

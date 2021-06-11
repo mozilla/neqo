@@ -479,13 +479,12 @@ impl HttpRecvStream for RecvMessage {
                     .borrow_mut()
                     .new_push_promise(p.push_id, self.stream_id, headers)?;
                 self.blocked_push_promise.pop_front();
+            } else {
+                return Ok(());
             }
         }
 
-        if self.blocked_push_promise.is_empty() {
-            return self.receive_internal(conn, true);
-        }
-        Ok(())
+        self.receive_internal(conn, true)
     }
 
     fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {

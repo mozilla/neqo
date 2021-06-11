@@ -394,10 +394,11 @@ impl Http3Client {
             .base_handler
             .recv_streams
             .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
-        let hs = recv_stream.http_stream().ok_or(Error::InvalidStreamId)?;
-        match hs.read_data(&mut self.conn, buf) {
+        match recv_stream.read_data(&mut self.conn, buf) {
             Ok((amount, fin)) => {
                 if recv_stream.done() {
                     self.base_handler.recv_streams.remove(&stream_id);
@@ -856,11 +857,22 @@ mod tests {
 
         pub fn new_with_settings(server_settings: &[HSetting]) -> Self {
             fixture_init();
+            let max_table_size = server_settings
+                .iter()
+                .find(|s| s.setting_type == HSettingType::MaxTableCapacity)
+                .map_or(100, |s| s.value);
+            let max_blocked_streams = u16::try_from(
+                server_settings
+                    .iter()
+                    .find(|s| s.setting_type == HSettingType::BlockedStreams)
+                    .map_or(100, |s| s.value),
+            )
+            .unwrap();
             let qpack = Rc::new(RefCell::new(QPackEncoder::new(
                 QpackSettings {
-                    max_table_size_encoder: 128,
-                    max_table_size_decoder: 128,
-                    max_blocked_streams: 0,
+                    max_table_size_encoder: max_table_size,
+                    max_table_size_decoder: max_table_size,
+                    max_blocked_streams: max_blocked_streams,
                 },
                 true,
             )));
@@ -5174,8 +5186,16 @@ mod tests {
         assert_eq!(client.state(), Http3State::Connected);
     }
 
-    fn setup_server_side_encoder(client: &mut Http3Client, server: &mut TestServer) {
-        server.encoder.borrow_mut().set_max_capacity(100).unwrap();
+    fn setup_server_side_encoder_param(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        max_blocked_streams: u64,
+    ) {
+        server
+            .encoder
+            .borrow_mut()
+            .set_max_capacity(max_blocked_streams)
+            .unwrap();
         server
             .encoder
             .borrow_mut()
@@ -5186,20 +5206,41 @@ mod tests {
         mem::drop(client.process(out.dgram(), now()));
     }
 
+    fn setup_server_side_encoder(client: &mut Http3Client, server: &mut TestServer) {
+        setup_server_side_encoder_param(client, server, 100);
+    }
+
     fn send_push_promise_using_encoder(
         client: &mut Http3Client,
         server: &mut TestServer,
         stream_id: u64,
         push_id: u64,
     ) -> Option<Datagram> {
-        let headers = vec![
+        send_push_promise_using_encoder_with_custom_headers(
+            client,
+            server,
+            stream_id,
+            push_id,
+            (String::from("my-header"), String::from("my-header")),
+        )
+    }
+
+    fn send_push_promise_using_encoder_with_custom_headers(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: u64,
+        push_id: u64,
+        additional_header: Header,
+    ) -> Option<Datagram> {
+        let mut headers = vec![
             (String::from(":method"), String::from("GET")),
             (String::from(":scheme"), String::from("https")),
             (String::from(":authority"), String::from("something.com")),
             (String::from(":path"), String::from("/")),
-            (String::from("my-header"), String::from("my-header")),
             (String::from("content-length"), String::from("3")),
         ];
+        headers.push(additional_header);
+
         let encoded_headers = server
             .encoder
             .borrow_mut()
@@ -5375,6 +5416,83 @@ mod tests {
         let _out = client.process(encoder_inst_pkt2, now());
 
         // The response headers are blocked.
+        assert!(check_header_ready_and_push_promise(&mut client));
+    }
+
+    // In this test there are 2 push promises that are blocked and the response header is
+    // blocked as well. After a packet is received olny the first push promises is unblocked.
+    #[test]
+    fn two_push_promises_and_header_block() {
+        let mut client = default_http3_client_param(200);
+        let mut server = TestServer::new_with_settings(&[
+            HSetting::new(HSettingType::MaxTableCapacity, 200),
+            HSetting::new(HSettingType::BlockedStreams, 100),
+            HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+        ]);
+        connect_only_transport_with(&mut client, &mut server);
+        server.create_control_stream();
+        server.create_qpack_streams();
+        setup_server_side_encoder_param(&mut client, &mut server, 200);
+
+        let request_stream_id = make_request_and_exchange_pkts(&mut client, &mut server, true);
+
+        // Send a PushPromise that is blocked until encoder_inst_pkt2 is process by the client.
+        let encoder_inst_pkt1 = send_push_promise_using_encoder_with_custom_headers(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            0,
+            (String::from("my1"), String::from("my1")),
+        );
+
+        // PushPromise is blocked wathing for encoder instructions.
+        assert!(!check_push_events(&mut client));
+
+        let encoder_inst_pkt2 = send_push_promise_using_encoder_with_custom_headers(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            1,
+            (String::from("my2"), String::from("my2")),
+        );
+
+        // PushPromise is blocked wathing for encoder instructions.
+        assert!(!check_push_events(&mut client));
+
+        let response_headers = vec![
+            (String::from(":status"), String::from("200")),
+            (String::from("content-length"), String::from("1234")),
+            (String::from("my3"), String::from("my3")),
+        ];
+        let encoded_headers = server
+            .encoder
+            .borrow_mut()
+            .encode_header_block(&mut server.conn, &response_headers, request_stream_id)
+            .unwrap();
+        let header_hframe = HFrame::Headers {
+            header_block: encoded_headers.to_vec(),
+        };
+        let mut d = Encoder::default();
+        header_hframe.encode(&mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // The response headers are blocked.
+        assert!(!check_header_ready(&mut client));
+
+        // Let client receive the encoder instructions.
+        let _out = client.process(encoder_inst_pkt1, now());
+
+        assert!(check_push_events(&mut client));
+
+        // Let client receive the encoder instructions.
+        let _out = client.process(encoder_inst_pkt2, now());
+
         assert!(check_header_ready_and_push_promise(&mut client));
     }
 
