@@ -52,6 +52,7 @@ pub enum RecoveryToken {
     Stream(StreamRecoveryToken),
     Crypto(CryptoRecoveryToken),
     HandshakeDone,
+    KeepAlive, // Special PING.
     NewToken(usize),
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),
     RetireConnectionId(u64),
