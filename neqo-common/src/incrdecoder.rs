@@ -9,7 +9,7 @@ use std::mem;
 
 use crate::codec::Decoder;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct IncrementalDecoderUint {
     v: u64,
     remaining: Option<usize>,

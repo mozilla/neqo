@@ -7,8 +7,8 @@
 use crate::client_events::Http3ClientEvents;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
-use crate::stream_type_reader::NewStreamTypeReader;
 use crate::{Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
+use neqo_common::{Decoder, IncrementalDecoderUint};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 #[derive(Debug)]
 enum PushStreamState {
-    ReadPushId(NewStreamTypeReader),
+    ReadPushId(IncrementalDecoderUint),
     ReadResponse { push_id: u64, response: RecvMessage },
     Closed,
 }
@@ -73,7 +73,7 @@ impl PushStream {
         events: Http3ClientEvents,
     ) -> Self {
         Self {
-            state: PushStreamState::ReadPushId(NewStreamTypeReader::new(stream_id)),
+            state: PushStreamState::ReadPushId(IncrementalDecoderUint::default()),
             stream_id,
             push_handler,
             qpack_decoder,
@@ -93,35 +93,43 @@ impl RecvStream for PushStream {
         loop {
             match &mut self.state {
                 PushStreamState::ReadPushId(id_reader) => {
-                    let push_id = id_reader.get_type(conn, self.stream_id);
-                    let fin = id_reader.fin();
-                    if fin {
-                        self.state = PushStreamState::Closed;
-                        return Ok(ReceiveOutput::NoOutput);
-                    }
-                    if let Some(p) = push_id {
-                        if self
-                            .push_handler
-                            .borrow_mut()
-                            .add_new_push_stream(p, self.stream_id)?
-                        {
-                            self.state = PushStreamState::ReadResponse {
-                                push_id: p,
-                                response: RecvMessage::new(
-                                    MessageType::Response,
-                                    self.stream_id,
-                                    Rc::clone(&self.qpack_decoder),
-                                    Box::new(RecvPushEvents::new(p, Rc::clone(&self.push_handler))),
-                                    None,
-                                ),
-                            };
-                        } else {
-                            mem::drop(conn.stream_stop_sending(
-                                self.stream_id,
-                                Error::HttpRequestCancelled.code(),
-                            ));
+                    let to_read = id_reader.min_remaining();
+                    let mut buf = vec![0; to_read];
+                    match conn.stream_recv(self.stream_id, &mut buf[..])? {
+                        (_, true) => {
                             self.state = PushStreamState::Closed;
-                            return Ok(ReceiveOutput::NoOutput);
+                            break Ok(ReceiveOutput::NoOutput);
+                        }
+                        (0, false) => break Ok(ReceiveOutput::NoOutput),
+                        (amount, false) => {
+                            if let Some(p) = id_reader.consume(&mut Decoder::from(&buf[..amount])) {
+                                if self
+                                    .push_handler
+                                    .borrow_mut()
+                                    .add_new_push_stream(p, self.stream_id)?
+                                {
+                                    self.state = PushStreamState::ReadResponse {
+                                        push_id: p,
+                                        response: RecvMessage::new(
+                                            MessageType::Response,
+                                            self.stream_id,
+                                            Rc::clone(&self.qpack_decoder),
+                                            Box::new(RecvPushEvents::new(
+                                                p,
+                                                Rc::clone(&self.push_handler),
+                                            )),
+                                            None,
+                                        ),
+                                    };
+                                } else {
+                                    mem::drop(conn.stream_stop_sending(
+                                        self.stream_id,
+                                        Error::HttpRequestCancelled.code(),
+                                    ));
+                                    self.state = PushStreamState::Closed;
+                                    return Ok(ReceiveOutput::NoOutput);
+                                }
+                            }
                         }
                     }
                 }
