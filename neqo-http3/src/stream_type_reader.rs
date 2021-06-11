@@ -7,59 +7,55 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::{AppError, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
-use neqo_common::{qdebug, Decoder, IncrementalDecoderUint};
+use neqo_common::{Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
 
-#[derive(Debug)]
-pub(crate) struct NewStreamTypeReader {
-    stream_id: u64,
-    reader: IncrementalDecoderUint,
-    fin: bool,
+#[derive(Debug, PartialEq)]
+pub enum NewStreamTypeReader {
+    Read {
+        reader: IncrementalDecoderUint,
+        stream_id: u64,
+    },
+    Done,
 }
 
 impl NewStreamTypeReader {
     pub fn new(stream_id: u64) -> Self {
-        Self {
-            stream_id,
+        Self::Read {
             reader: IncrementalDecoderUint::default(),
-            fin: false,
-        }
-    }
-    pub fn get_type(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
-        // On any error we will only close this stream!
-        loop {
-            let to_read = self.reader.min_remaining();
-            let mut buf = vec![0; to_read];
-            match conn.stream_recv(stream_id, &mut buf[..]) {
-                Ok((_, true)) => {
-                    self.fin = true;
-                    return None;
-                }
-                Ok((0, false)) => {
-                    return None;
-                }
-                Ok((amount, false)) => {
-                    let res = self.reader.consume(&mut Decoder::from(&buf[..amount]));
-                    if res.is_some() {
-                        return res;
-                    }
-                }
-                Err(e) => {
-                    qdebug!(
-                        [conn],
-                        "Error reading stream type for stream {}: {:?}",
-                        stream_id,
-                        e
-                    );
-                    self.fin = true;
-                    return None;
-                }
-            }
+            stream_id,
         }
     }
 
-    pub fn fin(&self) -> bool {
-        self.fin
+    pub fn get_type(&mut self, conn: &mut Connection) -> Option<Http3StreamType> {
+        // On any error we will only close this stream!
+        loop {
+            match self {
+                NewStreamTypeReader::Read {
+                    ref mut reader,
+                    stream_id,
+                } => {
+                    let to_read = reader.min_remaining();
+                    let mut buf = vec![0; to_read];
+                    match conn.stream_recv(*stream_id, &mut buf[..]) {
+                        Ok((0, false)) => {
+                            return None;
+                        }
+                        Ok((amount, false)) => {
+                            if let Some(res) = reader.consume(&mut Decoder::from(&buf[..amount])) {
+                                *self = NewStreamTypeReader::Done;
+                                return Some(res.into());
+                            }
+                        }
+                        Ok((_, true)) | Err(_) => {
+                            *self = NewStreamTypeReader::Done;
+                            return None;
+                        }
+                    }
+                }
+                NewStreamTypeReader::Done => return None,
+            }
+        }
     }
 }
 
@@ -69,16 +65,13 @@ impl RecvStream for NewStreamTypeReader {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
-        let stream_type = self.get_type(conn, self.stream_id);
-        if let Some(t) = stream_type {
-            Ok(ReceiveOutput::NewStream(t))
-        } else {
-            Ok(ReceiveOutput::NoOutput)
-        }
+        Ok(self
+            .get_type(conn)
+            .map_or(ReceiveOutput::NoOutput, |t| ReceiveOutput::NewStream(t)))
     }
 
     fn done(&self) -> bool {
-        self.fin
+        *self == NewStreamTypeReader::Done
     }
 
     fn stream_type(&self) -> Http3StreamType {

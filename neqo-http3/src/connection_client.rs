@@ -535,16 +535,9 @@ impl Http3Client {
             match e {
                 ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
                     StreamType::BiDi => return Err(Error::HttpStreamCreation),
-                    StreamType::UniDi => {
-                        if self
-                            .base_handler
-                            .handle_new_unidi_stream(&mut self.conn, stream_id.as_u64())?
-                        {
-                            // Do not force read from the stream because RecvStreamReadable will trigger a read.
-                            // If we read the stream here we may post multiple read events.
-                            self.handle_new_push_stream(stream_id.as_u64(), false)?;
-                        }
-                    }
+                    StreamType::UniDi => self
+                        .base_handler
+                        .handle_new_unidi_stream(stream_id.as_u64()),
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
@@ -607,7 +600,7 @@ impl Http3Client {
             .base_handler
             .handle_stream_readable(&mut self.conn, stream_id)?
         {
-            ReceiveOutput::PushStream => self.handle_new_push_stream(stream_id, true),
+            ReceiveOutput::PushStream => self.handle_new_push_stream(stream_id),
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
@@ -630,7 +623,7 @@ impl Http3Client {
         }
     }
 
-    fn handle_new_push_stream(&mut self, stream_id: u64, force_read: bool) -> Res<()> {
+    fn handle_new_push_stream(&mut self, stream_id: u64) -> Res<()> {
         if self.push_handler.borrow().can_receive_push() {
             self.base_handler.add_recv_stream(
                 stream_id,
@@ -641,12 +634,10 @@ impl Http3Client {
                     self.events.clone(),
                 )),
             );
-            if force_read {
-                let res2 = self
-                    .base_handler
-                    .handle_stream_readable(&mut self.conn, stream_id)?;
-                debug_assert!(matches!(res2, ReceiveOutput::NoOutput));
-            }
+            let res = self
+                .base_handler
+                .handle_stream_readable(&mut self.conn, stream_id)?;
+            debug_assert!(matches!(res, ReceiveOutput::NoOutput));
             Ok(())
         } else {
             Err(Error::HttpId)
