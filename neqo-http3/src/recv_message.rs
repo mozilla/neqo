@@ -438,7 +438,7 @@ impl RecvStream for RecvMessage {
         matches!(self.state, RecvMessageState::Closed)
     }
 
-    fn stream_reset(&self, app_error: AppError, reset_type: ResetType) -> Res<()> {
+    fn stream_reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
         if !self.closing() || !self.blocked_push_promise.is_empty() {
             self.qpack_decoder
                 .borrow_mut()
@@ -453,6 +453,7 @@ impl RecvStream for RecvMessage {
             }
             ResetType::App => {}
         }
+        self.state = RecvMessageState::Closed;
         Ok(())
     }
 

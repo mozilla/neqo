@@ -150,7 +150,7 @@ impl RecvStream for PushStream {
         matches!(self.state, PushStreamState::Closed)
     }
 
-    fn stream_reset(&self, app_error: AppError, reset_type: ResetType) -> Res<()> {
+    fn stream_reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
         if !self.done() {
             self.qpack_decoder
                 .borrow_mut()
@@ -166,6 +166,7 @@ impl RecvStream for PushStream {
                 }
             }
         }
+        self.state = PushStreamState::Closed;
         Ok(())
     }
 

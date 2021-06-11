@@ -302,6 +302,7 @@ impl From<u64> for Http3StreamType {
     }
 }
 
+#[derive(PartialEq, Debug)]
 pub enum ReceiveOutput {
     NoOutput,
     PushStream,
@@ -313,7 +314,7 @@ pub enum ReceiveOutput {
 pub trait RecvStream: Debug {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, etc.
-    fn stream_reset(&self, error: AppError, reset_type: ResetType) -> Res<()>;
+    fn stream_reset(&mut self, error: AppError, reset_type: ResetType) -> Res<()>;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput>;
