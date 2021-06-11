@@ -25,7 +25,7 @@ impl DecoderRecvStream {
 }
 
 impl RecvStream for DecoderRecvStream {
-    fn stream_reset(&self, _error: AppError, _reset_type: ResetType) -> Res<()> {
+    fn stream_reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
         Err(Error::HttpClosedCriticalStream)
     }
 

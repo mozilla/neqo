@@ -729,7 +729,7 @@ impl Http3Client {
 
     fn reset_stream_on_error(&mut self, stream_id: u64, app_error: AppError) {
         mem::drop(self.conn.stream_stop_sending(stream_id, app_error));
-        if let Some(rs) = self.base_handler.recv_streams.remove(&stream_id) {
+        if let Some(mut rs) = self.base_handler.recv_streams.remove(&stream_id) {
             rs.stream_reset(app_error, ResetType::Local).unwrap();
         }
     }

@@ -43,7 +43,7 @@ impl ControlStreamRemote {
 }
 
 impl RecvStream for ControlStreamRemote {
-    fn stream_reset(&self, _error: AppError, _reset_type: ResetType) -> Res<()> {
+    fn stream_reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
         Err(Error::HttpClosedCriticalStream)
     }
 
