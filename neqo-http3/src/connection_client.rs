@@ -872,7 +872,7 @@ mod tests {
                 QpackSettings {
                     max_table_size_encoder: max_table_size,
                     max_table_size_decoder: max_table_size,
-                    max_blocked_streams: max_blocked_streams,
+                    max_blocked_streams,
                 },
                 true,
             )));
