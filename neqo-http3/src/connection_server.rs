@@ -13,6 +13,7 @@ use crate::{Error, Header, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
+use std::rc::Rc;
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -128,7 +129,7 @@ impl Http3ServerHandler {
                         Box::new(RecvMessage::new(
                             MessageType::Request,
                             stream_id.as_u64(),
-                            self.base_handler.qpack_decoder.clone(),
+                            Rc::clone(&self.base_handler.qpack_decoder),
                             Box::new(self.events.clone()),
                             None,
                         )),

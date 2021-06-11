@@ -110,8 +110,8 @@ impl RecvStream for PushStream {
                                 response: RecvMessage::new(
                                     MessageType::Response,
                                     self.stream_id,
-                                    self.qpack_decoder.clone(),
-                                    Box::new(RecvPushEvents::new(p, self.push_handler.clone())),
+                                    Rc::clone(&self.qpack_decoder),
+                                    Box::new(RecvPushEvents::new(p, Rc::clone(&self.push_handler))),
                                     None,
                                 ),
                             };

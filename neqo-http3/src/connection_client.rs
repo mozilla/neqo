@@ -309,9 +309,9 @@ impl Http3Client {
             Box::new(RecvMessage::new(
                 MessageType::Response,
                 id,
-                self.base_handler.qpack_decoder.clone(),
+                Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(self.events.clone()),
-                Some(self.push_handler.clone()),
+                Some(Rc::clone(&self.push_handler)),
             )),
         );
 
@@ -636,8 +636,8 @@ impl Http3Client {
                 stream_id,
                 Box::new(PushStream::new(
                     stream_id,
-                    self.push_handler.clone(),
-                    self.base_handler.qpack_decoder.clone(),
+                    Rc::clone(&self.push_handler),
+                    Rc::clone(&self.base_handler.qpack_decoder),
                     self.events.clone(),
                 )),
             );
@@ -879,7 +879,7 @@ mod tests {
                 },
                 conn: default_server_h3(),
                 control_stream_id: None,
-                encoder: qpack.clone(),
+                encoder: Rc::clone(&qpack),
                 encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack),
                 encoder_stream_id: None,
                 decoder_stream_id: None,
@@ -901,7 +901,7 @@ mod tests {
                 },
                 conn,
                 control_stream_id: None,
-                encoder: qpack.clone(),
+                encoder: Rc::clone(&qpack),
                 encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack),
                 encoder_stream_id: None,
                 decoder_stream_id: None,
