@@ -322,7 +322,7 @@ pub trait RecvStream: Debug {
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream>;
 }
 
-pub trait HttpRecvStream: Debug {
+pub trait HttpRecvStream: RecvStream {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()>;

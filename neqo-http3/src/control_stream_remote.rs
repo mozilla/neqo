@@ -53,8 +53,6 @@ impl RecvStream for ControlStreamRemote {
         loop {
             if let Some(f) = self.receive_single(conn)? {
                 control_frames.push(f);
-            } else if control_frames.is_empty() {
-                return Ok(ReceiveOutput::NoOutput);
             } else {
                 return Ok(ReceiveOutput::ControlFrames(control_frames));
             }

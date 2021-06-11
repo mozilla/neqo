@@ -217,10 +217,11 @@ impl Http3ServerHandler {
             .base_handler
             .recv_streams
             .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
-        let hs = recv_stream.http_stream().ok_or(Error::InvalidStreamId)?;
-        match hs.read_data(conn, buf) {
+        match recv_stream.read_data(conn, buf) {
             Ok((amount, fin)) => {
                 if recv_stream.done() {
                     self.base_handler.recv_streams.remove(&stream_id);
