@@ -139,7 +139,13 @@ impl WindowAdjustment for Cubic {
 
         let time_ca = self
             .ca_epoch_start
-            .map_or(min_rtt, |t| now + min_rtt - t)
+            .map_or(min_rtt, |t| {
+                if now + min_rtt < t {
+                    min_rtt
+                } else {
+                    now + min_rtt - t
+                }
+            })
             .as_secs_f64();
         let target_cubic = self.w_cubic(time_ca);
 
