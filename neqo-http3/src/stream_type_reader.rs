@@ -10,7 +10,7 @@ use crate::{AppError, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream
 use neqo_common::{Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum NewStreamTypeReader {
     Read {
         reader: IncrementalDecoderUint,
@@ -68,11 +68,11 @@ impl RecvStream for NewStreamTypeReader {
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
         Ok(self
             .get_type(conn)
-            .map_or(ReceiveOutput::NoOutput, |t| ReceiveOutput::NewStream(t)))
+            .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream))
     }
 
     fn done(&self) -> bool {
-        *self == NewStreamTypeReader::Done
+        matches!(*self, NewStreamTypeReader::Done)
     }
 
     fn stream_type(&self) -> Http3StreamType {
@@ -122,9 +122,7 @@ mod tests {
             }
         }
 
-        fn decode(&mut self, stream_type: u64, outcome: ReceiveOutput, done: bool) {
-            let mut enc = Encoder::default();
-            enc.encode_varint(stream_type);
+        fn decode_buffer(&mut self, enc: &[u8], outcome: ReceiveOutput, done: bool) {
             let len = enc.len() - 1;
             for i in 0..len {
                 self.conn_s
@@ -145,6 +143,12 @@ mod tests {
             mem::drop(self.conn_c.process(out.dgram(), now()));
             assert_eq!(self.decoder.receive(&mut self.conn_c).unwrap(), outcome);
             assert_eq!(self.decoder.done(), done);
+        }
+
+        fn decode(&mut self, stream_type: u64, outcome: ReceiveOutput, done: bool) {
+            let mut enc = Encoder::default();
+            enc.encode_varint(stream_type);
+            self.decode_buffer(&enc[..], outcome, done);
         }
     }
 
@@ -195,6 +199,12 @@ mod tests {
             true,
         );
         t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, ReceiveOutput::NoOutput, true);
+    }
+
+    #[test]
+    fn decoding_truncate() {
+        let mut t = Test::new();
+        t.decode_buffer(&[0xff], ReceiveOutput::NoOutput, false);
     }
 
     #[test]

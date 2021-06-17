@@ -368,11 +368,11 @@ impl Http3Connection {
         }
     }
 
-    fn check_stream_exists(&self, stream_type: &Http3StreamType) -> Res<()> {
+    fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
         if self
             .recv_streams
             .values()
-            .any(|c| c.stream_type() == *stream_type)
+            .any(|c| c.stream_type() == stream_type)
         {
             Err(Error::HttpStreamCreation)
         } else {
@@ -382,8 +382,8 @@ impl Http3Connection {
 
     /// If the new stream is a control stream, this function creates a proper handler
     /// and perform a read.
-    /// if the new stream is a push stream, the function returns ReceiveOutput::PushStream
-    /// and the coller will handl it.
+    /// if the new stream is a push stream, the function returns `ReceiveOutput::PushStream`
+    /// and the caller will handle it.
     /// If the sttream is of a unknown type the stream will be closed.
     fn handle_new_stream(
         &mut self,
@@ -393,7 +393,7 @@ impl Http3Connection {
     ) -> Res<ReceiveOutput> {
         let recv_stream: Option<Box<dyn RecvStream>> = match stream_type {
             Http3StreamType::Control => {
-                self.check_stream_exists(&Http3StreamType::Control)?;
+                self.check_stream_exists(Http3StreamType::Control)?;
                 Some(Box::new(ControlStreamRemote::new(stream_id)))
             }
 
@@ -403,7 +403,7 @@ impl Http3Connection {
             }
             Http3StreamType::Decoder => {
                 qinfo!([self], "A new remote qpack encoder stream {}", stream_id);
-                self.check_stream_exists(&Http3StreamType::Decoder)?;
+                self.check_stream_exists(Http3StreamType::Decoder)?;
                 Some(Box::new(DecoderRecvStream::new(
                     stream_id,
                     Rc::clone(&self.qpack_decoder),
@@ -411,7 +411,7 @@ impl Http3Connection {
             }
             Http3StreamType::Encoder => {
                 qinfo!([self], "A new remote qpack decoder stream {}", stream_id);
-                self.check_stream_exists(&Http3StreamType::Encoder)?;
+                self.check_stream_exists(Http3StreamType::Encoder)?;
                 Some(Box::new(EncoderRecvStream::new(
                     stream_id,
                     Rc::clone(&self.qpack_encoder),

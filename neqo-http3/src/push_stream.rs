@@ -80,6 +80,29 @@ impl PushStream {
             events,
         }
     }
+
+    fn push_id_decoded(&mut self, push_id: u64, conn: &mut Connection) -> Res<()> {
+        if self
+            .push_handler
+            .borrow_mut()
+            .add_new_push_stream(push_id, self.stream_id)?
+        {
+            self.state = PushStreamState::ReadResponse {
+                push_id,
+                response: RecvMessage::new(
+                    MessageType::Response,
+                    self.stream_id,
+                    Rc::clone(&self.qpack_decoder),
+                    Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
+                    None,
+                ),
+            };
+        } else {
+            mem::drop(conn.stream_stop_sending(self.stream_id, Error::HttpRequestCancelled.code()));
+            self.state = PushStreamState::Closed;
+        }
+        Ok(())
+    }
 }
 
 impl Display for PushStream {
@@ -98,35 +121,13 @@ impl RecvStream for PushStream {
                     match conn.stream_recv(self.stream_id, &mut buf[..])? {
                         (_, true) => {
                             self.state = PushStreamState::Closed;
-                            break Ok(ReceiveOutput::NoOutput);
+                            return Err(Error::HttpGeneralProtocol);
                         }
-                        (0, false) => break Ok(ReceiveOutput::NoOutput),
+                        (0, false) => return Ok(ReceiveOutput::NoOutput),
                         (amount, false) => {
                             if let Some(p) = id_reader.consume(&mut Decoder::from(&buf[..amount])) {
-                                if self
-                                    .push_handler
-                                    .borrow_mut()
-                                    .add_new_push_stream(p, self.stream_id)?
-                                {
-                                    self.state = PushStreamState::ReadResponse {
-                                        push_id: p,
-                                        response: RecvMessage::new(
-                                            MessageType::Response,
-                                            self.stream_id,
-                                            Rc::clone(&self.qpack_decoder),
-                                            Box::new(RecvPushEvents::new(
-                                                p,
-                                                Rc::clone(&self.push_handler),
-                                            )),
-                                            None,
-                                        ),
-                                    };
-                                } else {
-                                    mem::drop(conn.stream_stop_sending(
-                                        self.stream_id,
-                                        Error::HttpRequestCancelled.code(),
-                                    ));
-                                    self.state = PushStreamState::Closed;
+                                self.push_id_decoded(p, conn)?;
+                                if self.done() {
                                     return Ok(ReceiveOutput::NoOutput);
                                 }
                             }
