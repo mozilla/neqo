@@ -122,11 +122,11 @@ mod tests {
             }
         }
 
-        fn decode_buffer(&mut self, enc: &[u8], outcome: ReceiveOutput, done: bool) {
+        fn decode_buffer(&mut self, enc: &[u8], outcome: &ReceiveOutput, done: bool) {
             let len = enc.len() - 1;
             for i in 0..len {
                 self.conn_s
-                    .stream_send(self.stream_id, &enc[i..i + 1])
+                    .stream_send(self.stream_id, &enc[i..=i])
                     .unwrap();
                 let out = self.conn_s.process(None, now());
                 mem::drop(self.conn_c.process(out.dgram(), now()));
@@ -141,11 +141,11 @@ mod tests {
                 .unwrap();
             let out = self.conn_s.process(None, now());
             mem::drop(self.conn_c.process(out.dgram(), now()));
-            assert_eq!(self.decoder.receive(&mut self.conn_c).unwrap(), outcome);
+            assert_eq!(self.decoder.receive(&mut self.conn_c).unwrap(), *outcome);
             assert_eq!(self.decoder.done(), done);
         }
 
-        fn decode(&mut self, stream_type: u64, outcome: ReceiveOutput, done: bool) {
+        fn decode(&mut self, stream_type: u64, outcome: &ReceiveOutput, done: bool) {
             let mut enc = Encoder::default();
             enc.encode_varint(stream_type);
             self.decode_buffer(&enc[..], outcome, done);
@@ -157,35 +157,35 @@ mod tests {
         let mut t = Test::new();
         t.decode(
             QPACK_UNI_STREAM_TYPE_DECODER,
-            ReceiveOutput::NewStream(Http3StreamType::Encoder),
+            &ReceiveOutput::NewStream(Http3StreamType::Encoder),
             true,
         );
 
         let mut t = Test::new();
         t.decode(
             QPACK_UNI_STREAM_TYPE_ENCODER,
-            ReceiveOutput::NewStream(Http3StreamType::Decoder),
+            &ReceiveOutput::NewStream(Http3StreamType::Decoder),
             true,
         );
 
         let mut t = Test::new();
         t.decode(
             HTTP3_UNI_STREAM_TYPE_CONTROL,
-            ReceiveOutput::NewStream(Http3StreamType::Control),
+            &ReceiveOutput::NewStream(Http3StreamType::Control),
             true,
         );
 
         let mut t = Test::new();
         t.decode(
             HTTP3_UNI_STREAM_TYPE_PUSH,
-            ReceiveOutput::NewStream(Http3StreamType::Push),
+            &ReceiveOutput::NewStream(Http3StreamType::Push),
             true,
         );
 
         let mut t = Test::new();
         t.decode(
             0x3fff_ffff_ffff_ffff,
-            ReceiveOutput::NewStream(Http3StreamType::Unknown),
+            &ReceiveOutput::NewStream(Http3StreamType::Unknown),
             true,
         );
     }
@@ -195,22 +195,22 @@ mod tests {
         let mut t = Test::new();
         t.decode(
             0x3fff,
-            ReceiveOutput::NewStream(Http3StreamType::Unknown),
+            &ReceiveOutput::NewStream(Http3StreamType::Unknown),
             true,
         );
-        t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, ReceiveOutput::NoOutput, true);
+        t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, &ReceiveOutput::NoOutput, true);
     }
 
     #[test]
     fn decoding_truncate() {
         let mut t = Test::new();
-        t.decode_buffer(&[0xff], ReceiveOutput::NoOutput, false);
+        t.decode_buffer(&[0xff], &ReceiveOutput::NoOutput, false);
     }
 
     #[test]
     fn reset() {
         let mut t = Test::new();
         t.decoder.stream_reset(0x100, ResetType::Remote).unwrap();
-        t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, ReceiveOutput::NoOutput, true);
+        t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, &ReceiveOutput::NoOutput, true);
     }
 }
