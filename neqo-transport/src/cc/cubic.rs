@@ -141,6 +141,8 @@ impl WindowAdjustment for Cubic {
             .ca_epoch_start
             .map_or(min_rtt, |t| {
                 if now + min_rtt < t {
+                    // This only happens when processing old packets
+                    // that were saved and replayed with old timestamps.
                     min_rtt
                 } else {
                     now + min_rtt - t
