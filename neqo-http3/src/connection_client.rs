@@ -5221,7 +5221,7 @@ mod tests {
             server,
             stream_id,
             push_id,
-            (String::from("my-header"), String::from("my-header")),
+            (String::from("my-header"), String::from("my-value")),
         )
     }
 
@@ -5420,7 +5420,7 @@ mod tests {
     }
 
     // In this test there are 2 push promises that are blocked and the response header is
-    // blocked as well. After a packet is received olny the first push promises is unblocked.
+    // blocked as well. After a packet is received only the first push promises is unblocked.
     #[test]
     fn two_push_promises_and_header_block() {
         let mut client = default_http3_client_param(200);
@@ -5442,7 +5442,7 @@ mod tests {
             &mut server,
             request_stream_id,
             0,
-            (String::from("my1"), String::from("my1")),
+            (String::from("myn1"), String::from("myv1")),
         );
 
         // PushPromise is blocked wathing for encoder instructions.
@@ -5453,7 +5453,7 @@ mod tests {
             &mut server,
             request_stream_id,
             1,
-            (String::from("my2"), String::from("my2")),
+            (String::from("myn2"), String::from("myv2")),
         );
 
         // PushPromise is blocked wathing for encoder instructions.
@@ -5462,7 +5462,7 @@ mod tests {
         let response_headers = vec![
             (String::from(":status"), String::from("200")),
             (String::from("content-length"), String::from("1234")),
-            (String::from("my3"), String::from("my3")),
+            (String::from("myn3"), String::from("myv3")),
         ];
         let encoded_headers = server
             .encoder
@@ -6381,5 +6381,23 @@ mod tests {
         client
             .stream_reset(request_stream_id, Error::HttpNoError.code())
             .unwrap();
+    }
+
+    // Client: receive a push stream
+    #[test]
+    fn incomple_push_stream() {
+        let (mut client, mut server) = connect();
+
+        // Create a push stream
+        let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = server
+            .conn
+            .stream_send(push_stream_id, PUSH_STREAM_TYPE)
+            .unwrap();
+        let _ = server.conn.stream_send(push_stream_id, &[0]).unwrap();
+        server.conn.stream_close_send(push_stream_id).unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpGeneralProtocol);
     }
 }
