@@ -7,9 +7,11 @@
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)"
 
+set -e
+
 # Some sanity checking.
-hash cargo || exit 1
-[[ -n "$root" ]] || exit 1
+hash cargo
+[[ -n "$root" ]]
 
 # Installation.
 if [[ "$1" == "install" ]]; then
@@ -37,3 +39,10 @@ fi
 
 # Check internal errors
 ./check_internal_errors
+
+if [[ ./neqo-crypto/bindings/bindings.toml -nt ./neqo-crypto/src/lib.rs ]]; then
+    echo "NSS bindings are newer than the code that uses them."
+    echo "Check the value of MINIMUM_NSS_VERSION in neqo-crypto/src/lib.rs"
+    echo "Touch neqo-crypto/src/lib.rs to remove this warning."
+    exit 1
+fi
