@@ -32,7 +32,7 @@ fn process_server_events(server: &mut Http3Server) {
                     (String::from(":path"), String::from("/"))
                 ]
             );
-            assert_eq!(fin, true);
+            assert!(fin);
             request
                 .set_response(
                     &[
@@ -45,7 +45,7 @@ fn process_server_events(server: &mut Http3Server) {
             request_found = true;
         }
     }
-    assert_eq!(request_found, true);
+    assert!(request_found);
 }
 
 fn process_client_events(conn: &mut Http3Client) {
@@ -61,13 +61,13 @@ fn process_client_events(conn: &mut Http3Client) {
                         (String::from("content-length"), String::from("3")),
                     ]
                 );
-                assert_eq!(fin, false);
+                assert!(!fin);
                 response_header_found = true;
             }
             Http3ClientEvent::DataReadable { stream_id } => {
                 let mut buf = [0u8; 100];
                 let (amount, fin) = conn.read_response_data(now(), stream_id, &mut buf).unwrap();
-                assert_eq!(fin, true);
+                assert!(fin);
                 assert_eq!(amount, RESPONSE_DATA.len());
                 assert_eq!(&buf[..RESPONSE_DATA.len()], RESPONSE_DATA);
                 response_data_found = true;
@@ -75,8 +75,8 @@ fn process_client_events(conn: &mut Http3Client) {
             _ => {}
         }
     }
-    assert_eq!(response_header_found, true);
-    assert_eq!(response_data_found, true)
+    assert!(response_header_found);
+    assert!(response_data_found);
 }
 
 fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
@@ -96,9 +96,9 @@ fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     let out = hconn_s.process(out.dgram(), now()); // Handshake
     let out = hconn_c.process(out.dgram(), now());
     let out = hconn_s.process(out.dgram(), now());
-    // assert_eq!(hconn_s.settings_received, true);
+    // assert!(hconn_s.settings_received);
     let out = hconn_c.process(out.dgram(), now());
-    // assert_eq!(hconn_c.settings_received, true);
+    // assert!(hconn_c.settings_received);
 
     (hconn_c, hconn_s, out.dgram())
 }

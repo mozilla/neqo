@@ -295,6 +295,12 @@ mod tests {
         create_server(DEFAULT_SETTINGS)
     }
 
+    #[allow(
+        unknown_lints,
+        renamed_and_removed_lints,
+        clippy::unknown_clippy_lints,
+        clippy::unnested_or_patterns
+    )] // Until we require rust 1.53 we can't use or_patterns.
     fn assert_closed(hconn: &mut Http3Server, expected: &Error) {
         let err = ConnectionError::Application(expected.code());
         let closed = |e| {
@@ -390,7 +396,7 @@ mod tests {
                         // the control stream
                         let mut buf = [0_u8; 100];
                         let (amount, fin) = client.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
+                        assert!(!fin);
                         assert_eq!(amount, CONTROL_STREAM_DATA.len());
                         assert_eq!(&buf[..9], CONTROL_STREAM_DATA);
                     } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID
@@ -398,7 +404,7 @@ mod tests {
                     {
                         let mut buf = [0_u8; 100];
                         let (amount, fin) = client.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
+                        assert!(!fin);
                         assert_eq!(amount, 1);
                         assert_eq!(buf[..1], [0x2]);
                     } else if stream_id == CLIENT_SIDE_DECODER_STREAM_ID
@@ -406,7 +412,7 @@ mod tests {
                     {
                         let mut buf = [0_u8; 100];
                         let (amount, fin) = client.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
+                        assert!(!fin);
                         assert_eq!(amount, 1);
                         assert_eq!(buf[..1], [0x3]);
                     } else {
@@ -795,7 +801,7 @@ mod tests {
             match event {
                 Http3ServerEvent::Headers { headers, fin, .. } => {
                     check_request_header(&headers);
-                    assert_eq!(fin, false);
+                    assert!(!fin);
                     headers_frames += 1;
                 }
                 Http3ServerEvent::Data {
@@ -804,7 +810,7 @@ mod tests {
                     fin,
                 } => {
                     assert_eq!(data, REQUEST_BODY);
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     request
                         .set_response(
                             &[
@@ -816,7 +822,7 @@ mod tests {
                         .unwrap();
                     data_received += 1;
                 }
-                _ => {}
+                Http3ServerEvent::StateChange { .. } => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -846,7 +852,7 @@ mod tests {
                     fin,
                 } => {
                     check_request_header(&headers);
-                    assert_eq!(fin, false);
+                    assert!(!fin);
                     headers_frames += 1;
                     request
                         .stream_stop_sending(Error::HttpNoError.code())
@@ -864,7 +870,7 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                _ => {}
+                Http3ServerEvent::StateChange { .. } => {}
             }
         }
         let out = hconn.process(None, now());
@@ -886,7 +892,7 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                _ => {}
+                Http3ServerEvent::StateChange { .. } => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -916,7 +922,7 @@ mod tests {
                     fin,
                 } => {
                     check_request_header(&headers);
-                    assert_eq!(fin, false);
+                    assert!(!fin);
                     headers_frames += 1;
                     request
                         .stream_reset(Error::HttpRequestRejected.code())
@@ -925,7 +931,7 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                _ => {}
+                Http3ServerEvent::StateChange { .. } => {}
             }
         }
         let out = hconn.process(None, now());
@@ -1149,7 +1155,7 @@ mod tests {
                 Http3ServerEvent::Data { request, .. } => {
                     assert!(requests.get(&request).is_some());
                 }
-                _ => {}
+                Http3ServerEvent::StateChange { .. } => {}
             }
         }
         assert_eq!(requests.len(), 2);

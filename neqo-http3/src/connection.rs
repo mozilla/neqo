@@ -156,11 +156,17 @@ impl Http3Connection {
     }
 
     /// Call `send` for all streams that need to send data.
+    #[allow(
+        unknown_lints,
+        renamed_and_removed_lints,
+        clippy::unknown_clippy_lints,
+        clippy::unnested_or_patterns
+    )] // Until we require rust 1.53 we can't use or_patterns.
     pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local.send(conn)?;
 
-        let to_send = mem::replace(&mut self.streams_have_data_to_send, BTreeSet::new());
+        let to_send = mem::take(&mut self.streams_have_data_to_send);
         for stream_id in to_send {
             let mut remove = false;
             if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
@@ -627,7 +633,7 @@ impl Http3Connection {
                             qpack_changed = true;
                         }
                         HSettingType::BlockedStreams => qpack_changed = true,
-                        _ => (),
+                        HSettingType::MaxHeaderListSize => (),
                     }
                 }
                 if qpack_changed {

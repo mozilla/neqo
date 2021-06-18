@@ -894,7 +894,7 @@ mod tests {
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, &[1; 10]).unwrap();
-        assert_eq!(s.data_ready(), true);
+        assert!(s.data_ready());
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
         assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
@@ -902,27 +902,27 @@ mod tests {
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, &[2; 12]).unwrap();
-        assert_eq!(s.data_ready(), false);
+        assert!(!s.data_ready());
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
         assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
         assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, &[3; 8]).unwrap();
-        assert_eq!(s.data_ready(), false);
+        assert!(!s.data_ready());
         assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
         assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // fill in the gap, but with a FIN
         s.inbound_stream_frame(true, 10, &[4; 6]).unwrap_err();
-        assert_eq!(s.data_ready(), false);
+        assert!(!s.data_ready());
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
         assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
         assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, &[5; 10]).unwrap();
-        assert_eq!(s.data_ready(), true);
+        assert!(s.data_ready());
         assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
         assert_eq!(s.state.recv_buf().unwrap().buffered(), 14);
 
@@ -930,7 +930,7 @@ mod tests {
         s.inbound_stream_frame(true, 24, &[6; 18]).unwrap();
         assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
         assert_eq!(s.state.recv_buf().unwrap().buffered(), 32);
-        assert_eq!(s.data_ready(), true);
+        assert!(s.data_ready());
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
 
         // Stream now no longer readable (is in DataRead state)
@@ -1079,7 +1079,7 @@ mod tests {
         s.maybe_send_flowc_update();
         assert!(!s.has_frames_to_write());
         assert_eq!(s.read(&mut buf).unwrap(), (RECV_BUFFER_SIZE, false));
-        assert_eq!(s.data_ready(), false);
+        assert!(!s.data_ready());
         s.maybe_send_flowc_update();
 
         // flow msg generated!

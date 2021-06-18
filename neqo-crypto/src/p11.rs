@@ -18,8 +18,14 @@ use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_int, c_uint};
 use std::ptr::null_mut;
 
-#[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
-#[allow(clippy::unreadable_literal, clippy::upper_case_acronyms)]
+#[allow(
+    unknown_lints,
+    renamed_and_removed_lints,
+    clippy::unknown_clippy_lints,
+    clippy::upper_case_acronyms
+)] // Until we require rust 1.51.
+#[allow(unknown_lints, deref_nullptr)] // Until we require rust 1.53 or bindgen#1651 is fixed.
+#[allow(clippy::unreadable_literal)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }

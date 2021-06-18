@@ -235,7 +235,7 @@ impl QPackEncoder {
                 self.stream_cancellation(stream_id);
                 Ok(())
             }
-            _ => Ok(()),
+            DecoderInstruction::NoInstruction => Ok(()),
         }
     }
 
@@ -364,6 +364,12 @@ impl QPackEncoder {
     /// `InternalError` if an unexpected error occurred.
     /// # Panics
     /// If there is a programming error.
+    #[allow(
+        unknown_lints,
+        renamed_and_removed_lints,
+        clippy::unknown_clippy_lints,
+        clippy::unnested_or_patterns
+    )] // Until we require rust 1.53 we can't use or_patterns.
     pub fn encode_header_block(
         &mut self,
         conn: &mut Connection,
@@ -592,7 +598,7 @@ mod tests {
                 .peer_conn
                 .stream_recv(self.send_stream_id, &mut buf)
                 .unwrap();
-            assert_eq!(fin, false);
+            assert!(!fin);
             assert_eq!(buf[..amount], encoder_instruction[..]);
         }
     }

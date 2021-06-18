@@ -129,7 +129,7 @@ impl RecvStream for PushStream {
                     }
                     return Ok(());
                 }
-                _ => return Ok(()),
+                PushStreamState::Closed => return Ok(()),
             }
         }
     }

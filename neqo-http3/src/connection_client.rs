@@ -1495,14 +1495,14 @@ mod tests {
                     assert!(push_streams.contains(&push_id));
                     check_push_response_header(&headers);
                     num_push_stream_headers += 1;
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::PushDataReadable { push_id } => {
                     assert!(push_streams.contains(&push_id));
                     let mut buf = [0_u8; 100];
                     let (amount, fin) = client.push_read_data(now(), push_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(amount, EXPECTED_PUSH_RESPONSE_DATA_FRAME.len());
                     assert_eq!(&buf[..amount], EXPECTED_PUSH_RESPONSE_DATA_FRAME);
                     num_push_stream_data += 1;
@@ -1515,8 +1515,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, response_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, response_stream_id);
@@ -1940,8 +1940,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_1(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -1949,7 +1949,7 @@ mod tests {
                     let (amount, fin) = client
                         .read_response_data(now(), stream_id, &mut buf)
                         .unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(amount, EXPECTED_RESPONSE_DATA_1.len());
                     assert_eq!(&buf[..amount], EXPECTED_RESPONSE_DATA_1);
                 }
@@ -1981,8 +1981,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -1990,7 +1990,7 @@ mod tests {
                     let (amount, fin) = client
                         .read_response_data(now(), stream_id, &mut buf)
                         .unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(amount, EXPECTED_RESPONSE_DATA_2_FRAME_1.len());
                     assert_eq!(&buf[..amount], EXPECTED_RESPONSE_DATA_2_FRAME_1);
                 }
@@ -2044,7 +2044,7 @@ mod tests {
                     // Read request body.
                     let mut buf = [0_u8; 100];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(amount, EXPECTED_REQUEST_BODY_FRAME.len());
                     assert_eq!(&buf[..amount], EXPECTED_REQUEST_BODY_FRAME);
 
@@ -2089,7 +2089,7 @@ mod tests {
                     // Read the DATA frame.
                     let mut buf = vec![1_u8; RECV_BUFFER_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(
                         amount,
                         request_body.len() + expected_data_frame_header.len()
@@ -2181,7 +2181,7 @@ mod tests {
                     // Read DATA frames.
                     let mut buf = vec![1_u8; RECV_BUFFER_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(
                         amount,
                         expected_first_data_frame_header.len()
@@ -2333,8 +2333,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                     response_headers = true;
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
@@ -2343,7 +2343,7 @@ mod tests {
                     let (amount, fin) = client
                         .read_response_data(now(), stream_id, &mut buf)
                         .unwrap();
-                    assert_eq!(fin, true);
+                    assert!(fin);
                     assert_eq!(amount, EXPECTED_RESPONSE_DATA_2_FRAME_1.len());
                     assert_eq!(&buf[..amount], EXPECTED_RESPONSE_DATA_2_FRAME_1);
                     response_body = true;
@@ -2405,7 +2405,7 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::HttpRequestRejected.code());
-                    assert_eq!(local, false);
+                    assert!(!local);
                     reset = true;
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
@@ -2524,7 +2524,7 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::HttpRequestCancelled.code());
-                    assert_eq!(local, false);
+                    assert!(!local);
                     reset = true;
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
@@ -2604,7 +2604,7 @@ mod tests {
         let (amount, fin) = client
             .read_response_data(now(), request_stream_id, &mut buf)
             .unwrap();
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(amount, EXPECTED_RESPONSE_DATA_2_FRAME_1.len());
         assert_eq!(&buf[..amount], EXPECTED_RESPONSE_DATA_2_FRAME_1);
 
@@ -2642,7 +2642,7 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::HttpRequestCancelled.code());
-                    assert_eq!(local, false);
+                    assert!(!local);
                     reset = true;
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
@@ -2745,7 +2745,7 @@ mod tests {
             match e {
                 Http3ClientEvent::HeaderReady { headers, fin, .. } => {
                     check_response_header_1(&headers);
-                    assert_eq!(fin, false);
+                    assert!(!fin);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert!(
@@ -2766,7 +2766,7 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id_3);
                     assert_eq!(error, Error::HttpRequestRejected.code());
-                    assert_eq!(local, false);
+                    assert!(!local);
                     stream_reset = true;
                 }
                 _ => {}
@@ -2818,7 +2818,7 @@ mod tests {
             {
                 assert_eq!(stream_id, request_stream_id_3);
                 assert_eq!(error, Error::HttpRequestRejected.code());
-                assert_eq!(local, false);
+                assert!(!local);
                 stream_reset_1 += 1;
             }
         }
@@ -2846,7 +2846,7 @@ mod tests {
             match e {
                 Http3ClientEvent::HeaderReady { headers, fin, .. } => {
                     check_response_header_1(&headers);
-                    assert_eq!(fin, false);
+                    assert!(!fin);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert!(stream_id == request_stream_id_1);
@@ -2865,7 +2865,7 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id_2);
                     assert_eq!(error, Error::HttpRequestRejected.code());
-                    assert_eq!(local, false);
+                    assert!(!local);
                     stream_reset_2 += 1;
                 }
                 _ => {}
@@ -2977,8 +2977,8 @@ mod tests {
         {
             assert_eq!(stream_id, request_stream_id);
             check_response_header_2(&headers);
-            assert_eq!(fin, true);
-            assert_eq!(interim, false);
+            assert!(fin);
+            assert!(!interim);
         } else {
             panic!("wrong event type");
         }
@@ -3016,8 +3016,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not receive a DataGeadable event!");
@@ -3044,7 +3044,7 @@ mod tests {
                     let res = client.read_response_data(now(), stream_id, &mut buf);
                     let (len, fin) = res.expect("should read");
                     assert_eq!(0, len);
-                    assert_eq!(fin, true);
+                    assert!(fin);
                 }
                 _ => {}
             };
@@ -3090,8 +3090,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -3144,8 +3144,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not receive a DataGeadable event!");
@@ -3172,7 +3172,7 @@ mod tests {
                     let res = client.read_response_data(now(), stream_id, &mut buf);
                     let (len, fin) = res.expect("should read");
                     assert_eq!(0, len);
-                    assert_eq!(fin, true);
+                    assert!(fin);
                 }
                 _ => {}
             };
@@ -3209,8 +3209,8 @@ mod tests {
                 } => {
                     assert_eq!(stream_id, request_stream_id);
                     check_response_header_2(&headers);
-                    assert_eq!(fin, false);
-                    assert_eq!(interim, false);
+                    assert!(!fin);
+                    assert!(!interim);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -3219,7 +3219,7 @@ mod tests {
                     let (len, fin) = res.expect("should have data");
                     assert_eq!(len, EXPECTED_RESPONSE_DATA_2_FRAME_1.len());
                     assert_eq!(&buf[..len], EXPECTED_RESPONSE_DATA_2_FRAME_1);
-                    assert_eq!(fin, false);
+                    assert!(!fin);
                 }
                 _ => {}
             };
@@ -3238,7 +3238,7 @@ mod tests {
             let res = client.read_response_data(now(), stream_id, &mut buf);
             let (len, fin) = res.expect("should read");
             assert_eq!(0, len);
-            assert_eq!(fin, true);
+            assert!(fin);
         } else {
             panic!("wrong event type");
         }
@@ -3323,7 +3323,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(len, EXPECTED_RESPONSE_DATA_2_FRAME_1.len());
                 assert_eq!(&buf[..len], EXPECTED_RESPONSE_DATA_2_FRAME_1);
-                assert_eq!(fin, true);
+                assert!(fin);
             }
             x => {
                 eprintln!("event {:?}", x);
@@ -3457,8 +3457,8 @@ mod tests {
             {
                 assert_eq!(stream_id, request_stream_id);
                 assert_eq!(headers, sent_headers);
-                assert_eq!(fin, true);
-                assert_eq!(interim, false);
+                assert!(fin);
+                assert!(!interim);
                 recv_header = true;
             } else {
                 panic!("event {:?}", e);
@@ -3990,8 +3990,8 @@ mod tests {
             {
                 assert_eq!(stream_id, request_stream_id);
                 check_response_header_0(&headers);
-                assert_eq!(fin, false);
-                assert_eq!(interim, false);
+                assert!(!fin);
+                assert!(!interim);
                 response_headers = true;
             }
         }
@@ -4022,7 +4022,7 @@ mod tests {
             .read_response_data(now(), request_stream_id, &mut buf)
             .unwrap();
         assert_eq!(0, len);
-        assert_eq!(fin, true)
+        assert!(fin);
     }
 
     #[test]
@@ -4051,8 +4051,8 @@ mod tests {
             {
                 assert_eq!(stream_id, request_stream_id);
                 check_response_header_0(&headers);
-                assert_eq!(fin, false);
-                assert_eq!(interim, false);
+                assert!(!fin);
+                assert!(!interim);
                 response_headers = true;
             }
         }
@@ -4092,7 +4092,7 @@ mod tests {
             .read_response_data(now(), request_stream_id, &mut buf)
             .unwrap();
         assert_eq!(0, len);
-        assert_eq!(fin, true);
+        assert!(fin);
     }
 
     #[test]
@@ -4121,8 +4121,8 @@ mod tests {
             {
                 assert_eq!(stream_id, request_stream_id);
                 check_response_header_0(&headers);
-                assert_eq!(fin, false);
-                assert_eq!(interim, false);
+                assert!(!fin);
+                assert!(!interim);
                 response_headers = true;
             }
         }
@@ -4880,7 +4880,7 @@ mod tests {
         assert!(server.conn.events().any(control_stream_readable));
         let mut buf = [0_u8; 100];
         let (amount, fin) = server.conn.stream_recv(2, &mut buf).unwrap();
-        assert_eq!(fin, false);
+        assert!(!fin);
 
         assert_eq!(amount, MAX_PUSH_ID_FRAME.len());
         assert_eq!(&buf[..3], MAX_PUSH_ID_FRAME);
@@ -5408,7 +5408,7 @@ mod tests {
             .conn
             .stream_recv(CLIENT_SIDE_DECODER_STREAM_ID, &mut inst)
             .unwrap();
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(amount, STREAM_CANCELED_ID_0.len());
         assert_eq!(&inst[..amount], STREAM_CANCELED_ID_0);
     }

@@ -117,6 +117,12 @@ impl Error {
     }
 
     #[must_use]
+    #[allow(
+        unknown_lints,
+        renamed_and_removed_lints,
+        clippy::unknown_clippy_lints,
+        clippy::unnested_or_patterns
+    )] // Until we require rust 1.53 we can't use or_patterns.
     pub fn connection_error(&self) -> bool {
         matches!(
             self,

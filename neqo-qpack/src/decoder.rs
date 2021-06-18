@@ -359,7 +359,7 @@ mod tests {
             .peer_conn
             .stream_recv(decoder.send_stream_id, &mut buf)
             .unwrap();
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..amount], decoder_instruction);
     }
 
