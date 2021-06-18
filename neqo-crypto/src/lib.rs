@@ -73,6 +73,8 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
+const MINIMUM_NSS_VERSION: &str = "3.66";
+
 #[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
 #[allow(
     unknown_lints,
@@ -80,9 +82,6 @@ use std::ptr::null;
     clippy::unknown_clippy_lints,
     clippy::upper_case_acronyms
 )] // Until we require rust 1.51.
-
-const MINIMUM_NSS_VERSION: &str = "3.66";
-
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
