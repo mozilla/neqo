@@ -126,6 +126,7 @@ functions = [
     "NSS_NoDB_Init",
     "NSS_SetDomesticPolicy",
     "NSS_Shutdown",
+    "NSS_VersionCheck",
 ]
 variables = [
     "NSS_INIT_READONLY",
