@@ -73,6 +73,8 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
+const MINIMUM_NSS_VERSION: &'static str = "3.66";
+
 mod nss {
     #![allow(
         non_upper_case_globals,
@@ -111,12 +113,23 @@ fn already_initialized() -> bool {
     unsafe { nss::NSS_IsInitialized() != 0 }
 }
 
+fn version_check() {
+    let min_ver = CString::new(MINIMUM_NSS_VERSION).unwrap();
+    assert_ne!(
+        unsafe { nss::NSS_VersionCheck(min_ver.as_ptr()) },
+        0,
+        "Minimum NSS version of {} not supported",
+        MINIMUM_NSS_VERSION,
+    );
+}
+
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance that
 pub fn init() {
     // Set time zero.
     time::init();
     unsafe {
         INITIALIZED.call_once(|| {
+            version_check();
             if already_initialized() {
                 return NssLoaded::External;
             }
@@ -148,6 +161,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
     time::init();
     unsafe {
         INITIALIZED.call_once(|| {
+            version_check();
             if already_initialized() {
                 return NssLoaded::External;
             }
@@ -155,8 +169,8 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             let path = dir.into();
             assert!(path.is_dir());
             let pathstr = path.to_str().expect("path converts to string").to_string();
-            let dircstr = CString::new(pathstr).expect("new CString");
-            let empty = CString::new("").expect("new empty CString");
+            let dircstr = CString::new(pathstr).unwrap();
+            let empty = CString::new("").unwrap();
             secstatus_to_res(nss::NSS_Initialize(
                 dircstr.as_ptr(),
                 empty.as_ptr(),
