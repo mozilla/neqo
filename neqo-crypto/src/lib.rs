@@ -73,7 +73,7 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
-const MINIMUM_NSS_VERSION: &'static str = "3.66";
+const MINIMUM_NSS_VERSION: &str = "3.66";
 
 mod nss {
     #![allow(
