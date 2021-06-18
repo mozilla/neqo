@@ -99,8 +99,6 @@ fn nss_dir() -> PathBuf {
             Command::new("hg")
                 .args(&[
                     "clone",
-                    "-u",
-                    "NSS_3_53_RTM",
                     "https://hg.mozilla.org/projects/nss",
                     dir.to_str().unwrap(),
                 ])
@@ -112,8 +110,6 @@ fn nss_dir() -> PathBuf {
             Command::new("hg")
                 .args(&[
                     "clone",
-                    "-u",
-                    "NSPR_4_25_RTM",
                     "https://hg.mozilla.org/projects/nspr",
                     nspr_dir.to_str().unwrap(),
                 ])
