@@ -817,14 +817,17 @@ fn retire_all() {
     let ncid = send_something(&mut server, now());
     server.test_frame_writer = None;
 
-    let ncid_before = client.stats().frame_rx.new_connection_id;
-    let rcid_before = client.stats().frame_tx.retire_connection_id;
+    let new_cid_before = client.stats().frame_rx.new_connection_id;
+    let retire_cid_before = client.stats().frame_tx.retire_connection_id;
     client.process_input(ncid, now());
     let retire = send_something(&mut client, now());
-    assert_eq!(client.stats().frame_rx.new_connection_id, ncid_before + 1);
+    assert_eq!(
+        client.stats().frame_rx.new_connection_id,
+        new_cid_before + 1
+    );
     assert_eq!(
         client.stats().frame_tx.retire_connection_id,
-        rcid_before + LOCAL_ACTIVE_CID_LIMIT
+        retire_cid_before + LOCAL_ACTIVE_CID_LIMIT
     );
 
     assert_ne!(get_cid(&retire), original_cid);

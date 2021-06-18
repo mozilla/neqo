@@ -311,7 +311,7 @@ impl HFrameReader {
     /// # Errors
     /// May return `HttpFrame` if a frame cannot be decoded.
     fn get_frame(&mut self) -> Res<HFrame> {
-        let payload = mem::replace(&mut self.payload, Vec::new());
+        let payload = mem::take(&mut self.payload);
         let mut dec = Decoder::from(&payload[..]);
         let f = match self.hframe_type {
             H3_FRAME_TYPE_DATA => HFrame::Data {
@@ -392,7 +392,7 @@ mod tests {
         mem::drop(conn_c.process(out.dgram(), now()));
 
         let (frame, fin) = fr.receive(&mut conn_c, stream_id).unwrap();
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert!(frame.is_some());
         assert_eq!(*f, frame.unwrap());
 
@@ -494,7 +494,7 @@ mod tests {
             let out = self.conn_s.process(None, now());
             mem::drop(self.conn_c.process(out.dgram(), now()));
             let (frame, fin) = self.fr.receive(&mut self.conn_c, self.stream_id).unwrap();
-            assert_eq!(fin, false);
+            assert!(!fin);
             frame
         }
     }
@@ -650,17 +650,17 @@ mod tests {
             }
             FrameReadingTestExpect::FrameComplete => {
                 let (f, fin) = rv.unwrap();
-                assert_eq!(fin, false);
+                assert!(!fin);
                 assert!(f.is_some());
             }
             FrameReadingTestExpect::FrameAndStreamComplete => {
                 let (f, fin) = rv.unwrap();
-                assert_eq!(fin, true);
+                assert!(fin);
                 assert!(f.is_some());
             }
             FrameReadingTestExpect::StreamDoneWithoutFrame => {
                 let (f, fin) = rv.unwrap();
-                assert_eq!(fin, true);
+                assert!(fin);
                 assert!(f.is_none());
             }
         };

@@ -1522,7 +1522,7 @@ mod tests {
         // Increasing conn max (conn:4, stream:4) will unblock but not emit
         // event b/c that happens in Connection::emit_frame() (tested in
         // connection.rs)
-        assert_eq!(conn_fc.borrow_mut().update(4), true);
+        assert!(conn_fc.borrow_mut().update(4));
         let evts = conn_events.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 0);
         assert_eq!(s.avail(), 2);

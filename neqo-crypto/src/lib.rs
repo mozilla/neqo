@@ -73,13 +73,14 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
+#[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
+#[allow(
+    unknown_lints,
+    renamed_and_removed_lints,
+    clippy::unknown_clippy_lints,
+    clippy::upper_case_acronyms
+)] // Until we require rust 1.51.
 mod nss {
-    #![allow(
-        non_upper_case_globals,
-        clippy::redundant_static_lifetimes,
-        clippy::upper_case_acronyms
-    )]
-    #![allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
@@ -96,11 +97,8 @@ enum NssLoaded {
 
 impl Drop for NssLoaded {
     fn drop(&mut self) {
-        match self {
-            Self::NoDb | Self::Db(_) => unsafe {
-                secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
-            },
-            _ => {}
+        if !matches!(self, Self::External) {
+            unsafe { secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed") }
         }
     }
 }

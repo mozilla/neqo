@@ -598,10 +598,10 @@ mod tests {
         assert_eq!(tps2.get_bytes(ORIGINAL_DESTINATION_CONNECTION_ID), None);
         assert_eq!(tps2.get_bytes(INITIAL_SOURCE_CONNECTION_ID), None);
         assert_eq!(tps2.get_bytes(RETRY_SOURCE_CONNECTION_ID), None);
-        assert_eq!(tps2.has_value(ORIGINAL_DESTINATION_CONNECTION_ID), false);
-        assert_eq!(tps2.has_value(INITIAL_SOURCE_CONNECTION_ID), false);
-        assert_eq!(tps2.has_value(RETRY_SOURCE_CONNECTION_ID), false);
-        assert_eq!(tps2.has_value(STATELESS_RESET_TOKEN), true);
+        assert!(!tps2.has_value(ORIGINAL_DESTINATION_CONNECTION_ID));
+        assert!(!tps2.has_value(INITIAL_SOURCE_CONNECTION_ID));
+        assert!(!tps2.has_value(RETRY_SOURCE_CONNECTION_ID));
+        assert!(tps2.has_value(STATELESS_RESET_TOKEN));
 
         let mut enc = Encoder::default();
         tps.encode(&mut enc);

@@ -254,7 +254,7 @@ impl PushController {
                     Ok(true)
                 }
                 PushState::PushPromise { headers } => {
-                    let tmp = mem::replace(headers, Vec::new());
+                    let tmp = mem::take(headers);
                     *push_state = PushState::Active {
                         stream_id,
                         headers: tmp,

@@ -103,16 +103,16 @@ fn transfer() {
     assert!(stream_ids.next().is_none());
     let (received1, fin1) = server.stream_recv(first_stream.as_u64(), &mut buf).unwrap();
     assert_eq!(received1, 4000);
-    assert_eq!(fin1, false);
+    assert!(!fin1);
     let (received2, fin2) = server.stream_recv(first_stream.as_u64(), &mut buf).unwrap();
     assert_eq!(received2, 140);
-    assert_eq!(fin2, false);
+    assert!(!fin2);
 
     let (received3, fin3) = server
         .stream_recv(second_stream.as_u64(), &mut buf)
         .unwrap();
     assert_eq!(received3, 60);
-    assert_eq!(fin3, true);
+    assert!(fin3);
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn after_fin_is_read_conn_events_for_stream_should_be_removed() {
     // read from the stream before checking connection events.
     let mut buf = vec![0; 4000];
     let (_, fin) = client.stream_recv(id, &mut buf).unwrap();
-    assert_eq!(fin, true);
+    assert!(fin);
 
     // Make sure we do not have RecvStreamReadable events for the stream when fin has been read.
     let readable_stream_evt =

@@ -865,7 +865,7 @@ impl LossRecovery {
                 .iter()
                 .chain(self.pto_time(rtt, PacketNumberSpace::Handshake).iter())
                 .min()
-                .cloned()
+                .copied()
         }
     }
 
