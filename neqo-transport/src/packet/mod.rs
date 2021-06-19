@@ -92,8 +92,6 @@ impl From<CryptoSpace> for PacketType {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QuicVersion {
     Version1,
-    Draft27,
-    Draft28,
     Draft29,
     Draft30,
     Draft31,
@@ -104,8 +102,6 @@ impl QuicVersion {
     pub fn as_u32(self) -> Version {
         match self {
             Self::Version1 => 1,
-            Self::Draft27 => 0xff00_0000 + 27,
-            Self::Draft28 => 0xff00_0000 + 28,
             Self::Draft29 => 0xff00_0000 + 29,
             Self::Draft30 => 0xff00_0000 + 30,
             Self::Draft31 => 0xff00_0000 + 31,
@@ -126,10 +122,6 @@ impl TryFrom<Version> for QuicVersion {
     fn try_from(ver: Version) -> Res<Self> {
         if ver == 1 {
             Ok(Self::Version1)
-        } else if ver == 0xff00_0000 + 27 {
-            Ok(Self::Draft27)
-        } else if ver == 0xff00_0000 + 28 {
-            Ok(Self::Draft28)
         } else if ver == 0xff00_0000 + 29 {
             Ok(Self::Draft29)
         } else if ver == 0xff00_0000 + 30 {
@@ -489,8 +481,6 @@ impl PacketBuilder {
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
         encoder.encode_uint(4, QuicVersion::Version1.as_u32());
-        encoder.encode_uint(4, QuicVersion::Draft27.as_u32());
-        encoder.encode_uint(4, QuicVersion::Draft28.as_u32());
         encoder.encode_uint(4, QuicVersion::Draft29.as_u32());
         encoder.encode_uint(4, QuicVersion::Draft30.as_u32());
         encoder.encode_uint(4, QuicVersion::Draft31.as_u32());

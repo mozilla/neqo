@@ -2155,7 +2155,6 @@ impl Connection {
 
     /// Process the final set of transport parameters.
     fn process_tps(&mut self) -> Res<()> {
-        self.validate_cids()?;
         {
             let tps = self.tps.borrow();
             let remote = tps.remote.as_ref().unwrap();
@@ -2201,94 +2200,6 @@ impl Connection {
         }
         self.set_initial_limits();
         qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
-        Ok(())
-    }
-
-    fn validate_cids(&mut self) -> Res<()> {
-        match self.version() {
-            QuicVersion::Draft27 => self.validate_cids_draft_27(),
-            _ => self.validate_cids_draft_28_plus(),
-        }
-    }
-
-    fn validate_cids_draft_27(&mut self) -> Res<()> {
-        if let AddressValidationInfo::Retry { token, .. } = &self.address_validation {
-            debug_assert!(!token.is_empty());
-            let tph = self.tps.borrow();
-            let tp = tph
-                .remote
-                .as_ref()
-                .unwrap()
-                .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
-            if self
-                .original_destination_cid
-                .as_ref()
-                .map(ConnectionId::as_cid_ref)
-                != tp.map(ConnectionIdRef::from)
-            {
-                return Err(Error::InvalidRetry);
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_cids_draft_28_plus(&mut self) -> Res<()> {
-        let tph = self.tps.borrow();
-        let remote_tps = tph.remote.as_ref().unwrap();
-
-        let tp = remote_tps.get_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID);
-        if self
-            .remote_initial_source_cid
-            .as_ref()
-            .map(ConnectionId::as_cid_ref)
-            != tp.map(ConnectionIdRef::from)
-        {
-            qwarn!(
-                [self],
-                "ISCID test failed: self cid {:?} != tp cid {:?}",
-                self.remote_initial_source_cid,
-                tp.map(hex),
-            );
-            return Err(Error::ProtocolViolation);
-        }
-
-        if self.role == Role::Client {
-            let tp = remote_tps.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
-            if self
-                .original_destination_cid
-                .as_ref()
-                .map(ConnectionId::as_cid_ref)
-                != tp.map(ConnectionIdRef::from)
-            {
-                qwarn!(
-                    [self],
-                    "ODCID test failed: self cid {:?} != tp cid {:?}",
-                    self.original_destination_cid,
-                    tp.map(hex),
-                );
-                return Err(Error::ProtocolViolation);
-            }
-
-            let tp = remote_tps.get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
-            let expected = if let AddressValidationInfo::Retry {
-                retry_source_cid, ..
-            } = &self.address_validation
-            {
-                Some(retry_source_cid.as_cid_ref())
-            } else {
-                None
-            };
-            if expected != tp.map(ConnectionIdRef::from) {
-                qwarn!(
-                    [self],
-                    "RSCID test failed. self cid {:?} != tp cid {:?}",
-                    expected,
-                    tp.map(hex),
-                );
-                return Err(Error::ProtocolViolation);
-            }
-        }
-
         Ok(())
     }
 

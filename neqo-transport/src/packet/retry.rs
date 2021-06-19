@@ -35,7 +35,6 @@ fn make_aead(secret: &[u8]) -> Aead {
     let secret = hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, secret).unwrap();
     Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap()
 }
-thread_local!(static RETRY_AEAD_27: RefCell<Aead> = RefCell::new(make_aead(RETRY_SECRET_27)));
 thread_local!(static RETRY_AEAD_29: RefCell<Aead> = RefCell::new(make_aead(RETRY_SECRET_29)));
 thread_local!(static RETRY_AEAD_V1: RefCell<Aead> = RefCell::new(make_aead(RETRY_SECRET_V1)));
 
@@ -46,7 +45,6 @@ where
 {
     match quic_version {
         QuicVersion::Version1 => &RETRY_AEAD_V1,
-        QuicVersion::Draft27 | QuicVersion::Draft28 => &RETRY_AEAD_27,
         QuicVersion::Draft29
         | QuicVersion::Draft30
         | QuicVersion::Draft31
