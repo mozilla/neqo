@@ -439,8 +439,19 @@ impl RecvStream {
             new_state.name()
         );
 
-        if let RecvStreamState::DataRead = new_state {
-            self.conn_events.recv_stream_complete(self.stream_id);
+        match new_state {
+            // Receiving all data, or receiving or requesting RESET_STREAM
+            // is cause to stop keep-alives.
+            RecvStreamState::DataRecvd { .. }
+            | RecvStreamState::AbortReading { .. }
+            | RecvStreamState::ResetRecvd => {
+                self.keep_alive = None;
+            }
+            // Once all the data is read, generate an event.
+            RecvStreamState::DataRead => {
+                self.conn_events.recv_stream_complete(self.stream_id);
+            }
+            _ => {}
         }
 
         self.state = new_state;
