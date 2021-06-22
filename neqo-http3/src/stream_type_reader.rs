@@ -30,30 +30,30 @@ impl NewStreamTypeReader {
     pub fn get_type(&mut self, conn: &mut Connection) -> Option<Http3StreamType> {
         // On any error we will only close this stream!
         loop {
-            match self {
-                NewStreamTypeReader::Read {
-                    ref mut reader,
-                    stream_id,
-                } => {
-                    let to_read = reader.min_remaining();
-                    let mut buf = vec![0; to_read];
-                    match conn.stream_recv(*stream_id, &mut buf[..]) {
-                        Ok((0, false)) => {
-                            return None;
-                        }
-                        Ok((amount, false)) => {
-                            if let Some(res) = reader.consume(&mut Decoder::from(&buf[..amount])) {
-                                *self = NewStreamTypeReader::Done;
-                                return Some(res.into());
-                            }
-                        }
-                        Ok((_, true)) | Err(_) => {
+            if let NewStreamTypeReader::Read {
+                ref mut reader,
+                stream_id,
+            } = self
+            {
+                let to_read = reader.min_remaining();
+                let mut buf = vec![0; to_read];
+                match conn.stream_recv(*stream_id, &mut buf[..]) {
+                    Ok((0, false)) => {
+                        return None;
+                    }
+                    Ok((amount, false)) => {
+                        if let Some(res) = reader.consume(&mut Decoder::from(&buf[..amount])) {
                             *self = NewStreamTypeReader::Done;
-                            return None;
+                            return Some(res.into());
                         }
                     }
+                    Ok((_, true)) | Err(_) => {
+                        *self = NewStreamTypeReader::Done;
+                        return None;
+                    }
                 }
-                NewStreamTypeReader::Done => return None,
+            } else {
+                return None;
             }
         }
     }
