@@ -543,3 +543,19 @@ fn keep_alive_large_rtt() {
         assert!(delay > rtt);
     }
 }
+
+/// Only the recipient of a unidirectional stream can keep it alive.
+#[test]
+fn keep_alive_uni() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_keep_alive(stream, true).unwrap_err();
+    let _ = client.stream_send(stream, DEFAULT_STREAM_DATA).unwrap();
+    let dgram = client.process_output(now()).dgram();
+
+    server.process_input(dgram.unwrap(), now());
+    server.stream_keep_alive(stream, true).unwrap();
+}
