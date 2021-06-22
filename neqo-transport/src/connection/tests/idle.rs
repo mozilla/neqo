@@ -455,7 +455,7 @@ fn keep_alive_close() {
     assert_idle(&mut client, LOCAL_IDLE_TIMEOUT);
 }
 
-/// Receiving RESET_STREAM stops keep-alives for that stream, but only once
+/// Receiving `RESET_STREAM` stops keep-alives for that stream, but only once
 /// the sending side is also closed.
 #[test]
 fn keep_alive_reset() {
