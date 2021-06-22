@@ -146,10 +146,10 @@ impl RecvMessage {
         Ok(())
     }
 
-    fn add_headers(&mut self, headers: Vec<Header>, fin: bool) -> Res<()> {
+    fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
         qtrace!([self], "Add new headers fin={}", fin);
         let interim = self.is_interim(&headers)?;
-        let _valid = self.headers_valid(&headers)?;
+        self.sanitize_headers(&mut headers)?;
         if fin && interim {
             return Err(Error::HttpGeneralProtocolStream);
         }
@@ -377,10 +377,10 @@ impl RecvMessage {
         }
     }
 
-    fn headers_valid(&self, headers: &[Header]) -> Res<bool> {
+    fn sanitize_headers(&self, headers: &mut Vec<Header>) -> Res<()> {
         let mut method_value: Option<&String> = None;
         let mut pseudo_state = 0;
-        for header in headers {
+        for header in headers.iter() {
             let is_pseudo = Self::track_pseudo(&header.0, &mut pseudo_state, &self.message_type)?;
 
             let mut bytes = header.0.bytes();
@@ -393,19 +393,6 @@ impl RecvMessage {
 
             if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
                 return Err(Error::InvalidHeader); // illegal characters.
-            }
-
-            if matches!(
-                header.0.as_str(),
-                "connection"
-                    | "host"
-                    | "keep-alive"
-                    | "proxy-connection"
-                    | "te"
-                    | "transfer-encoding"
-                    | "upgrade"
-            ) {
-                return Err(Error::InvalidHeader);
             }
         }
         // Clear the regular header bit, since we only check pseudo headers below.
@@ -424,7 +411,19 @@ impl RecvMessage {
             return Err(Error::InvalidHeader);
         }
 
-        Ok(true)
+        headers.retain(|h| {
+            !matches!(
+                h.0.as_str(),
+                "connection"
+                    | "host"
+                    | "keep-alive"
+                    | "proxy-connection"
+                    | "te"
+                    | "transfer-encoding"
+                    | "upgrade"
+            )
+        });
+        Ok(())
     }
 }
 

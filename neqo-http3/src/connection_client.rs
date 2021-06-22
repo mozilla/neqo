@@ -6224,11 +6224,44 @@ mod tests {
 
     #[test]
     fn malformed_response_excluded_header() {
-        do_malformed_response_test(&[
-            (String::from(":status"), String::from("200")),
-            (String::from("content-type"), String::from("text/plain")),
-            (String::from("connection"), String::from("close")),
-        ]);
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        server.encode_headers(
+            request_stream_id,
+            &[
+                (String::from(":status"), String::from("200")),
+                (String::from("content-type"), String::from("text/plain")),
+                (String::from("connection"), String::from("close")),
+            ],
+            &mut d,
+        );
+
+        // Send response
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the malformed headers.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::HeaderReady {
+                stream_id: request_stream_id,
+                headers: vec!(
+                    (String::from(":status"), String::from("200")),
+                    (String::from("content-type"), String::from("text/plain"))
+                ),
+                interim: false,
+                fin: false,
+            }
+        );
     }
 
     #[test]
