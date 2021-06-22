@@ -4,10 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{IdleTimeout, Output, State, LOCAL_IDLE_TIMEOUT};
+use super::super::{Connection, IdleTimeout, Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
     connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    maybe_authenticate, send_and_receive, send_something, AT_LEAST_PTO,
+    maybe_authenticate, send_and_receive, send_something, AT_LEAST_PTO, DEFAULT_STREAM_DATA,
 };
 use crate::packet::PacketBuilder;
 use crate::stats::FrameStats;
@@ -15,9 +15,9 @@ use crate::tparams::{self, TransportParameter};
 use crate::tracking::PacketNumberSpace;
 use crate::StreamType;
 
-use neqo_common::Encoder;
+use neqo_common::{qtrace, Encoder};
 use std::mem;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use test_fixture::{self, now, split_datagram};
 
 #[test]
@@ -305,4 +305,241 @@ fn idle_caching() {
     client.process_input(dgram.unwrap(), end);
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
+}
+
+/// This function opens a bidirectional stream and leaves both endpoints
+/// idle, with the stream left open.
+/// The stream ID of that stream is returned (along with the new time).
+fn create_stream_idle_rtt(
+    initiator: &mut Connection,
+    responder: &mut Connection,
+    mut now: Instant,
+    rtt: Duration,
+) -> (Instant, u64) {
+    let check_idle = |endpoint: &mut Connection, now: Instant| {
+        let delay = endpoint.process_output(now).callback();
+        qtrace!([endpoint], "idle timeout {:?}", delay);
+        if rtt < LOCAL_IDLE_TIMEOUT / 4 {
+            assert_eq!(LOCAL_IDLE_TIMEOUT, delay);
+        } else {
+            assert!(delay > LOCAL_IDLE_TIMEOUT);
+        }
+    };
+
+    // Exchange a message each way on a stream.
+    let stream = initiator.stream_create(StreamType::BiDi).unwrap();
+    let _ = initiator.stream_send(stream, DEFAULT_STREAM_DATA).unwrap();
+    let req = initiator.process_output(now).dgram();
+    now += rtt / 2;
+    responder.process_input(req.unwrap(), now);
+
+    // Reordering two packets from the responder forces the initiator to be idle.
+    let _ = responder.stream_send(stream, DEFAULT_STREAM_DATA).unwrap();
+    let resp1 = responder.process_output(now).dgram();
+    let _ = responder.stream_send(stream, DEFAULT_STREAM_DATA).unwrap();
+    let resp2 = responder.process_output(now).dgram();
+
+    now += rtt / 2;
+    initiator.process_input(resp2.unwrap(), now);
+    initiator.process_input(resp1.unwrap(), now);
+    let ack = initiator.process_output(now).dgram();
+    assert!(ack.is_some());
+    check_idle(initiator, now);
+
+    // Receiving the ACK should return the responder to idle too.
+    now += rtt / 2;
+    responder.process_input(ack.unwrap(), now);
+    check_idle(responder, now);
+
+    (now, stream)
+}
+
+fn create_stream_idle(initiator: &mut Connection, responder: &mut Connection) -> u64 {
+    let (_, stream) = create_stream_idle_rtt(initiator, responder, now(), Duration::new(0, 0));
+    stream
+}
+
+fn assert_idle(endpoint: &mut Connection, expected: Duration) {
+    assert_eq!(endpoint.process_output(now()).callback(), expected);
+}
+
+/// The creator of a stream marks it as important enough to use a keep-alive.
+#[test]
+fn keep_alive_initiator() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut server, &mut client);
+    let mut now = now();
+
+    // Marking the stream for keep-alive changes the idle timeout.
+    server.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut server, LOCAL_IDLE_TIMEOUT / 2);
+
+    // Wait that long and the server should send a PING frame.
+    now += LOCAL_IDLE_TIMEOUT / 2;
+    let pings_before = server.stats().frame_tx.ping;
+    let ping = server.process_output(now).dgram();
+    assert!(ping.is_some());
+    assert_eq!(server.stats().frame_tx.ping, pings_before + 1);
+}
+
+/// The other peer can also keep it alive.
+#[test]
+fn keep_alive_responder() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut server, &mut client);
+    let mut now = now();
+
+    // Marking the stream for keep-alive changes the idle timeout.
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    // Wait that long and the client should send a PING frame.
+    now += LOCAL_IDLE_TIMEOUT / 2;
+    let pings_before = client.stats().frame_tx.ping;
+    let ping = client.process_output(now).dgram();
+    assert!(ping.is_some());
+    assert_eq!(client.stats().frame_tx.ping, pings_before + 1);
+}
+
+/// Unmark a stream as being keep-alive.
+#[test]
+fn keep_alive_unmark() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut client, &mut server);
+
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    client.stream_keep_alive(stream, false).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT);
+}
+
+/// The sender has something to send.  Make it send it
+/// and cause the receiver to become idle by sending something
+/// else, reordering the packets, and consuming the ACK.
+/// Note that the sender might not be idle if the thing that it
+/// sends results in something in addition to an ACK.
+fn transfer_force_idle(sender: &mut Connection, receiver: &mut Connection) {
+    let dgram = sender.process_output(now()).dgram();
+    let chaff = send_something(sender, now());
+    receiver.process_input(chaff, now());
+    receiver.process_input(dgram.unwrap(), now());
+    let ack = receiver.process_output(now()).dgram();
+    sender.process_input(ack.unwrap(), now());
+}
+
+/// Receiving the end of the stream stops keep-alives for that stream.
+/// Even if that data hasn't been read.
+#[test]
+fn keep_alive_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut client, &mut server);
+
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    client.stream_close_send(stream).unwrap();
+    transfer_force_idle(&mut client, &mut server);
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    server.stream_close_send(stream).unwrap();
+    transfer_force_idle(&mut server, &mut client);
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT);
+}
+
+/// Receiving RESET_STREAM stops keep-alives for that stream, but only once
+/// the sending side is also closed.
+#[test]
+fn keep_alive_reset() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut client, &mut server);
+
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    client.stream_close_send(stream).unwrap();
+    transfer_force_idle(&mut client, &mut server);
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    server.stream_reset_send(stream, 0).unwrap();
+    transfer_force_idle(&mut server, &mut client);
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT);
+}
+
+/// Stopping sending also cancels the keep-alive.
+#[test]
+fn keep_alive_stop_sending() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut client, &mut server);
+
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    client.stream_close_send(stream).unwrap();
+    client.stream_stop_sending(stream, 0).unwrap();
+    transfer_force_idle(&mut client, &mut server);
+    // The server will have sent RESET_STREAM, which the client will
+    // want to acknowledge, so force that out.
+    let junk = send_something(&mut server, now());
+    let ack = client.process(Some(junk), now()).dgram();
+    assert!(ack.is_some());
+
+    // Now the client should be idle.
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT);
+}
+
+/// Multiple active streams are tracked properly.
+#[test]
+fn keep_alive_multiple_stop() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut client, &mut server);
+
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    let other = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_keep_alive(other, true).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    client.stream_keep_alive(stream, false).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT / 2);
+
+    client.stream_keep_alive(other, false).unwrap();
+    assert_idle(&mut client, LOCAL_IDLE_TIMEOUT);
+}
+
+/// If the RTT is too long relative to the idle timeout, the keep-alive is large too.
+#[test]
+fn keep_alive_large_rtt() {
+    let mut client = default_client();
+    let mut server = default_server();
+    // Use an RTT that is large enough to cause the PTO timer to exceed half
+    // the idle timeout.
+    let rtt = LOCAL_IDLE_TIMEOUT * 3 / 4;
+    let now = connect_with_rtt(&mut client, &mut server, now(), rtt);
+    let (now, stream) = create_stream_idle_rtt(&mut server, &mut client, now, rtt);
+
+    // Calculating PTO here is tricky as RTTvar has eroded after multiple round trips.
+    // Just check that the delay is larger than the baseline and the RTT.
+    for endpoint in &mut [client, server] {
+        endpoint.stream_keep_alive(stream, true).unwrap();
+        let delay = endpoint.process_output(now).callback();
+        qtrace!([endpoint], "new delay {:?}", delay);
+        assert!(delay > LOCAL_IDLE_TIMEOUT / 2);
+        assert!(delay > rtt);
+    }
 }
