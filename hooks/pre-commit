@@ -38,7 +38,7 @@ if ! errors=($(cargo fmt -- --check -l)); then
 fi
 
 # Check internal errors
-./check_internal_errors
+./hooks/check_internal_errors
 
 if [[ ./neqo-crypto/bindings/bindings.toml -nt ./neqo-crypto/src/lib.rs ]]; then
     echo "NSS bindings are newer than the code that uses them."
