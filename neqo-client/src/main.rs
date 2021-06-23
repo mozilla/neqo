@@ -546,7 +546,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .scan(None, |state, value| {
             if let Some(name) = state.take() {
                 *state = None;
-                Some((name, value.as_ref().to_string())) // TODO use a real type
+                Some(Header(name, value.as_ref().to_string())) // TODO use a real type
             } else {
                 *state = Some(value.as_ref().to_string());
                 None

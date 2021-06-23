@@ -25,7 +25,7 @@ use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
 use structopt::StructOpt;
 
-use neqo_common::{hex, qdebug, qinfo, Datagram};
+use neqo_common::{hex, qdebug, qinfo, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -281,20 +281,16 @@ impl HttpServer for Http3Server {
 
                     let default_ret = b"Hello World".to_vec();
 
-                    let response =
-                        headers
-                            .iter()
-                            .find(|&(k, _)| k == ":path")
-                            .and_then(|(_, path)| {
-                                if args.qns_test.is_some() {
-                                    qns_read_response(path)
-                                } else {
-                                    match path.trim_matches(|p| p == '/').parse::<usize>() {
-                                        Ok(v) => Some(vec![b'a'; v]),
-                                        Err(_) => Some(default_ret),
-                                    }
-                                }
-                            });
+                    let response = headers.iter().find(|&h| h.0 == ":path").and_then(|h| {
+                        if args.qns_test.is_some() {
+                            qns_read_response(&h.1)
+                        } else {
+                            match h.1.trim_matches(|p| p == '/').parse::<usize>() {
+                                Ok(v) => Some(vec![b'a'; v]),
+                                Err(_) => Some(default_ret),
+                            }
+                        }
+                    });
 
                     if response.is_none() {
                         request
@@ -308,8 +304,8 @@ impl HttpServer for Http3Server {
                     request
                         .set_response(
                             &[
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), response.len().to_string()),
+                                Header(String::from(":status"), String::from("200")),
+                                Header(String::from("content-length"), response.len().to_string()),
                             ],
                             &response,
                         )
