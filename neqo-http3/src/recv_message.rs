@@ -149,7 +149,9 @@ impl RecvMessage {
     fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
         qtrace!([self], "Add new headers fin={}", fin);
         let interim = self.is_interim(&headers)?;
-        self.sanitize_headers(&mut headers)?;
+        self.headers_valid(&headers)?;
+        headers.retain(Header::is_allowed_for_respone);
+
         if fin && interim {
             return Err(Error::HttpGeneralProtocolStream);
         }
@@ -332,11 +334,11 @@ impl RecvMessage {
     fn is_interim(&self, headers: &[Header]) -> Res<bool> {
         match self.message_type {
             MessageType::Response => {
-                let status = headers.iter().find(|(name, _value)| name == ":status");
-                if let Some((_name, value)) = status {
+                let status = headers.iter().find(|h| h.0 == ":status");
+                if let Some(h) = status {
                     #[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)]
                     #[allow(clippy::map_err_ignore)]
-                    let status_code = value.parse::<i32>().map_err(|_| Error::InvalidHeader)?;
+                    let status_code = h.1.parse::<i32>().map_err(|_| Error::InvalidHeader)?;
                     Ok((100..200).contains(&status_code))
                 } else {
                     Err(Error::InvalidHeader)
@@ -377,10 +379,10 @@ impl RecvMessage {
         }
     }
 
-    fn sanitize_headers(&self, headers: &mut Vec<Header>) -> Res<()> {
+    fn headers_valid(&self, headers: &[Header]) -> Res<()> {
         let mut method_value: Option<&String> = None;
         let mut pseudo_state = 0;
-        for header in headers.iter() {
+        for header in headers {
             let is_pseudo = Self::track_pseudo(&header.0, &mut pseudo_state, &self.message_type)?;
 
             let mut bytes = header.0.bytes();
@@ -411,18 +413,6 @@ impl RecvMessage {
             return Err(Error::InvalidHeader);
         }
 
-        headers.retain(|h| {
-            !matches!(
-                h.0.as_str(),
-                "connection"
-                    | "host"
-                    | "keep-alive"
-                    | "proxy-connection"
-                    | "te"
-                    | "transfer-encoding"
-                    | "upgrade"
-            )
-        });
         Ok(())
     }
 }

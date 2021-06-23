@@ -239,7 +239,7 @@ impl FromStr for Headers {
 
             if h2.len() == 2 {
                 res.h
-                    .push((h2[0].trim().to_string(), h2[1].trim().to_string()));
+                    .push(Header(h2[0].trim().to_string(), h2[1].trim().to_string()));
             }
         }
 
@@ -559,7 +559,10 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
                 "https",
                 &hc.host,
                 &hc.path,
-                &[(String::from("something1"), String::from("something2"))],
+                &[Header(
+                    String::from("something1"),
+                    String::from("something2"),
+                )],
             )
             .unwrap();
         hc.h3.stream_close_send(client_stream_id).unwrap();

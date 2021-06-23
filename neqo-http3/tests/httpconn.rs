@@ -8,7 +8,9 @@
 
 use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::AuthenticationStatus;
-use neqo_http3::{Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State};
+use neqo_http3::{
+    Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State,
+};
 use std::mem;
 use test_fixture::*;
 
@@ -26,18 +28,18 @@ fn process_server_events(server: &mut Http3Server) {
             assert_eq!(
                 headers,
                 vec![
-                    (String::from(":method"), String::from("GET")),
-                    (String::from(":scheme"), String::from("https")),
-                    (String::from(":authority"), String::from("something.com")),
-                    (String::from(":path"), String::from("/"))
+                    Header(String::from(":method"), String::from("GET")),
+                    Header(String::from(":scheme"), String::from("https")),
+                    Header(String::from(":authority"), String::from("something.com")),
+                    Header(String::from(":path"), String::from("/"))
                 ]
             );
             assert!(fin);
             request
                 .set_response(
                     &[
-                        (String::from(":status"), String::from("200")),
-                        (String::from("content-length"), String::from("3")),
+                        Header(String::from(":status"), String::from("200")),
+                        Header(String::from("content-length"), String::from("3")),
                     ],
                     RESPONSE_DATA,
                 )
@@ -57,8 +59,8 @@ fn process_client_events(conn: &mut Http3Client) {
                 assert_eq!(
                     headers,
                     vec![
-                        (String::from(":status"), String::from("200")),
-                        (String::from("content-length"), String::from("3")),
+                        Header(String::from(":status"), String::from("200")),
+                        Header(String::from("content-length"), String::from("3")),
                     ]
                 );
                 assert!(!fin);

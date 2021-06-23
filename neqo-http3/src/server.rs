@@ -758,10 +758,10 @@ mod tests {
 
     fn check_request_header(header: &[Header]) {
         let expected_request_header = &[
-            (String::from(":method"), String::from("GET")),
-            (String::from(":scheme"), String::from("https")),
-            (String::from(":authority"), String::from("something.com")),
-            (String::from(":path"), String::from("/")),
+            Header(String::from(":method"), String::from("GET")),
+            Header(String::from(":scheme"), String::from("https")),
+            Header(String::from(":authority"), String::from("something.com")),
+            Header(String::from(":path"), String::from("/")),
         ];
         assert_eq!(header, expected_request_header);
     }
@@ -814,8 +814,8 @@ mod tests {
                     request
                         .set_response(
                             &[
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3")),
+                                Header(String::from(":status"), String::from("200")),
+                                Header(String::from("content-length"), String::from("3")),
                             ],
                             RESPONSE_BODY,
                         )
@@ -860,8 +860,8 @@ mod tests {
                     request
                         .set_response(
                             &[
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3")),
+                                Header(String::from(":status"), String::from("200")),
+                                Header(String::from("content-length"), String::from("3")),
                             ],
                             RESPONSE_BODY,
                         )

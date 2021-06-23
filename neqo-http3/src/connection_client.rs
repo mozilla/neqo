@@ -296,10 +296,10 @@ impl Http3Client {
 
         // Transform pseudo-header fields
         let mut final_headers = vec![
-            (":method".into(), method.to_owned()),
-            (":scheme".into(), scheme.to_owned()),
-            (":authority".into(), host.to_owned()),
-            (":path".into(), path.to_owned()),
+            Header(":method".into(), method.to_owned()),
+            Header(":scheme".into(), scheme.to_owned()),
+            Header(":authority".into(), host.to_owned()),
+            Header(":path".into(), path.to_owned()),
         ];
         final_headers.extend_from_slice(headers);
 
@@ -1203,8 +1203,8 @@ mod tests {
     // decoded into:
     fn check_response_header_0(header: &[Header]) {
         let expected_response_header_0 = &[
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("0")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("0")),
         ];
         assert_eq!(header, expected_response_header_0);
     }
@@ -1228,8 +1228,8 @@ mod tests {
     // decoded into:
     fn check_response_header_1(header: &[Header]) {
         let expected_response_header_1 = &[
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("7")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("7")),
         ];
         assert_eq!(header, expected_response_header_1);
     }
@@ -1256,8 +1256,8 @@ mod tests {
     // decoded into:
     fn check_response_header_2(header: &[Header]) {
         let expected_response_header_2 = &[
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         assert_eq!(header, expected_response_header_2);
     }
@@ -1330,10 +1330,10 @@ mod tests {
 
     fn check_pushpromise_header(header: &[Header]) {
         let expected_response_header_1 = &[
-            (String::from(":method"), String::from("GET")),
-            (String::from(":scheme"), String::from("https")),
-            (String::from(":authority"), String::from("something.com")),
-            (String::from(":path"), String::from("/")),
+            Header(String::from(":method"), String::from("GET")),
+            Header(String::from(":scheme"), String::from("https")),
+            Header(String::from(":authority"), String::from("something.com")),
+            Header(String::from(":path"), String::from("/")),
         ];
         assert_eq!(header, expected_response_header_1);
     }
@@ -1405,8 +1405,8 @@ mod tests {
     // decoded into:
     fn check_push_response_header(header: &[Header]) {
         let expected_push_response_header = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("4")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("4")),
         ];
         assert_eq!(header, &expected_push_response_header[..]);
     }
@@ -3354,9 +3354,9 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         let encoded_headers = server
             .encoder
@@ -3423,9 +3423,9 @@ mod tests {
         setup_server_side_encoder(&mut hconn, &mut server);
 
         let sent_headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("0")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("0")),
         ];
         let encoded_headers = server
             .encoder
@@ -3556,7 +3556,7 @@ mod tests {
         let request_stream_id = make_request(
             &mut client,
             true,
-            &[(String::from("myheaders"), String::from("myvalue"))],
+            &[Header(String::from("myheaders"), String::from("myvalue"))],
         );
         assert_eq!(request_stream_id, 0);
 
@@ -4335,9 +4335,9 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         let encoded_headers = server
             .encoder
@@ -5221,7 +5221,7 @@ mod tests {
             server,
             stream_id,
             push_id,
-            (String::from("my-header"), String::from("my-value")),
+            Header(String::from("my-header"), String::from("my-value")),
         )
     }
 
@@ -5233,11 +5233,11 @@ mod tests {
         additional_header: Header,
     ) -> Option<Datagram> {
         let mut headers = vec![
-            (String::from(":method"), String::from("GET")),
-            (String::from(":scheme"), String::from("https")),
-            (String::from(":authority"), String::from("something.com")),
-            (String::from(":path"), String::from("/")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":method"), String::from("GET")),
+            Header(String::from(":scheme"), String::from("https")),
+            Header(String::from(":authority"), String::from("something.com")),
+            Header(String::from(":path"), String::from("/")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         headers.push(additional_header);
 
@@ -5388,8 +5388,8 @@ mod tests {
         assert!(!check_push_events(&mut client));
 
         let response_headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("1234")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("1234")),
         ];
         let encoded_headers = server
             .encoder
@@ -5442,7 +5442,7 @@ mod tests {
             &mut server,
             request_stream_id,
             0,
-            (String::from("myn1"), String::from("myv1")),
+            Header(String::from("myn1"), String::from("myv1")),
         );
 
         // PushPromise is blocked wathing for encoder instructions.
@@ -5453,16 +5453,16 @@ mod tests {
             &mut server,
             request_stream_id,
             1,
-            (String::from("myn2"), String::from("myv2")),
+            Header(String::from("myn2"), String::from("myv2")),
         );
 
         // PushPromise is blocked wathing for encoder instructions.
         assert!(!check_push_events(&mut client));
 
         let response_headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("1234")),
-            (String::from("myn3"), String::from("myv3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("1234")),
+            Header(String::from("myn3"), String::from("myv3")),
         ];
         let encoded_headers = server
             .encoder
@@ -5545,9 +5545,9 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("0")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("0")),
         ];
         let encoded_headers = server
             .encoder
@@ -5610,7 +5610,7 @@ mod tests {
         client: &mut Http3Client,
         server: &mut TestServer,
         request_stream_id: u64,
-        headers: &[(String, String)],
+        headers: &[Header],
         data: &[u8],
     ) -> Option<Datagram> {
         let encoded_headers = server
@@ -5667,9 +5667,9 @@ mod tests {
                 &mut server,
                 request_stream_id,
                 &[
-                    (String::from(":status"), String::from("200")),
-                    (String::from("my-header"), String::from("my-header")),
-                    (String::from("content-length"), String::from("3")),
+                    Header(String::from(":status"), String::from("200")),
+                    Header(String::from("my-header"), String::from("my-header")),
+                    Header(String::from("content-length"), String::from("3")),
                 ],
                 &[0x61, 0x62, 0x63],
             )
@@ -5702,9 +5702,9 @@ mod tests {
             &mut server,
             request_stream_id,
             &[
-                (String::from(":status"), String::from("200")),
-                (String::from("my-header"), String::from("my-header")),
-                (String::from("content-length"), String::from("3")),
+                Header(String::from(":status"), String::from("200")),
+                Header(String::from("my-header"), String::from("my-header")),
+                Header(String::from("content-length"), String::from("3")),
             ],
             &[],
         );
@@ -5735,8 +5735,8 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         let encoded_headers = server
             .encoder
@@ -5805,9 +5805,9 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let headers = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("0")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("0")),
         ];
         let encoded_headers = server
             .encoder
@@ -5902,13 +5902,13 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let mut d = Encoder::default();
-        let headers1xx = vec![(String::from(":status"), String::from("103"))];
+        let headers1xx = vec![Header(String::from(":status"), String::from("103"))];
         server.encode_headers(request_stream_id, &headers1xx, &mut d);
 
         let headers200 = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         server.encode_headers(request_stream_id, &headers200, &mut d);
 
@@ -5965,8 +5965,8 @@ mod tests {
 
         let mut d = Encoder::default();
         let headers = vec![
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         server.encode_headers(request_stream_id, &headers, &mut d);
 
@@ -6023,13 +6023,13 @@ mod tests {
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
         let mut d = Encoder::default();
-        let headers1xx = vec![(String::from(":status"), String::from("101"))];
+        let headers1xx = vec![Header(String::from(":status"), String::from("101"))];
         server.encode_headers(push_stream_id, &headers1xx, &mut d);
 
         let headers200 = vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         server.encode_headers(push_stream_id, &headers200, &mut d);
 
@@ -6092,8 +6092,8 @@ mod tests {
 
         let mut d = Encoder::default();
         let headers = vec![
-            (String::from("my-header"), String::from("my-header")),
-            (String::from("content-length"), String::from("3")),
+            Header(String::from("my-header"), String::from("my-header")),
+            Header(String::from("content-length"), String::from("3")),
         ];
         server.encode_headers(request_stream_id, &headers, &mut d);
 
@@ -6192,33 +6192,33 @@ mod tests {
     #[test]
     fn malformed_response_pseudo_header_after_regular_header() {
         do_malformed_response_test(&[
-            (String::from("content-type"), String::from("text/plain")),
-            (String::from(":status"), String::from("100")),
+            Header(String::from("content-type"), String::from("text/plain")),
+            Header(String::from(":status"), String::from("100")),
         ]);
     }
 
     #[test]
     fn malformed_response_undefined_pseudo_header() {
         do_malformed_response_test(&[
-            (String::from(":status"), String::from("200")),
-            (String::from(":cheese"), String::from("200")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from(":cheese"), String::from("200")),
         ]);
     }
 
     #[test]
     fn malformed_response_duplicate_pseudo_header() {
         do_malformed_response_test(&[
-            (String::from(":status"), String::from("200")),
-            (String::from(":status"), String::from("100")),
-            (String::from("content-type"), String::from("text/plain")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from(":status"), String::from("100")),
+            Header(String::from("content-type"), String::from("text/plain")),
         ]);
     }
 
     #[test]
     fn malformed_response_uppercase_header() {
         do_malformed_response_test(&[
-            (String::from(":status"), String::from("200")),
-            (String::from("content-Type"), String::from("text/plain")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content-Type"), String::from("text/plain")),
         ]);
     }
 
@@ -6232,9 +6232,9 @@ mod tests {
         server.encode_headers(
             request_stream_id,
             &[
-                (String::from(":status"), String::from("200")),
-                (String::from("content-type"), String::from("text/plain")),
-                (String::from("connection"), String::from("close")),
+                Header(String::from(":status"), String::from("200")),
+                Header(String::from("content-type"), String::from("text/plain")),
+                Header(String::from("connection"), String::from("close")),
             ],
             &mut d,
         );
@@ -6255,8 +6255,8 @@ mod tests {
             Http3ClientEvent::HeaderReady {
                 stream_id: request_stream_id,
                 headers: vec!(
-                    (String::from(":status"), String::from("200")),
-                    (String::from("content-type"), String::from("text/plain"))
+                    Header(String::from(":status"), String::from("200")),
+                    Header(String::from("content-type"), String::from("text/plain"))
                 ),
                 interim: false,
                 fin: false,
@@ -6267,17 +6267,17 @@ mod tests {
     #[test]
     fn malformed_response_excluded_byte_in_header() {
         do_malformed_response_test(&[
-            (String::from(":status"), String::from("200")),
-            (String::from("content:type"), String::from("text/plain")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from("content:type"), String::from("text/plain")),
         ]);
     }
 
     #[test]
     fn malformed_response_request_header_in_response() {
         do_malformed_response_test(&[
-            (String::from(":status"), String::from("200")),
-            (String::from(":method"), String::from("GET")),
-            (String::from("content-type"), String::from("text/plain")),
+            Header(String::from(":status"), String::from("200")),
+            Header(String::from(":method"), String::from("GET")),
+            Header(String::from("content-type"), String::from("text/plain")),
         ]);
     }
 
@@ -6356,7 +6356,7 @@ mod tests {
         let _ = make_request(
             &mut client,
             true,
-            &[(String::from("myheaders"), String::from("myvalue"))],
+            &[Header(String::from("myheaders"), String::from("myvalue"))],
         );
         // Assert that the request has used dynamic table. That will trigger a header_ack.
         assert_eq!(client.qpack_encoder_stats().dynamic_table_references, 1);
