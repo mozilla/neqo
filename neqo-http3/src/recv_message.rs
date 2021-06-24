@@ -150,7 +150,9 @@ impl RecvMessage {
         qtrace!([self], "Add new headers fin={}", fin);
         let interim = self.is_interim(&headers)?;
         self.headers_valid(&headers)?;
-        headers.retain(Header::is_allowed_for_respone);
+        if matches!(self.message_type, MessageType::Response) {
+            headers.retain(Header::is_allowed_for_response);
+        }
 
         if fin && interim {
             return Err(Error::HttpGeneralProtocolStream);
@@ -334,11 +336,11 @@ impl RecvMessage {
     fn is_interim(&self, headers: &[Header]) -> Res<bool> {
         match self.message_type {
             MessageType::Response => {
-                let status = headers.iter().find(|h| h.0 == ":status");
+                let status = headers.iter().find(|h| h.name() == ":status");
                 if let Some(h) = status {
                     #[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)]
                     #[allow(clippy::map_err_ignore)]
-                    let status_code = h.1.parse::<i32>().map_err(|_| Error::InvalidHeader)?;
+                    let status_code = h.value().parse::<i32>().map_err(|_| Error::InvalidHeader)?;
                     Ok((100..200).contains(&status_code))
                 } else {
                     Err(Error::InvalidHeader)
@@ -380,15 +382,16 @@ impl RecvMessage {
     }
 
     fn headers_valid(&self, headers: &[Header]) -> Res<()> {
-        let mut method_value: Option<&String> = None;
+        let mut method_value: Option<&str> = None;
         let mut pseudo_state = 0;
         for header in headers {
-            let is_pseudo = Self::track_pseudo(&header.0, &mut pseudo_state, &self.message_type)?;
+            let is_pseudo =
+                Self::track_pseudo(&header.name(), &mut pseudo_state, &self.message_type)?;
 
-            let mut bytes = header.0.bytes();
+            let mut bytes = header.name().bytes();
             if is_pseudo {
-                if header.0 == ":method" {
-                    method_value = Some(&header.1);
+                if header.name() == ":method" {
+                    method_value = Some(header.value());
                 }
                 let _ = bytes.next();
             }

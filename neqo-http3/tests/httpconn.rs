@@ -28,18 +28,18 @@ fn process_server_events(server: &mut Http3Server) {
             assert_eq!(
                 headers,
                 vec![
-                    Header(String::from(":method"), String::from("GET")),
-                    Header(String::from(":scheme"), String::from("https")),
-                    Header(String::from(":authority"), String::from("something.com")),
-                    Header(String::from(":path"), String::from("/"))
+                    Header::new(":method", "GET"),
+                    Header::new(":scheme", "https"),
+                    Header::new(":authority", "something.com"),
+                    Header::new(":path", "/")
                 ]
             );
             assert!(fin);
             request
                 .set_response(
                     &[
-                        Header(String::from(":status"), String::from("200")),
-                        Header(String::from("content-length"), String::from("3")),
+                        Header::new(":status", "200"),
+                        Header::new("content-length", "3"),
                     ],
                     RESPONSE_DATA,
                 )
@@ -59,8 +59,8 @@ fn process_client_events(conn: &mut Http3Client) {
                 assert_eq!(
                     headers,
                     vec![
-                        Header(String::from(":status"), String::from("200")),
-                        Header(String::from("content-length"), String::from("3")),
+                        Header::new(":status", "200"),
+                        Header::new("content-length", "3"),
                     ]
                 );
                 assert!(!fin);

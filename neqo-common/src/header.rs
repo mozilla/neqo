@@ -5,13 +5,24 @@
 // except according to those terms.
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
-pub struct Header(pub String, pub String);
+pub struct Header {
+    name: String,
+    value: String,
+}
 
 impl Header {
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn new(name: impl ToString, value: impl ToString) -> Self {
+        Self {
+            name: name.to_string(),
+            value: value.to_string(),
+        }
+    }
+
     #[must_use]
-    pub fn is_allowed_for_respone(&self) -> bool {
+    pub fn is_allowed_for_response(&self) -> bool {
         !matches!(
-            self.0.as_str(),
+            self.name.as_str(),
             "connection"
                 | "host"
                 | "keep-alive"
@@ -20,5 +31,15 @@ impl Header {
                 | "transfer-encoding"
                 | "upgrade"
         )
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn value(&self) -> &str {
+        &self.value
     }
 }
