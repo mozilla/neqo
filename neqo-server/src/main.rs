@@ -281,11 +281,11 @@ impl HttpServer for Http3Server {
 
                     let default_ret = b"Hello World".to_vec();
 
-                    let response = headers.iter().find(|&h| h.0 == ":path").and_then(|h| {
+                    let response = headers.iter().find(|&h| h.name() == ":path").and_then(|h| {
                         if args.qns_test.is_some() {
-                            qns_read_response(&h.1)
+                            qns_read_response(&h.value())
                         } else {
-                            match h.1.trim_matches(|p| p == '/').parse::<usize>() {
+                            match h.value().trim_matches(|p| p == '/').parse::<usize>() {
                                 Ok(v) => Some(vec![b'a'; v]),
                                 Err(_) => Some(default_ret),
                             }
@@ -304,8 +304,8 @@ impl HttpServer for Http3Server {
                     request
                         .set_response(
                             &[
-                                Header(String::from(":status"), String::from("200")),
-                                Header(String::from("content-length"), response.len().to_string()),
+                                Header::new(":status", "200"),
+                                Header::new("content-length", response.len()),
                             ],
                             &response,
                         )
