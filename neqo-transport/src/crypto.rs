@@ -77,7 +77,7 @@ impl Crypto {
         }
         let extension = match version {
             QuicVersion::Version1 => 0x39,
-             QuicVersion::Draft29
+            QuicVersion::Draft29
             | QuicVersion::Draft30
             | QuicVersion::Draft31
             | QuicVersion::Draft32 => 0xffa5,

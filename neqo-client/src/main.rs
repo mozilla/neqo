@@ -546,7 +546,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .scan(None, |state, value| {
             if let Some(name) = state.take() {
                 *state = None;
-                Some((name, value.as_ref().to_string())) // TODO use a real type
+                Some(Header::new(name, value.as_ref()))
             } else {
                 *state = Some(value.as_ref().to_string());
                 None
@@ -565,8 +565,6 @@ fn client(
 ) -> Res<()> {
     let quic_protocol = match args.alpn.as_str() {
         "h3" => QuicVersion::Version1,
-        "h3-27" => QuicVersion::Draft27,
-        "h3-28" => QuicVersion::Draft28,
         "h3-29" => QuicVersion::Draft29,
         "h3-30" => QuicVersion::Draft30,
         "h3-31" => QuicVersion::Draft31,
@@ -1063,8 +1061,6 @@ mod old {
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
-            "hq-27" => (QuicVersion::Draft27, "hq-27"),
-            "hq-28" => (QuicVersion::Draft28, "hq-28"),
             "hq-29" => (QuicVersion::Draft29, "hq-29"),
             "hq-30" => (QuicVersion::Draft30, "hq-30"),
             "hq-31" => (QuicVersion::Draft31, "hq-31"),
