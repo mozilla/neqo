@@ -1,6 +1,6 @@
 [package]
 name = "neqo-client"
-version = "0.4.26"
+version = "0.4.27"
 authors = ["Martin Thomson <mt@lowentropy.net>",
 	"Dragana Damjanovic <dragana.damjano@gmail.com>",
 	"Andy Grover <agrover@mozilla.com>"]
