@@ -64,7 +64,6 @@ mod state;
 pub mod test_internal;
 
 use idle::IdleTimeout;
-pub use idle::LOCAL_IDLE_TIMEOUT;
 use params::PreferredAddressConfig;
 pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
 use saved::SavedDatagrams;
@@ -379,7 +378,7 @@ impl Connection {
             saved_datagrams: SavedDatagrams::default(),
             crypto,
             acks: AckTracker::default(),
-            idle_timeout: IdleTimeout::default(),
+            idle_timeout: IdleTimeout::new(conn_params.get_idle_timeout()),
             streams: Streams::new(tphandler, role, events.clone()),
             connection_ids: ConnectionIdStore::default(),
             state_signaling: StateSignaling::Idle,

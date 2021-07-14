@@ -7,8 +7,6 @@
 use std::cmp::{max, min};
 use std::time::{Duration, Instant};
 
-pub const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
 /// -transport 10.2 ("Idle Timeout").
@@ -34,12 +32,6 @@ impl IdleTimeout {
             state: IdleTimeoutState::Init,
             keep_alive_outstanding: false,
         }
-    }
-}
-
-impl Default for IdleTimeout {
-    fn default() -> Self {
-        Self::new(LOCAL_IDLE_TIMEOUT)
     }
 }
 
