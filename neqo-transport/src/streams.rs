@@ -475,4 +475,12 @@ impl Streams {
     pub fn get_recv_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
         self.recv.get_mut(stream_id)
     }
+
+    pub fn keep_alive(&mut self, stream_id: StreamId, keep: bool) -> Res<()> {
+        self.recv.keep_alive(stream_id, keep)
+    }
+
+    pub fn need_keep_alive(&mut self) -> bool {
+        self.recv.need_keep_alive()
+    }
 }
