@@ -11,6 +11,7 @@ use std::cmp::max;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::mem;
+use std::rc::{Rc, Weak};
 
 use smallvec::SmallVec;
 
@@ -33,6 +34,7 @@ pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 #[derive(Debug, Default)]
 pub(crate) struct RecvStreams {
     streams: BTreeMap<StreamId, RecvStream>,
+    keep_alive: Weak<()>,
 }
 
 impl RecvStreams {
@@ -56,6 +58,25 @@ impl RecvStreams {
 
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut RecvStream> {
         self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)
+    }
+
+    pub fn keep_alive(&mut self, id: StreamId, k: bool) -> Res<()> {
+        let self_ka = &mut self.keep_alive;
+        let s = self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)?;
+        s.keep_alive = if k {
+            Some(self_ka.upgrade().unwrap_or_else(|| {
+                let r = Rc::new(());
+                *self_ka = Rc::downgrade(&r);
+                r
+            }))
+        } else {
+            None
+        };
+        Ok(())
+    }
+
+    pub fn need_keep_alive(&mut self) -> bool {
+        self.keep_alive.strong_count() > 0
     }
 
     pub fn clear(&mut self) {
@@ -393,6 +414,7 @@ pub struct RecvStream {
     stream_id: StreamId,
     state: RecvStreamState,
     conn_events: ConnectionEvents,
+    keep_alive: Option<Rc<()>>,
 }
 
 impl RecvStream {
@@ -401,6 +423,7 @@ impl RecvStream {
             stream_id,
             state: RecvStreamState::new(max_stream_data, stream_id),
             conn_events,
+            keep_alive: None,
         }
     }
 
@@ -416,8 +439,19 @@ impl RecvStream {
             new_state.name()
         );
 
-        if let RecvStreamState::DataRead = new_state {
-            self.conn_events.recv_stream_complete(self.stream_id);
+        match new_state {
+            // Receiving all data, or receiving or requesting RESET_STREAM
+            // is cause to stop keep-alives.
+            RecvStreamState::DataRecvd { .. }
+            | RecvStreamState::AbortReading { .. }
+            | RecvStreamState::ResetRecvd => {
+                self.keep_alive = None;
+            }
+            // Once all the data is read, generate an event.
+            RecvStreamState::DataRead => {
+                self.conn_events.recv_stream_complete(self.stream_id);
+            }
+            _ => {}
         }
 
         self.state = new_state;
