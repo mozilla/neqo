@@ -5682,7 +5682,7 @@ mod tests {
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
-        let _ = server.encoder_receiver.receive(&mut server.conn).unwrap();
+        mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
 
@@ -5719,7 +5719,7 @@ mod tests {
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
-        let _ = server.encoder_receiver.receive(&mut server.conn).unwrap();
+        mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
     }
 
@@ -5775,7 +5775,7 @@ mod tests {
 
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
-        let _ = server.encoder_receiver.receive(&mut server.conn).unwrap();
+        mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
 
@@ -5789,7 +5789,7 @@ mod tests {
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
-        let _ = server.encoder_receiver.receive(&mut server.conn).unwrap();
+        mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
     }
 
