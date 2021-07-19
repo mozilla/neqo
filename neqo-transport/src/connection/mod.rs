@@ -2185,9 +2185,11 @@ impl Connection {
 
             let max_ad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
             let min_ad = if remote.has_value(tparams::MIN_ACK_DELAY) {
-                Some(Duration::from_micros(
-                    remote.get_integer(tparams::MIN_ACK_DELAY),
-                ))
+                let min_ad = Duration::from_micros(remote.get_integer(tparams::MIN_ACK_DELAY));
+                if min_ad > max_ad {
+                    return Err(Error::TransportParameterError);
+                }
+                Some(min_ad)
             } else {
                 None
             };
