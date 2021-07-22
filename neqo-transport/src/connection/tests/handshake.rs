@@ -531,7 +531,7 @@ fn reorder_handshake() {
 #[test]
 fn reorder_1rtt() {
     const RTT: Duration = Duration::from_millis(100);
-    const PACKETS: usize = 6; // Many, but not enough to overflow cwnd.
+    const PACKETS: usize = 4; // Many, but not enough to overflow cwnd.
     let mut client = default_client();
     let mut server = default_server();
     let mut now = now();
