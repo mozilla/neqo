@@ -228,7 +228,7 @@ where
         Self {
             subject,
             active: initial_active,
-            max_active: max_active,
+            max_active,
             max_allowed: initial_active,
             retired: 0,
             frame_pending: false,
