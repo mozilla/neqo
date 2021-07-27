@@ -13,7 +13,8 @@ use crate::tracking::DEFAULT_ACK_DELAY;
 use crate::{CongestionControlAlgorithm, QuicVersion, Res};
 use std::convert::TryFrom;
 
-const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
+/// 256Mb is enough to keep a 10Gbps/250ms link mostly full.
+const LOCAL_MAX_DATA: u64 = 1 << 28;
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 /// See `ConnectionParameters.ack_ratio` for a discussion of this value.
@@ -40,7 +41,10 @@ pub enum PreferredAddressConfig {
 pub struct ConnectionParameters {
     quic_version: QuicVersion,
     cc_algorithm: CongestionControlAlgorithm,
-    /// Initial connection-level flow control limit.
+    /// The absolute maximum amount of data that the connection will buffer.
+    /// This limit is used as a connection-level flow control limit, and, unless
+    /// `Connection::set_stream_max_data` is used, stream buffers will increase
+    /// in size up to this value as data is processed.
     max_data: u64,
     /// Initial flow control limit for receiving data on bidirectional streams that the peer creates.
     max_stream_data_bidi_remote: u64,

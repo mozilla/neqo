@@ -380,7 +380,7 @@ impl Connection {
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
-            streams: Streams::new(tphandler, role, events.clone()),
+            streams: Streams::new(tphandler, conn_params.clone(), role, events.clone()),
             connection_ids: ConnectionIdStore::default(),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone()),

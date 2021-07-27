@@ -352,9 +352,9 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new(max_bytes: u64, stream_id: StreamId) -> Self {
+    fn new(max_stream_data: u64, max_data: u64, stream_id: StreamId) -> Self {
         Self::Recv {
-            fc: ReceiverFlowControl::new(stream_id, max_bytes),
+            fc: ReceiverFlowControl::new(stream_id, max_stream_data, max_data),
             recv_buf: RxStreamOrderer::new(),
         }
     }
@@ -396,10 +396,15 @@ pub struct RecvStream {
 }
 
 impl RecvStream {
-    pub fn new(stream_id: StreamId, max_stream_data: u64, conn_events: ConnectionEvents) -> Self {
+    pub fn new(
+        stream_id: StreamId,
+        max_stream_data: u64,
+        max_data: u64,
+        conn_events: ConnectionEvents,
+    ) -> Self {
         Self {
             stream_id,
-            state: RecvStreamState::new(max_stream_data, stream_id),
+            state: RecvStreamState::new(max_stream_data, max_data, stream_id),
             conn_events,
         }
     }
@@ -523,7 +528,7 @@ impl RecvStream {
 
     pub fn set_stream_max_data(&mut self, max_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
-            fc.set_max_active(max_data);
+            fc.set_active(max_data);
         }
     }
 
@@ -636,7 +641,7 @@ impl RecvStream {
     #[cfg(test)]
     pub fn has_frames_to_write(&self) -> bool {
         if let RecvStreamState::Recv { fc, .. } = &self.state {
-            fc.frame_needed().is_some()
+            fc.frame_needed()
         } else {
             false
         }
@@ -890,7 +895,7 @@ mod tests {
     fn stream_rx() {
         let conn_events = ConnectionEvents::default();
 
-        let mut s = RecvStream::new(StreamId::from(567), 1024, conn_events);
+        let mut s = RecvStream::new(StreamId::from(567), 1024, 1024, conn_events);
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, &[1; 10]).unwrap();
@@ -1069,7 +1074,12 @@ mod tests {
 
         let frame1 = vec![0; RECV_BUFFER_SIZE];
 
-        let mut s = RecvStream::new(StreamId::from(4), RX_STREAM_DATA_WINDOW, conn_events);
+        let mut s = RecvStream::new(
+            StreamId::from(4),
+            RX_STREAM_DATA_WINDOW,
+            RX_STREAM_DATA_WINDOW,
+            conn_events,
+        );
 
         let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
 
@@ -1100,7 +1110,12 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let frame1 = vec![0; RECV_BUFFER_SIZE];
-        let mut s = RecvStream::new(StreamId::from(67), RX_STREAM_DATA_WINDOW, conn_events);
+        let mut s = RecvStream::new(
+            StreamId::from(67),
+            RX_STREAM_DATA_WINDOW,
+            RX_STREAM_DATA_WINDOW,
+            conn_events,
+        );
 
         s.maybe_send_flowc_update();
         assert!(!s.has_frames_to_write());
@@ -1150,7 +1165,12 @@ mod tests {
 
         let frame1 = vec![0; RECV_BUFFER_SIZE];
         let stream_id = StreamId::from(67);
-        let mut s = RecvStream::new(stream_id, RX_STREAM_DATA_WINDOW, conn_events);
+        let mut s = RecvStream::new(
+            stream_id,
+            RX_STREAM_DATA_WINDOW,
+            RX_STREAM_DATA_WINDOW,
+            conn_events,
+        );
 
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
         let mut buf = [0; RECV_BUFFER_SIZE];

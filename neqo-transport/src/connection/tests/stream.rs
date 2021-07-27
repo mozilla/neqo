@@ -566,44 +566,46 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
 
     // create a stream
     let stream_id = server.stream_create(stream_type).unwrap();
-    let written1 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    let written1 = server.stream_send(stream_id, &[0x0; 1000]).unwrap();
     assert_eq!(u64::try_from(written1).unwrap(), RECV_BUFFER_START);
 
     // Send the stream to the client.
-    let out = server.process(None, now());
-    mem::drop(client.process(out.dgram(), now()));
+    let dgram = server.process(None, now()).dgram();
+    client.process_input(dgram.unwrap(), now());
 
     // change max_stream_data for stream_id.
     client.set_stream_max_data(stream_id, new_fc).unwrap();
 
-    // server should receive a MAX_SREAM_DATA frame if the flow control window is updated.
-    let out2 = client.process(None, now());
-    let out3 = server.process(out2.dgram(), now());
+    // server should receive a MAX_STREAM_DATA frame if the flow control window is updated.
+    let dgram = client.process(None, now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
     let expected = if RECV_BUFFER_START < new_fc { 1 } else { 0 };
     assert_eq!(server.stats().frame_rx.max_stream_data, expected);
 
     // If the flow control window has been increased, server can write more data.
-    let written2 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    let written2 = server.stream_send(stream_id, &[0x0; 1000]).unwrap();
     if RECV_BUFFER_START < new_fc {
         assert_eq!(u64::try_from(written2).unwrap(), new_fc - RECV_BUFFER_START);
     } else {
         assert_eq!(written2, 0);
     }
 
-    // Exchange packets so that client gets all data.
-    let out4 = client.process(out3.dgram(), now());
-    let out5 = server.process(out4.dgram(), now());
-    mem::drop(client.process(out5.dgram(), now()));
+    // Exchange packets so that the client gets all data.
+    let dgram = client.process(dgram, now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+    if let Some(d) = dgram {
+        client.process_input(d, now());
+    }
 
     // read all data by client
-    let mut buf = [0x0; 10000];
+    let mut buf = [0x0; 1000];
     let (read, _) = client.stream_recv(stream_id, &mut buf).unwrap();
     assert_eq!(u64::try_from(read).unwrap(), max(RECV_BUFFER_START, new_fc));
 
-    let out4 = client.process(None, now());
-    mem::drop(server.process(out4.dgram(), now()));
+    let dgram = client.process_output(now()).dgram();
+    server.process_input(dgram.unwrap(), now());
 
-    let written3 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    let written3 = server.stream_send(stream_id, &[0x0; 1000]).unwrap();
     assert_eq!(u64::try_from(written3).unwrap(), new_fc);
 }
 

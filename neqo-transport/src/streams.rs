@@ -15,8 +15,7 @@ use crate::send_stream::{SendStream, SendStreams, TransmissionPriority};
 use crate::stats::FrameStats;
 use crate::stream_id::{StreamId, StreamType};
 use crate::tparams::{self, TransportParametersHandler};
-use crate::ConnectionEvents;
-use crate::{Error, Res};
+use crate::{ConnectionEvents, ConnectionParameters, Error, Res};
 use neqo_common::{qtrace, qwarn, Role};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,6 +23,7 @@ use std::rc::Rc;
 pub struct Streams {
     role: Role,
     tps: Rc<RefCell<TransportParametersHandler>>,
+    params: ConnectionParameters,
     events: ConnectionEvents,
     sender_fc: Rc<RefCell<SenderFlowControl<()>>>,
     receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
@@ -36,24 +36,24 @@ pub struct Streams {
 impl Streams {
     pub fn new(
         tps: Rc<RefCell<TransportParametersHandler>>,
+        params: ConnectionParameters,
         role: Role,
         events: ConnectionEvents,
     ) -> Self {
-        let limit_bidi = tps
-            .borrow()
-            .local
-            .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI);
-        let limit_uni = tps
-            .borrow()
-            .local
-            .get_integer(tparams::INITIAL_MAX_STREAMS_UNI);
-        let max_data = tps.borrow().local.get_integer(tparams::INITIAL_MAX_DATA);
+        let limit_bidi = params.get_max_streams(StreamType::BiDi);
+        let limit_uni = params.get_max_streams(StreamType::UniDi);
+        let max_data = params.get_max_data();
         Self {
             role,
             tps,
+            params,
             events,
             sender_fc: Rc::new(RefCell::new(SenderFlowControl::new((), 0))),
-            receiver_fc: Rc::new(RefCell::new(ReceiverFlowControl::new((), max_data))),
+            receiver_fc: Rc::new(RefCell::new(ReceiverFlowControl::new(
+                (),
+                max_data,
+                max_data,
+            ))),
             remote_stream_limits: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
             local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
@@ -65,14 +65,14 @@ impl Streams {
         self.send.clear();
         self.recv.clear();
         debug_assert_eq!(
-            self.remote_stream_limits[StreamType::BiDi].max_active(),
+            self.remote_stream_limits[StreamType::BiDi].active(),
             self.tps
                 .borrow()
                 .local
                 .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)
         );
         debug_assert_eq!(
-            self.remote_stream_limits[StreamType::UniDi].max_active(),
+            self.remote_stream_limits[StreamType::UniDi].active(),
             self.tps
                 .borrow()
                 .local
@@ -301,34 +301,24 @@ impl Streams {
     }
 
     fn ensure_created_if_remote(&mut self, stream_id: StreamId) -> Res<()> {
+        let stype = stream_id.stream_type();
         if !stream_id.is_remote_initiated(self.role)
-            || !self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id)?
+            || !self.remote_stream_limits[stype].is_new_stream(stream_id)?
         {
             // If it is not a remote stream and stream already exist.
             return Ok(());
         }
 
-        let tp = match stream_id.stream_type() {
-            // From the local perspective, this is a remote- originated BiDi stream. From
-            // the remote perspective, this is a local-originated BiDi stream. Therefore,
-            // look at the local transport parameters for the
-            // INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value to decide how much this endpoint
-            // will allow its peer to send.
-            StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            StreamType::UniDi => tparams::INITIAL_MAX_STREAM_DATA_UNI,
-        };
-        let recv_initial_max_stream_data = self.tps.borrow().local.get_integer(tp);
-
-        while self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id)? {
-            let next_stream_id =
-                self.remote_stream_limits[stream_id.stream_type()].take_stream_id();
+        while self.remote_stream_limits[stype].is_new_stream(stream_id)? {
+            let next_stream_id = self.remote_stream_limits[stype].take_stream_id();
             self.events.new_stream(next_stream_id);
 
             self.recv.insert(
                 next_stream_id,
                 RecvStream::new(
                     next_stream_id,
-                    recv_initial_max_stream_data,
+                    self.params.get_max_stream_data(stype, true),
+                    self.params.get_max_data(),
                     self.events.clone(),
                 ),
             );
@@ -390,19 +380,14 @@ impl Streams {
                     ),
                 );
                 if st == StreamType::BiDi {
-                    // From the local perspective, this is a local- originated BiDi stream. From the
-                    // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
-                    // the local transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value
-                    // to decide how much this endpoint will allow its peer to send.
-                    let recv_initial_max_stream_data = self
-                        .tps
-                        .borrow()
-                        .local
-                        .get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
-
                     self.recv.insert(
                         new_id,
-                        RecvStream::new(new_id, recv_initial_max_stream_data, self.events.clone()),
+                        RecvStream::new(
+                            new_id,
+                            self.params.get_max_stream_data(StreamType::BiDi, false),
+                            self.params.get_max_data(),
+                            self.events.clone(),
+                        ),
                     );
                 }
                 Ok(new_id.as_u64())
