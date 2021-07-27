@@ -4465,9 +4465,32 @@ mod tests {
     #[test]
     fn push_keep_alive() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+        let idle_timeout = ConnectionParameters::default().get_idle_timeout();
 
         // Promise a push and deliver, but don't close the stream.
         send_push_promise(&mut server.conn, request_stream_id, 0);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            HTTP_RESPONSE_2,
+            true,
+        );
+        read_response_and_push_events(
+            &mut client,
+            &[PushPromiseInfo {
+                push_id: 0,
+                ref_stream_id: request_stream_id,
+            }],
+            &[], // No push streams yet.
+            request_stream_id,
+        );
+
+        // The client will become idle here.
+        force_idle(&mut client, &mut server);
+        assert_eq!(client.process_output(now()).callback(), idle_timeout);
+
+        // Reading push data will stop the client from being idle.
         let _ = send_push_data(&mut server.conn, 0, false);
         let dgram = server.conn.process_output(now()).dgram();
         client.process_input(dgram.unwrap(), now());
@@ -4478,7 +4501,6 @@ mod tests {
         assert!(!fin);
 
         force_idle(&mut client, &mut server);
-        let idle_timeout = ConnectionParameters::default().get_idle_timeout();
         assert_eq!(client.process_output(now()).callback(), idle_timeout / 2);
     }
 
