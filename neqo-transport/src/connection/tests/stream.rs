@@ -6,15 +6,15 @@
 
 use super::super::State;
 use super::{
-    connect, connect_force_idle, default_client, default_server, maybe_authenticate, new_client,
-    new_server, send_something, DEFAULT_STREAM_DATA,
+    assert_error, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
+    new_client, new_server, send_something, DEFAULT_STREAM_DATA,
 };
 use crate::events::ConnectionEvent;
 use crate::recv_stream::RECV_BUFFER_SIZE;
 use crate::send_stream::{SendStreamState, SEND_BUFFER_SIZE};
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::DEFAULT_ACK_PACKET_TOLERANCE;
-use crate::ConnectionParameters;
+use crate::{ConnectionError, ConnectionParameters};
 use crate::{Error, StreamId, StreamType};
 
 use neqo_common::{event::Provider, qdebug};
@@ -263,6 +263,55 @@ fn max_data() {
         evts[0],
         ConnectionEvent::SendStreamWritable { .. }
     ));
+}
+
+#[test]
+fn exceed_max_data() {
+    const SMALL_MAX_DATA: usize = 1024;
+
+    let mut client = default_client();
+    let mut server = new_server(
+        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
+    );
+
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(client.events().count(), 2); // SendStreamWritable, StateChange(connected)
+    assert_eq!(stream_id, 2);
+    assert_eq!(
+        client.stream_avail_send_space(stream_id).unwrap(),
+        SMALL_MAX_DATA
+    );
+    assert_eq!(
+        client
+            .stream_send(stream_id, &vec![b'a'; RECV_BUFFER_SIZE].into_boxed_slice())
+            .unwrap(),
+        SMALL_MAX_DATA
+    );
+
+    assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
+
+    // Artificially trick the client to think that it has more flow control credit.
+    client.streams.handle_max_data(100_000_000);
+    assert_eq!(client.stream_send(stream_id, b"h").unwrap(), 1);
+
+    let mut input = None;
+    loop {
+        let out = client.process(input, now()).dgram();
+        let c_done = out.is_none();
+        let out = server.process(out, now()).dgram();
+        if out.is_none() && c_done {
+            break;
+        }
+        input = out;
+    }
+
+    assert_error(&client, &ConnectionError::Transport(Error::PeerError(3)));
+    assert_error(
+        &server,
+        &ConnectionError::Transport(Error::FlowControlError),
+    );
 }
 
 #[test]
