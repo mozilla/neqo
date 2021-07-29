@@ -24,6 +24,8 @@ use crate::stats::FrameStats;
 use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use neqo_common::{qtrace, Role};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
@@ -333,6 +335,7 @@ impl RxStreamOrderer {
 enum RecvStreamState {
     Recv {
         fc: ReceiverFlowControl<StreamId>,
+        session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
         recv_buf: RxStreamOrderer,
     },
     SizeKnown {
@@ -352,10 +355,15 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new(max_bytes: u64, stream_id: StreamId) -> Self {
+    fn new(
+        max_bytes: u64,
+        stream_id: StreamId,
+        session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+    ) -> Self {
         Self::Recv {
             fc: ReceiverFlowControl::new(stream_id, max_bytes),
             recv_buf: RxStreamOrderer::new(),
+            session_fc,
         }
     }
 
@@ -396,10 +404,15 @@ pub struct RecvStream {
 }
 
 impl RecvStream {
-    pub fn new(stream_id: StreamId, max_stream_data: u64, conn_events: ConnectionEvents) -> Self {
+    pub fn new(
+        stream_id: StreamId,
+        max_stream_data: u64,
+        session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+        conn_events: ConnectionEvents,
+    ) -> Self {
         Self {
             stream_id,
-            state: RecvStreamState::new(max_stream_data, stream_id),
+            state: RecvStreamState::new(max_stream_data, stream_id, session_fc),
             conn_events,
         }
     }
@@ -507,8 +520,17 @@ impl RecvStream {
     /// If we should tell the sender they have more credit, return an offset
     pub fn maybe_send_flowc_update(&mut self) {
         // Only ever needed if actively receiving and not in SizeKnown state
-        if let RecvStreamState::Recv { fc, recv_buf } = &mut self.state {
-            fc.retired(recv_buf.retired());
+        if let RecvStreamState::Recv {
+            fc,
+            recv_buf,
+            session_fc,
+        } = &mut self.state
+        {
+            let new_retired = recv_buf.retired() - fc.current_retired();
+            if new_retired > 0 {
+                fc.retired(recv_buf.retired());
+                session_fc.borrow_mut().add_retired(new_retired);
+            }
         }
     }
 
@@ -890,7 +912,12 @@ mod tests {
     fn stream_rx() {
         let conn_events = ConnectionEvents::default();
 
-        let mut s = RecvStream::new(StreamId::from(567), 1024, conn_events);
+        let mut s = RecvStream::new(
+            StreamId::from(567),
+            1024,
+            Rc::new(RefCell::new(ReceiverFlowControl::new((), 1024 * 1024))),
+            conn_events,
+        );
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, &[1; 10]).unwrap();
@@ -1069,7 +1096,15 @@ mod tests {
 
         let frame1 = vec![0; RECV_BUFFER_SIZE];
 
-        let mut s = RecvStream::new(StreamId::from(4), RX_STREAM_DATA_WINDOW, conn_events);
+        let mut s = RecvStream::new(
+            StreamId::from(4),
+            RX_STREAM_DATA_WINDOW,
+            Rc::new(RefCell::new(ReceiverFlowControl::new(
+                (),
+                1024 * RX_STREAM_DATA_WINDOW,
+            ))),
+            conn_events,
+        );
 
         let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
 
@@ -1100,7 +1135,15 @@ mod tests {
         let conn_events = ConnectionEvents::default();
 
         let frame1 = vec![0; RECV_BUFFER_SIZE];
-        let mut s = RecvStream::new(StreamId::from(67), RX_STREAM_DATA_WINDOW, conn_events);
+        let mut s = RecvStream::new(
+            StreamId::from(67),
+            RX_STREAM_DATA_WINDOW,
+            Rc::new(RefCell::new(ReceiverFlowControl::new(
+                (),
+                1024 * RX_STREAM_DATA_WINDOW,
+            ))),
+            conn_events,
+        );
 
         s.maybe_send_flowc_update();
         assert!(!s.has_frames_to_write());
@@ -1150,7 +1193,15 @@ mod tests {
 
         let frame1 = vec![0; RECV_BUFFER_SIZE];
         let stream_id = StreamId::from(67);
-        let mut s = RecvStream::new(stream_id, RX_STREAM_DATA_WINDOW, conn_events);
+        let mut s = RecvStream::new(
+            stream_id,
+            RX_STREAM_DATA_WINDOW,
+            Rc::new(RefCell::new(ReceiverFlowControl::new(
+                (),
+                1024 * RX_STREAM_DATA_WINDOW,
+            ))),
+            conn_events,
+        );
 
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
         let mut buf = [0; RECV_BUFFER_SIZE];

@@ -277,6 +277,10 @@ where
         self.frame_pending |= self.max_active < max;
         self.max_active = max;
     }
+
+    pub fn current_retired(&self) -> u64 {
+        self.retired
+    }
 }
 
 impl ReceiverFlowControl<()> {
@@ -292,6 +296,13 @@ impl ReceiverFlowControl<()> {
                 tokens.push(RecoveryToken::MaxData(max_allowed));
                 self.frame_sent(max_allowed);
             }
+        }
+    }
+
+    pub fn add_retired(&mut self, count: u64) {
+        self.retired += count;
+        if self.retired + self.max_active / 2 > self.max_allowed {
+            self.frame_pending = true;
         }
     }
 }
