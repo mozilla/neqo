@@ -203,6 +203,11 @@ where
     max_active: u64,
     /// Last max allowed sent.
     max_allowed: u64,
+    /// Item received not consumed.
+    /// This will be used for byte flow control: each stream will remember is largest byte
+    /// offset received and session flow control will remember the sum of all bytes reserved
+    /// by all streams.
+    reserved: u64,
     /// Retired items.
     retired: u64,
     frame_pending: bool,
@@ -218,6 +223,7 @@ where
             subject,
             max_active: max,
             max_allowed: max,
+            reserved: 0,
             retired: 0,
             frame_pending: false,
         }
@@ -280,6 +286,14 @@ where
 
     pub fn current_retired(&self) -> u64 {
         self.retired
+    }
+
+    pub fn reserved(&self) -> u64 {
+        self.reserved
+    }
+
+    pub fn add_reserved(&mut self, count: u64) {
+        self.reserved += count;
     }
 }
 

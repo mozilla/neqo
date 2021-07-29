@@ -470,6 +470,35 @@ impl RecvStream {
         self.state = new_state;
     }
 
+    fn check_flow_control_limits(
+        new_end: u64,
+        fc: &mut ReceiverFlowControl<StreamId>,
+        session_fc: &mut Rc<RefCell<ReceiverFlowControl<()>>>,
+    ) -> Res<()> {
+        // If we have new data that exceeds the current largest offset, check that
+        // the flow control limitts are not exceeded.
+        // We are checking new_end - 1, this is the offset of the last byte of the data.
+        if new_end != 0 && (new_end - 1 > fc.reserved()) {
+            let last_offset = new_end - 1;
+            if !fc.check_allowed(last_offset) {
+                qtrace!("Stream RX window exceeded: {}", new_end);
+                return Err(Error::FlowControlError);
+            }
+            let new_bytes_received = last_offset - fc.reserved();
+            fc.add_reserved(new_bytes_received);
+            let session_reserved = session_fc.borrow_mut().reserved();
+            if !session_fc
+                .borrow_mut()
+                .check_allowed(session_reserved + new_bytes_received)
+            {
+                qtrace!("Session RX window exceeded: {}", new_end);
+                return Err(Error::FlowControlError);
+            }
+            session_fc.borrow_mut().add_reserved(new_bytes_received);
+        }
+        Ok(())
+    }
+
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: &[u8]) -> Res<()> {
         // We should post a DataReadable event only once when we change from no-data-ready to
         // data-ready. Therefore remember the state before processing a new frame.
@@ -484,12 +513,12 @@ impl RecvStream {
         }
 
         match &mut self.state {
-            RecvStreamState::Recv { recv_buf, fc, .. } => {
-                // We are checking new_end - 1, this is the offset of the last byte of the data.
-                if new_end != 0 && !fc.check_allowed(new_end - 1) {
-                    qtrace!("Stream RX window exceeded: {}", new_end);
-                    return Err(Error::FlowControlError);
-                }
+            RecvStreamState::Recv {
+                recv_buf,
+                fc,
+                session_fc,
+            } => {
+                RecvStream::check_flow_control_limits(new_end, fc, session_fc)?;
 
                 if fin {
                     let final_size = offset + data.len() as u64;
