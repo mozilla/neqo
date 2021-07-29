@@ -329,6 +329,7 @@ impl Streams {
                 RecvStream::new(
                     next_stream_id,
                     recv_initial_max_stream_data,
+                    Rc::clone(&self.receiver_fc),
                     self.events.clone(),
                 ),
             );
@@ -402,7 +403,12 @@ impl Streams {
 
                     self.recv.insert(
                         new_id,
-                        RecvStream::new(new_id, recv_initial_max_stream_data, self.events.clone()),
+                        RecvStream::new(
+                            new_id,
+                            recv_initial_max_stream_data,
+                            Rc::clone(&self.receiver_fc),
+                            self.events.clone(),
+                        ),
                     );
                 }
                 Ok(new_id.as_u64())

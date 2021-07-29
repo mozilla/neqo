@@ -7,7 +7,7 @@
 use super::super::State;
 use super::{
     connect, connect_force_idle, default_client, default_server, maybe_authenticate, new_client,
-    send_something, DEFAULT_STREAM_DATA,
+    new_server, send_something, DEFAULT_STREAM_DATA,
 };
 use crate::events::ConnectionEvent;
 use crate::recv_stream::RECV_BUFFER_SIZE;
@@ -135,6 +135,59 @@ fn report_fin_when_stream_closed_wo_data() {
     mem::drop(client.process(out.dgram(), now()));
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(client.events().any(stream_readable));
+}
+
+#[test]
+fn sending_max_data() {
+    const SMALL_MAX_DATA: usize = 16383;
+
+    let mut client = default_client();
+    let mut server = new_server(
+        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
+    );
+
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(client.events().count(), 2); // SendStreamWritable, StateChange(connected)
+    assert_eq!(stream_id, 2);
+    assert_eq!(
+        client.stream_avail_send_space(stream_id).unwrap(),
+        SMALL_MAX_DATA
+    );
+
+    assert_eq!(
+        client
+            .stream_send(stream_id, &vec![b'a'; RECV_BUFFER_SIZE].into_boxed_slice())
+            .unwrap(),
+        SMALL_MAX_DATA
+    );
+
+    let mut input = None;
+    loop {
+        let out = client.process(input, now()).dgram();
+        let c_done = out.is_none();
+        let out = server.process(out, now()).dgram();
+        if out.is_none() && c_done {
+            break;
+        }
+        input = out;
+    }
+
+    let mut buf = vec![0; 40000];
+    let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+    assert_eq!(received, 16383);
+    assert!(!fin);
+
+    let out = server.process(None, now()).dgram();
+    let _out = client.process(out, now()).dgram();
+
+    assert_eq!(
+        client
+            .stream_send(stream_id, &vec![b'a'; RECV_BUFFER_SIZE].into_boxed_slice())
+            .unwrap(),
+        SMALL_MAX_DATA
+    );
 }
 
 #[test]
