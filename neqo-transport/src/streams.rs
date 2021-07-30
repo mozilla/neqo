@@ -86,11 +86,11 @@ impl Streams {
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
-                ..
+                final_size,
             } => {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
-                    rs.reset(application_error_code);
+                    rs.reset(application_error_code, final_size)?;
                 }
             }
             Frame::StopSending {
@@ -279,7 +279,8 @@ impl Streams {
             | RecoveryToken::StreamDataBlocked { .. }
             | RecoveryToken::MaxStreamData { .. }
             | RecoveryToken::StreamsBlocked { .. }
-            | RecoveryToken::MaxStreams { .. } => (),
+            | RecoveryToken::MaxStreams { .. }
+            | RecoveryToken::MaxData(_) => (),
             _ => unreachable!("This is not a stream RecoveryToken"),
         }
     }
