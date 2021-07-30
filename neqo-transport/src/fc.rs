@@ -236,7 +236,7 @@ where
 
     /// Retired some items and maybe send flow control
     /// update.
-    pub fn retired(&mut self, retired: u64) {
+    pub fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
             return;
         }
@@ -284,7 +284,7 @@ where
         self.max_active = max;
     }
 
-    pub fn current_retired(&self) -> u64 {
+    pub fn retired(&self) -> u64 {
         self.retired
     }
 
@@ -341,6 +341,13 @@ impl ReceiverFlowControl<StreamId> {
                 });
                 self.frame_sent(max_allowed);
             }
+        }
+    }
+
+    pub fn add_retired(&mut self, count: u64) {
+        self.retired += count;
+        if self.retired + self.max_active / 2 > self.max_allowed {
+            self.frame_pending = true;
         }
     }
 }
@@ -601,16 +608,16 @@ mod test {
     #[test]
     fn max_allowed_after_items_retired() {
         let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retired(49);
+        fc.retire(49);
         assert_eq!(fc.frame_needed(), None);
-        fc.retired(51);
+        fc.retire(51);
         assert_eq!(fc.frame_needed(), Some(151));
     }
 
     #[test]
     fn need_max_allowed_frame_after_loss() {
         let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retired(100);
+        fc.retire(100);
         assert_eq!(fc.frame_needed(), Some(200));
         fc.frame_sent(200);
         assert_eq!(fc.frame_needed(), None);
@@ -621,11 +628,11 @@ mod test {
     #[test]
     fn no_max_allowed_frame_after_old_loss() {
         let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retired(51);
+        fc.retire(51);
         assert_eq!(fc.frame_needed(), Some(151));
         fc.frame_sent(151);
         assert_eq!(fc.frame_needed(), None);
-        fc.retired(102);
+        fc.retire(102);
         assert_eq!(fc.frame_needed(), Some(202));
         fc.frame_sent(202);
         assert_eq!(fc.frame_needed(), None);
@@ -636,24 +643,24 @@ mod test {
     #[test]
     fn force_send_max_allowed() {
         let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retired(10);
+        fc.retire(10);
         assert_eq!(fc.frame_needed(), None);
     }
 
     #[test]
     fn multiple_retries_after_frame_pending_is_set() {
         let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retired(51);
+        fc.retire(51);
         assert_eq!(fc.frame_needed(), Some(151));
-        fc.retired(61);
+        fc.retire(61);
         assert_eq!(fc.frame_needed(), Some(161));
-        fc.retired(88);
+        fc.retire(88);
         assert_eq!(fc.frame_needed(), Some(188));
-        fc.retired(90);
+        fc.retire(90);
         assert_eq!(fc.frame_needed(), Some(190));
         fc.frame_sent(190);
         assert_eq!(fc.frame_needed(), None);
-        fc.retired(141);
+        fc.retire(141);
         assert_eq!(fc.frame_needed(), Some(241));
         fc.frame_sent(241);
         assert_eq!(fc.frame_needed(), None);
@@ -662,11 +669,11 @@ mod test {
     #[test]
     fn new_retired_before_loss() {
         let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retired(51);
+        fc.retire(51);
         assert_eq!(fc.frame_needed(), Some(151));
         fc.frame_sent(151);
         assert_eq!(fc.frame_needed(), None);
-        fc.retired(62);
+        fc.retire(62);
         assert_eq!(fc.frame_needed(), None);
         fc.frame_lost(151);
         assert_eq!(fc.frame_needed(), Some(162));
@@ -679,10 +686,10 @@ mod test {
         // There is no MAX_STREAM_DATA frame needed.
         assert_eq!(fc.frame_needed(), None);
         // We can still retire more than 50.
-        fc.retired(60);
+        fc.retire(60);
         // There is no MAX_STREAM_DATA fame needed yet.
         assert_eq!(fc.frame_needed(), None);
-        fc.retired(76);
+        fc.retire(76);
         assert_eq!(fc.frame_needed(), Some(126));
 
         // Increase max_active.
@@ -690,7 +697,7 @@ mod test {
         assert_eq!(fc.frame_needed(), Some(136));
 
         // We can retire more than 60.
-        fc.retired(136);
+        fc.retire(136);
         assert_eq!(fc.frame_needed(), Some(196));
     }
 
