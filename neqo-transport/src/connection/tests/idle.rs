@@ -509,6 +509,12 @@ fn keep_alive_reset() {
     server.stream_reset_send(stream, 0).unwrap();
     transfer_force_idle(&mut server, &mut client);
     assert_idle(&mut client, default_timeout());
+
+    // The client will fade away from here.
+    let t = now() + (default_timeout() / 2);
+    assert_eq!(client.process_output(t).callback(), default_timeout() / 2);
+    let t = now() + default_timeout();
+    assert_eq!(client.process_output(t), Output::None);
 }
 
 /// Stopping sending also cancels the keep-alive.
