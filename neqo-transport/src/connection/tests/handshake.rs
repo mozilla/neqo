@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Output, State, LOCAL_IDLE_TIMEOUT};
+use super::super::{Connection, Output, State};
 use super::{
     assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
     get_tokens, handshake, maybe_authenticate, send_something, CountingConnectionIdGenerator,
@@ -632,7 +632,8 @@ fn verify_pkt_honors_mtu() {
     let now = now();
 
     let res = client.process(None, now);
-    assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
+    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
+    assert_eq!(res, Output::Callback(idle_timeout));
 
     // Try to send a large stream and verify first packet is correctly sized
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
