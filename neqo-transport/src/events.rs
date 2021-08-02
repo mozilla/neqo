@@ -62,6 +62,12 @@ pub enum ConnectionEvent {
     /// Any data written to streams needs to be written again.
     ZeroRttRejected,
     ResumptionToken(ResumptionToken),
+    Datagram(Vec<u8>),
+    // TODO: datagrams probably need some identifiers. The packet number they
+    // are sent in would be enough. In that case we need an even DaagramSent
+    // as well.
+    DatagramLost,
+    DatagramAcked,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -150,6 +156,18 @@ impl ConnectionEvents {
     pub fn recv_stream_complete(&self, stream_id: StreamId) {
         // If stopped, no longer readable.
         self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
+    }
+
+    pub fn datagram(&self, data: &[u8]) {
+        self.insert(ConnectionEvent::Datagram(data.to_vec()));
+    }
+
+    pub fn datagram_lost(&self) {
+        self.insert(ConnectionEvent::DatagramLost);
+    }
+
+    pub fn datagram_acked(&self) {
+        self.insert(ConnectionEvent::DatagramAcked);
     }
 
     fn insert(&self, event: ConnectionEvent) {

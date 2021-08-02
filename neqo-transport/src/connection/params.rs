@@ -65,6 +65,7 @@ pub struct ConnectionParameters {
     /// The duration of the idle timeout for the connection.
     idle_timeout: Duration,
     preferred_address: PreferredAddressConfig,
+    max_datagram_frame_size: u64,
 }
 
 impl Default for ConnectionParameters {
@@ -81,6 +82,7 @@ impl Default for ConnectionParameters {
             ack_ratio: DEFAULT_ACK_RATIO,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
+            max_datagram_frame_size: 0,
         }
     }
 }
@@ -209,6 +211,15 @@ impl ConnectionParameters {
         self.idle_timeout
     }
 
+    pub fn get_max_datagram_frame_size(&self) -> u64 {
+        self.max_datagram_frame_size
+    }
+
+    pub fn max_datagram_frame_size(mut self, v: u64) -> Self {
+        self.max_datagram_frame_size = v;
+        self
+    }
+
     pub fn create_transport_parameter(
         &self,
         role: Role,
@@ -268,6 +279,10 @@ impl ConnectionParameters {
                 );
             }
         }
+        tps.local.set_integer(
+            tparams::MAX_DATAGRAM_FRAME_SIZE,
+            self.max_datagram_frame_size,
+        );
         Ok(tps)
     }
 }
