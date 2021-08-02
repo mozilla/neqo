@@ -491,17 +491,16 @@ impl RecvStream {
         session_fc: &mut Rc<RefCell<ReceiverFlowControl<()>>>,
     ) -> Res<()> {
         // If we have new data that exceeds the current largest offset, check that
-        // the flow control limitts are not exceeded.
+        // the flow control limits are not exceeded.
         // We are checking new_end - 1, this is the offset of the last byte of the data.
-        if new_end != 0 && (new_end - 1 > fc.reserved()) {
+        if new_end > fc.reserved() + 1 {
             let last_offset = new_end - 1;
             if !fc.check_allowed(last_offset) {
                 qtrace!("Stream RX window exceeded: {}", new_end);
                 return Err(Error::FlowControlError);
             }
-            let new_bytes_received = last_offset - fc.reserved();
-            fc.add_reserved(new_bytes_received);
-            let session_reserved = session_fc.borrow_mut().reserved();
+            let new_bytes_received = fc.reserve(last_offset);
+            let session_reserved = session_fc.borrow().reserved();
             if !session_fc
                 .borrow_mut()
                 .check_allowed(session_reserved + new_bytes_received)
@@ -543,11 +542,8 @@ impl RecvStream {
                     recv_buf.inbound_frame(offset, data);
 
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
-                    let fc_copy = mem::replace(fc, ReceiverFlowControl::new(StreamId::new(0), 0));
-                    let session_fc_copy = mem::replace(
-                        session_fc,
-                        Rc::new(RefCell::new(ReceiverFlowControl::new((), 0))),
-                    );
+                    let fc_copy = mem::take(fc);
+                    let session_fc_copy = mem::take(session_fc);
                     if final_size == buf.retired() + buf.bytes_ready() as u64 {
                         self.set_state(RecvStreamState::DataRecvd {
                             fc: fc_copy,
@@ -575,11 +571,8 @@ impl RecvStream {
                 recv_buf.inbound_frame(offset, data);
                 if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
-                    let fc_copy = mem::replace(fc, ReceiverFlowControl::new(StreamId::new(0), 0));
-                    let session_fc_copy = mem::replace(
-                        session_fc,
-                        Rc::new(RefCell::new(ReceiverFlowControl::new((), 0))),
-                    );
+                    let fc_copy = mem::take(fc);
+                    let session_fc_copy = mem::take(session_fc);
                     self.set_state(RecvStreamState::DataRecvd {
                         fc: fc_copy,
                         session_fc: session_fc_copy,
@@ -728,11 +721,8 @@ impl RecvStream {
         match &mut self.state {
             RecvStreamState::Recv { fc, session_fc, .. }
             | RecvStreamState::SizeKnown { fc, session_fc, .. } => {
-                let fc_copy = mem::replace(fc, ReceiverFlowControl::new(StreamId::new(0), 0));
-                let session_fc_copy = mem::replace(
-                    session_fc,
-                    Rc::new(RefCell::new(ReceiverFlowControl::new((), 0))),
-                );
+                let fc_copy = mem::take(fc);
+                let session_fc_copy = mem::take(session_fc);
                 self.set_state(RecvStreamState::AbortReading {
                     fc: fc_copy,
                     session_fc: session_fc_copy,
@@ -811,13 +801,12 @@ impl RecvStream {
         } = &mut self.state
         {
             if *final_size_known {
+                // We already know the final_size of the stream therefore we
+                // do not need to wait for RESET.
                 self.set_state(RecvStreamState::ResetRecvd);
             } else {
-                let fc_copy = mem::replace(fc, ReceiverFlowControl::new(StreamId::new(0), 0));
-                let session_fc_copy = mem::replace(
-                    session_fc,
-                    Rc::new(RefCell::new(ReceiverFlowControl::new((), 0))),
-                );
+                let fc_copy = mem::take(fc);
+                let session_fc_copy = mem::take(session_fc);
                 self.set_state(RecvStreamState::WaitForReset {
                     fc: fc_copy,
                     session_fc: session_fc_copy,
@@ -1263,24 +1252,12 @@ mod tests {
 
     #[test]
     fn stream_flowc_update() {
-        let conn_events = ConnectionEvents::default();
-
-        let frame1 = vec![0; RECV_BUFFER_SIZE];
-
-        let mut s = RecvStream::new(
-            StreamId::from(4),
-            RX_STREAM_DATA_WINDOW,
-            Rc::new(RefCell::new(ReceiverFlowControl::new(
-                (),
-                1024 * RX_STREAM_DATA_WINDOW,
-            ))),
-            conn_events,
-        );
-
+        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
         let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
-        s.inbound_stream_frame(false, 0, &frame1).unwrap();
+        s.inbound_stream_frame(false, 0, &[0; RECV_BUFFER_SIZE])
+            .unwrap();
         assert!(!s.has_frames_to_write());
         assert_eq!(s.read(&mut buf).unwrap(), (RECV_BUFFER_SIZE, false));
         assert!(!s.data_ready());
@@ -1297,23 +1274,22 @@ mod tests {
         assert!(!s.has_frames_to_write());
     }
 
-    #[test]
-    fn stream_max_stream_data() {
+    fn create_stream(fc: u64) -> RecvStream {
         let conn_events = ConnectionEvents::default();
-
-        let frame1 = vec![0; RECV_BUFFER_SIZE];
-        let mut s = RecvStream::new(
+        RecvStream::new(
             StreamId::from(67),
             RX_STREAM_DATA_WINDOW,
-            Rc::new(RefCell::new(ReceiverFlowControl::new(
-                (),
-                1024 * RX_STREAM_DATA_WINDOW,
-            ))),
+            Rc::new(RefCell::new(ReceiverFlowControl::new((), fc))),
             conn_events,
-        );
+        )
+    }
 
+    #[test]
+    fn stream_max_stream_data() {
+        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
         assert!(!s.has_frames_to_write());
-        s.inbound_stream_frame(false, 0, &frame1).unwrap();
+        s.inbound_stream_frame(false, 0, &[0; RECV_BUFFER_SIZE])
+            .unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
             .unwrap_err();
     }
@@ -1355,21 +1331,9 @@ mod tests {
 
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
-        let conn_events = ConnectionEvents::default();
-
-        let frame1 = vec![0; RECV_BUFFER_SIZE];
-        let stream_id = StreamId::from(67);
-        let mut s = RecvStream::new(
-            stream_id,
-            RX_STREAM_DATA_WINDOW,
-            Rc::new(RefCell::new(ReceiverFlowControl::new(
-                (),
-                1024 * RX_STREAM_DATA_WINDOW,
-            ))),
-            conn_events,
-        );
-
-        s.inbound_stream_frame(false, 0, &frame1).unwrap();
+        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
+        s.inbound_stream_frame(false, 0, &[0; RECV_BUFFER_SIZE])
+            .unwrap();
         let mut buf = [0; RECV_BUFFER_SIZE];
         s.read(&mut buf).unwrap();
         assert!(s.has_frames_to_write());
@@ -1381,6 +1345,7 @@ mod tests {
     #[test]
     fn session_flow_control() {
         const SESSION_WINDOW: usize = 1024;
+        assert!(RX_STREAM_DATA_WINDOW > u64::try_from(SESSION_WINDOW).unwrap());
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             u64::try_from(SESSION_WINDOW).unwrap(),
@@ -1392,10 +1357,12 @@ mod tests {
             ConnectionEvents::default(),
         );
 
-        let frame1 = vec![0; SESSION_WINDOW];
-        s.inbound_stream_frame(false, 0, &frame1).unwrap();
+        s.inbound_stream_frame(false, 0, &[0; SESSION_WINDOW])
+            .unwrap();
         assert!(!session_fc.borrow().frame_needed().is_some());
-        let mut buf = [0; RECV_BUFFER_SIZE];
+        // The buffer is big enough to hold SESSION_WINDOW, this will make sure that we always
+        // read everything from he stream.
+        let mut buf = [0; 2 * SESSION_WINDOW];
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed().is_some());
         // consume it
@@ -1438,7 +1405,8 @@ mod tests {
             ConnectionEvents::default(),
         );
 
-        s.inbound_stream_frame(true, 0, &frame1).unwrap();
+        s.inbound_stream_frame(true, 0, &[0; SESSION_WINDOW])
+            .unwrap();
         assert!(!session_fc.borrow().frame_needed().is_some());
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed().is_some());
@@ -1447,6 +1415,7 @@ mod tests {
     #[test]
     fn session_flow_control_reset() {
         const SESSION_WINDOW: usize = 1024;
+        assert!(RX_STREAM_DATA_WINDOW > u64::try_from(SESSION_WINDOW).unwrap());
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             u64::try_from(SESSION_WINDOW).unwrap(),
@@ -1458,8 +1427,8 @@ mod tests {
             ConnectionEvents::default(),
         );
 
-        let frame1 = vec![0; SESSION_WINDOW / 2];
-        s.inbound_stream_frame(false, 0, &frame1).unwrap();
+        s.inbound_stream_frame(false, 0, &[0; SESSION_WINDOW / 2])
+            .unwrap();
         assert!(!session_fc.borrow().frame_needed().is_some());
 
         s.reset(
