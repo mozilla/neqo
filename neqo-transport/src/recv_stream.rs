@@ -459,22 +459,22 @@ impl RecvStream {
         // If we have new data that exceeds the current largest offset, check that
         // the flow control limits are not exceeded.
         // We are checking new_end - 1, this is the offset of the last byte of the data.
-        if new_end > fc.reserved() + 1 {
+        if new_end > fc.consumed() + 1 {
             let last_offset = new_end - 1;
             if !fc.check_allowed(last_offset) {
                 qtrace!("Stream RX window exceeded: {}", new_end);
                 return Err(Error::FlowControlError);
             }
-            let new_bytes_received = fc.reserve(last_offset);
-            let session_reserved = session_fc.borrow().reserved();
+            let new_bytes_consumed = fc.set_consumed(last_offset);
+            let session_consumed = session_fc.borrow().consumed();
             if !session_fc
                 .borrow_mut()
-                .check_allowed(session_reserved + new_bytes_received)
+                .check_allowed(session_consumed + new_bytes_consumed)
             {
                 qtrace!("Session RX window exceeded: {}", new_end);
                 return Err(Error::FlowControlError);
             }
-            session_fc.borrow_mut().add_reserved(new_bytes_received);
+            session_fc.borrow_mut().consume(new_bytes_consumed);
         }
         Ok(())
     }

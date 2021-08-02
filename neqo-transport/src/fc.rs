@@ -203,11 +203,11 @@ where
     max_active: u64,
     /// Last max allowed sent.
     max_allowed: u64,
-    /// Item received not consumed.
+    /// Item received, but not retired yet.
     /// This will be used for byte flow control: each stream will remember is largest byte
-    /// offset received and session flow control will remember the sum of all bytes reserved
+    /// offset received and session flow control will remember the sum of all bytes consumed
     /// by all streams.
-    reserved: u64,
+    consumed: u64,
     /// Retired items.
     retired: u64,
     frame_pending: bool,
@@ -223,7 +223,7 @@ where
             subject,
             max_active: max,
             max_allowed: max,
-            reserved: 0,
+            consumed: 0,
             retired: 0,
             frame_pending: false,
         }
@@ -288,12 +288,12 @@ where
         self.retired
     }
 
-    pub fn reserved(&self) -> u64 {
-        self.reserved
+    pub fn consumed(&self) -> u64 {
+        self.consumed
     }
 
-    pub fn add_reserved(&mut self, count: u64) {
-        self.reserved += count;
+    pub fn consume(&mut self, count: u64) {
+        self.consumed += count;
     }
 }
 
@@ -351,10 +351,10 @@ impl ReceiverFlowControl<StreamId> {
         }
     }
 
-    pub fn reserve(&mut self, reserved: u64) -> u64 {
-        let new_reserved = reserved - self.reserved;
-        self.reserved = reserved;
-        new_reserved
+    pub fn set_consumed(&mut self, consumed: u64) -> u64 {
+        let new_consumed = consumed - self.consumed;
+        self.consumed = consumed;
+        new_consumed
     }
 }
 
