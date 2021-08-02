@@ -192,7 +192,7 @@ impl SenderFlowControl<StreamType> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ReceiverFlowControl<T>
 where
     T: Debug + Sized,
@@ -349,6 +349,12 @@ impl ReceiverFlowControl<StreamId> {
         if self.retired + self.max_active / 2 > self.max_allowed {
             self.frame_pending = true;
         }
+    }
+
+    pub fn reserve(&mut self, reserved: u64) -> u64 {
+        let new_reserved = reserved - self.reserved;
+        self.reserved = reserved;
+        new_reserved
     }
 }
 
