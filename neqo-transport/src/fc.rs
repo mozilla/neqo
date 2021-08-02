@@ -17,7 +17,7 @@ use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
 use crate::stream_id::{StreamId, StreamType};
 use crate::{Error, Res};
-use neqo_common::Role;
+use neqo_common::{qtrace, Role};
 
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -208,6 +208,7 @@ where
     /// offset received and session flow control will remember the sum of all bytes consumed
     /// by all streams.
     consumed: u64,
+    final_size_reached: bool,
     /// Retired items.
     retired: u64,
     frame_pending: bool,
@@ -224,14 +225,10 @@ where
             max_active: max,
             max_allowed: max,
             consumed: 0,
+            final_size_reached: false,
             retired: 0,
             frame_pending: false,
         }
-    }
-
-    /// Check if received item exceeds the allowed flow control limit.
-    pub fn check_allowed(&self, new_end: u64) -> bool {
-        new_end < self.max_allowed
     }
 
     /// Retired some items and maybe send flow control
@@ -291,10 +288,6 @@ where
     pub fn consumed(&self) -> u64 {
         self.consumed
     }
-
-    pub fn consume(&mut self, count: u64) {
-        self.consumed += count;
-    }
 }
 
 impl ReceiverFlowControl<()> {
@@ -314,10 +307,25 @@ impl ReceiverFlowControl<()> {
     }
 
     pub fn add_retired(&mut self, count: u64) {
+        assert!(self.retired + count <= self.consumed);
         self.retired += count;
         if self.retired + self.max_active / 2 > self.max_allowed {
             self.frame_pending = true;
         }
+    }
+
+    pub fn consume(&mut self, count: u64) -> Res<()> {
+        if self.consumed + count > self.max_allowed {
+            qtrace!(
+                "Session RX window exceeded: consumed:{} new:{} limit:{}",
+                self.consumed,
+                count,
+                self.max_allowed
+            );
+            return Err(Error::FlowControlError);
+        }
+        self.consumed += count;
+        Ok(())
     }
 }
 
@@ -345,16 +353,54 @@ impl ReceiverFlowControl<StreamId> {
     }
 
     pub fn add_retired(&mut self, count: u64) {
+        assert!(self.retired + count <= self.consumed);
         self.retired += count;
         if self.retired + self.max_active / 2 > self.max_allowed {
             self.frame_pending = true;
         }
     }
 
-    pub fn set_consumed(&mut self, consumed: u64) -> u64 {
-        let new_consumed = consumed - self.consumed;
-        self.consumed = consumed;
-        new_consumed
+    pub fn set_consumed(&mut self, consumed: u64, fin: bool) -> Res<u64> {
+        let new_consumed = match (fin, self.final_size_reached) {
+            (true, true) => {
+                if consumed != self.consumed {
+                    return Err(Error::FinalSizeError);
+                }
+                0
+            }
+            (false, true) => {
+                if consumed > self.consumed {
+                    return Err(Error::FinalSizeError);
+                }
+                0
+            }
+            (_, false) => {
+                if fin && consumed < self.consumed {
+                    return Err(Error::FinalSizeError);
+                }
+                self.final_size_reached = fin;
+                if consumed > self.consumed {
+                    if consumed > self.max_allowed {
+                        qtrace!("Stream RX window exceeded: {}", consumed);
+                        return Err(Error::FlowControlError);
+                    }
+                    let new_consumed = consumed - self.consumed;
+                    self.consumed = consumed;
+                    new_consumed
+                } else {
+                    0
+                }
+            }
+        };
+        Ok(new_consumed)
+    }
+
+    pub fn final_size(&self) -> Option<u64> {
+        if self.final_size_reached {
+            Some(self.consumed)
+        } else {
+            None
+        }
     }
 }
 
@@ -380,6 +426,11 @@ impl ReceiverFlowControl<StreamType> {
                 self.frame_sent(max_streams);
             }
         }
+    }
+
+    /// Check if received item exceeds the allowed flow control limit.
+    pub fn check_allowed(&self, new_end: u64) -> bool {
+        new_end < self.max_allowed
     }
 
     /// Retire given amount of additional data.

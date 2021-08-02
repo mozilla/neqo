@@ -317,15 +317,6 @@ impl RxStreamOrderer {
         buf.resize(orig_len + self.bytes_ready(), 0);
         self.read(&mut buf[orig_len..])
     }
-
-    fn highest_seen_offset(&self) -> u64 {
-        let maybe_ooo_last = self
-            .data_ranges
-            .iter()
-            .next_back()
-            .map(|(start, data)| *start + data.len() as u64);
-        maybe_ooo_last.unwrap_or(self.retired)
-    }
 }
 
 /// QUIC receiving states, based on -transport 3.2.
@@ -342,7 +333,6 @@ enum RecvStreamState {
         fc: ReceiverFlowControl<StreamId>,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
         recv_buf: RxStreamOrderer,
-        final_size: u64,
     },
     DataRecvd {
         fc: ReceiverFlowControl<StreamId>,
@@ -353,7 +343,6 @@ enum RecvStreamState {
     AbortReading {
         fc: ReceiverFlowControl<StreamId>,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
-        final_size_known: bool,
         frame_needed: bool,
         err: AppError,
     },
@@ -402,10 +391,23 @@ impl RecvStreamState {
         }
     }
 
-    fn final_size(&self) -> Option<u64> {
+    fn flow_control_consume_data(&mut self, consumed: u64, fin: bool) -> Res<()> {
         match self {
-            Self::SizeKnown { final_size, .. } => Some(*final_size),
-            _ => None,
+            Self::Recv { fc, session_fc, .. }
+            | Self::SizeKnown { fc, session_fc, .. }
+            | Self::DataRecvd { fc, session_fc, .. } => {
+                let new_bytes_consumed = fc.set_consumed(consumed, fin)?;
+                session_fc.borrow_mut().consume(new_bytes_consumed)
+            }
+            Self::AbortReading { fc, session_fc, .. }
+            | Self::WaitForReset { fc, session_fc, .. } => {
+                let new_bytes_consumed = fc.set_consumed(consumed, fin)?;
+                session_fc.borrow_mut().consume(new_bytes_consumed)?;
+                // Let's also retire this data since the stream has been aborted
+                RecvStream::flow_control_retire_data(fc.consumed() - fc.retired(), fc, session_fc);
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -451,46 +453,13 @@ impl RecvStream {
         self.state = new_state;
     }
 
-    fn check_flow_control_limits(
-        new_end: u64,
-        fc: &mut ReceiverFlowControl<StreamId>,
-        session_fc: &mut Rc<RefCell<ReceiverFlowControl<()>>>,
-    ) -> Res<()> {
-        // If we have new data that exceeds the current largest offset, check that
-        // the flow control limits are not exceeded.
-        // We are checking new_end - 1, this is the offset of the last byte of the data.
-        if new_end > fc.consumed() + 1 {
-            let last_offset = new_end - 1;
-            if !fc.check_allowed(last_offset) {
-                qtrace!("Stream RX window exceeded: {}", new_end);
-                return Err(Error::FlowControlError);
-            }
-            let new_bytes_consumed = fc.set_consumed(last_offset);
-            let session_consumed = session_fc.borrow().consumed();
-            if !session_fc
-                .borrow_mut()
-                .check_allowed(session_consumed + new_bytes_consumed)
-            {
-                qtrace!("Session RX window exceeded: {}", new_end);
-                return Err(Error::FlowControlError);
-            }
-            session_fc.borrow_mut().consume(new_bytes_consumed);
-        }
-        Ok(())
-    }
-
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: &[u8]) -> Res<()> {
         // We should post a DataReadable event only once when we change from no-data-ready to
         // data-ready. Therefore remember the state before processing a new frame.
         let already_data_ready = self.data_ready();
         let new_end = offset + u64::try_from(data.len()).unwrap();
 
-        // Send final size errors even if stream is closed
-        if let Some(final_size) = self.state.final_size() {
-            if new_end > final_size || (fin && new_end != final_size) {
-                return Err(Error::FinalSizeError);
-            }
-        }
+        self.state.flow_control_consume_data(new_end, fin)?;
 
         match &mut self.state {
             RecvStreamState::Recv {
@@ -498,19 +467,14 @@ impl RecvStream {
                 fc,
                 session_fc,
             } => {
-                Self::check_flow_control_limits(new_end, fc, session_fc)?;
-
+                recv_buf.inbound_frame(offset, data);
                 if fin {
-                    let final_size = offset + data.len() as u64;
-                    if final_size < recv_buf.highest_seen_offset() {
-                        return Err(Error::FinalSizeError);
-                    }
-                    recv_buf.inbound_frame(offset, data);
-
+                    let all_recv = fc.final_size().unwrap()
+                        == recv_buf.retired() + recv_buf.bytes_ready() as u64;
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
-                    if final_size == buf.retired() + buf.bytes_ready() as u64 {
+                    if all_recv {
                         self.set_state(RecvStreamState::DataRecvd {
                             fc: fc_copy,
                             session_fc: session_fc_copy,
@@ -521,21 +485,17 @@ impl RecvStream {
                             fc: fc_copy,
                             session_fc: session_fc_copy,
                             recv_buf: buf,
-                            final_size,
                         });
                     }
-                } else {
-                    recv_buf.inbound_frame(offset, data);
                 }
             }
             RecvStreamState::SizeKnown {
                 recv_buf,
-                final_size,
                 fc,
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data);
-                if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
+                if fc.final_size().unwrap() == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -563,15 +523,14 @@ impl RecvStream {
     }
 
     pub fn reset(&mut self, application_error_code: AppError, final_size: u64) -> Res<()> {
+        self.state.flow_control_consume_data(final_size, true)?;
         match &mut self.state {
             RecvStreamState::Recv { fc, session_fc, .. }
             | RecvStreamState::SizeKnown { fc, session_fc, .. }
             | RecvStreamState::AbortReading { fc, session_fc, .. }
             | RecvStreamState::WaitForReset { fc, session_fc } => {
-                if final_size < fc.retired() {
-                    return Err(Error::FinalSizeError);
-                }
-                Self::update_flow_control(final_size - fc.retired(), fc, session_fc);
+                // make flow control consumes new data that not really exist.
+                Self::flow_control_retire_data(final_size - fc.retired(), fc, session_fc);
                 self.conn_events
                     .recv_stream_reset(self.stream_id, application_error_code);
                 self.set_state(RecvStreamState::ResetRecvd);
@@ -584,7 +543,7 @@ impl RecvStream {
     }
 
     /// If we should tell the sender they have more credit, return an offset
-    fn update_flow_control(
+    fn flow_control_retire_data(
         new_read: u64,
         fc: &mut ReceiverFlowControl<StreamId>,
         session_fc: &mut Rc<RefCell<ReceiverFlowControl<()>>>,
@@ -650,7 +609,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 let bytes_read = recv_buf.read(buf);
-                Self::update_flow_control(u64::try_from(bytes_read).unwrap(), fc, session_fc);
+                Self::flow_control_retire_data(u64::try_from(bytes_read).unwrap(), fc, session_fc);
                 let fin_read = if data_recvd_state {
                     if recv_buf.buffered() == 0 {
                         self.set_state(RecvStreamState::DataRead);
@@ -672,37 +631,22 @@ impl RecvStream {
 
     pub fn stop_sending(&mut self, err: AppError) {
         qtrace!("stop_sending called when in state {}", self.state.name());
-        let final_size_known = if let RecvStreamState::SizeKnown {
-            fc,
-            session_fc,
-            final_size,
-            ..
-        } = &mut self.state
-        {
-            Self::update_flow_control(*final_size - fc.retired(), fc, session_fc);
-            true
-        } else {
-            false
-        };
         match &mut self.state {
             RecvStreamState::Recv { fc, session_fc, .. }
             | RecvStreamState::SizeKnown { fc, session_fc, .. } => {
+                // Retire data
+                Self::flow_control_retire_data(fc.consumed() - fc.retired(), fc, session_fc);
                 let fc_copy = mem::take(fc);
                 let session_fc_copy = mem::take(session_fc);
                 self.set_state(RecvStreamState::AbortReading {
                     fc: fc_copy,
                     session_fc: session_fc_copy,
-                    final_size_known,
                     frame_needed: true,
                     err,
                 })
             }
-            RecvStreamState::DataRecvd {
-                fc,
-                session_fc,
-                recv_buf,
-            } => {
-                Self::update_flow_control(recv_buf.bytes_ready() as u64, fc, session_fc);
+            RecvStreamState::DataRecvd { fc, session_fc, .. } => {
+                Self::flow_control_retire_data(fc.consumed() - fc.retired(), fc, session_fc);
                 self.set_state(RecvStreamState::DataRead);
             }
             RecvStreamState::DataRead
@@ -759,14 +703,8 @@ impl RecvStream {
     }
 
     pub fn stop_sending_acked(&mut self) {
-        if let RecvStreamState::AbortReading {
-            fc,
-            session_fc,
-            final_size_known,
-            ..
-        } = &mut self.state
-        {
-            if *final_size_known {
+        if let RecvStreamState::AbortReading { fc, session_fc, .. } = &mut self.state {
+            if fc.final_size().is_some() {
                 // We already know the final_size of the stream therefore we
                 // do not need to wait for RESET.
                 self.set_state(RecvStreamState::ResetRecvd);
