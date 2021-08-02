@@ -117,6 +117,7 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
+    NotAvailable,
 }
 
 impl Error {

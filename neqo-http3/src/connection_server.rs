@@ -172,6 +172,9 @@ impl Http3ServerHandler {
                 ConnectionEvent::SendStreamWritable { .. }
                 | ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::SendStreamCreatable { .. } => {}
+                ConnectionEvent::Datagram { .. }
+                | ConnectionEvent::DatagramAcked
+                | ConnectionEvent::DatagramLost => panic!("Datagrams are not enabled"),
             }
         }
         Ok(())

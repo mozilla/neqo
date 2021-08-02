@@ -99,6 +99,7 @@ impl Http3Client {
         http3_parameters: &Http3Parameters,
         now: Instant,
     ) -> Res<Self> {
+        assert!(conn_params.get_max_datagram_frame_size() == 0);
         Ok(Self::new_with_conn(
             Connection::new_client(
                 server_name,
@@ -610,6 +611,9 @@ impl Http3Client {
                 ConnectionEvent::ResumptionToken(token) => {
                     self.create_resumption_token(&token);
                 }
+                ConnectionEvent::Datagram { .. }
+                | ConnectionEvent::DatagramAcked
+                | ConnectionEvent::DatagramLost => panic!("Datagrams are not enabled"),
             }
         }
         Ok(())
