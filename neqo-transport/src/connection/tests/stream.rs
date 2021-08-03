@@ -863,3 +863,61 @@ fn session_flow_control_stop_sending_state_data_recvd() {
         SMALL_MAX_DATA
     );
 }
+
+#[test]
+fn session_flow_control_affects_all_streams() {
+    const SMALL_MAX_DATA: usize = 1024;
+
+    let mut client = default_client();
+    let mut server = new_server(
+        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
+    );
+
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(
+        client.stream_avail_send_space(stream_id).unwrap(),
+        SMALL_MAX_DATA
+    );
+
+    let stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(
+        client.stream_avail_send_space(stream_id2).unwrap(),
+        SMALL_MAX_DATA
+    );
+
+    assert_eq!(
+        client
+            .stream_send(stream_id, &[b'a'; SMALL_MAX_DATA / 2 + 1])
+            .unwrap(),
+        SMALL_MAX_DATA / 2 + 1
+    );
+
+    assert_eq!(
+        client.stream_avail_send_space(stream_id).unwrap(),
+        SMALL_MAX_DATA / 2 - 1
+    );
+    assert_eq!(
+        client.stream_avail_send_space(stream_id2).unwrap(),
+        SMALL_MAX_DATA / 2 - 1
+    );
+
+    exchange_data(&mut client, &mut server);
+
+    let mut buf = [0x0; SMALL_MAX_DATA];
+    let (read, _) = server.stream_recv(stream_id, &mut buf).unwrap();
+    assert_eq!(read, SMALL_MAX_DATA / 2 + 1);
+
+    exchange_data(&mut client, &mut server);
+
+    assert_eq!(
+        client.stream_avail_send_space(stream_id).unwrap(),
+        SMALL_MAX_DATA
+    );
+
+    assert_eq!(
+        client.stream_avail_send_space(stream_id2).unwrap(),
+        SMALL_MAX_DATA
+    );
+}
