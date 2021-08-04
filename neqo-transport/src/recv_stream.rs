@@ -364,6 +364,7 @@ enum RecvStreamState {
     AbortReading {
         fc: ReceiverFlowControl<StreamId>,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+        final_size_reached: bool,
         frame_needed: bool,
         err: AppError,
     },
@@ -413,23 +414,53 @@ impl RecvStreamState {
     }
 
     fn flow_control_consume_data(&mut self, consumed: u64, fin: bool) -> Res<()> {
-        match self {
-            Self::Recv { fc, session_fc, .. }
-            | Self::SizeKnown { fc, session_fc, .. }
-            | Self::DataRecvd { fc, session_fc, .. } => {
-                let new_bytes_consumed = fc.set_consumed(consumed, fin)?;
-                session_fc.borrow_mut().consume(new_bytes_consumed)
+        let (fc, session_fc, final_size_reached, retire_data) = match self {
+            Self::Recv { fc, session_fc, .. } => (fc, session_fc, false, false),
+            Self::WaitForReset { fc, session_fc, .. } => (fc, session_fc, false, true),
+            Self::SizeKnown { fc, session_fc, .. } | Self::DataRecvd { fc, session_fc, .. } => {
+                (fc, session_fc, true, false)
             }
-            Self::AbortReading { fc, session_fc, .. }
-            | Self::WaitForReset { fc, session_fc, .. } => {
-                let new_bytes_consumed = fc.set_consumed(consumed, fin)?;
-                session_fc.borrow_mut().consume(new_bytes_consumed)?;
-                // Let's also retire this data since the stream has been aborted
-                RecvStream::flow_control_retire_data(fc.consumed() - fc.retired(), fc, session_fc);
-                Ok(())
+            Self::AbortReading {
+                fc,
+                session_fc,
+                final_size_reached,
+                ..
+            } => {
+                let old_final_size_reached = *final_size_reached;
+                *final_size_reached |= fin;
+                (fc, session_fc, old_final_size_reached, true)
             }
-            _ => Ok(()),
+            Self::DataRead | Self::ResetRecvd => {
+                return Ok(());
+            }
+        };
+
+        // Check final size:
+        match (fin, final_size_reached) {
+            (true, true) => {
+                if consumed != fc.consumed() {
+                    return Err(Error::FinalSizeError);
+                }
+            }
+            (false, true) => {
+                if consumed > fc.consumed() {
+                    return Err(Error::FinalSizeError);
+                }
+            }
+            (_, false) => {
+                if fin && consumed < fc.consumed() {
+                    return Err(Error::FinalSizeError);
+                }
+            }
         }
+
+        let new_bytes_consumed = fc.set_consumed(consumed)?;
+        session_fc.borrow_mut().consume(new_bytes_consumed)?;
+        if retire_data {
+            // Let's also retire this data since the stream has been aborted
+            RecvStream::flow_control_retire_data(fc.consumed() - fc.retired(), fc, session_fc);
+        }
+        Ok(())
     }
 }
 
@@ -503,8 +534,8 @@ impl RecvStream {
             } => {
                 recv_buf.inbound_frame(offset, data);
                 if fin {
-                    let all_recv = fc.final_size().unwrap()
-                        == recv_buf.retired() + recv_buf.bytes_ready() as u64;
+                    let all_recv =
+                        fc.consumed() == recv_buf.retired() + recv_buf.bytes_ready() as u64;
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -529,7 +560,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data);
-                if fc.final_size().unwrap() == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
+                if fc.consumed() == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -675,6 +706,7 @@ impl RecvStream {
                 self.set_state(RecvStreamState::AbortReading {
                     fc: fc_copy,
                     session_fc: session_fc_copy,
+                    final_size_reached: matches!(self.state, RecvStreamState::SizeKnown { .. }),
                     frame_needed: true,
                     err,
                 })
@@ -737,8 +769,14 @@ impl RecvStream {
     }
 
     pub fn stop_sending_acked(&mut self) {
-        if let RecvStreamState::AbortReading { fc, session_fc, .. } = &mut self.state {
-            if fc.final_size().is_some() {
+        if let RecvStreamState::AbortReading {
+            fc,
+            session_fc,
+            final_size_reached,
+            ..
+        } = &mut self.state
+        {
+            if *final_size_reached {
                 // We already know the final_size of the stream therefore we
                 // do not need to wait for RESET.
                 self.set_state(RecvStreamState::ResetRecvd);
@@ -1226,12 +1264,12 @@ mod tests {
         assert!(!s.has_frames_to_write());
     }
 
-    fn create_stream(fc: u64) -> RecvStream {
+    fn create_stream(session_fc: u64) -> RecvStream {
         let conn_events = ConnectionEvents::default();
         RecvStream::new(
             StreamId::from(67),
             RX_STREAM_DATA_WINDOW,
-            Rc::new(RefCell::new(ReceiverFlowControl::new((), fc))),
+            Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
         )
     }
@@ -1393,149 +1431,163 @@ mod tests {
         assert!(session_fc.borrow().frame_needed().is_some());
     }
 
-    fn check_fc_values(
-        session_fc: &Rc<RefCell<ReceiverFlowControl<()>>>,
-        s1: &RecvStream,
-        session_c: u64,
-        session_r: u64,
-        s1_c: u64,
-        s1_r: u64,
-    ) {
-        assert_eq!(session_fc.borrow().consumed(), session_c);
-        assert_eq!(s1.fc().unwrap().consumed(), s1_c);
-        assert_eq!(session_fc.borrow().retired(), session_r);
-        assert_eq!(s1.fc().unwrap().retired(), s1_r);
+    fn check_fc<T: std::fmt::Debug>(fc: &ReceiverFlowControl<T>, consumed: u64, retired: u64) {
+        assert_eq!(fc.consumed(), consumed);
+        assert_eq!(fc.retired(), retired);
     }
 
-    fn check_fc_values_2(
-        session_fc: &Rc<RefCell<ReceiverFlowControl<()>>>,
-        s1: &RecvStream,
-        s2: &RecvStream,
-        session_v: (u64, u64),
-        s1_v: (u64, u64),
-        s2_v: (u64, u64),
-    ) {
-        assert_eq!(session_fc.borrow().consumed(), session_v.0);
-        assert_eq!(s1.fc().unwrap().consumed(), s1_v.0);
-        assert_eq!(s2.fc().unwrap().consumed(), s2_v.0);
-        assert_eq!(session_fc.borrow().retired(), session_v.1);
-        assert_eq!(s1.fc().unwrap().retired(), s1_v.1);
-        assert_eq!(s2.fc().unwrap().retired(), s2_v.1);
-    }
-
-    // Test flow control in RecvStreamState::Recv
+    // Test consuming the flow control in RecvStreamState::Recv
     #[test]
-    fn fc_state_recv() {
+    fn fc_state_recv_1() {
+        const SW: u64 = 1024;
+        const SW_US: usize = 1024;
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
+
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
+
+        s.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
+
+        check_fc(&fc.borrow(), SW / 4, 0);
+        check_fc(s.fc().unwrap(), SW / 4, 0);
+    }
+
+    // Test consuming the flow control in RecvStreamState::Recv
+    // with multiple streams
+    #[test]
+    fn fc_state_recv_2() {
         const SW: u64 = 1024;
         const SW_US: usize = 1024;
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
         let mut s1 = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
         let mut s2 = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
 
-        check_fc_values_2(&fc, &s1, &s2, (0, 0), (0, 0), (0, 0));
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s1.fc().unwrap(), 0, 0);
+        check_fc(s2.fc().unwrap(), 0, 0);
 
         s1.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
 
-        check_fc_values_2(&fc, &s1, &s2, (SW / 4, 0), (SW / 4, 0), (0, 0));
+        check_fc(&fc.borrow(), SW / 4, 0);
+        check_fc(s1.fc().unwrap(), SW / 4, 0);
+        check_fc(s2.fc().unwrap(), 0, 0);
 
         s2.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
 
-        check_fc_values_2(&fc, &s1, &s2, (SW / 2, 0), (SW / 4, 0), (SW / 4, 0));
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s1.fc().unwrap(), SW / 4, 0);
+        check_fc(s2.fc().unwrap(), SW / 4, 0);
+    }
 
-        // Receiving duplicate frames (already consumed data) will not cause an error or
-        // change fc.
-        s2.inbound_stream_frame(false, 0, &[0; SW_US / 8]).unwrap();
-        check_fc_values_2(&fc, &s1, &s2, (SW / 2, 0), (SW / 4, 0), (SW / 4, 0));
-        s2.inbound_stream_frame(false, SW / 8, &[0; SW_US / 8])
-            .unwrap();
-        check_fc_values_2(&fc, &s1, &s2, (SW / 2, 0), (SW / 4, 0), (SW / 4, 0));
+    // Test retiring the flow control in RecvStreamState::Recv
+    // with multiple streams
+    #[test]
+    fn fc_state_recv_3() {
+        const SW: u64 = 1024;
+        const SW_US: usize = 1024;
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
+        let mut s1 = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
+        let mut s2 = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
+
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s1.fc().unwrap(), 0, 0);
+        check_fc(s2.fc().unwrap(), 0, 0);
+
+        s1.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
+        s2.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s1.fc().unwrap(), SW / 4, 0);
+        check_fc(s2.fc().unwrap(), SW / 4, 0);
 
         // Read data
         let mut buf = [1; SW_US];
         assert_eq!(s1.read(&mut buf).unwrap(), (SW_US / 4, false));
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW / 2, SW / 4),
-            (SW / 4, SW / 4),
-            (SW / 4, 0),
-        );
+        check_fc(&fc.borrow(), SW / 2, SW / 4);
+        check_fc(s1.fc().unwrap(), SW / 4, SW / 4);
+        check_fc(s2.fc().unwrap(), SW / 4, 0);
 
         assert_eq!(s2.read(&mut buf).unwrap(), (SW_US / 4, false));
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW / 2, SW / 2),
-            (SW / 4, SW / 4),
-            (SW / 4, SW / 4),
-        );
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s1.fc().unwrap(), SW / 4, SW / 4);
+        check_fc(s2.fc().unwrap(), SW / 4, SW / 4);
 
         // Read when there is no more date to be read will not change fc.
         assert_eq!(s1.read(&mut buf).unwrap(), (0, false));
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW / 2, SW / 2),
-            (SW / 4, SW / 4),
-            (SW / 4, SW / 4),
-        );
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s1.fc().unwrap(), SW / 4, SW / 4);
+        check_fc(s2.fc().unwrap(), SW / 4, SW / 4);
 
-        // Receive more data for s1
+        // Receiving more data on a stream.
         s1.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW * 3 / 4, SW / 2),
-            (SW / 2, SW / 4),
-            (SW / 4, SW / 4),
-        );
+        check_fc(&fc.borrow(), SW * 3 / 4, SW / 2);
+        check_fc(s1.fc().unwrap(), SW / 2, SW / 4);
+        check_fc(s2.fc().unwrap(), SW / 4, SW / 4);
 
         // Read data
         assert_eq!(s1.read(&mut buf).unwrap(), (SW_US / 4, false));
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW * 3 / 4, SW * 3 / 4),
-            (SW / 2, SW / 2),
-            (SW / 4, SW / 4),
-        );
+        check_fc(&fc.borrow(), SW * 3 / 4, SW * 3 / 4);
+        check_fc(s1.fc().unwrap(), SW / 2, SW / 2);
+        check_fc(s2.fc().unwrap(), SW / 4, SW / 4);
+    }
 
-        // Receive data out of order
-        s2.inbound_stream_frame(false, SW * 3 / 8, &[0; SW_US / 8])
+    // Test consuming the flow control in RecvStreamState::Recv - duplicate data
+    #[test]
+    fn fc_state_recv_4() {
+        const SW: u64 = 1024;
+        const SW_US: usize = 1024;
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
+
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
+
+        s.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
+
+        check_fc(&fc.borrow(), SW / 4, 0);
+        check_fc(s.fc().unwrap(), SW / 4, 0);
+
+        // Receiving duplicate frames (already consumed data) will not cause an error or
+        // change fc.
+        s.inbound_stream_frame(false, 0, &[0; SW_US / 8]).unwrap();
+        check_fc(&fc.borrow(), SW / 4, 0);
+        check_fc(s.fc().unwrap(), SW / 4, 0);
+    }
+
+    // Test consuming the flow control in RecvStreamState::Recv - filling a gap in the
+    // data stream.
+    #[test]
+    fn fc_state_recv_5() {
+        const SW: u64 = 1024;
+        const SW_US: usize = 1024;
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
+
+        // Receive out of order data.
+        s.inbound_stream_frame(false, SW / 8, &[0; SW_US / 8])
             .unwrap();
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW, SW * 3 / 4),
-            (SW / 2, SW / 2),
-            (SW / 2, SW / 4),
-        );
+        check_fc(&fc.borrow(), SW / 4, 0);
+        check_fc(s.fc().unwrap(), SW / 4, 0);
 
         // Filling in the gap will not change fc.
-        s2.inbound_stream_frame(false, SW / 4, &[0; SW_US / 8])
-            .unwrap();
-        check_fc_values_2(
-            &fc,
-            &s1,
-            &s2,
-            (SW, SW * 3 / 4),
-            (SW / 2, SW / 2),
-            (SW / 2, SW / 4),
-        );
+        s.inbound_stream_frame(false, 0, &[0; SW_US / 8]).unwrap();
+        check_fc(&fc.borrow(), SW / 4, 0);
+        check_fc(s.fc().unwrap(), SW / 4, 0);
+    }
 
-        assert_eq!(s2.read(&mut buf).unwrap(), (SW_US / 4, false));
-        check_fc_values_2(&fc, &s1, &s2, (SW, SW), (SW / 2, SW / 2), (SW / 2, SW / 2));
+    // Test consuming the flow control in RecvStreamState::Recv - receiving frame past
+    // the flow control will cause an error.
+    #[test]
+    fn fc_state_recv_6() {
+        const SW: u64 = 1024;
+        const SW_US: usize = 1024;
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
 
-        // Receiving frame pass the flow control will cause an error.
+        // Receiving frame past the flow control will cause an error.
         assert_eq!(
-            s2.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
+            s.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
             Err(Error::FlowControlError)
         );
     }
@@ -1549,45 +1601,52 @@ mod tests {
 
         let mut s = create_stream_with_fc(Rc::clone(&fc), SW);
 
-        check_fc_values(&fc, &s, 0, 0, 0, 0);
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
 
         s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // Receiving duplicate frames (already consumed data) will not cause an error or
         // change fc.
         s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        // Receiving frame pass the final size of a stream will return an error.
+        // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4 + 1]),
             Err(Error::FinalSizeError)
         );
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // Add new data to the gap will not change fc.
         s.inbound_stream_frame(false, SW / 8, &[0; SW_US / 8])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // Fill the gap
         s.inbound_stream_frame(false, 0, &[0; SW_US / 8]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // Read all data
         let mut buf = [1; SW_US];
         assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 2, true));
         // the stream does not have fc any more. We can only check the session fc.
-        assert_eq!(fc.borrow().consumed(), SW / 2);
-        assert_eq!(fc.borrow().retired(), SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        assert!(s.fc().is_none());
     }
 
     // Test flow control in RecvStreamState::DataRecvd
@@ -1599,35 +1658,40 @@ mod tests {
 
         let mut s = create_stream_with_fc(Rc::clone(&fc), SW);
 
-        check_fc_values(&fc, &s, 0, 0, 0, 0);
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
 
         s.inbound_stream_frame(true, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // Receiving duplicate frames (already consumed data) will not cause an error or
         // change fc.
         s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        // Receiving frame pass the final size of a stream will return an error.
+        // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4 + 1]),
             Err(Error::FinalSizeError)
         );
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         // Read all data
         let mut buf = [1; SW_US];
         assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 2, true));
         // the stream does not have fc any more. We can only check the session fc.
-        assert_eq!(fc.borrow().consumed(), SW / 2);
-        assert_eq!(fc.borrow().retired(), SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        assert!(s.fc().is_none());
     }
 
     // Test flow control in RecvStreamState::DataRead
@@ -1638,31 +1702,34 @@ mod tests {
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
 
         let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
-        check_fc_values(&fc, &s, 0, 0, 0, 0);
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
 
         s.inbound_stream_frame(true, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         let mut buf = [1; SW_US];
         assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 2, true));
         // the stream does not have fc any more. We can only check the session fc.
-        assert_eq!(fc.borrow().consumed(), SW / 2);
-        assert_eq!(fc.borrow().retired(), SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        assert!(s.fc().is_none());
 
         // Receiving duplicate frames (already consumed data) will not cause an error or
         // change fc.
         s.inbound_stream_frame(true, 0, &[0; SW_US / 2]).unwrap();
         // the stream does not have fc any more. We can only check the session fc.
-        assert_eq!(fc.borrow().consumed(), SW / 2);
-        assert_eq!(fc.borrow().retired(), SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        assert!(s.fc().is_none());
 
-        // Receiving frame pass the final size of a stream will NOT return an error.
+        // Receiving frame past the final size of a stream or the stream's fc limit
+        // will NOT return an error.
         s.inbound_stream_frame(true, 0, &[0; SW_US / 2 + 1])
             .unwrap();
-
-        // Receiving frame pass the stream's fc limit will not return an error.
         s.inbound_stream_frame(true, 0, &[0; SW_US * 3 / 4 + 1])
             .unwrap();
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        assert!(s.fc().is_none());
     }
 
     // Test flow control in RecvStreamState::AbortReading and final size is known
@@ -1673,32 +1740,38 @@ mod tests {
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
 
         let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
-        check_fc_values(&fc, &s, 0, 0, 0, 0);
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
 
         s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         s.stop_sending(Error::NoError.code());
         // All data will de retired
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
         // Receiving duplicate frames (already consumed data) will not cause an error or
         // change fc.
         s.inbound_stream_frame(true, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
-        // Receiving frame pass the final size of a stream will return an error.
+        // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 4, &[0; SW_US / 4 + 1]),
             Err(Error::FinalSizeError)
         );
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
     }
 
     // Test flow control in RecvStreamState::AbortReading and final size is unknown
@@ -1709,21 +1782,25 @@ mod tests {
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
 
         let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
-        check_fc_values(&fc, &s, 0, 0, 0, 0);
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
 
         s.inbound_stream_frame(false, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         s.stop_sending(Error::NoError.code());
         // All data will de retired
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
         // Receiving duplicate frames (already consumed data) will not cause an error or
         // change fc.
         s.inbound_stream_frame(false, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
-        // Receiving data pass the flow control limit will cause an error.
+        // Receiving data past the flow control limit will cause an error.
         assert_eq!(
             s.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
             Err(Error::FlowControlError)
@@ -1732,23 +1809,27 @@ mod tests {
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
         // Receiving more data will case the data to be retired.
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 2, &[0; 10]).unwrap();
-        check_fc_values(&fc, &s, SW / 2 + 10, SW / 2 + 10, SW / 2 + 10, SW / 2 + 10);
+        check_fc(&fc.borrow(), SW / 2 + 10, SW / 2 + 10);
+        check_fc(s.fc().unwrap(), SW / 2 + 10, SW / 2 + 10);
 
         // We can still receive the final size.
         s.inbound_stream_frame(true, SW / 2, &[0; 20]).unwrap();
-        check_fc_values(&fc, &s, SW / 2 + 20, SW / 2 + 20, SW / 2 + 20, SW / 2 + 20);
+        check_fc(&fc.borrow(), SW / 2 + 20, SW / 2 + 20);
+        check_fc(s.fc().unwrap(), SW / 2 + 20, SW / 2 + 20);
 
-        // Receiving frame pass the final size of a stream will return an error.
+        // Receiving frame past the final size of a stream will return an error.
         assert_eq!(
             s.inbound_stream_frame(true, SW / 2, &[0; 21]),
             Err(Error::FinalSizeError)
         );
-        check_fc_values(&fc, &s, SW / 2 + 20, SW / 2 + 20, SW / 2 + 20, SW / 2 + 20);
+        check_fc(&fc.borrow(), SW / 2 + 20, SW / 2 + 20);
+        check_fc(s.fc().unwrap(), SW / 2 + 20, SW / 2 + 20);
     }
 
     // Test flow control in RecvStreamState::WaitForReset
@@ -1759,22 +1840,28 @@ mod tests {
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
 
         let mut s = create_stream_with_fc(Rc::clone(&fc), SW * 3 / 4);
-        check_fc_values(&fc, &s, 0, 0, 0, 0);
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
 
         s.inbound_stream_frame(false, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, 0, SW / 2, 0);
+        check_fc(&fc.borrow(), SW / 2, 0);
+        check_fc(s.fc().unwrap(), SW / 2, 0);
 
         s.stop_sending(Error::NoError.code());
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
+
         s.stop_sending_acked();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
         // Receiving duplicate frames (already consumed data) will not cause an error or
         // change fc.
         s.inbound_stream_frame(false, 0, &[0; SW_US / 2]).unwrap();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
-        // Receiving data pass the flow control limit will cause an error.
+        // Receiving data past the flow control limit will cause an error.
         assert_eq!(
             s.inbound_stream_frame(false, 0, &[0; SW_US * 3 / 4 + 1]),
             Err(Error::FlowControlError)
@@ -1783,11 +1870,13 @@ mod tests {
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
             .unwrap();
-        check_fc_values(&fc, &s, SW / 2, SW / 2, SW / 2, SW / 2);
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
         // Receiving more data will case the data to be retired.
         // The stream can still receive duplicate data without a fin bit.
         s.inbound_stream_frame(false, SW / 2, &[0; 10]).unwrap();
-        check_fc_values(&fc, &s, SW / 2 + 10, SW / 2 + 10, SW / 2 + 10, SW / 2 + 10);
+        check_fc(&fc.borrow(), SW / 2 + 10, SW / 2 + 10);
+        check_fc(s.fc().unwrap(), SW / 2 + 10, SW / 2 + 10);
     }
 }

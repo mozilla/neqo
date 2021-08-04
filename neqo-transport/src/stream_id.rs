@@ -16,7 +16,7 @@ pub enum StreamType {
     UniDi,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash, Default)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
 pub struct StreamId(u64);
 
 impl StreamId {

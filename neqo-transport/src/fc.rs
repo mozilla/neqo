@@ -192,7 +192,7 @@ impl SenderFlowControl<StreamType> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ReceiverFlowControl<T>
 where
     T: Debug + Sized,
@@ -208,7 +208,6 @@ where
     /// offset received and session flow control will remember the sum of all bytes consumed
     /// by all streams.
     consumed: u64,
-    final_size_reached: bool,
     /// Retired items.
     retired: u64,
     frame_pending: bool,
@@ -225,7 +224,6 @@ where
             max_active: max,
             max_allowed: max,
             consumed: 0,
-            final_size_reached: false,
             retired: 0,
             frame_pending: false,
         }
@@ -307,7 +305,7 @@ impl ReceiverFlowControl<()> {
     }
 
     pub fn add_retired(&mut self, count: u64) {
-        assert!(self.retired + count <= self.consumed);
+        debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
         if self.retired + self.max_active / 2 > self.max_allowed {
             self.frame_pending = true;
@@ -326,6 +324,12 @@ impl ReceiverFlowControl<()> {
         }
         self.consumed += count;
         Ok(())
+    }
+}
+
+impl Default for ReceiverFlowControl<()> {
+    fn default() -> Self {
+        Self::new((), 0)
     }
 }
 
@@ -353,54 +357,31 @@ impl ReceiverFlowControl<StreamId> {
     }
 
     pub fn add_retired(&mut self, count: u64) {
-        assert!(self.retired + count <= self.consumed);
+        debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
         if self.retired + self.max_active / 2 > self.max_allowed {
             self.frame_pending = true;
         }
     }
 
-    pub fn set_consumed(&mut self, consumed: u64, fin: bool) -> Res<u64> {
-        let new_consumed = match (fin, self.final_size_reached) {
-            (true, true) => {
-                if consumed != self.consumed {
-                    return Err(Error::FinalSizeError);
-                }
-                0
+    pub fn set_consumed(&mut self, consumed: u64) -> Res<u64> {
+        if consumed > self.consumed {
+            if consumed > self.max_allowed {
+                qtrace!("Stream RX window exceeded: {}", consumed);
+                return Err(Error::FlowControlError);
             }
-            (false, true) => {
-                if consumed > self.consumed {
-                    return Err(Error::FinalSizeError);
-                }
-                0
-            }
-            (_, false) => {
-                if fin && consumed < self.consumed {
-                    return Err(Error::FinalSizeError);
-                }
-                self.final_size_reached = fin;
-                if consumed > self.consumed {
-                    if consumed > self.max_allowed {
-                        qtrace!("Stream RX window exceeded: {}", consumed);
-                        return Err(Error::FlowControlError);
-                    }
-                    let new_consumed = consumed - self.consumed;
-                    self.consumed = consumed;
-                    new_consumed
-                } else {
-                    0
-                }
-            }
-        };
-        Ok(new_consumed)
-    }
-
-    pub fn final_size(&self) -> Option<u64> {
-        if self.final_size_reached {
-            Some(self.consumed)
+            let new_consumed = consumed - self.consumed;
+            self.consumed = consumed;
+            Ok(new_consumed)
         } else {
-            None
+            Ok(0)
         }
+    }
+}
+
+impl Default for ReceiverFlowControl<StreamId> {
+    fn default() -> Self {
+        Self::new(StreamId::new(0), 0)
     }
 }
 

@@ -798,14 +798,14 @@ fn session_flow_control_stop_sending_state_size_known() {
     client.stream_close_send(stream_id).unwrap();
     let out2 = client.process(None, now()).dgram();
 
-    mem::drop(server.process(out2, now()).dgram());
+    server.process_input(out2.unwrap(), now());
 
     server
         .stream_stop_sending(stream_id, Error::NoError.code())
         .unwrap();
 
     // In this case the final size is known when stream_stop_sending is called
-    // and tthe server release flow control imediatley and send STOP_SENDING and
+    // and the server releases flow control immediately and sends STOP_SENDING and
     // MAX_DATA in the same packet.
     let out = server.process(out1, now()).dgram();
     client.process_input(out.unwrap(), now());
