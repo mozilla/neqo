@@ -1558,6 +1558,65 @@ mod tests {
         );
     }
 
+    // Test that the flow controls will send updates.
+    #[test]
+    fn fc_state_recv_7() {
+        const SW: u64 = 1024;
+        const SW_US: usize = 1024;
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), SW / 2);
+
+        check_fc(&fc.borrow(), 0, 0);
+        check_fc(s.fc().unwrap(), 0, 0);
+
+        s.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
+        let mut buf = [1; SW_US];
+        assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 4, false));
+        check_fc(&fc.borrow(), SW / 4, SW / 4);
+        check_fc(s.fc().unwrap(), SW / 4, SW / 4);
+
+        // Still no fc update needed.
+        assert!(fc.borrow().frame_needed().is_none());
+        assert!(s.fc().unwrap().frame_needed().is_none());
+
+        // Receive one more byte that will cause a fc update after it is read.
+        s.inbound_stream_frame(false, SW / 4, &[0]).unwrap();
+        check_fc(&fc.borrow(), SW / 4 + 1, SW / 4);
+        check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4);
+        // Only consuming data does not cause a fc update to be sent.
+        assert!(fc.borrow().frame_needed().is_none());
+        assert!(s.fc().unwrap().frame_needed().is_none());
+
+        assert_eq!(s.read(&mut buf).unwrap(), (1, false));
+        check_fc(&fc.borrow(), SW / 4 + 1, SW / 4 + 1);
+        check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4 + 1);
+        // Data are retired and the sttream fc will send an update.
+        assert!(fc.borrow().frame_needed().is_none());
+        assert!(s.fc().unwrap().frame_needed().is_some());
+
+        // Receive more data to increase fc further.
+        s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
+            .unwrap();
+        assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 4 - 1, false));
+        check_fc(&fc.borrow(), SW / 2, SW / 2);
+        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
+        assert!(fc.borrow().frame_needed().is_none());
+        assert!(s.fc().unwrap().frame_needed().is_some());
+
+        // Write the fc updatte frame
+        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut token = Vec::new();
+        s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
+
+        // Receive 1 byte that will case a session fc update after it is read.
+        s.inbound_stream_frame(false, SW / 2, &[0]).unwrap();
+        assert_eq!(s.read(&mut buf).unwrap(), (1, false));
+        check_fc(&fc.borrow(), SW / 2 + 1, SW / 2 + 1);
+        check_fc(s.fc().unwrap(), SW / 2 + 1, SW / 2 + 1);
+        assert!(fc.borrow().frame_needed().is_some());
+        assert!(s.fc().unwrap().frame_needed().is_none());
+    }
+
     // Test flow control in RecvStreamState::SizeKnown
     #[test]
     fn fc_state_size_known() {
