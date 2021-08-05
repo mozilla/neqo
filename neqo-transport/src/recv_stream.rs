@@ -670,7 +670,7 @@ impl RecvStream {
     #[cfg(test)]
     pub fn has_frames_to_write(&self) -> bool {
         if let RecvStreamState::Recv { fc, .. } = &self.state {
-            fc.frame_needed().is_some()
+            fc.frame_needed()
         } else {
             false
         }
