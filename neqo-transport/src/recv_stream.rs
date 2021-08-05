@@ -436,22 +436,15 @@ impl RecvStreamState {
         };
 
         // Check final size:
-        match (fin, final_size_reached) {
-            (true, true) => {
-                if consumed != fc.consumed() {
-                    return Err(Error::FinalSizeError);
-                }
-            }
-            (false, true) => {
-                if consumed > fc.consumed() {
-                    return Err(Error::FinalSizeError);
-                }
-            }
-            (_, false) => {
-                if fin && consumed < fc.consumed() {
-                    return Err(Error::FinalSizeError);
-                }
-            }
+        let final_size_ok = match (fin, final_size_reached) {
+            (true, true) => consumed == fc.consumed(),
+            (false, true) => consumed <= fc.consumed(),
+            (true, false) => consumed >= fc.consumed(),
+            (false, false) => true,
+        };
+
+        if !final_size_ok {
+            return Err(Error::FinalSizeError);
         }
 
         let new_bytes_consumed = fc.set_consumed(consumed)?;
@@ -1641,7 +1634,8 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let mut token = Vec::new();
         let mut stats = FrameStats::default();
-        fc.borrow_mut().write_frames(&mut builder, &mut token, &mut stats);
+        fc.borrow_mut()
+            .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 0);
         s.write_frame(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_stream_data, 1);
@@ -1653,7 +1647,8 @@ mod tests {
         check_fc(s.fc().unwrap(), SW / 2 + 1, SW / 2 + 1);
         assert!(fc.borrow().frame_needed().is_some());
         assert!(s.fc().unwrap().frame_needed().is_none());
-        fc.borrow_mut().write_frames(&mut builder, &mut token, &mut stats);
+        fc.borrow_mut()
+            .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 1);
         s.write_frame(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_stream_data, 1);
