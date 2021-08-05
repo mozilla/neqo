@@ -365,17 +365,17 @@ impl ReceiverFlowControl<StreamId> {
     }
 
     pub fn set_consumed(&mut self, consumed: u64) -> Res<u64> {
-        if consumed > self.consumed {
-            if consumed > self.max_allowed {
-                qtrace!("Stream RX window exceeded: {}", consumed);
-                return Err(Error::FlowControlError);
-            }
-            let new_consumed = consumed - self.consumed;
-            self.consumed = consumed;
-            Ok(new_consumed)
-        } else {
-            Ok(0)
+        if consumed <= self.consumed {
+            return Ok(0);
         }
+
+        if consumed > self.max_allowed {
+            qtrace!("Stream RX window exceeded: {}", consumed);
+            return Err(Error::FlowControlError);
+        }
+        let new_consumed = consumed - self.consumed;
+        self.consumed = consumed;
+        Ok(new_consumed)
     }
 }
 
