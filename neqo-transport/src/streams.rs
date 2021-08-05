@@ -86,11 +86,11 @@ impl Streams {
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
-                ..
+                final_size,
             } => {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
-                    rs.reset(application_error_code);
+                    rs.reset(application_error_code, final_size)?;
                 }
             }
             Frame::StopSending {
@@ -279,7 +279,8 @@ impl Streams {
             | RecoveryToken::StreamDataBlocked { .. }
             | RecoveryToken::MaxStreamData { .. }
             | RecoveryToken::StreamsBlocked { .. }
-            | RecoveryToken::MaxStreams { .. } => (),
+            | RecoveryToken::MaxStreams { .. }
+            | RecoveryToken::MaxData(_) => (),
             _ => unreachable!("This is not a stream RecoveryToken"),
         }
     }
@@ -329,6 +330,7 @@ impl Streams {
                 RecvStream::new(
                     next_stream_id,
                     recv_initial_max_stream_data,
+                    Rc::clone(&self.receiver_fc),
                     self.events.clone(),
                 ),
             );
@@ -402,7 +404,12 @@ impl Streams {
 
                     self.recv.insert(
                         new_id,
-                        RecvStream::new(new_id, recv_initial_max_stream_data, self.events.clone()),
+                        RecvStream::new(
+                            new_id,
+                            recv_initial_max_stream_data,
+                            Rc::clone(&self.receiver_fc),
+                            self.events.clone(),
+                        ),
                     );
                 }
                 Ok(new_id.as_u64())
