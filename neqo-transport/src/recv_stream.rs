@@ -26,7 +26,6 @@ use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use neqo_common::{qtrace, Role};
 use std::cell::RefCell;
-use std::rc::Rc;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
