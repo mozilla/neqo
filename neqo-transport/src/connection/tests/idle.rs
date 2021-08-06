@@ -440,6 +440,31 @@ fn keep_alive_responder() {
     assert_eq!(client.stats().frame_tx.ping, pings_before + 1);
 }
 
+/// Make sure that acknowledging a keep-alive is OK.
+#[test]
+fn keep_alive_ack() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream = create_stream_idle(&mut client, &mut server);
+    let mut now = now();
+
+    // Marking the stream for keep-alive changes the idle timeout.
+    client.stream_keep_alive(stream, true).unwrap();
+    assert_idle(&mut client, default_timeout() / 2);
+
+    // Wait that long and the server should send a PING frame.
+    now += default_timeout() / 2;
+    let pings_before = client.stats().frame_tx.ping;
+    let ping = client.process_output(now).dgram();
+    assert!(ping.is_some());
+    assert_eq!(client.stats().frame_tx.ping, pings_before + 1);
+
+    server.process_input(ping.unwrap(), now);
+    let ack = send_something(&mut server, now);
+    client.process_input(ack, now);
+}
+
 /// Unmark a stream as being keep-alive.
 #[test]
 fn keep_alive_unmark() {
