@@ -2573,7 +2573,7 @@ impl Connection {
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
                     RecoveryToken::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
                     // We only worry when these are lost
-                    RecoveryToken::HandshakeDone => (),
+                    RecoveryToken::HandshakeDone | RecoveryToken::KeepAlive => (),
                     _ => unreachable!("All other tokens are for streams"),
                 }
             }
