@@ -1886,8 +1886,7 @@ impl Connection {
             } else if self.streams.need_keep_alive() {
                 // We need to keep the connection alive, including sending
                 // a PING again.
-                let keep_alive = self.idle_timeout.send_keep_alive(now, pto, tokens);
-                keep_alive
+                self.idle_timeout.send_keep_alive(now, pto, tokens)
             } else {
                 false
             }
