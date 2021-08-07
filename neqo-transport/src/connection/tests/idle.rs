@@ -426,10 +426,10 @@ fn keep_alive_initiator() {
     // Check that there will be next keep-alive ping after default_timeout() / 2.
     assert_idle(&mut server, now, default_timeout() / 2);
     now += default_timeout() / 2;
-    let pings_before = server.stats().frame_tx.ping;
+    let pings_before2 = server.stats().frame_tx.ping;
     let ping = server.process_output(now).dgram();
     assert!(ping.is_some());
-    assert_eq!(server.stats().frame_tx.ping, pings_before + 1);
+    assert_eq!(server.stats().frame_tx.ping, pings_before2 + 1);
 }
 
 /// Test a keep-alive ping is retransmitted if lost.
@@ -455,10 +455,10 @@ fn keep_alive_lost() {
     // Wait for ping to be marked lost.
     assert!(server.process_output(now).callback() < AT_LEAST_PTO);
     now += AT_LEAST_PTO;
-    let pings_before = server.stats().frame_tx.ping;
+    let pings_before2 = server.stats().frame_tx.ping;
     let ping = server.process_output(now).dgram();
     assert!(ping.is_some());
-    assert_eq!(server.stats().frame_tx.ping, pings_before + 1);
+    assert_eq!(server.stats().frame_tx.ping, pings_before2 + 1);
 
     // Exchange ack for the PING.
     let out = client.process(ping, now).dgram();
