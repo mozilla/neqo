@@ -456,6 +456,16 @@ impl<'a> Handler<'a> {
         self.streams.is_empty() && self.url_queue.is_empty()
     }
 
+    fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: u64) -> bool {
+        self.streams.remove(&stream_id);
+        self.download_urls(client);
+        if self.done() {
+            client.close(Instant::now(), 0, "kthxbye!");
+            return false;
+        }
+        true
+    }
+
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
         while let Some(event) = client.next_event() {
             match event {
@@ -467,17 +477,22 @@ impl<'a> Handler<'a> {
                     headers,
                     fin,
                     ..
-                } => match self.streams.get(&stream_id) {
-                    Some(out_file) => {
-                        if out_file.is_none() {
-                            println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+                } => {
+                    match self.streams.get(&stream_id) {
+                        Some(out_file) => {
+                            if out_file.is_none() {
+                                println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+                            }
+                        }
+                        None => {
+                            println!("Data on unexpected stream: {}", stream_id);
+                            return Ok(false);
                         }
                     }
-                    None => {
-                        println!("Data on unexpected stream: {}", stream_id);
-                        return Ok(false);
+                    if fin {
+                        return Ok(self.on_stream_fin(client, stream_id));
                     }
-                },
+                }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     let mut stream_done = false;
                     match self.streams.get_mut(&stream_id) {
@@ -518,12 +533,7 @@ impl<'a> Handler<'a> {
                     }
 
                     if stream_done {
-                        self.streams.remove(&stream_id);
-                        self.download_urls(client);
-                        if self.done() {
-                            client.close(Instant::now(), 0, "kthxbye!");
-                            return Ok(false);
-                        }
+                        return Ok(self.on_stream_fin(client, stream_id));
                     }
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
