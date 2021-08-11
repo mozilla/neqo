@@ -224,6 +224,32 @@ impl Http3Connection {
         }
     }
 
+    fn handle_unblocked_streams(
+        &mut self,
+        unblocked_streams: Vec<u64>,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        for stream_id in unblocked_streams {
+            qdebug!([self], "Stream {} is unblocked", stream_id);
+            if let Some(r) = self.recv_streams.get_mut(&stream_id) {
+                if let Err(e) = r
+                    .http_stream()
+                    .ok_or(Error::HttpInternal(10))?
+                    .header_unblocked(conn)
+                {
+                    if e.stream_reset_error() {
+                        mem::drop(conn.stream_stop_sending(stream_id, e.code()));
+                        r.stream_reset(e.code(), ResetType::Local).unwrap();
+                        mem::drop(self.recv_streams.remove(&stream_id));
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// This function handles reading from all streams, i.e. control, qpack, request/response
     /// stream and unidi stream that are still do not have a type.
     /// The function cannot handle:
@@ -243,14 +269,7 @@ impl Http3Connection {
 
         match output {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
-                for stream_id in unblocked_streams {
-                    qdebug!([self], "Stream {} is unblocked", stream_id);
-                    if let Some(r) = self.recv_streams.get_mut(&stream_id) {
-                        r.http_stream()
-                            .ok_or(Error::HttpInternal(10))?
-                            .header_unblocked(conn)?;
-                    }
-                }
+                self.handle_unblocked_streams(unblocked_streams, conn)?;
                 Ok(ReceiveOutput::NoOutput)
             }
             ReceiveOutput::ControlFrames(mut control_frames) => {
