@@ -68,6 +68,35 @@ fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct Priority {
+    urgency: u8,
+    incremental: bool,
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Priority {
+            urgency: 3,
+            incremental: false,
+        }
+    }
+}
+
+impl Priority {
+    /// # Panics
+    /// If an invalid urgency (>7 is given)
+    fn new(urgency: u8, incremental: bool) -> Priority {
+        assert!(urgency < 8);
+        Priority { urgency, incremental }
+    }
+
+    /// Returns a header if required to send
+    fn header(self) -> Option<Header> {
+        todo!()
+    }
+}
+
 pub struct Http3Parameters {
     pub qpack_settings: QpackSettings,
     pub max_concurrent_push_streams: u64,
@@ -269,6 +298,7 @@ impl Http3Client {
         host: &str,
         path: &str,
         headers: &[Header],
+        priority: Priority,
     ) -> Res<u64> {
         qinfo!(
             [self],
@@ -333,6 +363,13 @@ impl Http3Client {
         }
 
         Ok(id)
+    }
+
+    /// Send an [`PRIORITY_UPDATE`-Frame][1]. Only priorities that changes have to be passed to this
+    /// function.
+    /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
+    fn priority_update(&mut self, update: &[(u64, Priority)]) -> Res<()> {
+        todo!()
     }
 
     /// An application may reset a stream(request).
