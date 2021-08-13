@@ -69,7 +69,8 @@ pub(crate) struct Http3Connection {
     pub send_streams: HashMap<u64, SendMessage>,
     pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
     // stream priorities of (bidirectional) request streams
-    stream_priorities: HashMap<u64, Priority>,
+    pub stream_priorities: HashMap<u64, Priority>,
+    pub send_priority_update: bool,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -97,6 +98,7 @@ impl Http3Connection {
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
             stream_priorities: HashMap::new(),
+            send_priority_update: false,
         }
     }
 

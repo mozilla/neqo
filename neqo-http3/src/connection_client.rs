@@ -342,9 +342,19 @@ impl Http3Client {
 
     /// Send an [`PRIORITY_UPDATE`-frame][1]. Only priorities that changes have to be passed to this
     /// function.
+    /// # Error
+    /// `InvalidStreamId` if the stream does not exist
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
-    pub fn priority_update(&mut self, _client_id: u64, _priority: Priority) -> Res<()> {
-        todo!()
+    pub fn priority_update(&mut self, client_id: u64, priority: Priority) -> Res<()> {
+        if let Some(stream_priorities) = self.base_handler.stream_priorities.get_mut(&client_id) {
+            if *stream_priorities != priority {
+                *stream_priorities = priority;
+                self.base_handler.send_priority_update = true;
+            }
+            Ok(())
+        } else {
+            Err(Error::InvalidStreamId)
+        }
     }
 
     /// An application may reset a stream(request).
