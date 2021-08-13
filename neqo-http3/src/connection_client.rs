@@ -12,7 +12,7 @@ use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
-use crate::{Header, Http3StreamType, ReceiveOutput, RecvMessageEvents, ResetType};
+use crate::{Header, ReceiveOutput, RecvMessageEvents, ResetType};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
@@ -549,18 +549,9 @@ impl Http3Client {
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     if let Err(e) = self.handle_stream_readable(stream_id) {
-                        let is_critical =
-                            if let Some(r) = self.base_handler.recv_streams.get(&stream_id) {
-                                matches!(
-                                    r.stream_type(),
-                                    Http3StreamType::Control
-                                        | Http3StreamType::Encoder
-                                        | Http3StreamType::Decoder
-                                )
-                            } else {
-                                false
-                            };
-                        if !is_critical && e.stream_reset_error() {
+                        if !self.base_handler.stream_is_critical(stream_id)
+                            && e.stream_reset_error()
+                        {
                             self.reset_stream_on_error(stream_id, e.code());
                         } else {
                             return Err(e);
@@ -6541,7 +6532,7 @@ mod tests {
 
         let headers = vec![
             Header::new(":status", "200"),
-            Header::new(":method", "GET"),
+            Header::new(":method", "GET"), // <- invalid
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
         ];
@@ -6562,7 +6553,7 @@ mod tests {
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
-        d.encode(&[0x61, 0x62, 0x63]);
+        d.encode(b"abc");
         server_send_response_and_exchange_packet(
             &mut client,
             &mut server,
