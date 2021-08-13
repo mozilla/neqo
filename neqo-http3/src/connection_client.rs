@@ -12,7 +12,7 @@ use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
-use crate::{Header, ReceiveOutput, RecvMessageEvents, ResetType};
+use crate::{Header, Priority, ReceiveOutput, RecvMessageEvents, ResetType};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
@@ -65,35 +65,6 @@ fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
         QuicVersion::Draft30 => "h3-30",
         QuicVersion::Draft31 => "h3-31",
         QuicVersion::Draft32 => "h3-32",
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct Priority {
-    urgency: u8,
-    incremental: bool,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Priority {
-            urgency: 3,
-            incremental: false,
-        }
-    }
-}
-
-impl Priority {
-    /// # Panics
-    /// If an invalid urgency (>7 is given)
-    fn new(urgency: u8, incremental: bool) -> Priority {
-        assert!(urgency < 8);
-        Priority { urgency, incremental }
-    }
-
-    /// Returns a header if required to send
-    fn header(self) -> Option<Header> {
-        todo!()
     }
 }
 
@@ -330,6 +301,9 @@ impl Http3Client {
             Header::new(":authority", host),
             Header::new(":path", path),
         ];
+        if let Some(priority_header) = priority.header() {
+            final_headers.push(priority_header);
+        }
         final_headers.extend_from_slice(headers);
 
         self.base_handler.add_streams(
@@ -342,6 +316,7 @@ impl Http3Client {
                 Box::new(self.events.clone()),
                 Some(Rc::clone(&self.push_handler)),
             )),
+            priority,
         );
 
         // Call immediately send so that at least headers get sent. This will make Firefox faster, since
@@ -365,10 +340,10 @@ impl Http3Client {
         Ok(id)
     }
 
-    /// Send an [`PRIORITY_UPDATE`-Frame][1]. Only priorities that changes have to be passed to this
+    /// Send an [`PRIORITY_UPDATE`-frame][1]. Only priorities that changes have to be passed to this
     /// function.
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
-    fn priority_update(&mut self, update: &[(u64, Priority)]) -> Res<()> {
+    pub fn priority_update(&mut self, _client_id: u64, _priority: Priority) -> Res<()> {
         todo!()
     }
 
@@ -799,7 +774,7 @@ mod tests {
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::qpack_encoder_receiver::EncoderRecvStream;
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
-    use crate::{Http3Server, RecvStream};
+    use crate::{Http3Server, Priority, RecvStream};
     use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
@@ -1217,7 +1192,15 @@ mod tests {
     // Fetch request fetch("GET", "https", "something.com", "/", headers).
     fn make_request(client: &mut Http3Client, close_sending_side: bool, headers: &[Header]) -> u64 {
         let request_stream_id = client
-            .fetch(now(), "GET", "https", "something.com", "/", headers)
+            .fetch(
+                now(),
+                "GET",
+                "https",
+                "something.com",
+                "/",
+                headers,
+                Priority::default(),
+            )
             .unwrap();
         if close_sending_side {
             client.stream_close_send(request_stream_id).unwrap();
@@ -2877,7 +2860,15 @@ mod tests {
 
         // Check that a new request cannot be made.
         assert_eq!(
-            client.fetch(now(), "GET", "https", "something.com", "/", &[]),
+            client.fetch(
+                now(),
+                "GET",
+                "https",
+                "something.com",
+                "/",
+                &[],
+                Priority::default()
+            ),
             Err(Error::AlreadyClosed)
         );
 
@@ -3686,7 +3677,15 @@ mod tests {
     fn zero_rtt_before_resumption_token() {
         let mut client = default_http3_client();
         assert!(client
-            .fetch(now(), "GET", "https", "something.com", "/", &[])
+            .fetch(
+                now(),
+                "GET",
+                "https",
+                "something.com",
+                "/",
+                &[],
+                Priority::default()
+            )
             .is_err());
     }
 

@@ -9,7 +9,7 @@
 
 use neqo_common::{event::Provider, hex, Datagram};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
@@ -539,7 +539,15 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
 
     let client_stream_id = hc
         .h3
-        .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
+        .fetch(
+            Instant::now(),
+            "GET",
+            "https",
+            &hc.host,
+            &hc.path,
+            &[],
+            Priority::default(),
+        )
         .unwrap();
     hc.h3.stream_close_send(client_stream_id).unwrap();
 
@@ -559,6 +567,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
                 &hc.host,
                 &hc.path,
                 &[Header::new("something1", "something2")],
+                Priority::default(),
             )
             .unwrap();
         hc.h3.stream_close_send(client_stream_id).unwrap();
@@ -590,7 +599,15 @@ fn test_h3_rz(
     // Exchange some data to get http3 control streams and a resumption token.
     let client_stream_id = hc
         .h3
-        .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
+        .fetch(
+            Instant::now(),
+            "GET",
+            "https",
+            &hc.host,
+            &hc.path,
+            &[],
+            Priority::default(),
+        )
         .unwrap();
     hc.h3.stream_close_send(client_stream_id).unwrap();
 
@@ -641,7 +658,15 @@ fn test_h3_rz(
         // SendH3 data during 0rtt
         let client_stream_id = hc
             .h3
-            .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
+            .fetch(
+                Instant::now(),
+                "GET",
+                "https",
+                &hc.host,
+                &hc.path,
+                &[],
+                Priority::default(),
+            )
             .unwrap();
         mem::drop(hc.h3.stream_close_send(client_stream_id));
         hc.streams.insert(client_stream_id);

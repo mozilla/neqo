@@ -14,7 +14,7 @@ use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::send_message::SendMessage;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamTypeReader;
-use crate::{Http3StreamType, ReceiveOutput, RecvStream, ResetType};
+use crate::{Http3StreamType, Priority, ReceiveOutput, RecvStream, ResetType};
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
@@ -68,6 +68,8 @@ pub(crate) struct Http3Connection {
     streams_have_data_to_send: BTreeSet<u64>,
     pub send_streams: HashMap<u64, SendMessage>,
     pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
+    // stream priorities of (bidirectional) request streams
+    stream_priorities: HashMap<u64, Priority>,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -94,6 +96,7 @@ impl Http3Connection {
             streams_have_data_to_send: BTreeSet::new(),
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
+            stream_priorities: HashMap::new(),
         }
     }
 
@@ -217,6 +220,7 @@ impl Http3Connection {
             let output = recv_stream.receive(conn);
             if recv_stream.done() {
                 self.recv_streams.remove(&stream_id);
+                self.stream_priorities.remove(&stream_id);
             }
             output
         } else {
@@ -386,7 +390,7 @@ impl Http3Connection {
     /// and perform a read.
     /// if the new stream is a push stream, the function returns `ReceiveOutput::PushStream`
     /// and the caller will handle it.
-    /// If the sttream is of a unknown type the stream will be closed.
+    /// If the stream is of a unknown type the stream will be closed.
     fn handle_new_stream(
         &mut self,
         conn: &mut Connection,
@@ -474,6 +478,7 @@ impl Http3Connection {
         if let Some(mut s) = self.recv_streams.remove(&stream_id) {
             s.stream_reset(error, ResetType::App)?;
         }
+        self.stream_priorities.remove(&stream_id);
 
         // Stream may be already be closed and we may get an error here, but we do not care.
         mem::drop(conn.stream_reset_send(stream_id, error));
@@ -490,7 +495,7 @@ impl Http3Connection {
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?;
-        // The following function may return InvalidStreamId from the transport layer if the stream has been cloesd
+        // The following function may return InvalidStreamId from the transport layer if the stream has been closed
         // already. It is ok to ignore it here.
         mem::drop(send_stream.close(conn));
         if send_stream.done() {
@@ -604,12 +609,14 @@ impl Http3Connection {
         stream_id: u64,
         send_stream: SendMessage,
         recv_stream: Box<dyn RecvStream>,
+        priority: Priority,
     ) {
         if send_stream.has_data_to_send() {
             self.streams_have_data_to_send.insert(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
         self.recv_streams.insert(stream_id, recv_stream);
+        self.stream_priorities.insert(stream_id, priority);
     }
 
     /// Add a new recv stream. This is used for push streams.
