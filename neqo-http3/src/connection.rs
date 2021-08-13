@@ -238,9 +238,13 @@ impl Http3Connection {
                     .header_unblocked(conn)
                 {
                     if e.stream_reset_error() {
+                        // Stream may be already be closed and we may get an error
+                        // here, but we do not care.
                         mem::drop(conn.stream_stop_sending(stream_id, e.code()));
                         r.stream_reset(e.code(), ResetType::Local).unwrap();
-                        mem::drop(self.recv_streams.remove(&stream_id));
+                        let res = self.recv_streams.remove(&stream_id);
+                        // The stream should still be in the list.
+                        debug_assert!(res.is_some());
                     } else {
                         return Err(e);
                     }
@@ -638,5 +642,16 @@ impl Http3Connection {
 
     pub fn queue_control_frame(&mut self, frame: &HFrame) {
         self.control_stream_local.queue_frame(frame);
+    }
+
+    pub fn stream_is_critical(&self, stream_id: u64) -> bool {
+        if let Some(r) = self.recv_streams.get(&stream_id) {
+            matches!(
+                r.stream_type(),
+                Http3StreamType::Control | Http3StreamType::Encoder | Http3StreamType::Decoder
+            )
+        } else {
+            false
+        }
     }
 }
