@@ -315,8 +315,8 @@ impl Http3Client {
                 Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(self.events.clone()),
                 Some(Rc::clone(&self.push_handler)),
+                priority,
             )),
-            priority,
         );
 
         // Call immediately send so that at least headers get sent. This will make Firefox faster, since
@@ -340,21 +340,25 @@ impl Http3Client {
         Ok(id)
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1]. Only priorities that changes have to be passed to this
-    /// function.
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [process]-call
     /// # Error
     /// `InvalidStreamId` if the stream does not exist
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
-    pub fn priority_update(&mut self, client_id: u64, priority: Priority) -> Res<()> {
-        if let Some(stream_priorities) = self.base_handler.stream_priorities.get_mut(&client_id) {
-            if *stream_priorities != priority {
-                *stream_priorities = priority;
-                self.base_handler.send_priority_update = true;
-            }
-            Ok(())
-        } else {
-            Err(Error::InvalidStreamId)
+    pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<()> {
+        let stream = self
+            .base_handler
+            .recv_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+
+        if stream.priority() != priority {
+            stream.priority_update(priority);
+            self.base_handler
+                .control_stream_local
+                .outstanding_priority_update
+                .push_back(stream_id);
         }
+        Ok(())
     }
 
     /// An application may reset a stream(request).

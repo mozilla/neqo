@@ -1,4 +1,6 @@
-use crate::Header;
+use crate::{HFrame, Header};
+use std::fmt;
+use std::io::Write;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Priority {
@@ -33,18 +35,40 @@ impl Priority {
                 urgency: 3,
                 incremental: false,
             } => None,
+            other => Some(Header::new("priority", format!("{}", other))),
+        }
+    }
+
+    pub fn encode_request_frame(self, stream_id: u64) -> HFrame {
+        let mut priority = Vec::new();
+        write!(priority, "{}", self).unwrap();
+
+        HFrame::PriorityUpdateRequest {
+            element_id: stream_id,
+            priority,
+        }
+    }
+}
+
+impl fmt::Display for Priority {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Priority {
+                urgency: 3,
+                incremental: false,
+            } => Ok(()),
             Priority {
                 urgency: 3,
                 incremental: true,
-            } => Some(Header::new("priority", "i")),
+            } => write!(f, "i"),
             Priority {
                 urgency,
                 incremental: false,
-            } => Some(Header::new("priority", format!("u={}", urgency))),
+            } => write!(f, "u={}", urgency),
             Priority {
                 urgency,
                 incremental: true,
-            } => Some(Header::new("priority", format!("u={},i", urgency))),
+            } => write!(f, "u={},i", urgency),
         }
     }
 }

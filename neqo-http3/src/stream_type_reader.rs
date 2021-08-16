@@ -6,7 +6,9 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{AppError, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{
+    AppError, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res, ResetType,
+};
 use neqo_common::{Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
 
@@ -81,6 +83,10 @@ impl RecvStream for NewStreamTypeReader {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         None
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::default()
     }
 }
 

@@ -132,8 +132,8 @@ impl Http3ServerHandler {
                             Rc::clone(&self.base_handler.qpack_decoder),
                             Box::new(self.events.clone()),
                             None,
+                            Priority::default(),
                         )),
-                        Priority::default(),
                     ),
                     StreamType::UniDi => self
                         .base_handler

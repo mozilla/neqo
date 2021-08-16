@@ -5,7 +5,8 @@
 // except according to those terms.
 
 use crate::{
-    AppError, Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType,
+    AppError, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
+    ResetType,
 };
 use neqo_qpack::QPackEncoder;
 use neqo_transport::Connection;
@@ -44,5 +45,9 @@ impl RecvStream for EncoderRecvStream {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         None
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::default()
     }
 }

@@ -323,6 +323,15 @@ pub trait RecvStream: Debug {
     fn done(&self) -> bool;
     fn stream_type(&self) -> Http3StreamType;
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream>;
+    fn priority(&self) -> Priority;
+
+    /// only relevant for streams supporting priority updates
+    #[allow(unused_variables)]
+    fn priority_update(&mut self, priority: Priority) {}
+    fn priority_update_outstanding(&self) -> bool {
+        false
+    }
+    fn priority_update_sent(&mut self) {}
 }
 
 pub trait HttpRecvStream: RecvStream {

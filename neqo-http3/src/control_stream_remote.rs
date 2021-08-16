@@ -6,7 +6,8 @@
 
 use crate::hframe::{HFrame, HFrameReader};
 use crate::{
-    AppError, Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType,
+    AppError, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
+    ResetType,
 };
 use neqo_common::qdebug;
 use neqo_transport::Connection;
@@ -69,5 +70,9 @@ impl RecvStream for ControlStreamRemote {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         None
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::default()
     }
 }

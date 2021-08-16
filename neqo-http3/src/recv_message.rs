@@ -6,7 +6,7 @@
 
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
-use crate::qlog;
+use crate::{qlog, Priority};
 use crate::{
     Error, Header, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvMessageEvents, RecvStream,
     Res, ResetType,
@@ -76,6 +76,8 @@ pub(crate) struct RecvMessage {
     conn_events: Box<dyn RecvMessageEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: u64,
+    priority: Priority,
+    last_send_priority: Priority,
     blocked_push_promise: VecDeque<PushInfo>,
 }
 
@@ -92,6 +94,7 @@ impl RecvMessage {
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
         conn_events: Box<dyn RecvMessageEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
+        priority: Priority,
     ) -> Self {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders {
@@ -102,6 +105,8 @@ impl RecvMessage {
             conn_events,
             push_handler,
             stream_id,
+            priority,
+            last_send_priority: priority,
             blocked_push_promise: VecDeque::new(),
         }
     }
@@ -455,6 +460,19 @@ impl RecvStream for RecvMessage {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
+    }
+
+    fn priority(&self) -> Priority {
+        self.priority
+    }
+    fn priority_update(&mut self, priority: Priority) {
+        self.priority = priority;
+    }
+    fn priority_update_outstanding(&self) -> bool {
+        self.priority != self.last_send_priority
+    }
+    fn priority_update_sent(&mut self) {
+        self.last_send_priority = self.priority
     }
 }
 

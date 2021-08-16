@@ -25,6 +25,7 @@ pub(crate) const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
 const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
 const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
+const H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST: HFrameType = 0xf0700;
 
 pub const H3_RESERVED_FRAME_TYPES: &[HFrameType] = &[0x2, 0x6, 0x8, 0x9];
 
@@ -55,6 +56,10 @@ pub enum HFrame {
         push_id: u64,
     },
     Grease,
+    PriorityUpdateRequest {
+        element_id: u64,
+        priority: Vec<u8>,
+    },
 }
 
 impl HFrame {
@@ -67,6 +72,7 @@ impl HFrame {
             Self::PushPromise { .. } => H3_FRAME_TYPE_PUSH_PROMISE,
             Self::Goaway { .. } => H3_FRAME_TYPE_GOAWAY,
             Self::MaxPushId { .. } => H3_FRAME_TYPE_MAX_PUSH_ID,
+            Self::PriorityUpdateRequest { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST,
             Self::Grease => {
                 let r = random(7);
                 Decoder::from(&r).decode_uint(7).unwrap() * 0x1f + 0x21
@@ -115,6 +121,16 @@ impl HFrame {
                 // Encode some number of random bytes.
                 let r = random(8);
                 enc.encode_vvec(&r[1..usize::from(1 + (r[0] & 0x7))]);
+            }
+            Self::PriorityUpdateRequest {
+                element_id,
+                priority,
+            } => {
+                let mut update_frame = Encoder::new();
+                update_frame.encode_varint(*element_id);
+                update_frame.encode(priority);
+                enc.encode_varint(update_frame.len() as u64);
+                enc.encode(&update_frame);
             }
         }
     }

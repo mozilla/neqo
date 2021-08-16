@@ -7,7 +7,9 @@
 use crate::client_events::Http3ClientEvents;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
-use crate::{Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{
+    Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res, ResetType,
+};
 use neqo_common::{Decoder, IncrementalDecoderUint};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
@@ -95,6 +97,7 @@ impl PushStream {
                     Rc::clone(&self.qpack_decoder),
                     Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
                     None,
+                    Priority::default(),
                 ),
             };
         } else {
@@ -177,6 +180,10 @@ impl RecvStream for PushStream {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::default()
     }
 }
 

@@ -58,7 +58,7 @@ pub enum Http3ClientEvent {
     /// A push has been canceled.
     PushCanceled { push_id: u64 },
     /// A push stream was been reset due to a HttpGeneralProtocol error.
-    /// Most common dase are malformed response headers.
+    /// Most common case are malformed response headers.
     PushReset { push_id: u64, error: AppError },
     /// New stream can be created
     RequestsCreatable,

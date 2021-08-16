@@ -5,9 +5,10 @@
 // except according to those terms.
 
 use crate::hframe::HFrame;
-use crate::{Res, HTTP3_UNI_STREAM_TYPE_CONTROL};
+use crate::{Http3StreamType, RecvStream, Res, HTTP3_UNI_STREAM_TYPE_CONTROL};
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamType};
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 
 // The local control stream, responsible for encoding frames and sending them
@@ -15,6 +16,8 @@ use std::convert::TryFrom;
 pub(crate) struct ControlStreamLocal {
     stream_id: Option<u64>,
     buf: Vec<u8>,
+    // `stream_id`s of outstanding request streams
+    pub outstanding_priority_update: VecDeque<u64>,
 }
 
 impl ::std::fmt::Display for ControlStreamLocal {
@@ -28,6 +31,7 @@ impl ControlStreamLocal {
         Self {
             stream_id: None,
             buf: vec![u8::try_from(HTTP3_UNI_STREAM_TYPE_CONTROL).unwrap()],
+            outstanding_priority_update: VecDeque::new(),
         }
     }
 
@@ -39,8 +43,35 @@ impl ControlStreamLocal {
     }
 
     /// Send control data if available.
-    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
+    pub fn send(
+        &mut self,
+        conn: &mut Connection,
+        recv_conn: &mut HashMap<u64, Box<dyn RecvStream>>,
+    ) -> Res<()> {
         if let Some(stream_id) = self.stream_id {
+            // send all necessary priority updates
+            while let Some(update_id) = self.outstanding_priority_update.pop_front() {
+                let update_stream = match recv_conn.get_mut(&update_id) {
+                    Some(update_stream) => update_stream,
+                    None => continue,
+                };
+                if update_stream.stream_type() != Http3StreamType::Http {
+                    continue;
+                }
+                // in case multiple priority_updates were issued, ignore now irrelevant
+                if !update_stream.priority_update_outstanding() {
+                    continue;
+                }
+                let hframe = update_stream.priority().encode_request_frame(update_id);
+                let mut enc = Encoder::new();
+                hframe.encode(&mut enc);
+                if conn.stream_send_atomic(stream_id, &enc)? {
+                    update_stream.priority_update_sent();
+                } else {
+                    self.outstanding_priority_update.push_front(update_id);
+                }
+            }
+
             if !self.buf.is_empty() {
                 qtrace!([self], "sending data.");
                 let sent = conn.stream_send(stream_id, &self.buf[..])?;
