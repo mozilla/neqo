@@ -14,7 +14,7 @@ use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::send_message::SendMessage;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamTypeReader;
-use crate::{Http3StreamType, Priority, ReceiveOutput, RecvStream, ResetType};
+use crate::{Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType};
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
@@ -203,10 +203,12 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_new_unidi_stream(&mut self, stream_id: u64) {
+    pub fn handle_new_unidi_stream(&mut self, stream_id: u64, push_stream_allowed: bool) {
         qtrace!([self], "A new stream: {}.", stream_id);
-        self.recv_streams
-            .insert(stream_id, Box::new(NewStreamTypeReader::new(stream_id)));
+        self.recv_streams.insert(
+            stream_id,
+            Box::new(NewStreamTypeReader::new(stream_id, push_stream_allowed)),
+        );
     }
 
     #[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
@@ -286,6 +288,7 @@ impl Http3Connection {
                 }
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
+            ReceiveOutput::NewStream(NewStreamType::Push(_)) => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
@@ -414,48 +417,57 @@ impl Http3Connection {
     fn handle_new_stream(
         &mut self,
         conn: &mut Connection,
-        stream_type: Http3StreamType,
+        stream_type: NewStreamType,
         stream_id: u64,
     ) -> Res<ReceiveOutput> {
-        let recv_stream: Option<Box<dyn RecvStream>> = match stream_type {
-            Http3StreamType::Control => {
+        match stream_type {
+            NewStreamType::Control => {
                 self.check_stream_exists(Http3StreamType::Control)?;
-                Some(Box::new(ControlStreamRemote::new(stream_id)))
+                self.recv_streams
+                    .insert(stream_id, Box::new(ControlStreamRemote::new(stream_id)));
             }
 
-            Http3StreamType::Push => {
-                qinfo!([self], "A new push stream {}.", stream_id);
-                None
+            NewStreamType::Push(push_id) => {
+                qinfo!(
+                    [self],
+                    "A new push stream {} push_id:{}.",
+                    stream_id,
+                    push_id
+                );
             }
-            Http3StreamType::Decoder => {
+            NewStreamType::Decoder => {
                 qinfo!([self], "A new remote qpack encoder stream {}", stream_id);
                 self.check_stream_exists(Http3StreamType::Decoder)?;
-                Some(Box::new(DecoderRecvStream::new(
+                self.recv_streams.insert(
                     stream_id,
-                    Rc::clone(&self.qpack_decoder),
-                )))
+                    Box::new(DecoderRecvStream::new(
+                        stream_id,
+                        Rc::clone(&self.qpack_decoder),
+                    )),
+                );
             }
-            Http3StreamType::Encoder => {
+            NewStreamType::Encoder => {
                 qinfo!([self], "A new remote qpack decoder stream {}", stream_id);
                 self.check_stream_exists(Http3StreamType::Encoder)?;
-                Some(Box::new(EncoderRecvStream::new(
+                self.recv_streams.insert(
                     stream_id,
-                    Rc::clone(&self.qpack_encoder),
-                )))
+                    Box::new(EncoderRecvStream::new(
+                        stream_id,
+                        Rc::clone(&self.qpack_encoder),
+                    )),
+                );
             }
             _ => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
-                None
             }
         };
 
-        match (recv_stream, stream_type) {
-            (Some(rs), _) => {
-                self.recv_streams.insert(stream_id, rs);
+        match stream_type {
+            NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id)
             }
-            (None, Http3StreamType::Push) => Ok(ReceiveOutput::PushStream),
-            (None, _) => Ok(ReceiveOutput::NoOutput),
+            NewStreamType::Push(_) => Ok(ReceiveOutput::NewStream(stream_type)),
+            _ => Ok(ReceiveOutput::NoOutput),
         }
     }
 
