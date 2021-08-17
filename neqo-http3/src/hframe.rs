@@ -12,9 +12,10 @@ use neqo_common::{
 use neqo_crypto::random;
 use neqo_transport::Connection;
 use std::convert::TryFrom;
+use std::io::Write;
 use std::mem;
 
-use crate::{Error, Res};
+use crate::{Error, Priority, Res};
 
 pub(crate) type HFrameType = u64;
 
@@ -58,7 +59,7 @@ pub enum HFrame {
     Grease,
     PriorityUpdateRequest {
         element_id: u64,
-        priority: Vec<u8>,
+        priority: Priority,
     },
 }
 
@@ -128,7 +129,11 @@ impl HFrame {
             } => {
                 let mut update_frame = Encoder::new();
                 update_frame.encode_varint(*element_id);
-                update_frame.encode(priority);
+
+                let mut priority_enc: Vec<u8> = Vec::new();
+                write!(priority_enc, "{}", priority).unwrap();
+
+                update_frame.encode(&priority_enc);
                 enc.encode_varint(update_frame.len() as u64);
                 enc.encode(&update_frame);
             }

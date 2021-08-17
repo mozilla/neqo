@@ -40,12 +40,9 @@ impl Priority {
     }
 
     pub fn encode_request_frame(self, stream_id: u64) -> HFrame {
-        let mut priority = Vec::new();
-        write!(priority, "{}", self).unwrap();
-
         HFrame::PriorityUpdateRequest {
             element_id: stream_id,
-            priority,
+            priority: self,
         }
     }
 }
