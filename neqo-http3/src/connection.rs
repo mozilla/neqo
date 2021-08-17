@@ -14,7 +14,7 @@ use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::send_message::SendMessage;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamTypeReader;
-use crate::{Http3StreamType, ReceiveOutput, RecvStream, ResetType};
+use crate::{Http3StreamType, Priority, ReceiveOutput, RecvStream, ResetType};
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
@@ -61,7 +61,7 @@ impl Http3State {
 pub(crate) struct Http3Connection {
     pub state: Http3State,
     local_qpack_settings: QpackSettings,
-    pub control_stream_local: ControlStreamLocal,
+    control_stream_local: ControlStreamLocal,
     pub qpack_encoder: Rc<RefCell<QPackEncoder>>,
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
@@ -620,5 +620,22 @@ impl Http3Connection {
 
     pub fn queue_control_frame(&mut self, frame: &HFrame) {
         self.control_stream_local.queue_frame(frame);
+    }
+
+    pub fn queue_update_priority(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
+        let stream = self
+            .recv_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
+            .ok_or(Error::InvalidStreamId)?;
+
+        if stream.priority() != priority {
+            stream.priority_update(priority);
+            self.control_stream_local.queue_update_priority(stream_id);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }

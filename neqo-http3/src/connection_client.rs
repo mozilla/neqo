@@ -346,23 +346,7 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
     pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
-        let stream = self
-            .base_handler
-            .recv_streams
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?
-            .http_stream()
-            .ok_or(Error::InvalidStreamId)?;
-
-        if stream.priority() != priority {
-            stream.priority_update(priority);
-            self.base_handler
-                .control_stream_local
-                .queue_update_priority(stream_id);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.base_handler.queue_update_priority(stream_id, priority)
     }
 
     /// An application may reset a stream(request).
