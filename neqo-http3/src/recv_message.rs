@@ -461,19 +461,6 @@ impl RecvStream for RecvMessage {
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
     }
-
-    fn priority(&self) -> Priority {
-        self.priority
-    }
-    fn priority_update(&mut self, priority: Priority) {
-        self.priority = priority;
-    }
-    fn priority_update_outstanding(&self) -> bool {
-        self.priority != self.last_send_priority
-    }
-    fn priority_update_sent(&mut self) {
-        self.last_send_priority = self.priority
-    }
 }
 
 impl HttpRecvStream for RecvMessage {
@@ -537,5 +524,21 @@ impl HttpRecvStream for RecvMessage {
                 _ => break Ok((written, false)),
             }
         }
+    }
+
+    fn priority(&self) -> Priority {
+        self.priority
+    }
+
+    fn priority_update(&mut self, priority: Priority) {
+        self.priority = priority;
+    }
+
+    fn priority_update_outstanding(&self) -> bool {
+        self.priority != self.last_send_priority
+    }
+
+    fn priority_update_sent(&mut self) {
+        self.last_send_priority = self.priority
     }
 }

@@ -181,10 +181,6 @@ impl RecvStream for PushStream {
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
     }
-
-    fn priority(&self) -> Priority {
-        Priority::default()
-    }
 }
 
 impl HttpRecvStream for PushStream {
@@ -203,5 +199,21 @@ impl HttpRecvStream for PushStream {
         } else {
             Err(Error::InvalidStreamId)
         }
+    }
+
+    fn priority(&self) -> Priority {
+        todo!()
+    }
+
+    fn priority_update(&mut self, _priority: Priority) {
+        todo!()
+    }
+
+    fn priority_update_outstanding(&self) -> bool {
+        todo!()
+    }
+
+    fn priority_update_sent(&mut self) {
+        todo!()
     }
 }

@@ -349,6 +349,8 @@ impl Http3Client {
             .base_handler
             .recv_streams
             .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
         if stream.priority() != priority {

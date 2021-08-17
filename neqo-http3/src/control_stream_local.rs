@@ -55,9 +55,10 @@ impl ControlStreamLocal {
                     Some(update_stream) => update_stream,
                     None => continue,
                 };
-                if update_stream.stream_type() != Http3StreamType::Http {
-                    continue;
-                }
+                // can unwrap here, because
+                let update_stream = update_stream.http_stream().unwrap();
+                assert_eq!(update_stream.stream_type(), Http3StreamType::Http);
+
                 // in case multiple priority_updates were issued, ignore now irrelevant
                 if !update_stream.priority_update_outstanding() {
                     continue;
