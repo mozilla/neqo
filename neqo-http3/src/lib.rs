@@ -29,6 +29,7 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
+use crate::control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL;
 use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
 use neqo_qpack::encoder::QPACK_UNI_STREAM_TYPE_ENCODER;
 use neqo_qpack::Error as QpackError;
@@ -279,7 +280,6 @@ impl ::std::fmt::Display for Error {
     }
 }
 
-pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -293,14 +293,28 @@ pub enum Http3StreamType {
     Unknown,
 }
 
-impl From<u64> for Http3StreamType {
-    fn from(stream_type: u64) -> Self {
-        match stream_type {
-            HTTP3_UNI_STREAM_TYPE_CONTROL => Self::Control,
-            HTTP3_UNI_STREAM_TYPE_PUSH => Self::Push,
-            QPACK_UNI_STREAM_TYPE_ENCODER => Self::Decoder,
-            QPACK_UNI_STREAM_TYPE_DECODER => Self::Encoder,
-            _ => Self::Unknown,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NewStreamType {
+    Control,
+    Decoder,
+    Encoder,
+    Http,
+    Push(u64),
+    Unknown,
+}
+
+impl NewStreamType {
+    fn decode_stream_type(
+        stream_type: u64,
+        push_stream_allowed: bool,
+    ) -> Res<Option<NewStreamType>> {
+        match (stream_type, push_stream_allowed) {
+            (HTTP3_UNI_STREAM_TYPE_CONTROL, _) => Ok(Some(NewStreamType::Control)),
+            (QPACK_UNI_STREAM_TYPE_ENCODER, _) => Ok(Some(NewStreamType::Decoder)),
+            (QPACK_UNI_STREAM_TYPE_DECODER, _) => Ok(Some(NewStreamType::Encoder)),
+            (HTTP3_UNI_STREAM_TYPE_PUSH, true) => Ok(None),
+            (HTTP3_UNI_STREAM_TYPE_PUSH, false) => Err(Error::HttpStreamCreation),
+            _ => Ok(Some(NewStreamType::Unknown)),
         }
     }
 }
@@ -311,7 +325,7 @@ pub enum ReceiveOutput {
     PushStream,
     ControlFrames(Vec<HFrame>),
     UnblockedStreams(Vec<u64>),
-    NewStream(Http3StreamType),
+    NewStream(NewStreamType),
 }
 
 pub trait RecvStream: Debug {

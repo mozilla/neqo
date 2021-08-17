@@ -6,13 +6,21 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{AppError, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
-use neqo_common::{Decoder, IncrementalDecoderUint};
+use crate::{
+    AppError, Error, Http3StreamType, HttpRecvStream, NewStreamType, ReceiveOutput, RecvStream,
+    Res, ResetType,
+};
+use neqo_common::{qtrace, Decoder, IncrementalDecoderUint};
 use neqo_transport::Connection;
 
 #[derive(Debug)]
 pub enum NewStreamTypeReader {
-    Read {
+    ReadType {
+        push_stream_allowed: bool,
+        reader: IncrementalDecoderUint,
+        stream_id: u64,
+    },
+    ReadSessionId {
         reader: IncrementalDecoderUint,
         stream_id: u64,
     },
@@ -20,41 +28,96 @@ pub enum NewStreamTypeReader {
 }
 
 impl NewStreamTypeReader {
-    pub fn new(stream_id: u64) -> Self {
-        NewStreamTypeReader::Read {
+    pub fn new(stream_id: u64, push_stream_allowed: bool) -> Self {
+        NewStreamTypeReader::ReadType {
+            push_stream_allowed,
             reader: IncrementalDecoderUint::default(),
             stream_id,
         }
     }
 
-    pub fn get_type(&mut self, conn: &mut Connection) -> Option<Http3StreamType> {
-        // On any error we will only close this stream!
-        loop {
-            if let NewStreamTypeReader::Read {
-                ref mut reader,
-                stream_id,
-            } = self
-            {
+    fn read(&mut self, conn: &mut Connection) -> Res<(Option<u64>, bool)> {
+        match self {
+            NewStreamTypeReader::ReadType {
+                reader, stream_id, ..
+            }
+            | NewStreamTypeReader::ReadSessionId { reader, stream_id } => loop {
                 let to_read = reader.min_remaining();
                 let mut buf = vec![0; to_read];
-                match conn.stream_recv(*stream_id, &mut buf[..]) {
-                    Ok((0, false)) => {
-                        return None;
-                    }
-                    Ok((amount, false)) => {
-                        if let Some(res) = reader.consume(&mut Decoder::from(&buf[..amount])) {
-                            *self = NewStreamTypeReader::Done;
-                            return Some(res.into());
+                match conn.stream_recv(*stream_id, &mut buf[..])? {
+                    (0, f) => break Ok((None, f)),
+                    (amount, f) => {
+                        let res = reader.consume(&mut Decoder::from(&buf[..amount]));
+                        if res.is_some() || f {
+                            break Ok((res, f));
                         }
                     }
-                    Ok((_, true)) | Err(_) => {
-                        *self = NewStreamTypeReader::Done;
-                        return None;
-                    }
                 }
-            } else {
-                return None;
+            },
+            _ => Ok((None, false)),
+        }
+    }
+
+    pub fn get_type(&mut self, conn: &mut Connection) -> Res<Option<NewStreamType>> {
+        loop {
+            let (output, fin) = self.read(conn)?;
+            if output.is_none() {
+                if fin {
+                    *self = NewStreamTypeReader::Done;
+                    break Err(Error::HttpStreamCreation);
+                }
+                break Ok(None);
             }
+            let output = output.unwrap();
+            qtrace!("Decoded uint {}", output);
+            match self {
+                NewStreamTypeReader::ReadType {
+                    push_stream_allowed,
+                    stream_id,
+                    ..
+                } => {
+                    let res = NewStreamType::decode_stream_type(output, *push_stream_allowed);
+                    if res.is_err() {
+                        *self = NewStreamTypeReader::Done;
+                        return res;
+                    }
+                    let res = res.unwrap();
+                    if fin {
+                        *self = NewStreamTypeReader::Done;
+                        return self.map_stream_fin(res);
+                    }
+                    qtrace!("Decoded stream type {:?}", res);
+                    if res.is_some() {
+                        *self = NewStreamTypeReader::Done;
+                        break Ok(res);
+                    }
+                    // This is a WebTransportStream stream and it needs more data to be decoded.
+                    *self = NewStreamTypeReader::ReadSessionId {
+                        reader: IncrementalDecoderUint::default(),
+                        stream_id: *stream_id,
+                    };
+                }
+                NewStreamTypeReader::ReadSessionId { .. } => {
+                    *self = NewStreamTypeReader::Done;
+                    qtrace!("New Stream stream push_id={}", output);
+                    if fin {
+                        break Err(Error::HttpGeneralProtocol);
+                    }
+                    break Ok(Some(NewStreamType::Push(output)));
+                }
+                _ => unreachable!("Cannot be in state NewStreamTypeReader::Done"),
+            }
+        }
+    }
+
+    fn map_stream_fin(&self, decoded: Option<NewStreamType>) -> Res<Option<NewStreamType>> {
+        match decoded {
+            Some(NewStreamType::Control)
+            | Some(NewStreamType::Encoder)
+            | Some(NewStreamType::Decoder) => Err(Error::HttpClosedCriticalStream),
+            None => Err(Error::HttpStreamCreation),
+            Some(NewStreamType::Unknown) => Ok(decoded),
+            _ => unreachable!("PushStream is mapped to None at this stage."),
         }
     }
 }
@@ -67,12 +130,12 @@ impl RecvStream for NewStreamTypeReader {
 
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
         Ok(self
-            .get_type(conn)
-            .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream))
+            .get_type(conn)?
+            .map_or(ReceiveOutput::NoOutput, |t| ReceiveOutput::NewStream(t)))
     }
 
     fn done(&self) -> bool {
-        matches!(*self, NewStreamTypeReader::Done)
+        matches!(self, NewStreamTypeReader::Done)
     }
 
     fn stream_type(&self) -> Http3StreamType {
@@ -91,9 +154,9 @@ mod tests {
     use std::mem;
     use test_fixture::{connect, now};
 
+    use crate::control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL;
     use crate::{
-        Http3StreamType, ReceiveOutput, RecvStream, ResetType, HTTP3_UNI_STREAM_TYPE_CONTROL,
-        HTTP3_UNI_STREAM_TYPE_PUSH,
+        Error, NewStreamType, ReceiveOutput, RecvStream, Res, ResetType, HTTP3_UNI_STREAM_TYPE_PUSH,
     };
     use neqo_common::Encoder;
     use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
@@ -107,7 +170,7 @@ mod tests {
     }
 
     impl Test {
-        fn new() -> Self {
+        fn new(push_allowed: bool) -> Self {
             let (mut conn_c, mut conn_s) = connect();
             // create a stream
             let stream_id = conn_s.stream_create(StreamType::UniDi).unwrap();
@@ -118,11 +181,17 @@ mod tests {
                 conn_c,
                 conn_s,
                 stream_id,
-                decoder: NewStreamTypeReader::new(stream_id),
+                decoder: NewStreamTypeReader::new(stream_id, push_allowed),
             }
         }
 
-        fn decode_buffer(&mut self, enc: &[u8], outcome: &ReceiveOutput, done: bool) {
+        fn decode_buffer(
+            &mut self,
+            enc: &[u8],
+            fin: bool,
+            outcome: Res<ReceiveOutput>,
+            done: bool,
+        ) {
             let len = enc.len() - 1;
             for i in 0..len {
                 self.conn_s
@@ -139,78 +208,172 @@ mod tests {
             self.conn_s
                 .stream_send(self.stream_id, &enc[enc.len() - 1..])
                 .unwrap();
+            if fin {
+                self.conn_s.stream_close_send(self.stream_id).unwrap();
+            }
             let out = self.conn_s.process(None, now());
             mem::drop(self.conn_c.process(out.dgram(), now()));
-            assert_eq!(self.decoder.receive(&mut self.conn_c).unwrap(), *outcome);
+            assert_eq!(self.decoder.receive(&mut self.conn_c), outcome);
             assert_eq!(self.decoder.done(), done);
         }
 
-        fn decode(&mut self, stream_type: u64, outcome: &ReceiveOutput, done: bool) {
+        fn decode(
+            &mut self,
+            to_encode: &[u64],
+            fin: bool,
+            outcome: Res<ReceiveOutput>,
+            done: bool,
+        ) {
             let mut enc = Encoder::default();
-            enc.encode_varint(stream_type);
-            self.decode_buffer(&enc[..], outcome, done);
+            for i in to_encode {
+                enc.encode_varint(*i);
+            }
+            self.decode_buffer(&enc[..], fin, outcome, done);
         }
     }
 
     #[test]
     fn decode_streams() {
-        let mut t = Test::new();
+        let mut t = Test::new(false);
         t.decode(
-            QPACK_UNI_STREAM_TYPE_DECODER,
-            &ReceiveOutput::NewStream(Http3StreamType::Encoder),
+            &[QPACK_UNI_STREAM_TYPE_DECODER],
+            false,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Encoder)),
             true,
         );
 
-        let mut t = Test::new();
+        let mut t = Test::new(false);
         t.decode(
-            QPACK_UNI_STREAM_TYPE_ENCODER,
-            &ReceiveOutput::NewStream(Http3StreamType::Decoder),
+            &[QPACK_UNI_STREAM_TYPE_ENCODER],
+            false,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Decoder)),
             true,
         );
 
-        let mut t = Test::new();
+        let mut t = Test::new(false);
         t.decode(
-            HTTP3_UNI_STREAM_TYPE_CONTROL,
-            &ReceiveOutput::NewStream(Http3StreamType::Control),
+            &[HTTP3_UNI_STREAM_TYPE_CONTROL],
+            false,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Control)),
             true,
         );
 
-        let mut t = Test::new();
+        let mut t = Test::new(true);
         t.decode(
-            HTTP3_UNI_STREAM_TYPE_PUSH,
-            &ReceiveOutput::NewStream(Http3StreamType::Push),
+            &[HTTP3_UNI_STREAM_TYPE_PUSH, 0xaaaa_aaaa],
+            false,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa))),
             true,
         );
 
-        let mut t = Test::new();
+        let mut t = Test::new(false);
         t.decode(
-            0x3fff_ffff_ffff_ffff,
-            &ReceiveOutput::NewStream(Http3StreamType::Unknown),
+            &[HTTP3_UNI_STREAM_TYPE_PUSH],
+            false,
+            Err(Error::HttpStreamCreation),
+            true,
+        );
+
+        let mut t = Test::new(true);
+        t.decode(
+            &[0x3fff_ffff_ffff_ffff],
+            false,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Unknown)),
             true,
         );
     }
 
     #[test]
     fn done_decoding() {
-        let mut t = Test::new();
+        let mut t = Test::new(true);
         t.decode(
-            0x3fff,
-            &ReceiveOutput::NewStream(Http3StreamType::Unknown),
+            &[0x3fff],
+            false,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Unknown)),
             true,
         );
-        t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, &ReceiveOutput::NoOutput, true);
+        // NewStreamTypeReader is done, it will not continue reading from the stream.
+        t.decode(
+            &[QPACK_UNI_STREAM_TYPE_DECODER],
+            false,
+            Ok(ReceiveOutput::NoOutput),
+            true,
+        );
     }
 
     #[test]
     fn decoding_truncate() {
-        let mut t = Test::new();
-        t.decode_buffer(&[0xff], &ReceiveOutput::NoOutput, false);
+        let mut t = Test::new(false);
+        t.decode_buffer(&[0xff], false, Ok(ReceiveOutput::NoOutput), false);
     }
 
     #[test]
     fn reset() {
-        let mut t = Test::new();
+        let mut t = Test::new(true);
         t.decoder.stream_reset(0x100, ResetType::Remote).unwrap();
-        t.decode(HTTP3_UNI_STREAM_TYPE_PUSH, &ReceiveOutput::NoOutput, true);
+        // after a reset NewStreamTypeReader will not read more data.
+        t.decode(
+            &[QPACK_UNI_STREAM_TYPE_DECODER],
+            false,
+            Ok(ReceiveOutput::NoOutput),
+            true,
+        );
+    }
+
+    #[test]
+    fn stream_fin() {
+        let mut t = Test::new(false);
+        t.decode(
+            &[QPACK_UNI_STREAM_TYPE_DECODER],
+            true,
+            Err(Error::HttpClosedCriticalStream),
+            true,
+        );
+
+        let mut t = Test::new(false);
+        t.decode(
+            &[QPACK_UNI_STREAM_TYPE_ENCODER],
+            true,
+            Err(Error::HttpClosedCriticalStream),
+            true,
+        );
+
+        let mut t = Test::new(false);
+        t.decode(
+            &[HTTP3_UNI_STREAM_TYPE_CONTROL],
+            true,
+            Err(Error::HttpClosedCriticalStream),
+            true,
+        );
+
+        let mut t = Test::new(true);
+        t.decode(
+            &[HTTP3_UNI_STREAM_TYPE_PUSH, 0xaaaa_aaaa],
+            true,
+            Err(Error::HttpGeneralProtocol),
+            true,
+        );
+
+        let mut t = Test::new(false);
+        t.decode(
+            &[HTTP3_UNI_STREAM_TYPE_PUSH],
+            true,
+            Err(Error::HttpStreamCreation),
+            true,
+        );
+
+        let mut t = Test::new(true);
+        t.decode(
+            &[0x3fff_ffff_ffff_ffff],
+            true,
+            Ok(ReceiveOutput::NewStream(NewStreamType::Unknown)),
+            true,
+        );
+
+        let mut t = Test::new(true);
+        // stream_id 0x3fff_ffff_ffff_ffff is encoded into [0xff, 8].
+        // For this test the last byte is no delivered before a fin.
+        // This should cause aan error.
+        t.decode_buffer(&[0xff; 7], true, Err(Error::HttpStreamCreation), true);
     }
 }

@@ -12,7 +12,7 @@ use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
-use crate::{Header, Priority, ReceiveOutput, RecvMessageEvents, ResetType};
+use crate::{Header, NewStreamType, Priority, ReceiveOutput, RecvMessageEvents, ResetType};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
@@ -555,7 +555,7 @@ impl Http3Client {
                     StreamType::BiDi => return Err(Error::HttpStreamCreation),
                     StreamType::UniDi => self
                         .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64()),
+                        .handle_new_unidi_stream(stream_id.as_u64(), true),
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
@@ -623,7 +623,9 @@ impl Http3Client {
             .base_handler
             .handle_stream_readable(&mut self.conn, stream_id)?
         {
-            ReceiveOutput::PushStream => self.handle_new_push_stream(stream_id),
+            ReceiveOutput::NewStream(NewStreamType::Push(push_id)) => {
+                self.handle_new_push_stream(stream_id, push_id)
+            }
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
@@ -648,26 +650,43 @@ impl Http3Client {
         }
     }
 
-    fn handle_new_push_stream(&mut self, stream_id: u64) -> Res<()> {
-        if self.push_handler.borrow().can_receive_push() {
-            self.base_handler.add_recv_stream(
-                stream_id,
-                Box::new(PushStream::new(
-                    stream_id,
-                    Rc::clone(&self.push_handler),
-                    Rc::clone(&self.base_handler.qpack_decoder),
-                    self.events.clone(),
-                    Priority::default(),
-                )),
-            );
-            let res = self
-                .base_handler
-                .handle_stream_readable(&mut self.conn, stream_id)?;
-            debug_assert!(matches!(res, ReceiveOutput::NoOutput));
-            Ok(())
-        } else {
-            Err(Error::HttpId)
+    fn handle_new_push_stream(&mut self, stream_id: u64, push_id: u64) -> Res<()> {
+        if !self.push_handler.borrow().can_receive_push() {
+            return Err(Error::HttpId);
         }
+
+        // Add a new pish stream to `PushController`. `add_new_push_stream` may return an error
+        // (this will be a connection error) or a bool.
+        // If false is returned that means that the stream should be reset because the push has
+        // been already canceled (CANCEL_PUSH frame or canceling push from the application).
+        if !self
+            .push_handler
+            .borrow_mut()
+            .add_new_push_stream(push_id, stream_id)?
+        {
+            // We are not interested in the result of stream_stop_sending, we are not interested
+            // in this stream.
+            mem::drop(
+                self.conn
+                    .stream_stop_sending(stream_id, Error::HttpRequestCancelled.code()),
+            );
+            return Ok(());
+        }
+
+        self.base_handler.add_recv_stream(
+            stream_id,
+            Box::new(PushStream::new(
+                stream_id,
+                push_id,
+                Rc::clone(&self.push_handler),
+                Rc::clone(&self.base_handler.qpack_decoder),
+            )),
+        );
+        let res = self
+            .base_handler
+            .handle_stream_readable(&mut self.conn, stream_id)?;
+        debug_assert!(matches!(res, ReceiveOutput::NoOutput));
+        Ok(())
     }
 
     fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
