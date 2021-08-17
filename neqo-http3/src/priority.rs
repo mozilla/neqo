@@ -1,6 +1,5 @@
 use crate::{HFrame, Header};
 use std::fmt;
-use std::io::Write;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Priority {

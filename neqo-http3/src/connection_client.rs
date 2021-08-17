@@ -340,10 +340,11 @@ impl Http3Client {
         Ok(id)
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [process]-call, returns if the priority got
-    /// changed
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [Http3Client::process_output()]-call,
+    /// returns if the priority got changed
     /// # Error
     /// `InvalidStreamId` if the stream does not exist
+    ///
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
     pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
         self.base_handler.queue_update_priority(stream_id, priority)
