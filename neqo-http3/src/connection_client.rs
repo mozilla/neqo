@@ -340,11 +340,12 @@ impl Http3Client {
         Ok(id)
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [process]-call
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [process]-call, returns if the priority got
+    /// changed
     /// # Error
     /// `InvalidStreamId` if the stream does not exist
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
-    pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<()> {
+    pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
         let stream = self
             .base_handler
             .recv_streams
@@ -357,10 +358,11 @@ impl Http3Client {
             stream.priority_update(priority);
             self.base_handler
                 .control_stream_local
-                .outstanding_priority_update
-                .push_back(stream_id);
+                .queue_update_priority(stream_id);
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(())
     }
 
     /// An application may reset a stream(request).

@@ -17,7 +17,7 @@ pub(crate) struct ControlStreamLocal {
     stream_id: Option<u64>,
     buf: Vec<u8>,
     // `stream_id`s of outstanding request streams
-    pub outstanding_priority_update: VecDeque<u64>,
+    outstanding_priority_update: VecDeque<u64>,
 }
 
 impl ::std::fmt::Display for ControlStreamLocal {
@@ -40,6 +40,10 @@ impl ControlStreamLocal {
         let mut enc = Encoder::default();
         f.encode(&mut enc);
         self.buf.append(&mut enc.into());
+    }
+
+    pub fn queue_update_priority(&mut self, stream_id: u64) {
+        self.outstanding_priority_update.push_back(stream_id);
     }
 
     /// Send control data if available.
