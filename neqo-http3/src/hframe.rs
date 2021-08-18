@@ -293,7 +293,9 @@ impl HFrameReader {
                         | H3_FRAME_TYPE_GOAWAY
                         | H3_FRAME_TYPE_MAX_PUSH_ID
                         | H3_FRAME_TYPE_PUSH_PROMISE
-                        | H3_FRAME_TYPE_HEADERS => {
+                        | H3_FRAME_TYPE_HEADERS
+                        | H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST
+                        | H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH => {
                             if len == 0 {
                                 return Ok(Some(self.get_frame()?));
                             }
@@ -375,6 +377,22 @@ impl HFrameReader {
             H3_FRAME_TYPE_MAX_PUSH_ID => HFrame::MaxPushId {
                 push_id: dec.decode_varint().ok_or(Error::HttpFrame)?,
             },
+            H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST | H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH => {
+                let element_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
+                let priority = dec.decode_remainder();
+                let priority = Priority::from_bytes(priority).map_err(|_| Error::HttpFrame)?;
+                if self.hframe_type == H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST {
+                    HFrame::PriorityUpdateRequest {
+                        element_id,
+                        priority,
+                    }
+                } else {
+                    HFrame::PriorityUpdatePush {
+                        element_id,
+                        priority,
+                    }
+                }
+            }
             _ => panic!("We should not be calling this function with unknown frame type!"),
         };
         self.reset();
