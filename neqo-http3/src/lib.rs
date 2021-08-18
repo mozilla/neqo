@@ -29,9 +29,6 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use crate::control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL;
-use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
-use neqo_qpack::encoder::QPACK_UNI_STREAM_TYPE_ENCODER;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
 use neqo_transport::{AppError, Connection, Error as TransportError};
@@ -48,6 +45,7 @@ pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{ClientRequestStream, Http3ServerEvent};
 pub use settings::HttpZeroRttChecker;
+pub use stream_type_reader::NewStreamType;
 
 type Res<T> = Result<T, Error>;
 
@@ -280,8 +278,6 @@ impl ::std::fmt::Display for Error {
     }
 }
 
-pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Http3StreamType {
     Control,
@@ -291,32 +287,6 @@ pub enum Http3StreamType {
     Http,
     Push,
     Unknown,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum NewStreamType {
-    Control,
-    Decoder,
-    Encoder,
-    Http,
-    Push(u64),
-    Unknown,
-}
-
-impl NewStreamType {
-    fn decode_stream_type(
-        stream_type: u64,
-        push_stream_allowed: bool,
-    ) -> Res<Option<NewStreamType>> {
-        match (stream_type, push_stream_allowed) {
-            (HTTP3_UNI_STREAM_TYPE_CONTROL, _) => Ok(Some(NewStreamType::Control)),
-            (QPACK_UNI_STREAM_TYPE_ENCODER, _) => Ok(Some(NewStreamType::Decoder)),
-            (QPACK_UNI_STREAM_TYPE_DECODER, _) => Ok(Some(NewStreamType::Encoder)),
-            (HTTP3_UNI_STREAM_TYPE_PUSH, true) => Ok(None),
-            (HTTP3_UNI_STREAM_TYPE_PUSH, false) => Err(Error::HttpStreamCreation),
-            _ => Ok(Some(NewStreamType::Unknown)),
-        }
-    }
 }
 
 #[derive(PartialEq, Debug)]

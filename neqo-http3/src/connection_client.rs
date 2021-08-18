@@ -555,7 +555,7 @@ impl Http3Client {
                     StreamType::BiDi => return Err(Error::HttpStreamCreation),
                     StreamType::UniDi => self
                         .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64(), true),
+                        .handle_new_unidi_stream(stream_id.as_u64(), Role::Client),
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
@@ -655,7 +655,7 @@ impl Http3Client {
             return Err(Error::HttpId);
         }
 
-        // Add a new pish stream to `PushController`. `add_new_push_stream` may return an error
+        // Add a new push stream to `PushController`. `add_new_push_stream` may return an error
         // (this will be a connection error) or a bool.
         // If false is returned that means that the stream should be reset because the push has
         // been already canceled (CANCEL_PUSH frame or canceling push from the application).

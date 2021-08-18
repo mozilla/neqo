@@ -13,9 +13,9 @@ use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::send_message::SendMessage;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
-use crate::stream_type_reader::NewStreamTypeReader;
+use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType};
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_qpack::QpackSettings;
@@ -203,11 +203,11 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_new_unidi_stream(&mut self, stream_id: u64, push_stream_allowed: bool) {
+    pub fn handle_new_unidi_stream(&mut self, stream_id: u64, role: Role) {
         qtrace!([self], "A new stream: {}.", stream_id);
         self.recv_streams.insert(
             stream_id,
-            Box::new(NewStreamTypeReader::new(stream_id, push_stream_allowed)),
+            Box::new(NewStreamHeadReader::new(stream_id, role)),
         );
     }
 
