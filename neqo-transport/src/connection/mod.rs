@@ -39,12 +39,13 @@ use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::frame::{
     CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
-    FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT, FRAME_TYPE_DATAGRAM, FRAME_TYPE_DATAGRAM_WITH_LEN,
+    FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
 use crate::packet::{
     DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion,
 };
 use crate::path::{Path, PathRef, Paths};
+use crate::quic_datagrams::QuicDatagrams;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
 use crate::rtt::GRANULARITY;
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
@@ -246,10 +247,9 @@ pub struct Connection {
     /// In particular, this occurs when asynchronous certificate validation happens.
     saved_datagrams: SavedDatagrams,
 
+    /// This is responsible for the QuicDatagrams' handling:
     /// https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
-    /// Holds one Datagram that will be sent as soon as possible. If a new datagram is
-    /// added before the previous has been sent, the old Datagram will be lost.
-    datagram: Option<Vec<u8>>,
+    quic_datagrams: QuicDatagrams,
 
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
@@ -368,6 +368,11 @@ impl Connection {
 
         let stats = StatsCell::default();
         let events = ConnectionEvents::default();
+        let quic_datagrams = QuicDatagrams::new(
+            conn_params.get_datagram_size(),
+            conn_params.get_queued_datagrams(),
+            events.clone(),
+        );
 
         let c = Self {
             role,
@@ -395,7 +400,7 @@ impl Connection {
             release_resumption_token_timer: None,
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
-            datagram: None,
+            quic_datagrams,
             #[cfg(test)]
             test_frame_writer: None,
         };
@@ -1806,6 +1811,9 @@ impl Connection {
             }
         }
 
+        // Check if there is a Datagram to be written
+        self.quic_datagrams.write_frames(builder, tokens, stats);
+
         self.streams
             .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
         if builder.is_full() {
@@ -1923,11 +1931,6 @@ impl Connection {
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
 
-        // Check if there is a Datagram to be written
-        if primary && space == PacketNumberSpace::ApplicationData && !profile.ack_only(space) {
-            ack_eliciting |= self.maybe_write_datagram(builder, &mut tokens);
-        }
-
         if primary {
             let stats = &mut self.stats.borrow_mut().frame_tx;
             self.acks
@@ -1987,33 +1990,6 @@ impl Connection {
 
         stats.all += tokens.len();
         Ok((tokens, ack_eliciting, padded))
-    }
-
-    fn maybe_write_datagram(
-        &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
-    ) -> bool {
-        if let Some(data) = &self.datagram {
-            let len = data.len();
-            if builder.remaining() >= len + 1 {
-                // + 1 for Frame type
-                let length_len = Encoder::varint_len(u64::try_from(len).unwrap());
-                if builder.remaining() > 1 + length_len + len {
-                    builder.encode_varint(FRAME_TYPE_DATAGRAM_WITH_LEN);
-                    builder.encode_vvec(&data);
-                } else {
-                    builder.encode_varint(FRAME_TYPE_DATAGRAM);
-                    builder.encode(&data);
-                }
-                debug_assert!(builder.len() <= builder.limit());
-                self.datagram = None;
-                self.stats.borrow_mut().frame_tx.datagram += 1;
-                tokens.push(RecoveryToken::Datagram);
-                return true;
-            }
-        }
-        false
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -2211,6 +2187,13 @@ impl Connection {
             self.idle_timeout
                 .set_peer_timeout(Duration::from_millis(peer_timeout));
         }
+
+        self.quic_datagrams.set_remote_datagram_size(
+            self.tps
+                .borrow()
+                .remote()
+                .get_integer(tparams::MAX_DATAGRAM_FRAME_SIZE),
+        );
     }
 
     pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
@@ -2535,16 +2518,8 @@ impl Connection {
                     .ack_freq(seqno, tolerance - 1, delay, ignore_order);
             }
             Frame::Datagram { data, .. } => {
-                let max_size = self
-                    .tps
-                    .borrow()
-                    .local
-                    .get_integer(tparams::MAX_DATAGRAM_FRAME_SIZE);
-                if max_size < u64::try_from(data.len()).unwrap() {
-                    return Err(Error::ProtocolViolation);
-                }
-                self.events.datagram(data);
                 self.stats.borrow_mut().frame_rx.datagram += 1;
+                self.quic_datagrams.handle_datagram(data)?;
             }
             _ => unreachable!("All other frames are for streams"),
         };
@@ -2846,32 +2821,17 @@ impl Connection {
         self.streams.keep_alive(stream_id.into(), keep)
     }
 
-    fn max_dgram_size_configured(&self) -> Res<u64> {
-        let tph = self.tps.borrow();
-        if let Some(r) = &tph.remote {
-            Ok(r.get_integer(tparams::MAX_DATAGRAM_FRAME_SIZE))
-        } else if let Some(r) = &tph.remote_0rtt {
-            Ok(r.get_integer(tparams::MAX_DATAGRAM_FRAME_SIZE))
-        } else {
-            Err(Error::NotAvailable)
-        }
-    }
-
-    #[cfg(test)]
-    pub fn set_max_dgram_size(&mut self, v: u64) {
-        self.tps
-            .borrow_mut()
-            .remote
-            .as_mut()
-            .unwrap()
-            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, v);
+    pub fn remote_datagram_size(&self) -> u64 {
+        self.quic_datagrams.remote_datagram_size()
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
+    /// The value will change over time depending on the encoded size of the
+    /// packet number, ack frames, etc.
     /// # Error
     /// The function returns `NotAvailable` if datagrams are not enabled.
-    pub fn max_dgram_size(&self) -> Res<u64> {
-        let max_dgram_size = self.max_dgram_size_configured()?;
+    pub fn max_datagram_size(&self) -> Res<u64> {
+        let max_dgram_size = self.quic_datagrams.remote_datagram_size();
         if max_dgram_size == 0 {
             return Err(Error::NotAvailable);
         }
@@ -2885,7 +2845,7 @@ impl Connection {
         } else {
             return Err(Error::NotAvailable);
         };
-        let path = self.paths.select_path().ok_or(Error::NotAvailable)?;
+        let path = self.paths.primary_fallible().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().mtu();
         let encoder = Encoder::with_capacity(mtu);
 
@@ -2910,18 +2870,18 @@ impl Connection {
         Ok(min(data_len_possible, max_dgram_size))
     }
 
-    /// Returns if there was an unsend datagram that has been dismissed.
+    /// Returns true if there was an unsent datagram that has been dismissed.
     /// # Error
-    /// The function returns `TooMuchData` if the supply buffer cannot fit into a packet.
-    /// The function returns `NotAvailable` if datagrams are not enabled.
-    pub fn send_dgram(&mut self, buf: &[u8]) -> Res<bool> {
-        let data_limit = self.max_dgram_size()?;
-        if u64::try_from(buf.len()).unwrap() > data_limit {
-            return Err(Error::TooMuchData);
-        }
-        let dismissed = self.datagram.is_some();
-        self.datagram = Some(buf.to_vec());
-        Ok(dismissed)
+    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// the allowed remote datagram size. The funcion does not check if the
+    /// datagram can fit into a packet (i.e. MTU limit). This is checked during
+    /// creation of an actual packet and the datagram will be dropped if it does
+    /// not fit into the packet. The app is encourage to use `max_datagram_size`
+    /// to check the estimated max datagram size and to use smaller datagrams.
+    /// `max_datagram_size` is just a current estimate and will change over
+    /// time depending on the encoded size of the packet number, ack frames, etc.
+    pub fn add_datagram(&mut self, buf: &[u8]) -> Res<bool> {
+        self.quic_datagrams.add_datagram(buf)
     }
 }
 

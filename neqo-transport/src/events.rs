@@ -158,7 +158,33 @@ impl ConnectionEvents {
         self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
     }
 
-    pub fn datagram(&self, data: &[u8]) {
+    fn check_datagram_queued(&self, max_queued_datagrams: usize) {
+        let mut q = self.events.borrow_mut();
+        let mut remove = None;
+        if q.iter()
+            .filter(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
+            .count()
+            == max_queued_datagrams
+        {
+            if let Some(d) = q
+                .iter()
+                .rev()
+                .enumerate()
+                .filter(|(_, evt)| matches!(evt, ConnectionEvent::Datagram(_)))
+                .take(1)
+                .next()
+            {
+                remove = Some(d.0);
+            }
+        }
+        if let Some(r) = remove {
+            q.remove(r);
+            q.push_back(ConnectionEvent::DatagramLost);
+        }
+    }
+
+    pub fn datagram(&self, max_queued_datagrams: usize, data: &[u8]) {
+        self.check_datagram_queued(max_queued_datagrams);
         self.insert(ConnectionEvent::Datagram(data.to_vec()));
     }
 

@@ -24,6 +24,7 @@ pub const ACK_RATIO_SCALE: u8 = 10;
 const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
 /// The local value for the idle timeout period.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
 #[derive(Debug, Clone)]
@@ -65,7 +66,8 @@ pub struct ConnectionParameters {
     /// The duration of the idle timeout for the connection.
     idle_timeout: Duration,
     preferred_address: PreferredAddressConfig,
-    max_datagram_frame_size: u64,
+    datagram_size: u64,
+    queued_datagrams: usize,
 }
 
 impl Default for ConnectionParameters {
@@ -82,7 +84,8 @@ impl Default for ConnectionParameters {
             ack_ratio: DEFAULT_ACK_RATIO,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
-            max_datagram_frame_size: 0,
+            datagram_size: 0,
+            queued_datagrams: MAX_QUEUED_DATAGRAMS_DEFAULT,
         }
     }
 }
@@ -211,12 +214,21 @@ impl ConnectionParameters {
         self.idle_timeout
     }
 
-    pub fn get_max_datagram_frame_size(&self) -> u64 {
-        self.max_datagram_frame_size
+    pub fn get_datagram_size(&self) -> u64 {
+        self.datagram_size
     }
 
-    pub fn max_datagram_frame_size(mut self, v: u64) -> Self {
-        self.max_datagram_frame_size = v;
+    pub fn datagram_size(mut self, v: u64) -> Self {
+        self.datagram_size = v;
+        self
+    }
+
+    pub fn get_queued_datagrams(&self) -> usize {
+        self.queued_datagrams
+    }
+
+    pub fn queued_datagrams(mut self, v: usize) -> Self {
+        self.queued_datagrams = v;
         self
     }
 
@@ -279,10 +291,8 @@ impl ConnectionParameters {
                 );
             }
         }
-        tps.local.set_integer(
-            tparams::MAX_DATAGRAM_FRAME_SIZE,
-            self.max_datagram_frame_size,
-        );
+        tps.local
+            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.datagram_size);
         Ok(tps)
     }
 }
