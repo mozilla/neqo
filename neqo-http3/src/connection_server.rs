@@ -10,7 +10,7 @@ use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::{Error, Header, Priority, ReceiveOutput, Res};
-use neqo_common::{event::Provider, qdebug, qinfo, qtrace};
+use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
 use std::rc::Rc;
@@ -137,7 +137,7 @@ impl Http3ServerHandler {
                     ),
                     StreamType::UniDi => self
                         .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64(), false),
+                        .handle_new_unidi_stream(stream_id.as_u64(), Role::Server),
                 },
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.handle_stream_readable(conn, stream_id)?
