@@ -24,6 +24,7 @@ mod pace;
 mod packet;
 mod path;
 mod qlog;
+mod quic_datagrams;
 mod recovery;
 mod recv_stream;
 mod rtt;
