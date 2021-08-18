@@ -27,6 +27,7 @@ const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
 const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
 const H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST: HFrameType = 0xf0700;
+const H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH: HFrameType = 0xf0701;
 
 pub const H3_RESERVED_FRAME_TYPES: &[HFrameType] = &[0x2, 0x6, 0x8, 0x9];
 
@@ -61,6 +62,10 @@ pub enum HFrame {
         element_id: u64,
         priority: Priority,
     },
+    PriorityUpdatePush {
+        element_id: u64,
+        priority: Priority,
+    },
 }
 
 impl HFrame {
@@ -74,6 +79,7 @@ impl HFrame {
             Self::Goaway { .. } => H3_FRAME_TYPE_GOAWAY,
             Self::MaxPushId { .. } => H3_FRAME_TYPE_MAX_PUSH_ID,
             Self::PriorityUpdateRequest { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST,
+            Self::PriorityUpdatePush { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH,
             Self::Grease => {
                 let r = random(7);
                 Decoder::from(&r).decode_uint(7).unwrap() * 0x1f + 0x21
@@ -124,6 +130,10 @@ impl HFrame {
                 enc.encode_vvec(&r[1..usize::from(1 + (r[0] & 0x7))]);
             }
             Self::PriorityUpdateRequest {
+                element_id,
+                priority,
+            }
+            | Self::PriorityUpdatePush {
                 element_id,
                 priority,
             } => {

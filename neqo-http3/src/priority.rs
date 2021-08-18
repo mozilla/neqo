@@ -37,13 +37,6 @@ impl Priority {
             other => Some(Header::new("priority", format!("{}", other))),
         }
     }
-
-    pub fn encode_request_frame(self, stream_id: u64) -> HFrame {
-        HFrame::PriorityUpdateRequest {
-            element_id: stream_id,
-            priority: self,
-        }
-    }
 }
 
 impl fmt::Display for Priority {
@@ -65,6 +58,51 @@ impl fmt::Display for Priority {
                 urgency,
                 incremental: true,
             } => write!(f, "u={},i", urgency),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PriorityHandler {
+    priority: Priority,
+    last_send_priority: Priority,
+}
+
+impl PriorityHandler {
+    pub fn new(priority: Priority) -> PriorityHandler {
+        PriorityHandler {
+            priority,
+            last_send_priority: priority,
+        }
+    }
+
+    pub fn priority(&self) -> Priority {
+        self.priority
+    }
+
+    pub fn priority_update(&mut self, priority: Priority) {
+        self.priority = priority;
+    }
+
+    pub fn priority_update_outstanding(&self) -> bool {
+        self.priority != self.last_send_priority
+    }
+
+    pub fn priority_update_sent(&mut self) {
+        self.last_send_priority = self.priority
+    }
+
+    pub fn encode_request_frame(&self, stream_id: u64) -> HFrame {
+        HFrame::PriorityUpdateRequest {
+            element_id: stream_id,
+            priority: self.priority,
+        }
+    }
+
+    pub fn encode_push_frame(&self, stream_id: u64) -> HFrame {
+        HFrame::PriorityUpdatePush {
+            element_id: stream_id,
+            priority: self.priority,
         }
     }
 }

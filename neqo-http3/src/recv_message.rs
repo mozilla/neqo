@@ -12,6 +12,7 @@ use crate::{
     Res, ResetType,
 };
 
+use crate::priority::PriorityHandler;
 use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
@@ -76,8 +77,7 @@ pub(crate) struct RecvMessage {
     conn_events: Box<dyn RecvMessageEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: u64,
-    priority: Priority,
-    last_send_priority: Priority,
+    priority_handler: PriorityHandler,
     blocked_push_promise: VecDeque<PushInfo>,
 }
 
@@ -105,8 +105,7 @@ impl RecvMessage {
             conn_events,
             push_handler,
             stream_id,
-            priority,
-            last_send_priority: priority,
+            priority_handler: PriorityHandler::new(priority),
             blocked_push_promise: VecDeque::new(),
         }
     }
@@ -526,19 +525,7 @@ impl HttpRecvStream for RecvMessage {
         }
     }
 
-    fn priority(&self) -> Priority {
-        self.priority
-    }
-
-    fn priority_update(&mut self, priority: Priority) {
-        self.priority = priority;
-    }
-
-    fn priority_update_outstanding(&self) -> bool {
-        self.priority != self.last_send_priority
-    }
-
-    fn priority_update_sent(&mut self) {
-        self.last_send_priority = self.priority
+    fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
+        &mut self.priority_handler
     }
 }
