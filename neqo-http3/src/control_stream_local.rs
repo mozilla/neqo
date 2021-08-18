@@ -78,25 +78,18 @@ impl ControlStreamLocal {
                         update_stream.stream_type(),
                         Http3StreamType::Http | Http3StreamType::Push
                     ));
-                    let push_stream = matches!(update_stream.stream_type(), Http3StreamType::Push);
                     let update_stream = update_stream.http_stream().unwrap();
 
                     let priority_handler = update_stream.priority_handler_mut();
                     // in case multiple priority_updates were issued, ignore now irrelevant
-                    if !priority_handler.priority_update_outstanding() {
-                        continue;
-                    }
-                    let hframe = if push_stream {
-                        priority_handler.encode_push_frame(update_id)
-                    } else {
-                        priority_handler.encode_request_frame(update_id)
-                    };
-                    let mut enc = Encoder::new();
-                    hframe.encode(&mut enc);
-                    if conn.stream_send_atomic(stream_id, &enc)? {
-                        priority_handler.priority_update_sent();
-                    } else {
-                        self.outstanding_priority_update.push_front(update_id);
+                    if let Some(hframe) = priority_handler.maybe_encode_frame(update_id) {
+                        let mut enc = Encoder::new();
+                        hframe.encode(&mut enc);
+                        if conn.stream_send_atomic(stream_id, &enc)? {
+                            priority_handler.priority_update_sent();
+                        } else {
+                            self.outstanding_priority_update.push_front(update_id);
+                        }
                     }
                 }
             }

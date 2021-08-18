@@ -83,7 +83,7 @@ impl PushStream {
             push_handler,
             qpack_decoder,
             events,
-            priority_handler: PriorityHandler::new(priority),
+            priority_handler: PriorityHandler::new(true, priority),
         }
     }
 

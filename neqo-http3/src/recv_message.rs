@@ -105,7 +105,7 @@ impl RecvMessage {
             conn_events,
             push_handler,
             stream_id,
-            priority_handler: PriorityHandler::new(priority),
+            priority_handler: PriorityHandler::new(false, priority),
             blocked_push_promise: VecDeque::new(),
         }
     }

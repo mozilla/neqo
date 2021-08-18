@@ -630,9 +630,10 @@ impl Http3Connection {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
-        let priority_handler = stream.priority_handler_mut();
-        if priority_handler.priority() != priority {
-            priority_handler.priority_update(priority);
+        if stream
+            .priority_handler_mut()
+            .maybe_update_priority(priority)
+        {
             self.control_stream_local.queue_update_priority(stream_id);
             Ok(true)
         } else {

@@ -89,13 +89,15 @@ impl fmt::Display for Priority {
 
 #[derive(Debug)]
 pub struct PriorityHandler {
+    push_stream: bool,
     priority: Priority,
     last_send_priority: Priority,
 }
 
 impl PriorityHandler {
-    pub fn new(priority: Priority) -> PriorityHandler {
+    pub fn new(push_stream: bool, priority: Priority) -> PriorityHandler {
         PriorityHandler {
+            push_stream,
             priority,
             last_send_priority: priority,
         }
@@ -105,29 +107,36 @@ impl PriorityHandler {
         self.priority
     }
 
-    pub fn priority_update(&mut self, priority: Priority) {
-        self.priority = priority;
-    }
-
-    pub fn priority_update_outstanding(&self) -> bool {
-        self.priority != self.last_send_priority
+    /// Returns if an priority update will be issued
+    pub fn maybe_update_priority(&mut self, priority: Priority) -> bool {
+        if priority != self.priority {
+            self.priority = priority;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn priority_update_sent(&mut self) {
         self.last_send_priority = self.priority
     }
 
-    pub fn encode_request_frame(&self, stream_id: u64) -> HFrame {
-        HFrame::PriorityUpdateRequest {
-            element_id: stream_id,
-            priority: self.priority,
-        }
-    }
-
-    pub fn encode_push_frame(&self, stream_id: u64) -> HFrame {
-        HFrame::PriorityUpdatePush {
-            element_id: stream_id,
-            priority: self.priority,
+    /// Returns HFrame if an priority update is outstanding
+    pub fn maybe_encode_frame(&self, stream_id: u64) -> Option<HFrame> {
+        if self.priority != self.last_send_priority {
+            if self.push_stream {
+                Some(HFrame::PriorityUpdatePush {
+                    element_id: stream_id,
+                    priority: self.priority,
+                })
+            } else {
+                Some(HFrame::PriorityUpdateRequest {
+                    element_id: stream_id,
+                    priority: self.priority,
+                })
+            }
+        } else {
+            None
         }
     }
 }
