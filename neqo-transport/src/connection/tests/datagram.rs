@@ -15,7 +15,6 @@ use crate::quic_datagrams::MAX_QUIC_DATAGRAM;
 use crate::{Connection, ConnectionError, ConnectionParameters, Error};
 use neqo_common::event::Provider;
 use std::convert::TryFrom;
-use std::time::Duration;
 use test_fixture::now;
 
 const DATAGRAM_LEN_MTU: u64 = 1310;
@@ -155,7 +154,7 @@ fn datagram_acked() {
     let dgram_received = server.stats().frame_rx.datagram;
     server.process_input(out.unwrap(), now());
     assert_eq!(server.stats().frame_rx.datagram, dgram_received + 1);
-    let now = now() + Duration::from_millis(1);
+    let now = now() + AT_LEAST_PTO;
     // Ack should be sent
     let ack_sent = server.stats().frame_tx.ack;
     let out = server.process_output(now).dgram();
