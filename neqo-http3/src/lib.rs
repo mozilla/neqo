@@ -339,6 +339,7 @@ pub trait HttpRecvStream: RecvStream {
 
 pub(crate) trait RecvMessageEvents: Debug {
     fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool);
+    fn priority_update(&self, stream_id: u64, priority: Priority);
     fn data_readable(&self, stream_id: u64);
     fn reset(&self, stream_id: u64, error: AppError, local: bool);
 }

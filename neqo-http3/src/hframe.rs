@@ -408,6 +408,7 @@ mod tests {
     use neqo_transport::{Connection, StreamType};
     use std::mem;
     use test_fixture::{connect, default_client, default_server, fixture_init, now};
+    use crate::Priority;
 
     #[allow(clippy::many_single_char_names)]
     fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
@@ -517,6 +518,36 @@ mod tests {
         let t1 = make_grease();
         let t2 = make_grease();
         assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn test_priority_update_request_default() {
+        let f = HFrame::PriorityUpdateRequest { element_id: 6, priority: Priority::default() };
+        enc_dec(&f, "800f07000106", 0);
+    }
+
+    #[test]
+    fn test_priority_update_request_incremental_default() {
+        let f = HFrame::PriorityUpdateRequest { element_id: 7, priority: Priority::new(6, false) };
+        enc_dec(&f, "800f07000407753d36", 0); // "u=6"
+    }
+
+    #[test]
+    fn test_priority_update_request_urgency_default() {
+        let f = HFrame::PriorityUpdateRequest { element_id: 8, priority: Priority::new(3, true) };
+        enc_dec(&f, "800f0700020869", 0); // "i"
+    }
+
+    #[test]
+    fn test_priority_update_request() {
+        let f = HFrame::PriorityUpdateRequest { element_id: 9, priority: Priority::new(5, true) };
+        enc_dec(&f, "800f07000609753d352c69", 0); // "u=5,i'
+    }
+
+    #[test]
+    fn test_priority_update_push_default() {
+        let f = HFrame::PriorityUpdatePush { element_id: 10, priority: Priority::default() };
+        enc_dec(&f, "800f0701010a", 0);
     }
 
     struct HFrameReaderTest {

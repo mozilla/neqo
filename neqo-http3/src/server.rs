@@ -189,6 +189,9 @@ impl Http3Server {
                                 remove = true;
                             }
                         }
+                        Http3ServerConnEvent::PriorityUpdate { stream_id, priority } => {
+                            self.events.priority_update(stream_id, priority);
+                        }
                     }
                 }
             }
@@ -823,6 +826,7 @@ mod tests {
                     data_received += 1;
                 }
                 Http3ServerEvent::StateChange { .. } => {}
+                Http3ServerEvent::PriorityUpdate { .. } => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -871,6 +875,7 @@ mod tests {
                     panic!("We should not have a Data event");
                 }
                 Http3ServerEvent::StateChange { .. } => {}
+                Http3ServerEvent::PriorityUpdate { .. } => {}
             }
         }
         let out = hconn.process(None, now());
@@ -893,6 +898,7 @@ mod tests {
                     panic!("We should not have a Data event");
                 }
                 Http3ServerEvent::StateChange { .. } => {}
+                Http3ServerEvent::PriorityUpdate { .. } => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -932,6 +938,7 @@ mod tests {
                     panic!("We should not have a Data event");
                 }
                 Http3ServerEvent::StateChange { .. } => {}
+                Http3ServerEvent::PriorityUpdate { .. } => {}
             }
         }
         let out = hconn.process(None, now());
@@ -1156,6 +1163,7 @@ mod tests {
                     assert!(requests.get(&request).is_some());
                 }
                 Http3ServerEvent::StateChange { .. } => {}
+                Http3ServerEvent::PriorityUpdate { .. } => {}
             }
         }
         assert_eq!(requests.len(), 2);

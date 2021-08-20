@@ -8,7 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
-use crate::Header;
+use crate::{Header, Priority};
 use crate::RecvMessageEvents;
 
 use neqo_common::event::Provider as EventProvider;
@@ -19,7 +19,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Http3ClientEvent {
     /// Response headers are received.
     HeaderReady {
@@ -27,6 +27,10 @@ pub enum Http3ClientEvent {
         headers: Vec<Header>,
         interim: bool,
         fin: bool,
+    },
+    PriorityUpdate {
+        stream_id: u64,
+        priority: Priority,
     },
     /// A stream can accept new data.
     DataWritable { stream_id: u64 },
@@ -92,6 +96,10 @@ impl RecvMessageEvents for Http3ClientEvents {
             interim,
             fin,
         });
+    }
+
+    fn priority_update(&self, stream_id: u64, priority: Priority) {
+        self.insert(Http3ClientEvent::PriorityUpdate { stream_id, priority});
     }
 
     /// Add a new `DataReadable` event

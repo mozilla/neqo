@@ -1754,6 +1754,17 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
     }
 
+    // send PRIORITY_UPDATE frame on a control stream to the client
+    #[test]
+    fn test_priority_update_request_on_control_stream() {
+        test_wrong_frame_on_control_stream(&[0x80, 0x0f, 0x07, 0x00, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_priority_update_push_on_control_stream() {
+        test_wrong_frame_on_control_stream(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x03]);
+    }
+
     fn test_wrong_frame_on_push_stream(v: &[u8]) {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(false);
 
@@ -1788,6 +1799,16 @@ mod tests {
     #[test]
     fn test_push_promise_frame_on_push_stream() {
         test_wrong_frame_on_push_stream(&[0x5, 0x2, 0x1, 0x2]);
+    }
+
+    #[test]
+    fn test_priority_update_request_on_push_stream() {
+        test_wrong_frame_on_push_stream(&[0x80, 0x0f, 0x07, 0x00, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_priority_update_push_on_push_stream() {
+        test_wrong_frame_on_push_stream(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x03]);
     }
 
     #[test]
@@ -1871,6 +1892,16 @@ mod tests {
     #[test]
     fn test_max_push_id_frame_on_request_stream() {
         test_wrong_frame_on_request_stream(&[0xd, 0x1, 0x5]);
+    }
+
+    #[test]
+    fn test_priority_update_request_on_request_stream() {
+        test_wrong_frame_on_request_stream(&[0x80, 0x0f, 0x07, 0x00, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_priority_update_push_on_request_stream() {
+        test_wrong_frame_on_request_stream(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x03]);
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one

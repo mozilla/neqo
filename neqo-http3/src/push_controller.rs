@@ -6,7 +6,7 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::Http3Connection;
 use crate::hframe::HFrame;
-use crate::{Error, Header, Res};
+use crate::{Error, Header, Res, Priority};
 use crate::{RecvMessageEvents, ResetType};
 use neqo_common::{qerror, qinfo, qtrace};
 use neqo_transport::{AppError, Connection};
@@ -473,6 +473,10 @@ impl RecvMessageEvents for RecvPushEvents {
                 fin,
             },
         );
+    }
+
+    fn priority_update(&self, stream_id: u64, priority: Priority) {
+        self.push_handler.borrow_mut().new_stream_event(self.push_id, Http3ClientEvent::PriorityUpdate { stream_id, priority});
     }
 
     fn data_readable(&self, _stream_id: u64) {
