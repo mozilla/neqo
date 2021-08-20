@@ -46,16 +46,14 @@ impl Priority {
                 bare_item: BareItem::Integer(u),
                 ..
             })) if (0i64..=7).contains(u) => *u as u8,
-            None => 3,
-            _ => return Err(Error::HttpFrame),
+            _ => 3,
         };
         let incremental = match dict.get("i") {
             Some(ListEntry::Item(Item {
                 bare_item: BareItem::Boolean(i),
                 ..
             })) => *i,
-            None => false,
-            _ => return Err(Error::HttpFrame),
+            _ => false,
         };
         Ok(Priority {
             urgency,
