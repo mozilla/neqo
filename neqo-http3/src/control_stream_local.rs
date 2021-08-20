@@ -63,34 +63,44 @@ impl ControlStreamLocal {
                     self.buf = b;
                 }
             }
-
             if !self.buf.is_empty() {
-                // send all necessary priority updates
-                while let Some(update_id) = self.outstanding_priority_update.pop_front() {
-                    let update_stream = match recv_conn.get_mut(&update_id) {
-                        Some(update_stream) => update_stream,
-                        None => continue,
-                    };
+                self.send_priority_update(stream_id, conn, recv_conn)?
+            }
+        }
+        Ok(())
+    }
 
-                    // can assert and unwrap here, because priority updates can only be added to
-                    // HttpStreams in [Http3Connection::queue_update_priority}
-                    debug_assert!(matches!(
-                        update_stream.stream_type(),
-                        Http3StreamType::Http | Http3StreamType::Push
-                    ));
-                    let update_stream = update_stream.http_stream().unwrap();
+    /// Send priority updates if available and we are already sending a packet
+    fn send_priority_update(
+        &mut self,
+        stream_id: u64,
+        conn: &mut Connection,
+        recv_conn: &mut HashMap<u64, Box<dyn RecvStream>>,
+    ) -> Res<()> {
+        // send all necessary priority updates
+        while let Some(update_id) = self.outstanding_priority_update.pop_front() {
+            let update_stream = match recv_conn.get_mut(&update_id) {
+                Some(update_stream) => update_stream,
+                None => continue,
+            };
 
-                    let priority_handler = update_stream.priority_handler_mut();
-                    // in case multiple priority_updates were issued, ignore now irrelevant
-                    if let Some(hframe) = priority_handler.maybe_encode_frame(update_id) {
-                        let mut enc = Encoder::new();
-                        hframe.encode(&mut enc);
-                        if conn.stream_send_atomic(stream_id, &enc)? {
-                            priority_handler.priority_update_sent();
-                        } else {
-                            self.outstanding_priority_update.push_front(update_id);
-                        }
-                    }
+            // can assert and unwrap here, because priority updates can only be added to
+            // HttpStreams in [Http3Connection::queue_update_priority}
+            debug_assert!(matches!(
+                update_stream.stream_type(),
+                Http3StreamType::Http | Http3StreamType::Push
+            ));
+            let update_stream = update_stream.http_stream().unwrap();
+
+            let priority_handler = update_stream.priority_handler_mut();
+            // in case multiple priority_updates were issued, ignore now irrelevant
+            if let Some(hframe) = priority_handler.maybe_encode_frame(update_id) {
+                let mut enc = Encoder::new();
+                hframe.encode(&mut enc);
+                if conn.stream_send_atomic(stream_id, &enc)? {
+                    priority_handler.priority_update_sent();
+                } else {
+                    self.outstanding_priority_update.push_front(update_id);
                 }
             }
         }

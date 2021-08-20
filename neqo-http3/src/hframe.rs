@@ -380,7 +380,7 @@ impl HFrameReader {
             H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST | H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH => {
                 let element_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
                 let priority = dec.decode_remainder();
-                let priority = Priority::from_bytes(priority).map_err(|_| Error::HttpFrame)?;
+                let priority = Priority::from_bytes(priority)?;
                 if self.hframe_type == H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST {
                     HFrame::PriorityUpdateRequest {
                         element_id,

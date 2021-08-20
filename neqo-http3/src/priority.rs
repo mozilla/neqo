@@ -1,4 +1,4 @@
-use crate::{HFrame, Header};
+use crate::{Error, HFrame, Header, Res};
 use sfv::{BareItem, Item, ListEntry, Parser};
 use std::fmt;
 
@@ -39,15 +39,15 @@ impl Priority {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Priority, &'static str> {
-        let dict = Parser::parse_dictionary(bytes)?;
+    pub fn from_bytes(bytes: &[u8]) -> Res<Priority> {
+        let dict = Parser::parse_dictionary(bytes).map_err(|_| Error::HttpFrame)?;
         let urgency = match dict.get("u") {
             Some(ListEntry::Item(Item {
                 bare_item: BareItem::Integer(u),
                 ..
             })) if (0i64..=7).contains(u) => *u as u8,
             None => 3,
-            _ => return Err("priority: invalid urgency value"),
+            _ => return Err(Error::HttpFrame),
         };
         let incremental = match dict.get("i") {
             Some(ListEntry::Item(Item {
@@ -55,7 +55,7 @@ impl Priority {
                 ..
             })) => *i,
             None => false,
-            _ => return Err("priority: invalid incremental value"),
+            _ => return Err(Error::HttpFrame),
         };
         Ok(Priority {
             urgency,
