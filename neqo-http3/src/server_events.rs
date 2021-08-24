@@ -8,7 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
-use crate::{Header, Res, Priority};
+use crate::{Header, Priority, Res};
 use neqo_common::{qdebug, qinfo};
 use neqo_transport::server::ActiveConnectionRef;
 use neqo_transport::{AppError, Connection};
@@ -125,7 +125,7 @@ pub enum Http3ServerEvent {
     PriorityUpdate {
         stream_id: u64,
         priority: Priority,
-    }
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -173,6 +173,9 @@ impl Http3ServerEvents {
     }
 
     pub(crate) fn priority_update(&self, stream_id: u64, priority: Priority) {
-        self.insert(Http3ServerEvent::PriorityUpdate { stream_id, priority })
+        self.insert(Http3ServerEvent::PriorityUpdate {
+            stream_id,
+            priority,
+        })
     }
 }

@@ -189,7 +189,10 @@ impl Http3Server {
                                 remove = true;
                             }
                         }
-                        Http3ServerConnEvent::PriorityUpdate { stream_id, priority } => {
+                        Http3ServerConnEvent::PriorityUpdate {
+                            stream_id,
+                            priority,
+                        } => {
                             self.events.priority_update(stream_id, priority);
                         }
                     }

@@ -190,8 +190,20 @@ impl Http3ServerHandler {
                         HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
                             Err(Error::HttpFrameUnexpected)
                         }
+                        HFrame::PriorityUpdatePush { element_id, priority } => {
+                            // TODO: check if the element_id references a promised push stream or
+                            //       is greater than the maximum Push ID.
+                            self.events.priority_update(element_id, priority);
+                            Ok(())
+                        }
+                        HFrame::PriorityUpdateRequest { element_id, priority } => {
+                            // TODO: check that the element_id references a request stream
+                            //       within the client-sided bidirectional stream limit
+                            self.events.priority_update(element_id, priority);
+                            Ok(())
+                        }
                         _ => unreachable!(
-                            "we should only put MaxPushId and Goaway into control_frames."
+                            "we should only put MaxPushId, Goaway and PriorityUpdates into control_frames."
                         ),
                     }?;
                 }

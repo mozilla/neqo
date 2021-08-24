@@ -628,9 +628,11 @@ impl Http3Client {
                             .handle_cancel_push(push_id, &mut self.conn, &mut self.base_handler),
                         HFrame::MaxPushId { .. } => Err(Error::HttpFrameUnexpected),
                         HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
+                        HFrame::PriorityUpdateRequest { .. }
+                        | HFrame::PriorityUpdatePush { .. } => Err(Error::HttpFrameUnexpected),
                         _ => {
                             unreachable!(
-                                "we should only put MaxPushId and Goaway into control_frames."
+                                "we should only put MaxPushId, Goaway and PriorityUpdates into control_frames."
                             );
                         }
                     }?;

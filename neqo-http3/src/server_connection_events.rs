@@ -6,8 +6,8 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
-use crate::{Header, Priority};
 use crate::RecvMessageEvents;
+use crate::{Header, Priority};
 
 use neqo_transport::AppError;
 
@@ -28,7 +28,9 @@ pub(crate) enum Http3ServerConnEvent {
         priority: Priority,
     },
     /// Request data is ready.
-    DataReadable { stream_id: u64 },
+    DataReadable {
+        stream_id: u64,
+    },
     //TODO: This is never used. Do we need it?
     // Peer reset the stream.
     //Reset { stream_id: u64, error: AppError },
@@ -49,10 +51,6 @@ impl RecvMessageEvents for Http3ServerConnEvents {
             headers,
             fin,
         });
-    }
-
-    fn priority_update(&self, stream_id: u64, priority: Priority) {
-        self.insert(Http3ServerConnEvent::PriorityUpdate { stream_id, priority});
     }
 
     /// Add a new `DataReadable` event
@@ -95,6 +93,13 @@ impl Http3ServerConnEvents {
 
     pub fn connection_state_change(&self, state: Http3State) {
         self.insert(Http3ServerConnEvent::StateChange(state));
+    }
+
+    pub fn priority_update(&self, stream_id: u64, priority: Priority) {
+        self.insert(Http3ServerConnEvent::PriorityUpdate {
+            stream_id,
+            priority,
+        })
     }
 
     pub fn remove_events_for_stream_id(&self, stream_id: u64) {

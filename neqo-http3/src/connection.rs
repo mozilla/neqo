@@ -517,9 +517,11 @@ impl Http3Connection {
                 self.handle_settings(settings)?;
                 Ok(None)
             }
-            HFrame::Goaway { .. } | HFrame::MaxPushId { .. } | HFrame::CancelPush { .. } => {
-                Ok(Some(f))
-            }
+            HFrame::Goaway { .. }
+            | HFrame::MaxPushId { .. }
+            | HFrame::CancelPush { .. }
+            | HFrame::PriorityUpdateRequest { .. }
+            | HFrame::PriorityUpdatePush { .. } => Ok(Some(f)),
             _ => Err(Error::HttpFrameUnexpected),
         }
     }
