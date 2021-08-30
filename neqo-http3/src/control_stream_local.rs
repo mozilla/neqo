@@ -63,14 +63,14 @@ impl ControlStreamLocal {
                     self.buf = b;
                 }
             }
-            if !self.buf.is_empty() {
+            // only send priority updates if all buffer data has been sent
+            if self.buf.is_empty() {
                 self.send_priority_update(stream_id, conn, recv_conn)?
             }
         }
         Ok(())
     }
 
-    /// Send priority updates if available and we are already sending a packet
     fn send_priority_update(
         &mut self,
         stream_id: u64,

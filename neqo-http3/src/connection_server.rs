@@ -193,6 +193,7 @@ impl Http3ServerHandler {
                         HFrame::PriorityUpdatePush { element_id, priority } => {
                             // TODO: check if the element_id references a promised push stream or
                             //       is greater than the maximum Push ID.
+
                             self.events.priority_update(element_id, priority);
                             Ok(())
                         }

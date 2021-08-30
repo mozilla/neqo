@@ -583,7 +583,7 @@ mod tests {
         assert_closed(&mut hconn, &Error::HttpFrameUnexpected);
     }
 
-    // send DATA frame on a cortrol stream
+    // send DATA frame on a control stream
     #[test]
     fn test_server_data_frame_on_control_stream() {
         test_wrong_frame_on_control_stream(&[0x0, 0x2, 0x1, 0x2]);
@@ -737,7 +737,7 @@ mod tests {
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one
-    fn test_incomplet_frame(res: &[u8]) {
+    fn test_incomplete_frame(res: &[u8]) {
         let (mut hconn, mut peer_conn) = connect_and_receive_settings();
 
         // send an incomplete reequest.
@@ -774,19 +774,19 @@ mod tests {
 
     // Incomplete DATA frame
     #[test]
-    fn test_server_incomplet_data_frame() {
-        test_incomplet_frame(&REQUEST_WITH_BODY[..22]);
+    fn test_server_incomplete_data_frame() {
+        test_incomplete_frame(&REQUEST_WITH_BODY[..22]);
     }
 
     // Incomplete HEADERS frame
     #[test]
-    fn test_server_incomplet_headers_frame() {
-        test_incomplet_frame(&REQUEST_WITH_BODY[..10]);
+    fn test_server_incomplete_headers_frame() {
+        test_incomplete_frame(&REQUEST_WITH_BODY[..10]);
     }
 
     #[test]
-    fn test_server_incomplet_unknown_frame() {
-        test_incomplet_frame(&[0x21]);
+    fn test_server_incomplete_unknown_frame() {
+        test_incomplete_frame(&[0x21]);
     }
 
     #[test]
@@ -969,6 +969,16 @@ mod tests {
         assert_eq!(reset, 1);
         assert_eq!(stop_sending, 1);
     }
+
+    /*
+    #[test]
+    fn test_client_priority_update() {
+        let (mut hconn, mut peer_conn) = connect();
+        let client = Http3ClientEvent::new()
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        peer_conn.stream_send(stream_id, REQUEST_WITH_BODY).unwrap();
+    }
+    */
 
     // Server: Test that the connection will be closed if the local control stream
     // has been reset.
