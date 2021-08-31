@@ -270,7 +270,7 @@ impl Http3Connection {
         }
     }
 
-    fn is_critical_stream(&self, stream_id: u64) -> bool {
+    pub fn is_critical_stream(&self, stream_id: u64) -> bool {
         self.qpack_encoder
             .borrow()
             .local_stream_id()

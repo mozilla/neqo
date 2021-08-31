@@ -45,7 +45,6 @@ use crate::packet::{
     DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion,
 };
 use crate::path::{Path, PathRef, Paths};
-use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
 use crate::rtt::GRANULARITY;
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
@@ -54,6 +53,7 @@ use crate::stream_id::StreamType;
 use crate::streams::Streams;
 use crate::tparams::{self, TransportParameter, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckTracker, PacketNumberSpace, SentPacket};
+use crate::{qlog, StreamId};
 use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
@@ -2172,6 +2172,10 @@ impl Connection {
             self.idle_timeout
                 .set_peer_timeout(Duration::from_millis(peer_timeout));
         }
+    }
+
+    pub fn is_in_remote_bidi_limit(&self, stream_id: StreamId) -> bool {
+        self.streams.is_in_remote_bidi_limit(stream_id)
     }
 
     /// Process the final set of transport parameters.

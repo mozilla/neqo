@@ -61,6 +61,10 @@ impl Streams {
         }
     }
 
+    pub fn is_in_remote_bidi_limit(&self, stream_id: StreamId) -> bool {
+        self.remote_stream_limits[StreamType::BiDi].is_in_limit(stream_id)
+    }
+
     pub fn zero_rtt_rejected(&mut self) {
         self.send.clear();
         self.recv.clear();

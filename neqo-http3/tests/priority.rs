@@ -58,7 +58,7 @@ pub fn default_http3_server() -> Http3Server {
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
-    let mut client_data = true;
+    let mut client_data;
     loop {
         out = client.process(out, now()).dgram();
         client_data = out.is_none();

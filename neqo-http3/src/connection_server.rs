@@ -12,7 +12,7 @@ use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvent
 use crate::{Error, Header, Priority, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -193,13 +193,20 @@ impl Http3ServerHandler {
                         HFrame::PriorityUpdatePush { element_id, priority } => {
                             // TODO: check if the element_id references a promised push stream or
                             //       is greater than the maximum Push ID.
-
                             self.events.priority_update(element_id, priority);
                             Ok(())
                         }
                         HFrame::PriorityUpdateRequest { element_id, priority } => {
-                            // TODO: check that the element_id references a request stream
-                            //       within the client-sided bidirectional stream limit
+                            // check that the element_id references a request stream
+                            // within the client-sided bidirectional stream limit
+                            let element_stream_id = StreamId::new(element_id);
+                            if !element_stream_id.is_bidi()
+                                || !element_stream_id.is_client_initiated()
+                                || !conn.is_in_remote_bidi_limit(element_stream_id)
+                            {
+                                return Err(Error::HttpId)
+                            }
+
                             self.events.priority_update(element_id, priority);
                             Ok(())
                         }

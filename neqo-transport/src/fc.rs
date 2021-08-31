@@ -448,6 +448,11 @@ impl RemoteStreamLimit {
         }
     }
 
+    pub fn is_in_limit(&self, stream_id: StreamId) -> bool {
+        let stream_idx = stream_id.as_u64() >> 2;
+        self.streams_fc.check_allowed(stream_idx)
+    }
+
     pub fn is_new_stream(&mut self, stream_id: StreamId) -> Res<bool> {
         let stream_idx = stream_id.as_u64() >> 2;
         if !self.streams_fc.check_allowed(stream_idx) {
