@@ -8,8 +8,8 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
+use crate::Header;
 use crate::RecvMessageEvents;
-use crate::{Header, Priority};
 
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
@@ -28,18 +28,10 @@ pub enum Http3ClientEvent {
         interim: bool,
         fin: bool,
     },
-    PriorityUpdate {
-        stream_id: u64,
-        priority: Priority,
-    },
     /// A stream can accept new data.
-    DataWritable {
-        stream_id: u64,
-    },
+    DataWritable { stream_id: u64 },
     /// New bytes available for reading.
-    DataReadable {
-        stream_id: u64,
-    },
+    DataReadable { stream_id: u64 },
     /// Peer reset the stream or there was an parsing error.
     Reset {
         stream_id: u64,
@@ -47,10 +39,7 @@ pub enum Http3ClientEvent {
         local: bool,
     },
     /// Peer has sent a STOP_SENDING.
-    StopSending {
-        stream_id: u64,
-        error: AppError,
-    },
+    StopSending { stream_id: u64, error: AppError },
     /// A new push promise.
     PushPromise {
         push_id: u64,
@@ -65,19 +54,12 @@ pub enum Http3ClientEvent {
         fin: bool,
     },
     /// New bytes are available on a push stream for reading.
-    PushDataReadable {
-        push_id: u64,
-    },
+    PushDataReadable { push_id: u64 },
     /// A push has been canceled.
-    PushCanceled {
-        push_id: u64,
-    },
+    PushCanceled { push_id: u64 },
     /// A push stream was been reset due to a HttpGeneralProtocol error.
     /// Most common case are malformed response headers.
-    PushReset {
-        push_id: u64,
-        error: AppError,
-    },
+    PushReset { push_id: u64, error: AppError },
     /// New stream can be created
     RequestsCreatable,
     /// Cert authentication needed
@@ -85,9 +67,7 @@ pub enum Http3ClientEvent {
     /// Encrypted client hello fallback occurred.  The certificate for the
     /// name `public_name` needs to be authenticated in order to get
     /// an updated ECH configuration.
-    EchFallbackAuthenticationNeeded {
-        public_name: String,
-    },
+    EchFallbackAuthenticationNeeded { public_name: String },
     /// A new resumption token.
     ResumptionToken(ResumptionToken),
     /// Zero Rtt has been rejected.

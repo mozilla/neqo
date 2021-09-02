@@ -61,8 +61,8 @@ impl Streams {
         }
     }
 
-    pub fn is_in_remote_bidi_limit(&self, stream_id: StreamId) -> bool {
-        self.remote_stream_limits[StreamType::BiDi].is_in_limit(stream_id)
+    pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
+        self.remote_stream_limits[stream_id.stream_type()].is_allowed(stream_id)
     }
 
     pub fn zero_rtt_rejected(&mut self) {

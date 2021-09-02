@@ -100,6 +100,7 @@ impl ControlStreamLocal {
                     priority_handler.priority_update_sent();
                 } else {
                     self.outstanding_priority_update.push_front(update_id);
+                    break;
                 }
             }
         }

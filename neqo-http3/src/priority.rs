@@ -138,3 +138,51 @@ impl PriorityHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::priority::PriorityHandler;
+    use crate::Priority;
+
+    #[test]
+    fn priority_updates_ignore_same() {
+        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        assert!(!p.maybe_update_priority(Priority::new(5, false)));
+        // updating with the same priority -> there should not be any priority frame sent
+        assert!(p.maybe_encode_frame(4).is_none());
+    }
+
+    #[test]
+    fn priority_updates_send_update() {
+        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        assert!(p.maybe_update_priority(Priority::new(6, false)));
+        // updating with the a different priority -> there should be a priority frame sent
+        assert!(p.maybe_encode_frame(4).is_some());
+    }
+
+    #[test]
+    fn multiple_priority_updates_ignore_same() {
+        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        assert!(p.maybe_update_priority(Priority::new(6, false)));
+        assert!(p.maybe_update_priority(Priority::new(5, false)));
+        // initial and last priority same -> there should not be any priority frame sent
+        assert!(p.maybe_encode_frame(4).is_none());
+    }
+
+    #[test]
+    fn multiple_priority_updates_send_update() {
+        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        assert!(p.maybe_update_priority(Priority::new(6, false)));
+        assert!(p.maybe_update_priority(Priority::new(7, false)));
+        // updating two times with a different -> there should be a priority frame sent
+        assert!(p.maybe_encode_frame(4).is_some());
+    }
+
+    #[test]
+    fn priority_updates_incremental() {
+        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        assert!(p.maybe_update_priority(Priority::new(5, true)));
+        // updating the incremental parameter -> there should be a priority frame sent
+        assert!(p.maybe_encode_frame(4).is_some());
+    }
+}

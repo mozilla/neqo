@@ -2174,8 +2174,8 @@ impl Connection {
         }
     }
 
-    pub fn is_in_remote_bidi_limit(&self, stream_id: StreamId) -> bool {
-        self.streams.is_in_remote_bidi_limit(stream_id)
+    pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
+        self.streams.is_stream_id_allowed(stream_id)
     }
 
     /// Process the final set of transport parameters.

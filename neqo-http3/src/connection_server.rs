@@ -202,7 +202,7 @@ impl Http3ServerHandler {
                             let element_stream_id = StreamId::new(element_id);
                             if !element_stream_id.is_bidi()
                                 || !element_stream_id.is_client_initiated()
-                                || !conn.is_in_remote_bidi_limit(element_stream_id)
+                                || !conn.is_stream_id_allowed(element_stream_id)
                             {
                                 return Err(Error::HttpId)
                             }

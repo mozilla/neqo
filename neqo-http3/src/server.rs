@@ -260,8 +260,9 @@ fn prepare_data(
 #[cfg(test)]
 mod tests {
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, Header};
+    use crate::{Error, HFrame, Header, Priority};
     use neqo_common::event::Provider;
+    use neqo_common::Encoder;
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_qpack::QpackSettings;
@@ -570,6 +571,53 @@ mod tests {
         let out = peer_conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&mut hconn, &Error::HttpFrameUnexpected);
+    }
+
+    fn priority_update_check_id(stream_id: u64, valid: bool) {
+        let (mut hconn, mut peer_conn) = connect();
+        // send a priority update
+        let frame = HFrame::PriorityUpdateRequest {
+            element_id: stream_id,
+            priority: Priority::default(),
+        };
+        let mut e = Encoder::default();
+        frame.encode(&mut e);
+        peer_conn.control_send(&e);
+        let out = peer_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        // check if the given connection got closed on invalid stream ids
+        if valid {
+            assert_not_closed(&mut hconn);
+        } else {
+            assert_closed(&mut hconn, &Error::HttpId);
+        }
+    }
+
+    #[test]
+    fn test_priority_update_valid_id_0() {
+        // Client-Initiated, Bidirectional
+        priority_update_check_id(0, true);
+    }
+    #[test]
+    fn test_priority_update_invalid_id_1() {
+        // Server-Initiated, Bidirectional
+        priority_update_check_id(1, false);
+    }
+    #[test]
+    fn test_priority_update_invalid_id_2() {
+        // Client-Initiated, Unidirectional
+        priority_update_check_id(2, false);
+    }
+    #[test]
+    fn test_priority_update_invalid_id_3() {
+        // Server-Initiated, Unidirectional
+        priority_update_check_id(3, false);
+    }
+
+    #[test]
+    fn test_priority_update_invalid_large_id() {
+        // Server-Initiated, Unidirectional (dividable by 4)
+        priority_update_check_id(1_000_000_000, false);
     }
 
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
@@ -969,16 +1017,6 @@ mod tests {
         assert_eq!(reset, 1);
         assert_eq!(stop_sending, 1);
     }
-
-    /*
-    #[test]
-    fn test_client_priority_update() {
-        let (mut hconn, mut peer_conn) = connect();
-        let client = Http3ClientEvent::new()
-        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
-        peer_conn.stream_send(stream_id, REQUEST_WITH_BODY).unwrap();
-    }
-    */
 
     // Server: Test that the connection will be closed if the local control stream
     // has been reset.
