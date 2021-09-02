@@ -169,3 +169,31 @@ fn priority_update() {
         other => panic!("unexpected server event: {:?}", other),
     }
 }
+
+#[test]
+fn priority_update_dont_send_for_cancelled_stream() {
+    let (mut client, mut server) = connect();
+    let stream_id = client
+        .fetch(
+            Instant::now(),
+            "GET",
+            "https",
+            "something.com",
+            "/",
+            &[],
+            Priority::new(5, false),
+        )
+        .unwrap();
+    exchange_packets(&mut client, &mut server);
+
+    let update_priority = Priority::new(6, false);
+    client.priority_update(stream_id, update_priority).unwrap();
+    client.stream_reset(stream_id, 11).unwrap();
+    exchange_packets(&mut client, &mut server);
+
+    while let Some(event) = server.next_event() {
+        if matches!(event, Http3ServerEvent::PriorityUpdate { .. }) {
+            panic!("Priority update sent on cancelled stream");
+        }
+    }
+}
