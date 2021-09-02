@@ -808,17 +808,20 @@ mod tests {
 
     /// Create a http3 client with default configuration.
     pub fn default_http3_client() -> Http3Client {
-        default_http3_client_param(100)
+        default_http3_client_param(100, ConnectionParameters::default())
     }
 
-    pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
+    pub fn default_http3_client_param(
+        max_table_size: u64,
+        conn_params: ConnectionParameters,
+    ) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             addr(),
             addr(),
-            ConnectionParameters::default(),
+            conn_params,
             &Http3Parameters {
                 qpack_settings: QpackSettings {
                     max_table_size_encoder: max_table_size,
@@ -1188,11 +1191,19 @@ mod tests {
     }
 
     // Perform Quic transport handshake and exchange Http3 settings.
-    fn connect() -> (Http3Client, TestServer) {
-        let mut client = default_http3_client();
+    fn connect_with_connection_parameters(
+        conn_params: ConnectionParameters,
+    ) -> (Http3Client, TestServer) {
+        // connecting with default max_table_size
+        let mut client = default_http3_client_param(100, conn_params);
         let mut server = TestServer::new();
         connect_with(&mut client, &mut server);
         (client, server)
+    }
+
+    // Perform Quic transport handshake and exchange Http3 settings.
+    fn connect() -> (Http3Client, TestServer) {
+        connect_with_connection_parameters(ConnectionParameters::default())
     }
 
     // Fetch request fetch("GET", "https", "something.com", "/", headers).
@@ -1346,6 +1357,17 @@ mod tests {
         assert_eq!(request_stream_id, 0);
 
         (client, server, request_stream_id)
+    }
+
+    fn connect_and_send_request_with(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        close_sending_side: bool,
+    ) -> u64 {
+        let request_stream_id = make_request_and_exchange_pkts(client, server, close_sending_side);
+        assert_eq!(request_stream_id, 0);
+
+        request_stream_id
     }
 
     fn server_send_response_and_exchange_packet(
@@ -5591,7 +5613,7 @@ mod tests {
     // blocked as well. After a packet is received only the first push promises is unblocked.
     #[test]
     fn two_push_promises_and_header_block() {
-        let mut client = default_http3_client_param(200);
+        let mut client = default_http3_client_param(200, ConnectionParameters::default());
         let mut server = TestServer::new_with_settings(&[
             HSetting::new(HSettingType::MaxTableCapacity, 200),
             HSetting::new(HSettingType::BlockedStreams, 100),
@@ -6457,7 +6479,8 @@ mod tests {
     const MAX_BLOCKED_STREAMS: u16 = 5;
 
     fn get_resumption_token(server: &mut Http3Server) -> ResumptionToken {
-        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+        let mut client =
+            default_http3_client_param(MAX_TABLE_SIZE, ConnectionParameters::default());
 
         let mut datagram = None;
         let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
@@ -6507,7 +6530,8 @@ mod tests {
 
         let token = get_resumption_token(&mut server);
         // Make a new connection.
-        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+        let mut client =
+            default_http3_client_param(MAX_TABLE_SIZE, ConnectionParameters::default());
         assert_eq!(client.state(), Http3State::Initializing);
         client
             .enable_resumption(now(), &token)
@@ -6593,5 +6617,33 @@ mod tests {
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
         assert_closed(&client, &Error::HttpGeneralProtocol);
+    }
+
+    #[test]
+    fn priority_update_during_full_buffer() {
+        //This line needs to change to be able to set a lower max_data
+        let (mut client, mut server) =
+            connect_with_connection_parameters(ConnectionParameters::default().max_data(1200));
+        let request_stream_id = connect_and_send_request_with(&mut client, &mut server, false);
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
+        assert!(client.events().any(data_writable));
+        // Send a lot of data
+        client
+            .send_request_body(request_stream_id, &[0; 3000])
+            .unwrap();
+
+        // now change priority
+        assert!(client
+            .priority_update(request_stream_id, Priority::new(6, false))
+            .unwrap());
+
+        // check if the priority pending priority_update doesn't cause a hang
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            HTTP_RESPONSE_1,
+            true,
+        );
     }
 }
