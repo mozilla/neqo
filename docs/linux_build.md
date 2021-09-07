@@ -113,7 +113,7 @@ export LD_LIBRARY_PATH=$NSS_DIR/../dist/Debug/lib
 5. Clone **NSS** and **NSPR**
 
 ```shell
-hg clone -u c7a1c91cd9be https://hg.mozilla.org/projects/nss "$NSS_DIR"
+hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
 hg clone -u NSPR_4_25_RTM https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
 ```
 
