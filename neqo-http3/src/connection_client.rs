@@ -6615,29 +6615,57 @@ mod tests {
 
     #[test]
     fn priority_update_during_full_buffer() {
-        // set a lower max_data on the server side to restrict the data the client can send
+        // set a lower MAX_DATA on the server side to restrict the data the client can send
         let (mut client, mut server) =
             connect_with_connection_parameters(ConnectionParameters::default().max_data(1200));
+
+        assert!(client.process(None, now()).dgram().is_none());
+
+        let mut buf = [0u8; 32];
+        server.conn.stream_recv(2, &mut buf).unwrap();
+
         let request_stream_id = make_request_and_exchange_pkts(&mut client, &mut server, false);
         let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(client.events().any(data_writable));
-        // Send a lot of data
+        // Send a lot of data to reach the flow control limit
         client
-            .send_request_body(request_stream_id, &[0; 3000])
+            .send_request_body(request_stream_id, &[0; 2000])
             .unwrap();
 
-        // now change priority
+        // now queue a priority_update packet for that stream
         assert!(client
             .priority_update(request_stream_id, Priority::new(6, false))
             .unwrap());
 
-        // check if the priority pending priority_update doesn't cause an infinite loop
-        server_send_response_and_exchange_packet(
-            &mut client,
-            &mut server,
-            request_stream_id,
-            HTTP_RESPONSE_1,
-            true,
-        );
+        let md_before = server.conn.stats().frame_tx.max_data;
+
+        // sending the http request and most most of the request data
+        let out = client.process(None, now()).dgram();
+        let out = server.conn.process(out, now()).dgram();
+
+        // the server responses with an ack, but the max_data didn't change
+        assert_eq!(md_before, server.conn.stats().frame_tx.max_data);
+
+        let out = client.process(out, now()).dgram();
+        let out = server.conn.process(out, now()).dgram();
+
+        // the server increased the max_data during the second read if that isn't the case
+        // in the future and therefore this asserts fails, the request data on stream 0 could be read
+        // to cause a max_update frame
+        assert_eq!(md_before + 1, server.conn.stats().frame_tx.max_data);
+
+        // make sure that the server didn't receive a priority_update yet
+        // exchange packets including settings on client control stream (stream_id 2)
+        assert_eq!(server.conn.stream_recv(2, &mut buf), Ok((0, false)));
+
+        // the client now sends the priority update
+        let out = client.process(out, now()).dgram();
+        println!("3rd len: {}", out.as_ref().unwrap().len());
+        let _out = server.conn.process(out, now()).dgram();
+
+        // make sure that the server didn't receive a priority_update yet
+        // exchange packets including settings on client control stream (stream_id 2)
+        let num_read = server.conn.stream_recv(2, &mut buf).unwrap();
+        assert_eq!(b"\x80\x0f\x07\x00\x04\x00\x75\x3d\x36", &buf[0..num_read.0]);
     }
 }

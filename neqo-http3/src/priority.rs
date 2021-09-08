@@ -142,7 +142,7 @@ impl PriorityHandler {
 #[cfg(test)]
 mod test {
     use crate::priority::PriorityHandler;
-    use crate::Priority;
+    use crate::{HFrame, Priority};
 
     #[test]
     fn priority_updates_ignore_same() {
@@ -174,8 +174,12 @@ mod test {
         let mut p = PriorityHandler::new(false, Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(6, false)));
         assert!(p.maybe_update_priority(Priority::new(7, false)));
-        // updating two times with a different -> there should be a priority frame sent
-        assert!(p.maybe_encode_frame(4).is_some());
+        // updating two times with a different priority -> the last priority update should be in the next frame
+        let expected = HFrame::PriorityUpdateRequest {
+            element_id: 4,
+            priority: Priority::new(7, false),
+        };
+        assert_eq!(p.maybe_encode_frame(4), Some(expected));
     }
 
     #[test]
@@ -183,6 +187,10 @@ mod test {
         let mut p = PriorityHandler::new(false, Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(5, true)));
         // updating the incremental parameter -> there should be a priority frame sent
-        assert!(p.maybe_encode_frame(4).is_some());
+        let expected = HFrame::PriorityUpdateRequest {
+            element_id: 4,
+            priority: Priority::new(5, true),
+        };
+        assert_eq!(p.maybe_encode_frame(4), Some(expected));
     }
 }
