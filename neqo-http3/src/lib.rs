@@ -15,6 +15,7 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
+mod priority;
 mod push_controller;
 mod push_stream;
 mod qlog;
@@ -35,12 +36,14 @@ pub use neqo_transport::Output;
 use neqo_transport::{AppError, Connection, Error as TransportError};
 use std::fmt::Debug;
 
+use crate::priority::PriorityHandler;
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
 pub use connection_client::Http3Parameters;
 pub use hframe::{HFrame, HFrameReader};
 pub use neqo_common::Header;
+pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{ClientRequestStream, Http3ServerEvent};
 pub use settings::HttpZeroRttChecker;
@@ -330,6 +333,8 @@ pub trait HttpRecvStream: RecvStream {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)>;
+
+    fn priority_handler_mut(&mut self) -> &mut PriorityHandler;
 }
 
 pub(crate) trait RecvMessageEvents: Debug {

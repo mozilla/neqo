@@ -9,10 +9,10 @@ use crate::hframe::HFrame;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{Error, Header, ReceiveOutput, Res};
+use crate::{Error, Header, Priority, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -132,6 +132,7 @@ impl Http3ServerHandler {
                             Rc::clone(&self.base_handler.qpack_decoder),
                             Box::new(self.events.clone()),
                             None,
+                            Priority::default(),
                         )),
                     ),
                     StreamType::UniDi => self
@@ -189,8 +190,28 @@ impl Http3ServerHandler {
                         HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
                             Err(Error::HttpFrameUnexpected)
                         }
+                        HFrame::PriorityUpdatePush { element_id, priority } => {
+                            // TODO: check if the element_id references a promised push stream or
+                            //       is greater than the maximum Push ID.
+                            self.events.priority_update(element_id, priority);
+                            Ok(())
+                        }
+                        HFrame::PriorityUpdateRequest { element_id, priority } => {
+                            // check that the element_id references a request stream
+                            // within the client-sided bidirectional stream limit
+                            let element_stream_id = StreamId::new(element_id);
+                            if !element_stream_id.is_bidi()
+                                || !element_stream_id.is_client_initiated()
+                                || !conn.is_stream_id_allowed(element_stream_id)
+                            {
+                                return Err(Error::HttpId)
+                            }
+
+                            self.events.priority_update(element_id, priority);
+                            Ok(())
+                        }
                         _ => unreachable!(
-                            "we should only put MaxPushId and Goaway into control_frames."
+                            "we should only put MaxPushId, Goaway and PriorityUpdates into control_frames."
                         ),
                     }?;
                 }

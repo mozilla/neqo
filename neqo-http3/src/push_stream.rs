@@ -5,9 +5,12 @@
 // except according to those terms.
 
 use crate::client_events::Http3ClientEvents;
+use crate::priority::PriorityHandler;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
-use crate::{Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{
+    Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res, ResetType,
+};
 use neqo_common::{Decoder, IncrementalDecoderUint};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
@@ -63,6 +66,7 @@ pub(crate) struct PushStream {
     push_handler: Rc<RefCell<PushController>>,
     qpack_decoder: Rc<RefCell<QPackDecoder>>,
     events: Http3ClientEvents,
+    priority_handler: PriorityHandler,
 }
 
 impl PushStream {
@@ -71,6 +75,7 @@ impl PushStream {
         push_handler: Rc<RefCell<PushController>>,
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
         events: Http3ClientEvents,
+        priority: Priority,
     ) -> Self {
         Self {
             state: PushStreamState::ReadPushId(IncrementalDecoderUint::default()),
@@ -78,6 +83,7 @@ impl PushStream {
             push_handler,
             qpack_decoder,
             events,
+            priority_handler: PriorityHandler::new(true, priority),
         }
     }
 
@@ -95,6 +101,7 @@ impl PushStream {
                     Rc::clone(&self.qpack_decoder),
                     Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
                     None,
+                    Priority::default(),
                 ),
             };
         } else {
@@ -196,5 +203,9 @@ impl HttpRecvStream for PushStream {
         } else {
             Err(Error::InvalidStreamId)
         }
+    }
+
+    fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
+        &mut self.priority_handler
     }
 }

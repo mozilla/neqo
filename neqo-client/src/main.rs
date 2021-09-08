@@ -16,6 +16,7 @@ use neqo_crypto::{
 };
 use neqo_http3::{
     self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
+    Priority,
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
@@ -418,6 +419,7 @@ impl<'a> Handler<'a> {
             &url.host_str().unwrap(),
             &url.path(),
             &to_headers(&self.args.header),
+            Priority::default(),
         ) {
             Ok(client_stream_id) => {
                 println!(

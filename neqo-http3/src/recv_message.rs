@@ -6,12 +6,13 @@
 
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
-use crate::qlog;
+use crate::{qlog, Priority};
 use crate::{
     Error, Header, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvMessageEvents, RecvStream,
     Res, ResetType,
 };
 
+use crate::priority::PriorityHandler;
 use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
@@ -76,6 +77,7 @@ pub(crate) struct RecvMessage {
     conn_events: Box<dyn RecvMessageEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: u64,
+    priority_handler: PriorityHandler,
     blocked_push_promise: VecDeque<PushInfo>,
 }
 
@@ -92,6 +94,7 @@ impl RecvMessage {
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
         conn_events: Box<dyn RecvMessageEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
+        priority: Priority,
     ) -> Self {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders {
@@ -102,6 +105,7 @@ impl RecvMessage {
             conn_events,
             push_handler,
             stream_id,
+            priority_handler: PriorityHandler::new(false, priority),
             blocked_push_promise: VecDeque::new(),
         }
     }
@@ -519,5 +523,9 @@ impl HttpRecvStream for RecvMessage {
                 _ => break Ok((written, false)),
             }
         }
+    }
+
+    fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
+        &mut self.priority_handler
     }
 }
