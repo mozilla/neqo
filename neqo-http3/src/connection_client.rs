@@ -564,7 +564,9 @@ impl Http3Client {
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     if let Err(e) = self.handle_stream_readable(stream_id) {
-                        if e.stream_reset_error() {
+                        if !self.base_handler.stream_is_critical(stream_id)
+                            && e.stream_reset_error()
+                        {
                             self.reset_stream_on_error(stream_id, e.code());
                         } else {
                             return Err(e);
@@ -6660,5 +6662,50 @@ mod tests {
         // check that the priority_update arrived at the client control stream
         let num_read = server.conn.stream_recv(2, &mut buf).unwrap();
         assert_eq!(b"\x80\x0f\x07\x00\x04\x00\x75\x3d\x36", &buf[0..num_read.0]);
+    }
+
+    #[test]
+    fn error_request_stream() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let headers = vec![
+            Header::new(":status", "200"),
+            Header::new(":method", "GET"), // <- invalid
+            Header::new("my-header", "my-header"),
+            Header::new("content-length", "3"),
+        ];
+        let encoded_headers = server
+            .encoder
+            .borrow_mut()
+            .encode_header_block(&mut server.conn, &headers, request_stream_id)
+            .unwrap();
+        let hframe = HFrame::Headers {
+            header_block: encoded_headers.to_vec(),
+        };
+
+        // Send the encoder instructions, but delay them so that the stream is blocked on decoding headers.
+        let encoder_inst_pkt = server.conn.process(None, now());
+
+        // Send response
+        let mut d = Encoder::default();
+        hframe.encode(&mut d);
+        let d_frame = HFrame::Data { len: 3 };
+        d_frame.encode(&mut d);
+        d.encode(b"abc");
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            true,
+        );
+
+        // Let client receive the encoder instructions.
+        client.process_input(encoder_inst_pkt.dgram().unwrap(), now());
+
+        let reset_event = |e| matches!(e, Http3ClientEvent::Reset { stream_id, .. } if stream_id == request_stream_id);
+        assert!(client.events().any(reset_event));
     }
 }
