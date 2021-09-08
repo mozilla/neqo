@@ -6619,11 +6619,6 @@ mod tests {
         let (mut client, mut server) =
             connect_with_connection_parameters(ConnectionParameters::default().max_data(1200));
 
-        assert!(client.process(None, now()).dgram().is_none());
-
-        let mut buf = [0u8; 32];
-        server.conn.stream_recv(2, &mut buf).unwrap();
-
         let request_stream_id = make_request_and_exchange_pkts(&mut client, &mut server, false);
         let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(client.events().any(data_writable));
@@ -6654,17 +6649,15 @@ mod tests {
         // to cause a max_update frame
         assert_eq!(md_before + 1, server.conn.stats().frame_tx.max_data);
 
-        // make sure that the server didn't receive a priority_update yet
-        // exchange packets including settings on client control stream (stream_id 2)
+        // make sure that the server didn't receive a priority_update on client control stream (stream_id 2) yet
+        let mut buf = [0u8; 32];
         assert_eq!(server.conn.stream_recv(2, &mut buf), Ok((0, false)));
 
         // the client now sends the priority update
         let out = client.process(out, now()).dgram();
-        println!("3rd len: {}", out.as_ref().unwrap().len());
-        let _out = server.conn.process(out, now()).dgram();
+        server.conn.process_input(out.unwrap(), now());
 
-        // make sure that the server didn't receive a priority_update yet
-        // exchange packets including settings on client control stream (stream_id 2)
+        // check that the priority_update arrived at the client control stream
         let num_read = server.conn.stream_recv(2, &mut buf).unwrap();
         assert_eq!(b"\x80\x0f\x07\x00\x04\x00\x75\x3d\x36", &buf[0..num_read.0]);
     }
