@@ -9,7 +9,7 @@ use crate::hframe::HFrame;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{Error, Header, Priority, ReceiveOutput, Res};
+use crate::{Error, Header, Priority, PriorityHandler, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
@@ -132,7 +132,7 @@ impl Http3ServerHandler {
                             Rc::clone(&self.base_handler.qpack_decoder),
                             Box::new(self.events.clone()),
                             None,
-                            Priority::default(),
+                            PriorityHandler::new(false, Priority::default()),
                         )),
                     ),
                     StreamType::UniDi => self
