@@ -97,9 +97,6 @@ impl QuicDatagrams {
         if u64::try_from(buf.len()).unwrap() > self.remote_datagram_size {
             return Err(Error::TooMuchData);
         }
-        //        let dismissed = self.datagram.is_some();
-        //        self.datagram = Some(buf.to_vec());
-        //        dismissed
         Ok(self.datagram.replace(buf.to_vec()).is_some())
     }
 
@@ -107,7 +104,8 @@ impl QuicDatagrams {
         if self.local_datagram_size < u64::try_from(data.len()).unwrap() {
             return Err(Error::ProtocolViolation);
         }
-        self.conn_events.datagram(self.max_queued_datagrams, data);
+        self.conn_events
+            .add_datagram(self.max_queued_datagrams, data);
         Ok(())
     }
 }

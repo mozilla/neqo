@@ -64,7 +64,7 @@ pub enum ConnectionEvent {
     ResumptionToken(ResumptionToken),
     Datagram(Vec<u8>),
     // TODO: datagrams probably need some identifiers. The packet number they
-    // are sent in would be enough. In that case we need an even DaagramSent
+    // are sent in would be enough. In that case we need an event DatagramSent
     // as well.
     DatagramLost,
     DatagramAcked,
@@ -158,6 +158,8 @@ impl ConnectionEvents {
         self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
     }
 
+    // The number of datagrams in the events queue is limited to max_queued_datagrams.
+    // This function ensure this and deletes the oldest datagrams if needed.
     fn check_datagram_queued(&self, max_queued_datagrams: usize) {
         let mut q = self.events.borrow_mut();
         let mut remove = None;
@@ -183,7 +185,7 @@ impl ConnectionEvents {
         }
     }
 
-    pub fn datagram(&self, max_queued_datagrams: usize, data: &[u8]) {
+    pub fn add_datagram(&self, max_queued_datagrams: usize, data: &[u8]) {
         self.check_datagram_queued(max_queued_datagrams);
         self.insert(ConnectionEvent::Datagram(data.to_vec()));
     }
