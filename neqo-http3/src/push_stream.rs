@@ -39,7 +39,6 @@ pub(crate) struct PushStream {
     push_id: u64,
     response: RecvMessage,
     push_handler: Rc<RefCell<PushController>>,
-    priority_handler: PriorityHandler,
 }
 
 impl PushStream {
@@ -57,12 +56,11 @@ impl PushStream {
                 qpack_decoder,
                 Box::new(RecvPushEvents::new(push_id, push_handler.clone())),
                 None,
-                Priority::default(),
+                PriorityHandler::new(true, priority),
             ),
             stream_id,
             push_id,
             push_handler,
-            priority_handler: PriorityHandler::new(true, priority),
         }
     }
 }
@@ -129,6 +127,6 @@ impl HttpRecvStream for PushStream {
     }
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
-        &mut self.priority_handler
+        self.response.priority_handler_mut()
     }
 }

@@ -12,7 +12,9 @@ use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
-use crate::{Header, NewStreamType, Priority, ReceiveOutput, RecvMessageEvents, ResetType};
+use crate::{
+    Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvMessageEvents, ResetType,
+};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
@@ -315,7 +317,7 @@ impl Http3Client {
                 Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(self.events.clone()),
                 Some(Rc::clone(&self.push_handler)),
-                priority,
+                PriorityHandler::new(false, priority),
             )),
         );
 
