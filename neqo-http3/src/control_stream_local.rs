@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::hframe::HFrame;
-use crate::{RecvStream, Res};
+use crate::{Http3StreamType, RecvStream, Res};
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamType};
 use std::collections::{HashMap, VecDeque};
