@@ -304,7 +304,7 @@ fn multiple_datagram_events() {
     assert_eq!(datagrams.next().unwrap(), THIRD_DATAGRAM);
     assert!(datagrams.next().is_none());
 
-    // New evens can be queued.
+    // New events can be queued.
     send_datagram(&mut client, &mut server, FOURTH_DATAGRAM);
     let mut datagrams = client.events().filter_map(|evt| {
         if let ConnectionEvent::Datagram(d) = evt {
@@ -350,7 +350,7 @@ fn too_many_datagram_events() {
     assert_eq!(datagrams.next().unwrap(), THIRD_DATAGRAM);
     assert!(datagrams.next().is_none());
 
-    // New evens can be queued.
+    // New events can be queued.
     send_datagram(&mut client, &mut server, FOURTH_DATAGRAM);
     let mut datagrams = client.events().filter_map(|evt| {
         if let ConnectionEvent::Datagram(d) = evt {
