@@ -680,6 +680,7 @@ impl Http3Client {
                 push_id,
                 Rc::clone(&self.push_handler),
                 Rc::clone(&self.base_handler.qpack_decoder),
+                Priority::default(),
             )),
         );
         let res = self

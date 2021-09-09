@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-
-
 use crate::priority::PriorityHandler;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
@@ -59,6 +57,7 @@ impl PushStream {
                 qpack_decoder,
                 Box::new(RecvPushEvents::new(push_id, push_handler.clone())),
                 None,
+                Priority::default(),
             ),
             stream_id,
             push_id,
