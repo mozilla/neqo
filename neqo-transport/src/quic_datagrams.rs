@@ -10,9 +10,10 @@ use crate::frame::{FRAME_TYPE_DATAGRAM, FRAME_TYPE_DATAGRAM_WITH_LEN};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
-use crate::{ConnectionEvents, Error, Res};
+use crate::{events::OutgoingQuicDatagramOutcome, ConnectionEvents, Error, Res};
 use neqo_common::Encoder;
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 
 pub const MAX_QUIC_DATAGRAM: u64 = 65535;
@@ -22,25 +23,28 @@ pub struct QuicDatagrams {
     local_datagram_size: u64,
     /// The max size of a datagram that would be acceptable by the peer.
     remote_datagram_size: u64,
+    max_queued_outgoing_datagrams: usize,
     /// The max number of datagrams that will be queued in connection events.
     /// If the number is exceeded, the oldest datagram will be dropped.
-    max_queued_datagrams: usize,
+    max_queued_incoming_datagrams: usize,
     /// Datagram queued for sending.
-    datagram: Option<Vec<u8>>,
+    datagrams: VecDeque<Vec<u8>>,
     conn_events: ConnectionEvents,
 }
 
 impl QuicDatagrams {
     pub fn new(
         local_datagram_size: u64,
-        max_queued_datagrams: usize,
+        max_queued_outgoing_datagrams: usize,
+        max_queued_incoming_datagrams: usize,
         conn_events: ConnectionEvents,
     ) -> Self {
         Self {
             local_datagram_size,
             remote_datagram_size: 0,
-            max_queued_datagrams,
-            datagram: None,
+            max_queued_outgoing_datagrams,
+            max_queued_incoming_datagrams,
+            datagrams: VecDeque::new(),
             conn_events,
         }
     }
@@ -62,7 +66,7 @@ impl QuicDatagrams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        if let Some(data) = &self.datagram.take() {
+        while let Some(data) = self.datagrams.pop_front() {
             let len = data.len();
             if builder.remaining() >= len + 1 {
                 // + 1 for Frame type
@@ -75,13 +79,18 @@ impl QuicDatagrams {
                     builder.encode(&data);
                 }
                 debug_assert!(builder.len() <= builder.limit());
-                self.datagram = None;
                 stats.datagram += 1;
-                tokens.push(RecoveryToken::Datagram);
+                tokens.push(RecoveryToken::QuicDatagram(len));
             } else {
-                // TODO try writing in a completely empty packet,
-                // before dropping a datagram.
-                self.conn_events.datagram_lost();
+                if tokens.is_empty() {
+                    // If the packet is empty, except packet headers, and the
+                    // datagram cannot fit, drop it.
+                    self.conn_events
+                        .quic_datagram_outcome(len, OutgoingQuicDatagramOutcome::DroppedTooBig);
+                } else {
+                    self.datagrams.push_front(data);
+                }
+                return;
             }
         }
     }
@@ -93,11 +102,18 @@ impl QuicDatagrams {
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet.
-    pub fn add_datagram(&mut self, buf: &[u8]) -> Res<bool> {
+    pub fn add_datagram(&mut self, buf: &[u8]) -> Res<()> {
         if u64::try_from(buf.len()).unwrap() > self.remote_datagram_size {
             return Err(Error::TooMuchData);
         }
-        Ok(self.datagram.replace(buf.to_vec()).is_some())
+        if self.datagrams.len() == self.max_queued_outgoing_datagrams {
+            self.conn_events.quic_datagram_outcome(
+                self.datagrams.pop_front().unwrap().len(),
+                OutgoingQuicDatagramOutcome::DroppedQueueFull,
+            );
+        }
+        self.datagrams.push_back(buf.to_vec());
+        Ok(())
     }
 
     pub fn handle_datagram(&self, data: &[u8]) -> Res<()> {
@@ -105,7 +121,7 @@ impl QuicDatagrams {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events
-            .add_datagram(self.max_queued_datagrams, data);
+            .add_quic_datagram(self.max_queued_incoming_datagrams, data);
         Ok(())
     }
 }

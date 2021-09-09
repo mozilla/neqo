@@ -89,7 +89,7 @@ pub enum RecoveryToken {
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),
     RetireConnectionId(u64),
     AckFrequency(AckRate),
-    Datagram,
+    QuicDatagram(usize),
 }
 
 /// `SendProfile` tells a sender how to send packets.

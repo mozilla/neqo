@@ -171,10 +171,10 @@ impl Http3ServerHandler {
                 | ConnectionEvent::ResumptionToken(..) => return Err(Error::HttpInternal(4)),
                 ConnectionEvent::SendStreamWritable { .. }
                 | ConnectionEvent::SendStreamComplete { .. }
-                | ConnectionEvent::SendStreamCreatable { .. } => {}
-                ConnectionEvent::Datagram { .. }
-                | ConnectionEvent::DatagramAcked
-                | ConnectionEvent::DatagramLost => panic!("Datagrams are not enabled"),
+                | ConnectionEvent::SendStreamCreatable { .. }
+                | ConnectionEvent::QuicDatagram { .. }
+                | ConnectionEvent::OutgoingQuicDatagramOutcome { .. }
+                | ConnectionEvent::IncomingQuicDatagramDropped => {}
             }
         }
         Ok(())

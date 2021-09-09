@@ -610,9 +610,9 @@ impl Http3Client {
                 ConnectionEvent::ResumptionToken(token) => {
                     self.create_resumption_token(&token);
                 }
-                ConnectionEvent::Datagram { .. }
-                | ConnectionEvent::DatagramAcked
-                | ConnectionEvent::DatagramLost => {}
+                ConnectionEvent::QuicDatagram { .. }
+                | ConnectionEvent::OutgoingQuicDatagramOutcome { .. }
+                | ConnectionEvent::IncomingQuicDatagramDropped => {}
             }
         }
         Ok(())
