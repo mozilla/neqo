@@ -66,8 +66,9 @@ pub struct ConnectionParameters {
     /// The duration of the idle timeout for the connection.
     idle_timeout: Duration,
     preferred_address: PreferredAddressConfig,
-    datagram_size: u64,
-    queued_datagrams: usize,
+    quic_datagram_size: u64,
+    queued_outgoing_quic_datagrams: usize,
+    queued_incoming_quic_datagrams: usize,
 }
 
 impl Default for ConnectionParameters {
@@ -84,8 +85,9 @@ impl Default for ConnectionParameters {
             ack_ratio: DEFAULT_ACK_RATIO,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
-            datagram_size: 0,
-            queued_datagrams: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            quic_datagram_size: 0,
+            queued_outgoing_quic_datagrams: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            queued_incoming_quic_datagrams: MAX_QUEUED_DATAGRAMS_DEFAULT,
         }
     }
 }
@@ -214,21 +216,30 @@ impl ConnectionParameters {
         self.idle_timeout
     }
 
-    pub fn get_datagram_size(&self) -> u64 {
-        self.datagram_size
+    pub fn get_quic_datagram_size(&self) -> u64 {
+        self.quic_datagram_size
     }
 
-    pub fn datagram_size(mut self, v: u64) -> Self {
-        self.datagram_size = v;
+    pub fn quic_datagram_size(mut self, v: u64) -> Self {
+        self.quic_datagram_size = v;
         self
     }
 
-    pub fn get_queued_datagrams(&self) -> usize {
-        self.queued_datagrams
+    pub fn get_queued_outgoing_quic_datagrams(&self) -> usize {
+        self.queued_outgoing_quic_datagrams
     }
 
-    pub fn queued_datagrams(mut self, v: usize) -> Self {
-        self.queued_datagrams = v;
+    pub fn queued_outgoing_quic_datagrams(mut self, v: usize) -> Self {
+        self.queued_outgoing_quic_datagrams = v;
+        self
+    }
+
+    pub fn get_queued_incoming_quic_datagrams(&self) -> usize {
+        self.queued_incoming_quic_datagrams
+    }
+
+    pub fn queued_incoming_quic_datagrams(mut self, v: usize) -> Self {
+        self.queued_incoming_quic_datagrams = v;
         self
     }
 
@@ -292,7 +303,7 @@ impl ConnectionParameters {
             }
         }
         tps.local
-            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.datagram_size);
+            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.quic_datagram_size);
         Ok(tps)
     }
 }

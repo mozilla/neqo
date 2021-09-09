@@ -36,7 +36,7 @@ use crate::cid::{
 
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
-use crate::events::{ConnectionEvent, ConnectionEvents};
+use crate::events::{ConnectionEvent, ConnectionEvents, OutgoingQuicDatagramOutcome};
 use crate::frame::{
     CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
@@ -369,8 +369,9 @@ impl Connection {
         let stats = StatsCell::default();
         let events = ConnectionEvents::default();
         let quic_datagrams = QuicDatagrams::new(
-            conn_params.get_datagram_size(),
-            conn_params.get_queued_datagrams(),
+            conn_params.get_quic_datagram_size(),
+            conn_params.get_queued_outgoing_quic_datagrams(),
+            conn_params.get_queued_incoming_quic_datagrams(),
             events.clone(),
         );
 
@@ -2544,7 +2545,9 @@ impl Connection {
                     RecoveryToken::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
                     RecoveryToken::KeepAlive => self.idle_timeout.lost_keep_alive(),
                     RecoveryToken::Stream(stream_token) => self.streams.lost(stream_token),
-                    RecoveryToken::Datagram => self.events.datagram_lost(),
+                    RecoveryToken::QuicDatagram(len) => self
+                        .events
+                        .quic_datagram_outcome(*len, OutgoingQuicDatagramOutcome::Lost),
                 }
             }
         }
@@ -2593,7 +2596,9 @@ impl Connection {
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
                     RecoveryToken::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
                     RecoveryToken::KeepAlive => self.idle_timeout.ack_keep_alive(),
-                    RecoveryToken::Datagram => self.events.datagram_acked(),
+                    RecoveryToken::QuicDatagram(len) => self
+                        .events
+                        .quic_datagram_outcome(*len, OutgoingQuicDatagramOutcome::Acked),
                     // We only worry when these are lost
                     RecoveryToken::HandshakeDone => (),
                 }
@@ -2821,7 +2826,7 @@ impl Connection {
         self.streams.keep_alive(stream_id.into(), keep)
     }
 
-    pub fn remote_datagram_size(&self) -> u64 {
+    pub fn remote_quic_datagram_size(&self) -> u64 {
         self.quic_datagrams.remote_datagram_size()
     }
 
@@ -2830,7 +2835,7 @@ impl Connection {
     /// packet number, ack frames, etc.
     /// # Error
     /// The function returns `NotAvailable` if datagrams are not enabled.
-    pub fn max_datagram_size(&self) -> Res<u64> {
+    pub fn max_quic_datagram_size(&self) -> Res<u64> {
         let max_dgram_size = self.quic_datagrams.remote_datagram_size();
         if max_dgram_size == 0 {
             return Err(Error::NotAvailable);
@@ -2876,11 +2881,11 @@ impl Connection {
     /// the allowed remote datagram size. The funcion does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
-    /// not fit into the packet. The app is encourage to use `max_datagram_size`
+    /// not fit into the packet. The app is encourage to use `max_quic_datagram_size`
     /// to check the estimated max datagram size and to use smaller datagrams.
-    /// `max_datagram_size` is just a current estimate and will change over
+    /// `max_quic_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn add_datagram(&mut self, buf: &[u8]) -> Res<bool> {
+    pub fn add_quic_datagram(&mut self, buf: &[u8]) -> Res<()> {
         self.quic_datagrams.add_datagram(buf)
     }
 }

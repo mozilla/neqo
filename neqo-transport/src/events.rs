@@ -17,6 +17,14 @@ use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
+pub enum OutgoingQuicDatagramOutcome {
+    DroppedTooBig,
+    DroppedQueueFull,
+    Lost,
+    Acked,
+}
+
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ConnectionEvent {
     /// Cert authentication needed
     AuthenticationNeeded,
@@ -62,12 +70,12 @@ pub enum ConnectionEvent {
     /// Any data written to streams needs to be written again.
     ZeroRttRejected,
     ResumptionToken(ResumptionToken),
-    Datagram(Vec<u8>),
-    // TODO: datagrams probably need some identifiers. The packet number they
-    // are sent in would be enough. In that case we need an event DatagramSent
-    // as well.
-    DatagramLost,
-    DatagramAcked,
+    QuicDatagram(Vec<u8>),
+    OutgoingQuicDatagramOutcome {
+        len: usize,
+        outcome: OutgoingQuicDatagramOutcome,
+    },
+    IncomingQuicDatagramDropped,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -160,11 +168,11 @@ impl ConnectionEvents {
 
     // The number of datagrams in the events queue is limited to max_queued_datagrams.
     // This function ensure this and deletes the oldest datagrams if needed.
-    fn check_datagram_queued(&self, max_queued_datagrams: usize) {
+    fn check_quic_datagram_queued(&self, max_queued_datagrams: usize) {
         let mut q = self.events.borrow_mut();
         let mut remove = None;
         if q.iter()
-            .filter(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
+            .filter(|evt| matches!(evt, ConnectionEvent::QuicDatagram(_)))
             .count()
             == max_queued_datagrams
         {
@@ -172,7 +180,7 @@ impl ConnectionEvents {
                 .iter()
                 .rev()
                 .enumerate()
-                .filter(|(_, evt)| matches!(evt, ConnectionEvent::Datagram(_)))
+                .filter(|(_, evt)| matches!(evt, ConnectionEvent::QuicDatagram(_)))
                 .take(1)
                 .next()
             {
@@ -181,21 +189,21 @@ impl ConnectionEvents {
         }
         if let Some(r) = remove {
             q.remove(r);
-            q.push_back(ConnectionEvent::DatagramLost);
+            q.push_back(ConnectionEvent::IncomingQuicDatagramDropped);
         }
     }
 
-    pub fn add_datagram(&self, max_queued_datagrams: usize, data: &[u8]) {
-        self.check_datagram_queued(max_queued_datagrams);
-        self.insert(ConnectionEvent::Datagram(data.to_vec()));
+    pub fn add_quic_datagram(&self, max_queued_datagrams: usize, data: &[u8]) {
+        self.check_quic_datagram_queued(max_queued_datagrams);
+        self.events
+            .borrow_mut()
+            .push_back(ConnectionEvent::QuicDatagram(data.to_vec()));
     }
 
-    pub fn datagram_lost(&self) {
-        self.insert(ConnectionEvent::DatagramLost);
-    }
-
-    pub fn datagram_acked(&self) {
-        self.insert(ConnectionEvent::DatagramAcked);
+    pub fn quic_datagram_outcome(&self, len: usize, outcome: OutgoingQuicDatagramOutcome) {
+        self.events
+            .borrow_mut()
+            .push_back(ConnectionEvent::OutgoingQuicDatagramOutcome { len, outcome });
     }
 
     fn insert(&self, event: ConnectionEvent) {
