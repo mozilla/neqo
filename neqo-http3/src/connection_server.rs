@@ -172,9 +172,9 @@ impl Http3ServerHandler {
                 ConnectionEvent::SendStreamWritable { .. }
                 | ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::SendStreamCreatable { .. }
-                | ConnectionEvent::QuicDatagram { .. }
-                | ConnectionEvent::OutgoingQuicDatagramOutcome { .. }
-                | ConnectionEvent::IncomingQuicDatagramDropped => {}
+                | ConnectionEvent::Datagram { .. }
+                | ConnectionEvent::OutgoingDatagramOutcome { .. }
+                | ConnectionEvent::IncomingDatagramDropped => {}
             }
         }
         Ok(())

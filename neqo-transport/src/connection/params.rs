@@ -11,6 +11,7 @@ use crate::stream_id::StreamType;
 use crate::tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler};
 use crate::tracking::DEFAULT_ACK_DELAY;
 use crate::{CongestionControlAlgorithm, QuicVersion, Res};
+use std::cmp::max;
 use std::convert::TryFrom;
 use std::time::Duration;
 
@@ -66,9 +67,9 @@ pub struct ConnectionParameters {
     /// The duration of the idle timeout for the connection.
     idle_timeout: Duration,
     preferred_address: PreferredAddressConfig,
-    quic_datagram_size: u64,
-    queued_outgoing_quic_datagrams: usize,
-    queued_incoming_quic_datagrams: usize,
+    datagram_size: u64,
+    outgoing_datagrams_queue: usize,
+    incoming_datagrams_queue: usize,
 }
 
 impl Default for ConnectionParameters {
@@ -85,9 +86,9 @@ impl Default for ConnectionParameters {
             ack_ratio: DEFAULT_ACK_RATIO,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
-            quic_datagram_size: 0,
-            queued_outgoing_quic_datagrams: MAX_QUEUED_DATAGRAMS_DEFAULT,
-            queued_incoming_quic_datagrams: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            datagram_size: 0,
+            outgoing_datagrams_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            incoming_datagrams_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
         }
     }
 }
@@ -216,30 +217,32 @@ impl ConnectionParameters {
         self.idle_timeout
     }
 
-    pub fn get_quic_datagram_size(&self) -> u64 {
-        self.quic_datagram_size
+    pub fn get_datagram_size(&self) -> u64 {
+        self.datagram_size
     }
 
-    pub fn quic_datagram_size(mut self, v: u64) -> Self {
-        self.quic_datagram_size = v;
+    pub fn datagram_size(mut self, v: u64) -> Self {
+        self.datagram_size = v;
         self
     }
 
-    pub fn get_queued_outgoing_quic_datagrams(&self) -> usize {
-        self.queued_outgoing_quic_datagrams
+    pub fn get_outgoing_datagrams_queue(&self) -> usize {
+        self.outgoing_datagrams_queue
     }
 
-    pub fn queued_outgoing_quic_datagrams(mut self, v: usize) -> Self {
-        self.queued_outgoing_quic_datagrams = v;
+    pub fn outgoing_datagrams_queue(mut self, v: usize) -> Self {
+        // The max queue length must be at least 1.
+        self.outgoing_datagrams_queue = max(v, 1);
         self
     }
 
-    pub fn get_queued_incoming_quic_datagrams(&self) -> usize {
-        self.queued_incoming_quic_datagrams
+    pub fn get_incoming_datagrams_queue(&self) -> usize {
+        self.incoming_datagrams_queue
     }
 
-    pub fn queued_incoming_quic_datagrams(mut self, v: usize) -> Self {
-        self.queued_incoming_quic_datagrams = v;
+    pub fn incoming_datagrams_queue(mut self, v: usize) -> Self {
+        // The max queue length must be at least 1.
+        self.incoming_datagrams_queue = max(v, 1);
         self
     }
 
@@ -303,7 +306,7 @@ impl ConnectionParameters {
             }
         }
         tps.local
-            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.quic_datagram_size);
+            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.datagram_size);
         Ok(tps)
     }
 }
