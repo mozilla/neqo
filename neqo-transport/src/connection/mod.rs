@@ -1803,17 +1803,18 @@ impl Connection {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
     ) -> Res<()> {
-        let stats = &mut self.stats.borrow_mut().frame_tx;
-
         if self.role == Role::Server {
             if let Some(t) = self.state_signaling.write_done(builder)? {
                 tokens.push(t);
-                stats.handshake_done += 1;
+                self.stats.borrow_mut().frame_tx.handshake_done += 1;
             }
         }
 
         // Check if there is a Datagram to be written
-        self.quic_datagrams.write_frames(builder, tokens, stats);
+        self.quic_datagrams
+            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
+
+        let stats = &mut self.stats.borrow_mut().frame_tx;
 
         self.streams
             .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
@@ -2520,7 +2521,8 @@ impl Connection {
             }
             Frame::Datagram { data, .. } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams.handle_datagram(data)?;
+                self.quic_datagrams
+                    .handle_datagram(data, &mut self.stats.borrow_mut())?;
             }
             _ => unreachable!("All other frames are for streams"),
         };
@@ -2545,9 +2547,11 @@ impl Connection {
                     RecoveryToken::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
                     RecoveryToken::KeepAlive => self.idle_timeout.lost_keep_alive(),
                     RecoveryToken::Stream(stream_token) => self.streams.lost(stream_token),
-                    RecoveryToken::Datagram(dgram_tracker) => self
-                        .events
-                        .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost),
+                    RecoveryToken::Datagram(dgram_tracker) => {
+                        self.events
+                            .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
+                        self.stats.borrow_mut().outgoing_datagram_lost += 1;
+                    }
                 }
             }
         }
@@ -2885,8 +2889,10 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
+
     pub fn send_datagram(&mut self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
-        self.quic_datagrams.add_datagram(buf, id.into())
+        self.quic_datagrams
+            .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }
 }
 

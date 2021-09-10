@@ -140,8 +140,13 @@ fn limit_data_size() {
     // but they cannot be sent.
     assert_eq!(server.send_datagram(DATA_BIGGER_THAN_MTU, Some(1)), Ok(()));
 
+    let dgram_dropped_s = server.stats().outgoing_datagram_dropped_too_big;
     let dgram_sent_s = server.stats().frame_tx.datagram;
     assert!(server.process_output(now()).dgram().is_none());
+    assert_eq!(
+        server.stats().outgoing_datagram_dropped_too_big,
+        dgram_dropped_s + 1
+    );
     assert_eq!(server.stats().frame_tx.datagram, dgram_sent_s);
     assert!(matches!(
         server.next_event().unwrap(),
@@ -175,9 +180,15 @@ fn after_dgram_dropped_continue_writing_frames() {
         ConnectionEvent::OutgoingDatagramOutcome { id, outcome } if id == 1 && outcome == OutgoingDatagramOutcome::DroppedTooBig)
     };
 
+    let dgram_dropped_c = client.stats().outgoing_datagram_dropped_too_big;
     let dgram_sent_c = client.stats().frame_tx.datagram;
+
     assert!(client.process_output(now()).dgram().is_some());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent_c + 1);
+    assert_eq!(
+        client.stats().outgoing_datagram_dropped_too_big,
+        dgram_dropped_c + 1
+    );
     assert!(client.events().any(datagram_dropped));
 }
 
@@ -224,11 +235,13 @@ fn datagram_lost() {
     let now = now() + AT_LEAST_PTO;
     let dgram_sent = client.stats().frame_tx.datagram;
     let pings_sent = client.stats().frame_tx.ping;
+    let dgram_lost = client.stats().outgoing_datagram_lost;
     let out = client.process_output(now).dgram();
     assert!(out.is_some()); //PING probing
                             // Datagram is not sent again.
     assert_eq!(client.stats().frame_tx.ping, pings_sent + 1);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent);
+    assert_eq!(client.stats().outgoing_datagram_lost, dgram_lost + 1);
 
     assert!(matches!(
         client.next_event().unwrap(),
@@ -298,13 +311,19 @@ fn outgoing_datagram_queue_full() {
         client.send_datagram(DATA_SMALLER_THAN_MTU_2, Some(2)),
         Ok(())
     );
+
     // The outgoing datagram queue limit is 2, therefore the datagram with id 1
     // will be dropped after adding one more datagram.
+    let dgram_dropped = client.stats().outgoing_datagram_dropped_queue_full;
     assert_eq!(client.send_datagram(DATA_MTU, Some(3)), Ok(()));
     assert!(matches!(
         client.next_event().unwrap(),
         ConnectionEvent::OutgoingDatagramOutcome { id, outcome } if id == 1 && outcome == OutgoingDatagramOutcome::DroppedQueueFull
     ));
+    assert_eq!(
+        client.stats().outgoing_datagram_dropped_queue_full,
+        dgram_dropped + 1
+    );
 
     // Send DATA_SMALLER_THAN_MTU_2 datagram
     let out = client.process_output(now()).dgram();
@@ -418,6 +437,7 @@ fn too_many_datagram_events() {
         ConnectionEvent::Datagram(data) if data == THIRD_DATAGRAM
     ));
     assert!(client.next_event().is_none());
+    assert_eq!(client.stats().incoming_datagram_dropped, 1);
 
     // New events can be queued.
     send_datagram(&mut client, &mut server, FOURTH_DATAGRAM);
@@ -426,6 +446,7 @@ fn too_many_datagram_events() {
         ConnectionEvent::Datagram(data) if data == FOURTH_DATAGRAM
     ));
     assert!(client.next_event().is_none());
+    assert_eq!(client.stats().incoming_datagram_dropped, 1);
 }
 
 #[test]

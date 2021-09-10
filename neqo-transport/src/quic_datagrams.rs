@@ -9,8 +9,7 @@
 use crate::frame::{FRAME_TYPE_DATAGRAM, FRAME_TYPE_DATAGRAM_WITH_LEN};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
-use crate::stats::FrameStats;
-use crate::{events::OutgoingDatagramOutcome, ConnectionEvents, Error, Res};
+use crate::{events::OutgoingDatagramOutcome, ConnectionEvents, Error, Res, Stats};
 use neqo_common::Encoder;
 use std::cmp::min;
 use std::collections::VecDeque;
@@ -108,7 +107,7 @@ impl QuicDatagrams {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
-        stats: &mut FrameStats,
+        stats: &mut Stats,
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {
             let len = dgram.len();
@@ -123,7 +122,7 @@ impl QuicDatagrams {
                     builder.encode(&dgram);
                 }
                 debug_assert!(builder.len() <= builder.limit());
-                stats.datagram += 1;
+                stats.frame_tx.datagram += 1;
                 tokens.push(RecoveryToken::Datagram(*dgram.tracking()));
             } else {
                 if tokens.is_empty() {
@@ -132,6 +131,7 @@ impl QuicDatagrams {
                     // Also continue trying to write the next QuicDatagram.
                     self.conn_events
                         .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
+                    stats.outgoing_datagram_dropped_too_big += 1;
                 } else {
                     self.datagrams.push_front(dgram);
                     // Try later on an empty packet.
@@ -148,7 +148,12 @@ impl QuicDatagrams {
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet.
-    pub fn add_datagram(&mut self, buf: &[u8], tracking: DatagramTracking) -> Res<()> {
+    pub fn add_datagram(
+        &mut self,
+        buf: &[u8],
+        tracking: DatagramTracking,
+        stats: &mut Stats,
+    ) -> Res<()> {
         if u64::try_from(buf.len()).unwrap() > self.remote_datagram_size {
             return Err(Error::TooMuchData);
         }
@@ -157,6 +162,7 @@ impl QuicDatagrams {
                 self.datagrams.pop_front().unwrap().tracking(),
                 OutgoingDatagramOutcome::DroppedQueueFull,
             );
+            stats.outgoing_datagram_dropped_queue_full += 1;
         }
         self.datagrams.push_back(QuicDatagram {
             data: buf.to_vec(),
@@ -165,12 +171,12 @@ impl QuicDatagrams {
         Ok(())
     }
 
-    pub fn handle_datagram(&self, data: &[u8]) -> Res<()> {
+    pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
         if self.local_datagram_size < u64::try_from(data.len()).unwrap() {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events
-            .add_datagram(self.max_queued_incoming_datagrams, data);
+            .add_datagram(self.max_queued_incoming_datagrams, data, stats);
         Ok(())
     }
 }
