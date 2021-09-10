@@ -127,6 +127,17 @@ pub struct Stats {
     pub frame_rx: FrameStats,
     /// Count frames sent.
     pub frame_tx: FrameStats,
+
+    /// The number of incoming datagrams dropped due to reaching the limit
+    /// of the incoming queue.
+    pub incoming_datagram_dropped: usize,
+    /// The number of datagrams declared lost.
+    pub outgoing_datagram_lost: usize,
+    /// The number of datagrams dropped due to being too large.
+    pub outgoing_datagram_dropped_too_big: usize,
+    /// The number of datagrams dropped due to reaching the limit of the
+    /// outgoing queue.
+    pub outgoing_datagram_dropped_queue_full: usize,
 }
 
 impl Stats {
