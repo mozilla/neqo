@@ -129,12 +129,14 @@ impl QuicDatagrams {
                 if tokens.is_empty() {
                     // If the packet is empty, except packet headers, and the
                     // datagram cannot fit, drop it.
+                    // Also continue trying to write the next QuicDatagram.
                     self.conn_events
                         .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
                 } else {
                     self.datagrams.push_front(dgram);
+                    // Try later on an empty packet.
+                    return;
                 }
-                return;
             }
         }
     }

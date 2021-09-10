@@ -160,6 +160,28 @@ fn limit_data_size() {
 }
 
 #[test]
+fn after_dgram_dropped_continue_writing_frames() {
+    let (mut client, _) = connect_datagram();
+
+    assert!(u64::try_from(DATA_BIGGER_THAN_MTU.len()).unwrap() > DATAGRAM_LEN_MTU);
+    // Datagram can be queued because they are smaller than allowed by the peer,
+    // but they cannot be sent.
+    assert_eq!(client.send_datagram(DATA_BIGGER_THAN_MTU, Some(1)), Ok(()));
+    assert_eq!(client.send_datagram(DATA_SMALLER_THAN_MTU, Some(2)), Ok(()));
+
+    let datagram_dropped = |e| {
+        matches!(
+        e,
+        ConnectionEvent::OutgoingDatagramOutcome { id, outcome } if id == 1 && outcome == OutgoingDatagramOutcome::DroppedTooBig)
+    };
+
+    let dgram_sent_c = client.stats().frame_tx.datagram;
+    assert!(client.process_output(now()).dgram().is_some());
+    assert_eq!(client.stats().frame_tx.datagram, dgram_sent_c + 1);
+    assert!(client.events().any(datagram_dropped));
+}
+
+#[test]
 fn datagram_acked() {
     let (mut client, mut server) = connect_datagram();
 
