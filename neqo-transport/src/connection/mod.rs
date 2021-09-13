@@ -2875,7 +2875,7 @@ impl Connection {
         Ok(min(data_len_possible, max_dgram_size))
     }
 
-    /// Returns true if there was an unsent datagram that has been dismissed.
+    /// Queue a datagram for sending.
     /// # Error
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size. The funcion does not check if the
