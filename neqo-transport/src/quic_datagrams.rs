@@ -19,14 +19,38 @@ use std::ops::Deref;
 
 pub const MAX_QUIC_DATAGRAM: u64 = 65535;
 
+#[derive(Debug, Clone, Copy)]
+pub enum DatagramTracking {
+    None,
+    Id(u64),
+}
+
+impl From<Option<u64>> for DatagramTracking {
+    fn from(v: Option<u64>) -> Self {
+        match v {
+            Some(id) => Self::Id(id),
+            None => Self::None,
+        }
+    }
+}
+
+impl Into<Option<u64>> for DatagramTracking {
+    fn into(self) -> Option<u64> {
+        match self {
+            Self::Id(id) => Some(id),
+            Self::None => None,
+        }
+    }
+}
+
 struct QuicDatagram {
     data: Vec<u8>,
-    id: Option<u64>,
+    tracking: DatagramTracking,
 }
 
 impl QuicDatagram {
-    fn id(&self) -> Option<u64> {
-        self.id
+    fn tracking(&self) -> &DatagramTracking {
+        &self.tracking
     }
 }
 
@@ -64,7 +88,7 @@ impl QuicDatagrams {
             remote_datagram_size: 0,
             max_queued_outgoing_datagrams,
             max_queued_incoming_datagrams,
-            datagrams: VecDeque::new(),
+            datagrams: VecDeque::with_capacity(max_queued_outgoing_datagrams),
             conn_events,
         }
     }
@@ -100,13 +124,13 @@ impl QuicDatagrams {
                 }
                 debug_assert!(builder.len() <= builder.limit());
                 stats.datagram += 1;
-                tokens.push(RecoveryToken::Datagram(dgram.id()));
+                tokens.push(RecoveryToken::Datagram(*dgram.tracking()));
             } else {
                 if tokens.is_empty() {
                     // If the packet is empty, except packet headers, and the
                     // datagram cannot fit, drop it.
                     self.conn_events
-                        .datagram_outcome(dgram.id(), OutgoingDatagramOutcome::DroppedTooBig);
+                        .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
                 } else {
                     self.datagrams.push_front(dgram);
                 }
@@ -122,19 +146,19 @@ impl QuicDatagrams {
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet.
-    pub fn add_datagram(&mut self, buf: &[u8], id: Option<u64>) -> Res<()> {
+    pub fn add_datagram(&mut self, buf: &[u8], tracking: DatagramTracking) -> Res<()> {
         if u64::try_from(buf.len()).unwrap() > self.remote_datagram_size {
             return Err(Error::TooMuchData);
         }
         if self.datagrams.len() == self.max_queued_outgoing_datagrams {
             self.conn_events.datagram_outcome(
-                self.datagrams.pop_front().unwrap().id(),
+                self.datagrams.pop_front().unwrap().tracking(),
                 OutgoingDatagramOutcome::DroppedQueueFull,
             );
         }
         self.datagrams.push_back(QuicDatagram {
             data: buf.to_vec(),
-            id,
+            tracking,
         });
         Ok(())
     }

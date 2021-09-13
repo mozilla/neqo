@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::connection::State;
+use crate::quic_datagrams::DatagramTracking;
 use crate::stream_id::{StreamId, StreamType};
 use crate::AppError;
 use neqo_common::event::Provider as EventProvider;
@@ -200,11 +201,15 @@ impl ConnectionEvents {
             .push_back(ConnectionEvent::Datagram(data.to_vec()));
     }
 
-    pub fn datagram_outcome(&self, id: Option<u64>, outcome: OutgoingDatagramOutcome) {
-        if let Some(d_id) = id {
+    pub fn datagram_outcome(
+        &self,
+        dgram_tracker: &DatagramTracking,
+        outcome: OutgoingDatagramOutcome,
+    ) {
+        if let DatagramTracking::Id(id) = dgram_tracker {
             self.events
                 .borrow_mut()
-                .push_back(ConnectionEvent::OutgoingDatagramOutcome { id: d_id, outcome });
+                .push_back(ConnectionEvent::OutgoingDatagramOutcome { id: *id, outcome });
         }
     }
 

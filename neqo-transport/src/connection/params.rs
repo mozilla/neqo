@@ -68,8 +68,8 @@ pub struct ConnectionParameters {
     idle_timeout: Duration,
     preferred_address: PreferredAddressConfig,
     datagram_size: u64,
-    outgoing_datagrams_queue: usize,
-    incoming_datagrams_queue: usize,
+    outgoing_datagram_queue: usize,
+    incoming_datagram_queue: usize,
 }
 
 impl Default for ConnectionParameters {
@@ -87,8 +87,8 @@ impl Default for ConnectionParameters {
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: 0,
-            outgoing_datagrams_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
-            incoming_datagrams_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
         }
     }
 }
@@ -226,23 +226,23 @@ impl ConnectionParameters {
         self
     }
 
-    pub fn get_outgoing_datagrams_queue(&self) -> usize {
-        self.outgoing_datagrams_queue
+    pub fn get_outgoing_datagram_queue(&self) -> usize {
+        self.outgoing_datagram_queue
     }
 
-    pub fn outgoing_datagrams_queue(mut self, v: usize) -> Self {
+    pub fn outgoing_datagram_queue(mut self, v: usize) -> Self {
         // The max queue length must be at least 1.
-        self.outgoing_datagrams_queue = max(v, 1);
+        self.outgoing_datagram_queue = max(v, 1);
         self
     }
 
-    pub fn get_incoming_datagrams_queue(&self) -> usize {
-        self.incoming_datagrams_queue
+    pub fn get_incoming_datagram_queue(&self) -> usize {
+        self.incoming_datagram_queue
     }
 
-    pub fn incoming_datagrams_queue(mut self, v: usize) -> Self {
+    pub fn incoming_datagram_queue(mut self, v: usize) -> Self {
         // The max queue length must be at least 1.
-        self.incoming_datagrams_queue = max(v, 1);
+        self.incoming_datagram_queue = max(v, 1);
         self
     }
 

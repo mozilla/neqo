@@ -45,7 +45,7 @@ use crate::packet::{
     DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion,
 };
 use crate::path::{Path, PathRef, Paths};
-use crate::quic_datagrams::QuicDatagrams;
+use crate::quic_datagrams::{DatagramTracking, QuicDatagrams};
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
 use crate::rtt::GRANULARITY;
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
@@ -370,8 +370,8 @@ impl Connection {
         let events = ConnectionEvents::default();
         let quic_datagrams = QuicDatagrams::new(
             conn_params.get_datagram_size(),
-            conn_params.get_outgoing_datagrams_queue(),
-            conn_params.get_incoming_datagrams_queue(),
+            conn_params.get_outgoing_datagram_queue(),
+            conn_params.get_incoming_datagram_queue(),
             events.clone(),
         );
 
@@ -2545,9 +2545,9 @@ impl Connection {
                     RecoveryToken::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
                     RecoveryToken::KeepAlive => self.idle_timeout.lost_keep_alive(),
                     RecoveryToken::Stream(stream_token) => self.streams.lost(stream_token),
-                    RecoveryToken::Datagram(id) => self
+                    RecoveryToken::Datagram(dgram_tracker) => self
                         .events
-                        .datagram_outcome(*id, OutgoingDatagramOutcome::Lost),
+                        .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost),
                 }
             }
         }
@@ -2596,9 +2596,9 @@ impl Connection {
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
                     RecoveryToken::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
                     RecoveryToken::KeepAlive => self.idle_timeout.ack_keep_alive(),
-                    RecoveryToken::Datagram(id) => self
+                    RecoveryToken::Datagram(dgram_tracker) => self
                         .events
-                        .datagram_outcome(*id, OutgoingDatagramOutcome::Acked),
+                        .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     // We only worry when these are lost
                     RecoveryToken::HandshakeDone => (),
                 }
@@ -2885,8 +2885,8 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn add_datagram(&mut self, buf: &[u8], id: Option<u64>) -> Res<()> {
-        self.quic_datagrams.add_datagram(buf, id)
+    pub fn send_datagram(&mut self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
+        self.quic_datagrams.add_datagram(buf, id.into())
     }
 }
 
