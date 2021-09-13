@@ -131,7 +131,7 @@ impl QuicDatagrams {
                     // Also continue trying to write the next QuicDatagram.
                     self.conn_events
                         .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
-                    stats.outgoing_datagram_dropped_too_big += 1;
+                    stats.datagram_tx.dropped_too_big += 1;
                 } else {
                     self.datagrams.push_front(dgram);
                     // Try later on an empty packet.
@@ -162,7 +162,7 @@ impl QuicDatagrams {
                 self.datagrams.pop_front().unwrap().tracking(),
                 OutgoingDatagramOutcome::DroppedQueueFull,
             );
-            stats.outgoing_datagram_dropped_queue_full += 1;
+            stats.datagram_tx.dropped_queue_full += 1;
         }
         self.datagrams.push_back(QuicDatagram {
             data: buf.to_vec(),

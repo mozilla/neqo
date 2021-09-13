@@ -91,6 +91,18 @@ impl Debug for FrameStats {
     }
 }
 
+///Datagram stats
+#[derive(Default, Clone)]
+pub struct DatagramStats {
+    /// The number of datagrams declared lost.
+    pub lost: usize,
+    /// The number of datagrams dropped due to being too large.
+    pub dropped_too_big: usize,
+    /// The number of datagrams dropped due to reaching the limit of the
+    /// outgoing queue.
+    pub dropped_queue_full: usize,
+}
+
 /// Connection statistics
 #[derive(Default, Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -131,13 +143,8 @@ pub struct Stats {
     /// The number of incoming datagrams dropped due to reaching the limit
     /// of the incoming queue.
     pub incoming_datagram_dropped: usize,
-    /// The number of datagrams declared lost.
-    pub outgoing_datagram_lost: usize,
-    /// The number of datagrams dropped due to being too large.
-    pub outgoing_datagram_dropped_too_big: usize,
-    /// The number of datagrams dropped due to reaching the limit of the
-    /// outgoing queue.
-    pub outgoing_datagram_dropped_queue_full: usize,
+
+    pub datagram_tx: DatagramStats,
 }
 
 impl Stats {

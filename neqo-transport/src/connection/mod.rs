@@ -2550,7 +2550,7 @@ impl Connection {
                     RecoveryToken::Datagram(dgram_tracker) => {
                         self.events
                             .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Lost);
-                        self.stats.borrow_mut().outgoing_datagram_lost += 1;
+                        self.stats.borrow_mut().datagram_tx.lost += 1;
                     }
                 }
             }
