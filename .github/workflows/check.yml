@@ -1,0 +1,88 @@
+name: CI
+on: [push, pull_request]
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Neqo Build and Test
+    runs-on: ubuntu-20.04
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+      NSS_DIR: ${{ github.workspace }}/nss
+      NSPR_DIR: ${{ github.workspace }}/nspr
+    strategy:
+      matrix:
+        rust-toolchain: [stable, 1.51.0]
+
+    steps:
+      - name: Install Packages
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            clang \
+            coreutils \
+            curl \
+            git \
+            gyp \
+            libclang-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            make \
+            mercurial \
+            ninja-build \
+            pkg-config \
+            ssh \
+            zlib1g-dev \
+            --no-install-recommends
+
+      # This step might be removed if the distro included a recent enough
+      # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
+      # (neqo-crypto/build.rs would also need to query pkg-config to get the
+      # right build flags rather than building NSS.)
+      - name: Fetch NSS and NSPR
+        run: |
+          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+          git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust-toolchain }}
+          profile: minimal
+          components: rustfmt, clippy
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --tests -v --all-features
+
+      - name: Run Tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: -v --all-features
+        env:
+           LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
+
+      - name: Check formatting
+        uses: actions-rs/cargo@v1
+        if: ${{ success() || failure() }}
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - uses: actions-rs/cargo@v1
+        name: Clippy
+        if: ${{ success() || failure() }}
+        with:
+          command: clippy
+          args: --tests -- -D warnings
