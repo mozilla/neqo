@@ -97,7 +97,7 @@ fn datagram_enabled_on_server() {
     );
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
-        server.send_datagram(&DATA_SMALLER_THAN_MTU, Some(1)),
+        server.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)),
         Err(Error::TooMuchData)
     );
     let dgram_sent = client.stats().frame_tx.datagram;
@@ -233,14 +233,14 @@ fn datagram_lost() {
 
     // Wait for PTO
     let now = now() + AT_LEAST_PTO;
-    let dgram_sent = client.stats().frame_tx.datagram;
+    let dgram_sent2 = client.stats().frame_tx.datagram;
     let pings_sent = client.stats().frame_tx.ping;
     let dgram_lost = client.stats().datagram_tx.lost;
     let out = client.process_output(now).dgram();
     assert!(out.is_some()); //PING probing
                             // Datagram is not sent again.
     assert_eq!(client.stats().frame_tx.ping, pings_sent + 1);
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent);
+    assert_eq!(client.stats().frame_tx.datagram, dgram_sent2);
     assert_eq!(client.stats().datagram_tx.lost, dgram_lost + 1);
 
     assert!(matches!(
@@ -259,9 +259,8 @@ fn datagram_sent_once() {
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     // Call process_output again should not send any new Datagram.
-    let dgram_sent = client.stats().frame_tx.datagram;
     assert!(client.process_output(now()).dgram().is_none());
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent);
+    assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
 #[test]
@@ -282,6 +281,7 @@ fn dgram_no_allowed() {
 }
 
 #[test]
+#[allow(clippy::assertions_on_constants)] // this is a static assert, thanks
 fn dgram_too_big() {
     let mut client =
         new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
@@ -335,9 +335,9 @@ fn outgoing_datagram_queue_full() {
     ));
 
     // Send DATA_SMALLER_THAN_MTU_2 datagram
-    let dgram_sent = client.stats().frame_tx.datagram;
+    let dgram_sent2 = client.stats().frame_tx.datagram;
     let out = client.process_output(now()).dgram();
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
+    assert_eq!(client.stats().frame_tx.datagram, dgram_sent2 + 1);
     server.process_input(out.unwrap(), now());
     assert!(matches!(
         server.next_event().unwrap(),
@@ -399,7 +399,7 @@ fn multiple_datagram_events() {
         }
     });
     assert_eq!(datagrams.next().unwrap(), FOURTH_DATAGRAM);
-    assert!(datagrams.next().is_none())
+    assert!(datagrams.next().is_none());
 }
 
 #[test]

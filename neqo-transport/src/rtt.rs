@@ -51,7 +51,7 @@ impl RttEstimate {
         qtrace!("initial RTT={:?}", rtt);
         if rtt >= GRANULARITY {
             // Ignore if the value is too small.
-            self.init(rtt)
+            self.init(rtt);
         }
     }
 
@@ -131,7 +131,7 @@ impl RttEstimate {
     pub fn pto(&self, pn_space: PacketNumberSpace) -> Duration {
         let mut t = self.estimate() + max(4 * self.rttvar, GRANULARITY);
         if pn_space == PacketNumberSpace::ApplicationData {
-            t += self.ack_delay.max()
+            t += self.ack_delay.max();
         }
         t
     }

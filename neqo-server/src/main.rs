@@ -283,7 +283,7 @@ impl HttpServer for Http3Server {
 
                     let response = headers.iter().find(|&h| h.name() == ":path").and_then(|h| {
                         if args.qns_test.is_some() {
-                            qns_read_response(&h.value())
+                            qns_read_response(h.value())
                         } else {
                             match h.value().trim_matches(|p| p == '/').parse::<usize>() {
                                 Ok(v) => Some(vec![b'a'; v]),
@@ -404,7 +404,7 @@ impl ServersRunner {
         }
 
         for (i, host) in self.hosts.iter().enumerate() {
-            let socket = match UdpSocket::bind(&host) {
+            let socket = match UdpSocket::bind(host) {
                 Err(err) => {
                     eprintln!("Unable to bind UDP socket: {}", err);
                     return Err(err);

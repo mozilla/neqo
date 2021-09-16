@@ -334,7 +334,7 @@ fn process_loop(
         loop {
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
-                    if let Err(e) = emit_datagram(&socket, dgram) {
+                    if let Err(e) = emit_datagram(socket, dgram) {
                         eprintln!("UDP write error: {}", e);
                         client.close(Instant::now(), 0, e.to_string());
                         exiting = true;
@@ -415,9 +415,9 @@ impl<'a> Handler<'a> {
         match client.fetch(
             Instant::now(),
             &self.args.method,
-            &url.scheme(),
-            &url.host_str().unwrap(),
-            &url.path(),
+            url.scheme(),
+            url.host_str().unwrap(),
+            url.path(),
             &to_headers(&self.args.header),
             Priority::default(),
         ) {
@@ -620,7 +620,7 @@ fn client(
         streams: HashMap::new(),
         url_queue: VecDeque::from(urls.to_vec()),
         all_paths: Vec::new(),
-        args: &args,
+        args,
         key_update,
     };
 
@@ -1017,7 +1017,7 @@ mod old {
             loop {
                 match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
-                        if let Err(e) = emit_datagram(&socket, dgram) {
+                        if let Err(e) = emit_datagram(socket, dgram) {
                             eprintln!("UDP write error: {}", e);
                             client.close(Instant::now(), 0, e.to_string());
                             exiting = true;
@@ -1099,19 +1099,19 @@ mod old {
             client.set_ciphers(&ciphers)?;
         }
 
-        client.set_qlog(qlog_new(args, origin, &client.odcid().unwrap())?);
+        client.set_qlog(qlog_new(args, origin, client.odcid().unwrap())?);
 
         let key_update = KeyUpdateState(args.key_update);
         let mut h = HandlerOld {
             streams: HashMap::new(),
             url_queue: VecDeque::from(urls.to_vec()),
             all_paths: Vec::new(),
-            args: &args,
+            args,
             token: None,
             key_update,
         };
 
-        process_loop_old(&local_addr, &socket, &mut client, &mut h)?;
+        process_loop_old(&local_addr, socket, &mut client, &mut h)?;
 
         let token = if args.resume {
             // If we haven't received an event, take a token if there is one.

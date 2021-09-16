@@ -250,11 +250,8 @@ impl QPackEncoder {
         }
 
         let mut buf = QpackData::default();
-        EncoderInstruction::InsertWithNameLiteral {
-            name: &name,
-            value: &value,
-        }
-        .marshal(&mut buf, self.use_huffman);
+        EncoderInstruction::InsertWithNameLiteral { name, value }
+            .marshal(&mut buf, self.use_huffman);
 
         let stream_id = self.local_stream.stream_id().ok_or(Error::Internal)?;
 
@@ -351,12 +348,7 @@ impl QPackEncoder {
     /// `InternalError` if an unexpected error occurred.
     /// # Panics
     /// If there is a programming error.
-    #[allow(
-        unknown_lints,
-        renamed_and_removed_lints,
-        clippy::unknown_clippy_lints,
-        clippy::unnested_or_patterns
-    )] // Until we require rust 1.53 we can't use or_patterns.
+    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     pub fn encode_header_block(
         &mut self,
         conn: &mut Connection,
@@ -427,7 +419,7 @@ impl QPackEncoder {
                     Err(Error::EncoderStreamBlocked) | Err(Error::DynamicTableFull) => {
                         // As soon as one of the instructions cannot be written or the table is full, do not try again.
                         encoder_blocked = true;
-                        encoded_h.encode_literal_with_name_literal(&name, &value)
+                        encoded_h.encode_literal_with_name_literal(&name, &value);
                     }
                     Err(e) => {
                         // `InternalError`, `ClosedCriticalStream`

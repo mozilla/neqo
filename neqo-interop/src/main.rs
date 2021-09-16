@@ -777,7 +777,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     let mut children = Vec::new();
 
     for test in &TESTS {
-        if !peer.test_enabled(&test) {
+        if !peer.test_enabled(test) {
             continue;
         }
 
@@ -926,7 +926,7 @@ fn main() {
         }
 
         let at = args.clone();
-        let child = thread::spawn(move || run_peer(&at, &peer));
+        let child = thread::spawn(move || run_peer(&at, peer));
         children.push((peer, child));
     }
 

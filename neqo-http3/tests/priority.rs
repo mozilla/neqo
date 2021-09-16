@@ -142,7 +142,7 @@ fn priority_update() {
                 Header::new("priority", "u=4,i"),
             ];
             assert_eq!(headers, expected_headers);
-            assert_eq!(fin, false);
+            assert!(!fin);
         }
         other => panic!("unexpected server event: {:?}", other),
     }
