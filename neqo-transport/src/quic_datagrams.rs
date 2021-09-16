@@ -112,7 +112,7 @@ impl QuicDatagrams {
         while let Some(dgram) = self.datagrams.pop_front() {
             let len = dgram.len();
             if builder.remaining() > len {
-                // + 1 for Frame type
+                // we need 1 more than `len` for the Frame type
                 let length_len = Encoder::varint_len(u64::try_from(len).unwrap());
                 if builder.remaining() > 1 + length_len + len {
                     builder.encode_varint(FRAME_TYPE_DATAGRAM_WITH_LEN);

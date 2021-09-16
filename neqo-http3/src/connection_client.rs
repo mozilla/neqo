@@ -263,7 +263,7 @@ impl Http3Client {
     /// is created. A response body may be added by calling `send_request_body`.
     /// # Errors
     /// If a new stream cannot be created an error will be return.
-    #[allow(clippy::too_many_arguments)] //
+    #[allow(clippy::too_many_arguments)] // https://github.com/mozilla/neqo/issues/1226
     pub fn fetch(
         &mut self,
         now: Instant,
