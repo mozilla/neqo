@@ -10,6 +10,7 @@ use crate::hframe::HFrame;
 use crate::push_controller::PushController;
 use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
+use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
 use crate::{
@@ -263,25 +264,21 @@ impl Http3Client {
     /// is created. A response body may be added by calling `send_request_body`.
     /// # Errors
     /// If a new stream cannot be created an error will be return.
-    #[allow(clippy::too_many_arguments)] // https://github.com/mozilla/neqo/issues/1226
-    pub fn fetch(
+    pub fn fetch<'x, 't: 'x, T>(
         &mut self,
         now: Instant,
         method: &str,
-        scheme: &str,
-        host: &str,
-        path: &str,
+        target: &'t T,
         headers: &[Header],
         priority: Priority,
-    ) -> Res<u64> {
-        qinfo!(
-            [self],
-            "Fetch method={}, scheme={}, host={}, path={}",
-            method,
-            scheme,
-            host,
-            path
-        );
+    ) -> Res<u64>
+    where
+        T: AsRequestTarget<'x> + ?Sized,
+    {
+        let target = target
+            .as_request_target()
+            .map_err(|_| Error::InvalidRequestTarget)?;
+        qinfo!([self], "Fetch method={}, target={:?}", method, target);
         // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
         match self.base_handler.state() {
             Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
@@ -300,9 +297,9 @@ impl Http3Client {
         // Transform pseudo-header fields
         let mut final_headers = vec![
             Header::new(":method", method),
-            Header::new(":scheme", scheme),
-            Header::new(":authority", host),
-            Header::new(":path", path),
+            Header::new(":scheme", target.scheme()),
+            Header::new(":authority", target.authority()),
+            Header::new(":path", target.path()),
         ];
         if let Some(priority_header) = priority.header() {
             final_headers.push(priority_header);
@@ -1248,9 +1245,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                "https",
-                "something.com",
-                "/",
+                "https://something.com/",
                 headers,
                 Priority::default(),
             )
@@ -2947,9 +2942,7 @@ mod tests {
             client.fetch(
                 now(),
                 "GET",
-                "https",
-                "something.com",
-                "/",
+                &("https", "something.com", "/"),
                 &[],
                 Priority::default()
             ),
@@ -3761,9 +3754,7 @@ mod tests {
             .fetch(
                 now(),
                 "GET",
-                "https",
-                "something.com",
-                "/",
+                &("https", "something.com", "/"),
                 &[],
                 Priority::default()
             )

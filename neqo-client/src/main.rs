@@ -415,9 +415,7 @@ impl<'a> Handler<'a> {
         match client.fetch(
             Instant::now(),
             &self.args.method,
-            url.scheme(),
-            url.host_str().unwrap(),
-            url.path(),
+            &url,
             &to_headers(&self.args.header),
             Priority::default(),
         ) {

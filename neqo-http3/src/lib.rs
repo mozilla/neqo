@@ -21,6 +21,7 @@ mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
 mod recv_message;
+pub mod request_target;
 mod send_message;
 pub mod server;
 mod server_connection_events;
@@ -80,21 +81,22 @@ pub enum Error {
     AlreadyClosed,
     AlreadyInitialized,
     DecodingFrame,
+    FatalError,
     HttpGoaway,
     Internal,
+    InvalidHeader,
+    InvalidInput,
+    InvalidRequestTarget,
     InvalidResumptionToken,
-    InvalidStreamId,
     InvalidState,
+    InvalidStreamId,
     NoMoreData,
     NotEnoughData,
+    StreamLimitError,
     TransportError(TransportError),
+    TransportStreamDoesNotExist,
     Unavailable,
     Unexpected,
-    StreamLimitError,
-    TransportStreamDoesNotExist,
-    InvalidInput,
-    FatalError,
-    InvalidHeader,
 }
 
 impl Error {
