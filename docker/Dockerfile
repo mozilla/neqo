@@ -7,9 +7,26 @@ FROM ubuntu:20.04
 LABEL maintainer="Martin Thomson <mt@lowentropy.net>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates coreutils curl git make mercurial ssh \
-    build-essential clang llvm libclang-dev lld \
-    gyp ninja-build pkg-config zlib1g-dev sudo \
+    ca-certificates \
+    coreutils \
+    curl \
+    git \
+    make \
+    mercurial \
+    ssh \
+    build-essential \
+    clang \
+    llvm \
+    libclang-dev \
+    lld \
+    gyp \
+    ninja-build \
+    pkg-config \
+    python-is-python3 \
+    python3 \
+    python3-pip \
+    sudo \
+    zlib1g-dev \
  && apt-get autoremove -y && apt-get clean -y \
  && rm -rf /var/lib/apt/lists/*
 
