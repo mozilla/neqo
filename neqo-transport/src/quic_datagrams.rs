@@ -33,11 +33,11 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-impl Into<Option<u64>> for DatagramTracking {
-    fn into(self) -> Option<u64> {
-        match self {
-            Self::Id(id) => Some(id),
-            Self::None => None,
+impl From<DatagramTracking> for Option<u64> {
+    fn from(v: DatagramTracking) -> Self {
+        match v {
+            DatagramTracking::Id(id) => Some(id),
+            DatagramTracking::None => None,
         }
     }
 }
@@ -111,8 +111,8 @@ impl QuicDatagrams {
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {
             let len = dgram.len();
-            if builder.remaining() >= len + 1 {
-                // + 1 for Frame type
+            if builder.remaining() > len {
+                // we need 1 more than `len` for the Frame type
                 let length_len = Encoder::varint_len(u64::try_from(len).unwrap());
                 if builder.remaining() > 1 + length_len + len {
                     builder.encode_varint(FRAME_TYPE_DATAGRAM_WITH_LEN);
@@ -124,19 +124,17 @@ impl QuicDatagrams {
                 debug_assert!(builder.len() <= builder.limit());
                 stats.frame_tx.datagram += 1;
                 tokens.push(RecoveryToken::Datagram(*dgram.tracking()));
+            } else if tokens.is_empty() {
+                // If the packet is empty, except packet headers, and the
+                // datagram cannot fit, drop it.
+                // Also continue trying to write the next QuicDatagram.
+                self.conn_events
+                    .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
+                stats.datagram_tx.dropped_too_big += 1;
             } else {
-                if tokens.is_empty() {
-                    // If the packet is empty, except packet headers, and the
-                    // datagram cannot fit, drop it.
-                    // Also continue trying to write the next QuicDatagram.
-                    self.conn_events
-                        .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
-                    stats.datagram_tx.dropped_too_big += 1;
-                } else {
-                    self.datagrams.push_front(dgram);
-                    // Try later on an empty packet.
-                    return;
-                }
+                self.datagrams.push_front(dgram);
+                // Try later on an empty packet.
+                return;
             }
         }
     }

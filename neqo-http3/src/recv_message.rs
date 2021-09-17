@@ -192,7 +192,7 @@ impl RecvMessage {
             RecvMessageState::WaitingForData { .. }
             | RecvMessageState::WaitingForFinAfterTrailers { .. } => {
                 if post_readable_event {
-                    self.conn_events.data_readable(self.stream_id)
+                    self.conn_events.data_readable(self.stream_id);
                 }
             }
             _ => unreachable!("Closing an already closed transaction."),
@@ -222,7 +222,7 @@ impl RecvMessage {
                 .as_ref()
                 .ok_or(Error::HttpFrameUnexpected)?
                 .borrow_mut()
-                .new_push_promise(push_id, self.stream_id, headers)?
+                .new_push_promise(push_id, self.stream_id, headers)?;
         } else {
             self.blocked_push_promise.push_back(PushInfo {
                 push_id,
@@ -256,7 +256,7 @@ impl RecvMessage {
                             );
                             match frame {
                                 HFrame::Headers { header_block } => {
-                                    self.handle_headers_frame(header_block, fin)?
+                                    self.handle_headers_frame(header_block, fin)?;
                                 }
                                 HFrame::Data { len } => self.handle_data_frame(len, fin)?,
                                 HFrame::PushPromise {
@@ -389,7 +389,7 @@ impl RecvMessage {
         let mut pseudo_state = 0;
         for header in headers {
             let is_pseudo =
-                Self::track_pseudo(&header.name(), &mut pseudo_state, &self.message_type)?;
+                Self::track_pseudo(header.name(), &mut pseudo_state, &self.message_type)?;
 
             let mut bytes = header.name().bytes();
             if is_pseudo {

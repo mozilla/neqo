@@ -133,7 +133,7 @@ impl QPackDecoder {
                 self.stats.dynamic_table_inserts += 1;
             }
             DecodedEncoderInstruction::NoInstruction => {
-                unreachable!("This can be call only with an instruction.")
+                unreachable!("This can be call only with an instruction.");
             }
         }
         Ok(())

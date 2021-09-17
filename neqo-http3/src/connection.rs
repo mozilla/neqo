@@ -150,12 +150,7 @@ impl Http3Connection {
     }
 
     /// Call `send` for all streams that need to send data.
-    #[allow(
-        unknown_lints,
-        renamed_and_removed_lints,
-        clippy::unknown_clippy_lints,
-        clippy::unnested_or_patterns
-    )] // Until we require rust 1.53 we can't use or_patterns.
+    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local
@@ -274,6 +269,7 @@ impl Http3Connection {
             output = self.handle_new_stream(conn, stream_type, stream_id)?;
         }
 
+        #[allow(clippy::match_same_arms)] // clippy is being stupid here
         match output {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
                 self.handle_unblocked_streams(unblocked_streams, conn)?;
@@ -457,7 +453,7 @@ impl Http3Connection {
                     )),
                 );
             }
-            _ => {
+            NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
         };
@@ -467,7 +463,7 @@ impl Http3Connection {
                 self.stream_receive(conn, stream_id)
             }
             NewStreamType::Push(_) => Ok(ReceiveOutput::NewStream(stream_type)),
-            _ => Ok(ReceiveOutput::NoOutput),
+            NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
         }
     }
 
@@ -566,7 +562,7 @@ impl Http3Connection {
             qinfo!([self], " {:?} = {:?}", s.setting_type, s.value);
             match s.setting_type {
                 HSettingType::MaxTableCapacity => {
-                    self.qpack_encoder.borrow_mut().set_max_capacity(s.value)?
+                    self.qpack_encoder.borrow_mut().set_max_capacity(s.value)?;
                 }
                 HSettingType::BlockedStreams => self
                     .qpack_encoder

@@ -935,7 +935,7 @@ mod tests {
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
-        builder.encode(&SAMPLE_INITIAL_PAYLOAD);
+        builder.encode(SAMPLE_INITIAL_PAYLOAD);
         let packet = builder.build(&mut prot).expect("build");
         assert_eq!(&packet[..], SAMPLE_INITIAL);
     }

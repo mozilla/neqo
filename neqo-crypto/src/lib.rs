@@ -100,7 +100,9 @@ enum NssLoaded {
 impl Drop for NssLoaded {
     fn drop(&mut self) {
         if !matches!(self, Self::External) {
-            unsafe { secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed") }
+            unsafe {
+                secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed");
+            }
         }
     }
 }

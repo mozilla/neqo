@@ -141,7 +141,7 @@ impl Http09Server {
         } else {
             Regex::new(r"GET +/(\d+)(?:\r)?\n").unwrap()
         };
-        let m = re.captures(&msg);
+        let m = re.captures(msg);
         let resp = match m.and_then(|m| m.get(1)) {
             None => {
                 self.save_partial(stream_id, buf, conn);

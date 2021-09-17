@@ -1040,7 +1040,7 @@ mod tests {
         }
 
         pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
-            self.lr.on_packet_sent(&self.path, sent_packet)
+            self.lr.on_packet_sent(&self.path, sent_packet);
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<SentPacket> {
@@ -1052,7 +1052,7 @@ mod tests {
         }
 
         pub fn discard(&mut self, space: PacketNumberSpace, now: Instant) {
-            self.lr.discard(&self.path, space, now)
+            self.lr.discard(&self.path, space, now);
         }
 
         pub fn pto_time(&self, space: PacketNumberSpace) -> Option<Instant> {
@@ -1288,8 +1288,8 @@ mod tests {
     fn no_new_acks() {
         let mut lr = setup_lr(1);
         let check = |lr: &Fixture| {
-            assert_rtts(&lr, TEST_RTT, TEST_RTT, TEST_RTTVAR, TEST_RTT);
-            assert_no_sent_times(&lr);
+            assert_rtts(lr, TEST_RTT, TEST_RTT, TEST_RTTVAR, TEST_RTT);
+            assert_no_sent_times(lr);
         };
         check(&lr);
 
