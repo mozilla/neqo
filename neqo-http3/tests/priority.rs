@@ -111,9 +111,7 @@ fn priority_update() {
         .fetch(
             Instant::now(),
             "GET",
-            "https",
-            "something.com",
-            "/",
+            &("https", "something.com", "/"),
             &[],
             Priority::new(4, true),
         )
@@ -177,9 +175,7 @@ fn priority_update_dont_send_for_cancelled_stream() {
         .fetch(
             Instant::now(),
             "GET",
-            "https",
-            "something.com",
-            "/",
+            &("https", "something.com", "/"),
             &[],
             Priority::new(5, false),
         )

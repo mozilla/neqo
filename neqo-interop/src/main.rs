@@ -542,9 +542,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
         .fetch(
             Instant::now(),
             "GET",
-            "https",
-            &hc.host,
-            &hc.path,
+            &("https", &hc.host, &hc.path),
             &[],
             Priority::default(),
         )
@@ -563,9 +561,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
             .fetch(
                 Instant::now(),
                 "GET",
-                "https",
-                &hc.host,
-                &hc.path,
+                &("https", &hc.host, &hc.path),
                 &[Header::new("something1", "something2")],
                 Priority::default(),
             )
@@ -602,9 +598,7 @@ fn test_h3_rz(
         .fetch(
             Instant::now(),
             "GET",
-            "https",
-            &hc.host,
-            &hc.path,
+            &("https", &hc.host, &hc.path),
             &[],
             Priority::default(),
         )
@@ -661,9 +655,7 @@ fn test_h3_rz(
             .fetch(
                 Instant::now(),
                 "GET",
-                "https",
-                &hc.host,
-                &hc.path,
+                &("https", &hc.host, &hc.path),
                 &[],
                 Priority::default(),
             )
