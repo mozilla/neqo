@@ -164,7 +164,6 @@ impl NewStreamHeadReader {
         }
     }
 
-    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     fn map_stream_fin(decoded: Option<NewStreamType>) -> Res<Option<NewStreamType>> {
         match decoded {
             Some(NewStreamType::Control)

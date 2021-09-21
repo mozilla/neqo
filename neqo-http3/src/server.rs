@@ -302,7 +302,6 @@ mod tests {
         create_server(DEFAULT_SETTINGS)
     }
 
-    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     fn assert_closed(hconn: &mut Http3Server, expected: &Error) {
         let err = ConnectionError::Application(expected.code());
         let closed = |e| {

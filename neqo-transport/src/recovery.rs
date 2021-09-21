@@ -355,12 +355,7 @@ impl LossRecoverySpace {
     /// We try to keep these around until a probe is sent for them, so it is
     /// important that `cd` is set to at least the current PTO time; otherwise we
     /// might remove all in-flight packets and stop sending probes.
-    #[allow(
-        clippy::option_if_let_else,
-        unknown_lints,
-        renamed_and_removed_lints,
-        clippy::unknown_clippy_lints
-    )] // Hard enough to read as-is.
+    #[allow(clippy::option_if_let_else)] // Hard enough to read as-is.
     fn remove_old_lost(&mut self, now: Instant, cd: Duration) {
         let mut it = self.sent_packets.iter();
         // If the first item is not expired, do nothing.
@@ -940,12 +935,7 @@ impl LossRecovery {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    #[allow(
-        clippy::option_if_let_else,
-        unknown_lints,
-        renamed_and_removed_lints,
-        clippy::unknown_clippy_lints
-    )]
+    #[allow(clippy::option_if_let_else)]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qdebug!([self], "get send profile {:?}", now);
         let sender = path.sender();

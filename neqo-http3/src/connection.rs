@@ -150,7 +150,6 @@ impl Http3Connection {
     }
 
     /// Call `send` for all streams that need to send data.
-    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local
@@ -206,7 +205,6 @@ impl Http3Connection {
         );
     }
 
-    #[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)] // Until we require rust 1.51.
     #[allow(clippy::option_if_let_else)] // False positive as borrow scope isn't lexical here.
     fn stream_receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<ReceiveOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);

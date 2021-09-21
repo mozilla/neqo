@@ -76,12 +76,7 @@ use std::ptr::null;
 const MINIMUM_NSS_VERSION: &str = "3.66";
 
 #[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
-#[allow(
-    unknown_lints,
-    renamed_and_removed_lints,
-    clippy::unknown_clippy_lints,
-    clippy::upper_case_acronyms
-)] // Until we require rust 1.51.
+#[allow(clippy::upper_case_acronyms)]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }

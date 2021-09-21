@@ -402,12 +402,7 @@ impl ToSocketAddrs for Peer {
     }
 }
 
-#[allow(
-    unknown_lints,
-    renamed_and_removed_lints,
-    clippy::unknown_clippy_lints,
-    clippy::upper_case_acronyms
-)] // Until we require rust 1.51.
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq)]
 enum Test {
     Connect,
