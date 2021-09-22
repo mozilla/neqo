@@ -79,7 +79,7 @@ impl QpackData {
             self.write_bytes(&encoded);
         } else {
             self.encode_prefixed_encoded_int(real_prefix, u64::try_from(value.len()).unwrap());
-            self.write_bytes(&value);
+            self.write_bytes(value);
         }
     }
 

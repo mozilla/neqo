@@ -91,8 +91,9 @@ impl Debug for FrameStats {
     }
 }
 
-///Datagram stats
+/// Datagram stats
 #[derive(Default, Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct DatagramStats {
     /// The number of datagrams declared lost.
     pub lost: usize,
@@ -159,7 +160,7 @@ impl Stats {
             "Dropped received packet: {}; Total: {}",
             reason.as_ref(),
             self.dropped_rx
-        )
+        );
     }
 
     /// # Panics

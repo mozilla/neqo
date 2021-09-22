@@ -150,7 +150,9 @@ mod tests {
     fn set_error_code(code: PRErrorCode) {
         // This code doesn't work without initializing NSS first.
         fixture_init();
-        unsafe { PR_SetError(code, 0) };
+        unsafe {
+            PR_SetError(code, 0);
+        }
     }
 
     #[test]

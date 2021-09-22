@@ -542,9 +542,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
         .fetch(
             Instant::now(),
             "GET",
-            "https",
-            &hc.host,
-            &hc.path,
+            &("https", &hc.host, &hc.path),
             &[],
             Priority::default(),
         )
@@ -563,9 +561,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
             .fetch(
                 Instant::now(),
                 "GET",
-                "https",
-                &hc.host,
-                &hc.path,
+                &("https", &hc.host, &hc.path),
                 &[Header::new("something1", "something2")],
                 Priority::default(),
             )
@@ -602,9 +598,7 @@ fn test_h3_rz(
         .fetch(
             Instant::now(),
             "GET",
-            "https",
-            &hc.host,
-            &hc.path,
+            &("https", &hc.host, &hc.path),
             &[],
             Priority::default(),
         )
@@ -661,9 +655,7 @@ fn test_h3_rz(
             .fetch(
                 Instant::now(),
                 "GET",
-                "https",
-                &hc.host,
-                &hc.path,
+                &("https", &hc.host, &hc.path),
                 &[],
                 Priority::default(),
             )
@@ -777,7 +769,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     let mut children = Vec::new();
 
     for test in &TESTS {
-        if !peer.test_enabled(&test) {
+        if !peer.test_enabled(test) {
             continue;
         }
 
@@ -926,7 +918,7 @@ fn main() {
         }
 
         let at = args.clone();
-        let child = thread::spawn(move || run_peer(&at, &peer));
+        let child = thread::spawn(move || run_peer(&at, peer));
         children.push((peer, child));
     }
 

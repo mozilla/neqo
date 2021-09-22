@@ -148,7 +148,9 @@ impl PrivateKey {
         // The data that `key_item` refers to needs to be freed, but we can't
         // use the scoped `Item` implementation.  This is OK as long as nothing
         // panics between `PK11_ReadRawAttribute` succeeding and here.
-        unsafe { SECITEM_FreeItem(&mut key_item, PRBool::from(false)) };
+        unsafe {
+            SECITEM_FreeItem(&mut key_item, PRBool::from(false));
+        }
         Ok(key)
     }
 }
