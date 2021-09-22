@@ -37,6 +37,8 @@ jobs:
             ssh \
             zlib1g-dev \
             --no-install-recommends
+          [ -d /usr/lib/llvm-10/lib ] # Expect clang 10
+          echo "LIBCLANG_DIR=/usr/lib/llvm-10/lib" >> "$GITHUB_ENV"
 
       # Rust installation cribbed from Dockerfiles at https://github.com/rust-lang/docker-rust
       - name: Install Rust
