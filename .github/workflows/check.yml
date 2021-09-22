@@ -9,10 +9,6 @@ jobs:
     runs-on: ubuntu-20.04
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=lld
-      NSS_DIR: ${{ github.workspace }}/nss
-      NSPR_DIR: ${{ github.workspace }}/nspr
-      CARGO_HOME: ${{ github.workspace }}/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/rustup
     strategy:
       matrix:
         rust-toolchain: [stable, 1.51.0]
@@ -59,11 +55,15 @@ jobs:
           rm -rf "$rustup_dir"
           chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
           "$CARGO_HOME/bin/rustup" default ${{ matrix.rust-toolchain }}
+          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
         env:
           rustup_version: 1.24.3
           rustup_host: x86_64-unknown-linux-gnu
           rustup_hash: 3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338
+          CARGO_HOME: ${{ github.workspace }}/cargo
+          RUSTUP_HOME: ${{ github.workspace }}/rustup
 
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
@@ -73,6 +73,11 @@ jobs:
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
           git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
+        env:
+          NSS_DIR: ${{ github.workspace }}/nss
+          NSPR_DIR: ${{ github.workspace }}/nspr
 
       - name: Checkout
         uses: actions/checkout@v2
