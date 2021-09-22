@@ -78,7 +78,6 @@ jobs:
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
           git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
-          ls -l $NSS_DIR
           echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
           echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
         env:
