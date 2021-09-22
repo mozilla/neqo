@@ -1513,28 +1513,24 @@ mod tests {
         // increasing to (conn:2, stream:4) will not generate an event or allow
         // sending anything.
         s.set_max_stream_data(4);
-        let evts = conn_events.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(conn_events.events().count(), 0);
         assert_eq!(s.send(b"hello").unwrap(), 0);
 
         // Increasing conn max (conn:4, stream:4) will unblock but not emit
         // event b/c that happens in Connection::emit_frame() (tested in
         // connection.rs)
         assert!(conn_fc.borrow_mut().update(4));
-        let evts = conn_events.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(conn_events.events().count(), 0);
         assert_eq!(s.avail(), 2);
         assert_eq!(s.send(b"hello").unwrap(), 2);
 
         // No event because still blocked by conn
         s.set_max_stream_data(1_000_000_000);
-        let evts = conn_events.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(conn_events.events().count(), 0);
 
         // No event because happens in emit_frame()
         conn_fc.borrow_mut().update(1_000_000_000);
-        let evts = conn_events.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(conn_events.events().count(), 0);
 
         // Unblocking both by a large amount will cause avail() to be limited by
         // tx buffer size.
@@ -1547,8 +1543,7 @@ mod tests {
 
         // No event because still blocked by tx buffer full
         s.set_max_stream_data(2_000_000_000);
-        let evts = conn_events.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(conn_events.events().count(), 0);
         assert_eq!(s.send(b"hello").unwrap(), 0);
     }
 
