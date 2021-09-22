@@ -2,8 +2,8 @@ pull_request_rules:
   - name: automatic merge on CI success and review
     conditions:
       - "#approved-reviews-by>=1"
-      - "check-success=CI / Neqo Build and Test (1.51.0) (pull_request)"
-      - "check-success=CI / Neqo Build and Test (stable) (pull_request)"
+      - "check-success=Neqo Build and Test (1.51.0) (pull_request)"
+      - "check-success=Neqo Build and Test (stable) (pull_request)"
       - base=main
       - label!=work-in-progress
     actions:
