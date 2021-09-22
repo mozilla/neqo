@@ -67,6 +67,9 @@ jobs:
           rustup_host: x86_64-unknown-linux-gnu
           rustup_hash: 3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338
 
+      - name: Checkout
+        uses: actions/checkout@v2
+
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
       # (neqo-crypto/build.rs would also need to query pkg-config to get the
@@ -75,14 +78,12 @@ jobs:
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
           git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+          ls -l $NSS_DIR
           echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
           echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
         env:
           NSS_DIR: ${{ github.workspace }}/nss
           NSPR_DIR: ${{ github.workspace }}/nspr
-
-      - name: Checkout
-        uses: actions/checkout@v2
 
       - name: Build
         run: cargo +${{ matrix.rust-toolchain }} build -v --tests
