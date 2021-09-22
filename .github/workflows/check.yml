@@ -51,7 +51,7 @@ jobs:
           echo "${rustup_hash} $rustup_init" | sha256sum -c -
           chmod +x "$rustup_init"
           "$rustup_init" -y -q --no-modify-path --profile minimal \
-            --default-toolchain {{ matrix.rust-toolchain }} \
+            --default-toolchain ${{ matrix.rust-toolchain }} \
             --default-host "$rustup_host" \
             --component clippy --component rustfmt
           rm -rf "$rustup_dir"
