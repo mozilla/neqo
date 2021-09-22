@@ -57,7 +57,7 @@ impl Debug for RefRequestTarget<'_, '_, '_> {
 pub trait AsRequestTarget<'x> {
     type Target: RequestTarget;
     type Error;
-    /// Produce a `RequestTarget` that refers to `self.
+    /// Produce a `RequestTarget` that refers to `self`.
     /// # Errors
     /// This method can generate an error of type `Self::Error`
     /// if the conversion is unsuccessful.

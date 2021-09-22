@@ -1,0 +1,101 @@
+name: CI
+on: [push, pull_request]
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Neqo Build and Test
+    runs-on: ubuntu-20.04
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+    strategy:
+      matrix:
+        rust-toolchain: [stable, 1.51.0]
+
+    steps:
+      - name: Install Packages
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            coreutils \
+            curl \
+            git \
+            gyp \
+            libclang-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            make \
+            mercurial \
+            ninja-build \
+            pkg-config \
+            ssh \
+            zlib1g-dev \
+            --no-install-recommends
+          [ -d /usr/lib/llvm-10/lib ] # Expect clang 10
+          echo "LIBCLANG_DIR=/usr/lib/llvm-10/lib" >> "$GITHUB_ENV"
+
+      # Rust installation cribbed from Dockerfiles at https://github.com/rust-lang/docker-rust
+      - name: Install Rust
+        run: |
+          export RUSTUP_HOME=~/.rustup
+          export CARGO_HOME=~/.cargo
+          rustup_dir=`mktemp -d /tmp/rustup-XXXXX`
+          mkdir -p "$rustup_dir"
+          rustup_init="$rustup_dir/rustup-init"
+          rustup_url="https://static.rust-lang.org/rustup/archive/$rustup_version/$rustup_host/rustup-init"
+          curl -SsLf "$rustup_url" -o "$rustup_init"
+          echo "${rustup_hash} $rustup_init" | sha256sum -c -
+          chmod +x "$rustup_init"
+          "$rustup_init" -y -q --no-modify-path --profile minimal \
+            --default-toolchain ${{ matrix.rust-toolchain }} \
+            --default-host "$rustup_host" \
+            --component clippy --component rustfmt
+          rm -rf "$rustup_dir"
+          chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
+          "$CARGO_HOME/bin/rustup" default ${{ matrix.rust-toolchain }}
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+        env:
+          rustup_version: 1.24.3
+          rustup_host: x86_64-unknown-linux-gnu
+          rustup_hash: 3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # This step might be removed if the distro included a recent enough
+      # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
+      # (neqo-crypto/build.rs would also need to query pkg-config to get the
+      # right build flags rather than building NSS.)
+      - name: Fetch NSS and NSPR
+        run: |
+          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+          git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
+        env:
+          NSS_DIR: ${{ github.workspace }}/nss
+          NSPR_DIR: ${{ github.workspace }}/nspr
+
+      - name: Build
+        run: cargo +${{ matrix.rust-toolchain }} build -v --tests
+
+      - name: Run Tests
+        run: cargo +${{ matrix.rust-toolchain }} test -v
+        env:
+           LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
+
+      - name: Check formatting
+        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
+        if: ${{ success() || failure() }}
+
+      - name: Clippy
+        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        if: ${{ success() || failure() }}

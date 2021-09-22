@@ -287,14 +287,13 @@ mod test {
         let v = 9;
         t.add(near_future, v);
         assert_eq!(near_future, t.next_time().expect("should return a value"));
-        let values: Vec<_> = t
-            .take_until(near_future - Duration::from_millis(1))
-            .collect();
-        assert!(values.is_empty());
-        let values: Vec<_> = t
+        assert_eq!(
+            t.take_until(near_future - Duration::from_millis(1)).count(),
+            0
+        );
+        assert!(t
             .take_until(near_future + Duration::from_millis(1))
-            .collect();
-        assert!(values.contains(&v));
+            .any(|x| x == v));
     }
 
     #[test]
