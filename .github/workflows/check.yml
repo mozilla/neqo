@@ -40,6 +40,25 @@ jobs:
             zlib1g-dev \
             --no-install-recommends
 
+      - name: Install Rust
+        run: |
+          rustup_dir=`mktemp -d /tmp/rustup-XXXXX`
+          mkdir -p "$rustup_dir"
+          rustup_init="$rustup_dir/rustup-init"
+          rustup_url="https://static.rust-lang.org/rustup/archive/$rustup_version/$rustup_host/rustup-init"
+          curl -SsLf "$rustup_url" -o "$rustup_init"
+          echo "${rustup_hash} $rustup_init" | sha256sum -c -
+          chmod +x "$rustup_init"
+          "$rustup_init" -y --no-modify-path --profile minimal \
+            --default-toolchain {{ matrix.rust-toolchain }} \
+            --default-host "$rustup_host"
+          rm -rf "$rustup_dir"
+          chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
+        env:
+          rustup_version: 1.24.3
+          rustup_host: x86_64-unknown-linux-gnu
+          rustup_hash: 3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338
+
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
       # (neqo-crypto/build.rs would also need to query pkg-config to get the
@@ -51,23 +70,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v2
-
-      - name: Install Rust
-        run: |
-          rustup=`mktemp /tmp/rustup-XXXXX`
-          rustup_url="https://static.rust-lang.org/rustup/archive/$rustup_version/$rustup_host/rustup-init"
-          curl -SsLf "$rustup_url" -o "$rustup"
-          echo "${rustup_hash} $rustup" | sha256sum -c -
-          chmod +x "$rustup"
-          "$rustup" -u --no-modify-path --profile minimal \
-            --default-toolchain {{ matrix.rust-toolchain }} \
-            --default-host "$rustup_host"
-          rm -f "$rustup"
-          chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
-        env:
-          rustup_version: 1.24.3
-          rustup_host: x86_64-unknown-linux-gnu
-          rustup_hash: 3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338
 
       - name: Build
         run: cargo build --tests -v --all-features
