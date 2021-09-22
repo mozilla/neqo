@@ -40,6 +40,7 @@ jobs:
             zlib1g-dev \
             --no-install-recommends
 
+      # Rust installation cribbed from Dockerfiles at https://github.com/rust-lang/docker-rust
       - name: Install Rust
         run: |
           rustup_dir=`mktemp -d /tmp/rustup-XXXXX`
@@ -49,9 +50,10 @@ jobs:
           curl -SsLf "$rustup_url" -o "$rustup_init"
           echo "${rustup_hash} $rustup_init" | sha256sum -c -
           chmod +x "$rustup_init"
-          "$rustup_init" -y --no-modify-path --profile minimal \
+          "$rustup_init" -y -q --no-modify-path --profile minimal \
             --default-toolchain {{ matrix.rust-toolchain }} \
-            --default-host "$rustup_host"
+            --default-host "$rustup_host" \
+            --component clippy --component rustfmt
           rm -rf "$rustup_dir"
           chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
         env:
