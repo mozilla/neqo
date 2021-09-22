@@ -11,6 +11,8 @@ jobs:
       RUSTFLAGS: -C link-arg=-fuse-ld=lld
       NSS_DIR: ${{ github.workspace }}/nss
       NSPR_DIR: ${{ github.workspace }}/nspr
+      CARGO_HOME: ${{ github.workspace }}/cargo
+      RUSTUP_HOME: ${{ github.workspace }}/rustup
     strategy:
       matrix:
         rust-toolchain: [stable, 1.51.0]
