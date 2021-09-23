@@ -15,7 +15,7 @@ use std::ptr::null_mut;
 use std::time::{Duration, Instant};
 
 // This is an opaque struct in NSS.
-#[allow(clippy::upper_case_acronyms)] // Until we require rust 1.51.
+#[allow(clippy::upper_case_acronyms)]
 #[allow(clippy::empty_enum)]
 pub enum SSLAntiReplayContext {}
 
