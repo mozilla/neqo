@@ -24,7 +24,7 @@ use crate::tracking::PacketNumberSpace;
 /// `select()`, or similar) can reliably deliver; see `neqo_common::hrtime`.
 pub const GRANULARITY: Duration = Duration::from_millis(1);
 // Defined in -recovery 6.2 as 333ms but using lower value.
-const INITIAL_RTT: Duration = Duration::from_millis(100);
+pub(crate) const INITIAL_RTT: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 #[allow(clippy::module_name_repetitions)]
@@ -155,7 +155,6 @@ impl RttEstimate {
         self.latest_rtt
     }
 
-    #[cfg(test)]
     pub fn rttvar(&self) -> Duration {
         self.rttvar
     }

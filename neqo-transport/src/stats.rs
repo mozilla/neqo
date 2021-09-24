@@ -13,10 +13,12 @@ use std::cell::RefCell;
 use std::fmt::{self, Debug};
 use std::ops::Deref;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub(crate) const MAX_PTO_COUNTS: usize = 16;
 
 #[derive(Default, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 #[allow(clippy::module_name_repetitions)]
 pub struct FrameStats {
     pub all: usize,
@@ -131,6 +133,11 @@ pub struct Stats {
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
+
+    /// The current, estimated round-trip time on the primary path.
+    pub rtt: Duration,
+    /// The current, estimated round-trip time variation on the primary path.
+    pub rttvar: Duration,
 
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.

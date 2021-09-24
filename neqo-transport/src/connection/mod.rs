@@ -767,7 +767,13 @@ impl Connection {
 
     /// Get a snapshot of collected statistics.
     pub fn stats(&self) -> Stats {
-        self.stats.borrow().clone()
+        let mut v = self.stats.borrow().clone();
+        if let Some(p) = self.paths.primary_fallible() {
+            let p = p.borrow();
+            v.rtt = p.rtt().estimate();
+            v.rttvar = p.rtt().rttvar();
+        }
+        v
     }
 
     // This function wraps a call to another function and sets the connection state
