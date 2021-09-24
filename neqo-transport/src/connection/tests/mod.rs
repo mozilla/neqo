@@ -192,7 +192,7 @@ fn connect_with_rtt(
 ) -> Instant {
     fn check_rtt(stats: &Stats, rtt: Duration) {
         assert_eq!(stats.rtt, rtt);
-        // Confirmation takes 2 round trips, 
+        // Confirmation takes 2 round trips,
         // so rttvar is reduced by 1/4 (from rtt/2).
         assert_eq!(stats.rttvar, rtt * 3 / 8);
     }
