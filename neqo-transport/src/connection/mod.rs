@@ -944,13 +944,9 @@ impl Connection {
         let earliest = delays.into_iter().min().unwrap();
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
-        qdebug!(
-            [self],
-            "delay duration {:?}",
-            max(now, earliest).duration_since(now)
-        );
         debug_assert!(earliest > now);
-        let delay = max(now, earliest).duration_since(now);
+        let delay = earliest.saturating_duration_since(now);
+        qdebug!([self], "delay duration {:?}", delay);
         self.hrtime.update(delay / 4);
         delay
     }
