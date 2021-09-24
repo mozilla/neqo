@@ -341,7 +341,6 @@ impl RecvMessage {
             MessageType::Response => {
                 let status = headers.iter().find(|h| h.name() == ":status");
                 if let Some(h) = status {
-                    #[allow(unknown_lints, renamed_and_removed_lints, clippy::unknown_clippy_lints)]
                     #[allow(clippy::map_err_ignore)]
                     let status_code = h.value().parse::<i32>().map_err(|_| Error::InvalidHeader)?;
                     Ok((100..200).contains(&status_code))

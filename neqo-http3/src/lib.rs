@@ -128,7 +128,6 @@ impl Error {
     }
 
     #[must_use]
-    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     pub fn connection_error(&self) -> bool {
         matches!(
             self,

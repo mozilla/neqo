@@ -142,12 +142,7 @@ impl QPackEncoder {
         }
     }
 
-    #[allow(
-        clippy::map_err_ignore,
-        unknown_lints,
-        renamed_and_removed_lints,
-        clippy::unknown_clippy_lints
-    )]
+    #[allow(clippy::map_err_ignore)]
     fn insert_count_instruction(&mut self, increment: u64) -> Res<()> {
         self.table
             .increment_acked(increment)
@@ -348,7 +343,6 @@ impl QPackEncoder {
     /// `InternalError` if an unexpected error occurred.
     /// # Panics
     /// If there is a programming error.
-    #[allow(clippy::unnested_or_patterns)] // Until we require rust 1.53 we can't use or_patterns.
     pub fn encode_header_block(
         &mut self,
         conn: &mut Connection,
