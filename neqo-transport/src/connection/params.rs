@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT};
+pub use crate::recovery::FAST_PTO_SCALE;
 use crate::recv_stream::RECV_BUFFER_SIZE;
 use crate::rtt::GRANULARITY;
 use crate::stream_id::StreamType;
@@ -70,6 +71,7 @@ pub struct ConnectionParameters {
     datagram_size: u64,
     outgoing_datagram_queue: usize,
     incoming_datagram_queue: usize,
+    fast_pto: u8,
 }
 
 impl Default for ConnectionParameters {
@@ -89,6 +91,7 @@ impl Default for ConnectionParameters {
             datagram_size: 0,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
+            fast_pto: FAST_PTO_SCALE,
         }
     }
 }
@@ -243,6 +246,26 @@ impl ConnectionParameters {
     pub fn incoming_datagram_queue(mut self, v: usize) -> Self {
         // The max queue length must be at least 1.
         self.incoming_datagram_queue = max(v, 1);
+        self
+    }
+
+    pub fn get_fast_pto(&self) -> u8 {
+        self.fast_pto
+    }
+
+    /// Fast PTO scale.  A value of `FAST_PTO_SCALE` follows the spec, a larger value
+    /// does not, but produces more probes with the intent of ensuring lower latency
+    /// in the event of tail loss. A value of `FAST_PTO_SCALE*4` is quite aggressive.
+    /// Larger values are not rejected, but could be very wasteful.
+    /// Values less than `FAST_PTO_SCALE` delay probes and could reduce performance.
+    /// A value of `FAST_PTO_SCALE/8` or less could result in any packet loss being
+    /// interpreted as persistent congestion.
+    ///
+    /// # Panics
+    /// A value of 0 is invalid and will cause a panic.
+    pub fn fast_pto(mut self, scale: u8) -> Self {
+        assert_ne!(scale, 0);
+        self.fast_pto = scale;
         self
     }
 
