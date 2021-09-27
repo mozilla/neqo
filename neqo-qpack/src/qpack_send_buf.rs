@@ -128,6 +128,16 @@ mod tests {
         assert_eq!(d[..], [0xff, 0xe1, 0x8c, 0x06]);
     }
 
+    #[test]
+    fn max_int() {
+        let mut d = QpackData::default();
+        d.encode_prefixed_encoded_int(Prefix::new(0x80, 1), u64::MAX);
+        assert_eq!(
+            d[..],
+            [0xff, 0x80, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
+        );
+    }
+
     const VALUE: &[u8] = b"custom-key";
 
     const LITERAL: &[u8] = &[
