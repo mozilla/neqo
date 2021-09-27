@@ -46,7 +46,7 @@ pub(crate) const MAX_OUTSTANDING_UNACK: usize = 200;
 /// Disable PING until this many packets are outstanding.
 pub(crate) const MIN_OUTSTANDING_UNACK: usize = 16;
 /// The scale we use for the fast PTO feature.
-pub const FAST_PTO_SCALE: u8 = 10;
+pub const FAST_PTO_SCALE: u8 = 100;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -827,13 +827,17 @@ impl LossRecovery {
         pn_space: PacketNumberSpace,
         fast_pto: u8,
     ) -> Duration {
+        // This is a complicated (but safe) way of calculating:
+        //   base_pto * F * 2^pto_count
+        // where F = fast_pto / FAST_PTO_SCALE (== 1 by default)
+        let pto_count = pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0));
         rtt.pto(pn_space)
             .checked_mul(
-                u32::from(FAST_PTO_SCALE)
-                    .checked_shl(pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0)))
+                u32::from(fast_pto)
+                    .checked_shl(pto_count)
                     .unwrap_or(u32::MAX),
             )
-            .map_or(Duration::from_secs(3600), |p| p / u32::from(fast_pto))
+            .map_or(Duration::from_secs(3600), |p| p / u32::from(FAST_PTO_SCALE))
     }
 
     /// Get the current PTO period for the given packet number space.

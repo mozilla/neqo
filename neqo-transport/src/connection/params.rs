@@ -253,13 +253,16 @@ impl ConnectionParameters {
         self.fast_pto
     }
 
-    /// Fast PTO scale.  A value of `FAST_PTO_SCALE` follows the spec, a larger value
+    /// Fast PTO scale.  A value of `FAST_PTO_SCALE` follows the spec, a smaller value
     /// does not, but produces more probes with the intent of ensuring lower latency
-    /// in the event of tail loss. A value of `FAST_PTO_SCALE*4` is quite aggressive.
-    /// Larger values are not rejected, but could be very wasteful.
-    /// Values less than `FAST_PTO_SCALE` delay probes and could reduce performance.
-    /// A value of `FAST_PTO_SCALE/8` or less could result in any packet loss being
-    /// interpreted as persistent congestion.
+    /// in the event of tail loss. A value of `FAST_PTO_SCALE/4` is quite aggressive.
+    /// Smaller values than this are not rejected, but could be very wasteful.
+    /// Values greater than `FAST_PTO_SCALE` delay probes and could reduce performance.
+    /// It should not be possible to increase the PTO timer by too much, but a maximum
+    /// value of 255 will result in very poor performance.
+    /// Scaling PTO this way does not affect when persistent congestion is declared,
+    /// but may change how many retransmissions are sent before declaring persistent
+    /// congestion.
     ///
     /// # Panics
     /// A value of 0 is invalid and will cause a panic.
