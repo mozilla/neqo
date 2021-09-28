@@ -300,31 +300,40 @@ pub enum ReceiveOutput {
 
 pub trait RecvStream: Debug {
     /// # Errors
-    /// An error may happen while reading a stream, e.g. early close, etc.
-    fn stream_reset(&mut self, error: AppError, reset_type: ResetType) -> Res<()>;
-    /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput>;
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, etc.
+    fn reset(&mut self, error: AppError, reset_type: ResetType) -> Res<()>;
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
+        Err(Error::InvalidStreamId)
+    }
     fn done(&self) -> bool;
+
     fn stream_type(&self) -> Http3StreamType;
-    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream>;
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        None
+    }
 }
 
 pub trait HttpRecvStream: RecvStream {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()>;
-    /// # Errors
-    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)>;
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler;
 }
 
-pub(crate) trait RecvMessageEvents: Debug {
-    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool);
+pub trait RecvStreamEvents: Debug {
     fn data_readable(&self, stream_id: u64);
-    fn reset(&self, stream_id: u64, error: AppError, local: bool);
+    fn reset(&self, _stream_id: u64, _error: AppError, _reset_type: ResetType) {}
+    fn done(&self) {}
+}
+
+pub(crate) trait HttpRecvStreamEvents: RecvStreamEvents {
+    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

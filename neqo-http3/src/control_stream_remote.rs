@@ -5,9 +5,7 @@
 // except according to those terms.
 
 use crate::hframe::{HFrame, HFrameReader};
-use crate::{
-    AppError, Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType,
-};
+use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType};
 use neqo_common::qdebug;
 use neqo_transport::Connection;
 
@@ -43,7 +41,7 @@ impl ControlStreamRemote {
 }
 
 impl RecvStream for ControlStreamRemote {
-    fn stream_reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
+    fn reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
         Err(Error::HttpClosedCriticalStream)
     }
 
@@ -66,9 +64,5 @@ impl RecvStream for ControlStreamRemote {
 
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::Control
-    }
-
-    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
-        None
     }
 }

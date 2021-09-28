@@ -88,7 +88,7 @@ impl RecvStream for PushStream {
         self.response.done()
     }
 
-    fn stream_reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
+    fn reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
         match reset_type {
             ResetType::App => {}
             t => {
@@ -97,8 +97,16 @@ impl RecvStream for PushStream {
                     .push_stream_reset(self.push_id, app_error, t);
             }
         }
-        self.response.stream_reset(app_error, reset_type)?;
+        self.response.reset(app_error, reset_type)?;
         Ok(())
+    }
+
+    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {
+        let res = self.response.read_data(conn, buf);
+        if self.response.done() {
+            self.push_handler.borrow_mut().close(self.push_id);
+        }
+        res
     }
 
     fn stream_type(&self) -> Http3StreamType {
@@ -114,14 +122,6 @@ impl HttpRecvStream for PushStream {
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
         self.receive(conn)?;
         Ok(())
-    }
-
-    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {
-        let res = self.response.read_data(conn, buf);
-        if self.response.done() {
-            self.push_handler.borrow_mut().close(self.push_id);
-        }
-        res
     }
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler {

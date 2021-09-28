@@ -237,7 +237,7 @@ impl Http3Connection {
                         // Stream may be already be closed and we may get an error
                         // here, but we do not care.
                         mem::drop(conn.stream_stop_sending(stream_id, e.code()));
-                        r.stream_reset(e.code(), ResetType::Local).unwrap();
+                        r.reset(e.code(), ResetType::Local).unwrap();
                         let res = self.recv_streams.remove(&stream_id);
                         // The stream should still be in the list.
                         debug_assert!(res.is_some());
@@ -311,7 +311,7 @@ impl Http3Connection {
 
         self.recv_streams
             .remove(&stream_id)
-            .map_or(Ok(()), |mut s| s.stream_reset(app_error, ResetType::Remote))
+            .map_or(Ok(()), |mut s| s.reset(app_error, ResetType::Remote))
     }
 
     pub fn handle_stream_stop_sending(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
@@ -502,7 +502,7 @@ impl Http3Connection {
         }
         self.send_streams.remove(&stream_id);
         if let Some(mut s) = self.recv_streams.remove(&stream_id) {
-            s.stream_reset(error, ResetType::App)?;
+            s.reset(error, ResetType::App)?;
         }
 
         // Stream may be already be closed and we may get an error here, but we do not care.

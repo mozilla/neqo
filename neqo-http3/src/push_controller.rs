@@ -7,7 +7,7 @@ use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::Http3Connection;
 use crate::hframe::HFrame;
 use crate::{Error, Header, Res};
-use crate::{RecvMessageEvents, ResetType};
+use crate::{HttpRecvStreamEvents, RecvStreamEvents, ResetType};
 use neqo_common::{qerror, qinfo, qtrace};
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
@@ -462,7 +462,18 @@ impl RecvPushEvents {
     }
 }
 
-impl RecvMessageEvents for RecvPushEvents {
+impl RecvStreamEvents for RecvPushEvents {
+    fn data_readable(&self, _stream_id: u64) {
+        self.push_handler.borrow_mut().new_stream_event(
+            self.push_id,
+            Http3ClientEvent::PushDataReadable {
+                push_id: self.push_id,
+            },
+        );
+    }
+}
+
+impl HttpRecvStreamEvents for RecvPushEvents {
     fn header_ready(&self, _stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool) {
         self.push_handler.borrow_mut().new_stream_event(
             self.push_id,
@@ -474,15 +485,4 @@ impl RecvMessageEvents for RecvPushEvents {
             },
         );
     }
-
-    fn data_readable(&self, _stream_id: u64) {
-        self.push_handler.borrow_mut().new_stream_event(
-            self.push_id,
-            Http3ClientEvent::PushDataReadable {
-                push_id: self.push_id,
-            },
-        );
-    }
-
-    fn reset(&self, _stream_id: u64, _error: AppError, _local: bool) {}
 }

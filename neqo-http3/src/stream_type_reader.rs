@@ -179,7 +179,7 @@ impl NewStreamHeadReader {
 }
 
 impl RecvStream for NewStreamHeadReader {
-    fn stream_reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
+    fn reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
         *self = NewStreamHeadReader::Done;
         Ok(())
     }
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn reset() {
         let mut t = Test::new(Role::Client);
-        t.decoder.stream_reset(0x100, ResetType::Remote).unwrap();
+        t.decoder.reset(0x100, ResetType::Remote).unwrap();
         // after a reset NewStreamHeadReader will not read more data.
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_DECODER],

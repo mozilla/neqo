@@ -8,8 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
-use crate::Header;
-use crate::RecvMessageEvents;
+use crate::{Header, HttpRecvStreamEvents, RecvStreamEvents, ResetType};
 
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
@@ -83,24 +82,19 @@ pub struct Http3ClientEvents {
     events: Rc<RefCell<VecDeque<Http3ClientEvent>>>,
 }
 
-impl RecvMessageEvents for Http3ClientEvents {
-    /// Add a new `HeaderReady` event.
-    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool) {
-        self.insert(Http3ClientEvent::HeaderReady {
-            stream_id,
-            headers,
-            interim,
-            fin,
-        });
-    }
-
+impl RecvStreamEvents for Http3ClientEvents {
     /// Add a new `DataReadable` event
     fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataReadable { stream_id });
     }
 
     /// Add a new `Reset` event.
-    fn reset(&self, stream_id: u64, error: AppError, local: bool) {
+    fn reset(&self, stream_id: u64, error: AppError, reset_type: ResetType) {
+        let local = match reset_type {
+            ResetType::App => return,
+            ResetType::Remote => false,
+            ResetType::Local => true,
+        };
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
@@ -112,6 +106,18 @@ impl RecvMessageEvents for Http3ClientEvents {
             stream_id,
             error,
             local,
+        });
+    }
+}
+
+impl HttpRecvStreamEvents for Http3ClientEvents {
+    /// Add a new `HeaderReady` event.
+    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool) {
+        self.insert(Http3ClientEvent::HeaderReady {
+            stream_id,
+            headers,
+            interim,
+            fin,
         });
     }
 }
