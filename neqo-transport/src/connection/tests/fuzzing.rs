@@ -9,9 +9,26 @@
 #![cfg(feature = "fuzzing")]
 
 use super::{connect_force_idle, default_client, default_server};
+use crate::cid::INITIAL_CID_FUZZING;
 use crate::StreamType;
 use neqo_crypto::FIXED_TAG_FUZZING;
 use test_fixture::now;
+
+#[test]
+fn fix_init_cid() {
+    let mut client = default_client();
+    let client_pkt = client.process_output(now()).dgram().unwrap();
+    let cid_start_len = 1 + 4;
+    assert_eq!(
+        usize::from(client_pkt[cid_start_len]),
+        INITIAL_CID_FUZZING.len()
+    );
+    let cid_start = cid_start_len + 1;
+    assert_eq!(
+        &client_pkt[cid_start..cid_start + INITIAL_CID_FUZZING.len()],
+        INITIAL_CID_FUZZING
+    );
+}
 
 #[test]
 fn no_encryption() {

@@ -110,6 +110,7 @@ fn duplicate_initial_new_path() {
     complete_connection(&mut client, &mut server, server_initial);
 }
 
+#[cfg(not(feature = "fuzzing"))]
 #[test]
 fn different_initials_same_path() {
     let mut server = default_server();
