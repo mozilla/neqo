@@ -6,8 +6,7 @@
 
 use crate::connection::Http3State;
 use crate::send_message::SendMessageEvents;
-use crate::RecvMessageEvents;
-use crate::{Header, Priority};
+use crate::{Header, HttpRecvStreamEvents, Priority, RecvStreamEvents};
 
 use neqo_transport::AppError;
 
@@ -43,7 +42,14 @@ pub(crate) struct Http3ServerConnEvents {
     events: Rc<RefCell<VecDeque<Http3ServerConnEvent>>>,
 }
 
-impl RecvMessageEvents for Http3ServerConnEvents {
+impl RecvStreamEvents for Http3ServerConnEvents {
+    /// Add a new `DataReadable` event
+    fn data_readable(&self, stream_id: u64) {
+        self.insert(Http3ServerConnEvent::DataReadable { stream_id });
+    }
+}
+
+impl HttpRecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `HeaderReady` event.
     fn header_ready(&self, stream_id: u64, headers: Vec<Header>, _interim: bool, fin: bool) {
         self.insert(Http3ServerConnEvent::Headers {
@@ -52,13 +58,6 @@ impl RecvMessageEvents for Http3ServerConnEvents {
             fin,
         });
     }
-
-    /// Add a new `DataReadable` event
-    fn data_readable(&self, stream_id: u64) {
-        self.insert(Http3ServerConnEvent::DataReadable { stream_id });
-    }
-
-    fn reset(&self, _stream_id: u64, _error: AppError, _local: bool) {}
 }
 
 impl SendMessageEvents for Http3ServerConnEvents {

@@ -7,7 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::{
-    qlog, Error, Header, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvMessageEvents,
+    qlog, Error, Header, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents, ReceiveOutput,
     RecvStream, Res, ResetType,
 };
 
@@ -73,7 +73,7 @@ pub(crate) struct RecvMessage {
     state: RecvMessageState,
     message_type: MessageType,
     qpack_decoder: Rc<RefCell<QPackDecoder>>,
-    conn_events: Box<dyn RecvMessageEvents>,
+    conn_events: Box<dyn HttpRecvStreamEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: u64,
     priority_handler: PriorityHandler,
@@ -91,7 +91,7 @@ impl RecvMessage {
         message_type: MessageType,
         stream_id: u64,
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
-        conn_events: Box<dyn RecvMessageEvents>,
+        conn_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
         priority_handler: PriorityHandler,
     ) -> Self {
@@ -432,54 +432,16 @@ impl RecvStream for RecvMessage {
         matches!(self.state, RecvMessageState::Closed)
     }
 
-    fn stream_reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
+    fn reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
         if !self.closing() || !self.blocked_push_promise.is_empty() {
             self.qpack_decoder
                 .borrow_mut()
                 .cancel_stream(self.stream_id);
         }
-        match reset_type {
-            ResetType::Local => {
-                self.conn_events.reset(self.stream_id, app_error, true);
-            }
-            ResetType::Remote => {
-                self.conn_events.reset(self.stream_id, app_error, false);
-            }
-            ResetType::App => {}
-        }
+        self.conn_events
+            .reset(self.stream_id, app_error, reset_type);
         self.state = RecvMessageState::Closed;
         Ok(())
-    }
-
-    fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::Http
-    }
-
-    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
-        Some(self)
-    }
-}
-
-impl HttpRecvStream for RecvMessage {
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
-        while let Some(p) = self.blocked_push_promise.front() {
-            if let Some(headers) = self
-                .qpack_decoder
-                .borrow_mut()
-                .decode_header_block(&p.header_block, self.stream_id)?
-            {
-                self.push_handler
-                    .as_ref()
-                    .ok_or(Error::HttpFrameUnexpected)?
-                    .borrow_mut()
-                    .new_push_promise(p.push_id, self.stream_id, headers)?;
-                self.blocked_push_promise.pop_front();
-            } else {
-                return Ok(());
-            }
-        }
-
-        self.receive_internal(conn, true)
     }
 
     fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {
@@ -521,6 +483,37 @@ impl HttpRecvStream for RecvMessage {
                 _ => break Ok((written, false)),
             }
         }
+    }
+
+    fn stream_type(&self) -> Http3StreamType {
+        Http3StreamType::Http
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        Some(self)
+    }
+}
+
+impl HttpRecvStream for RecvMessage {
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<()> {
+        while let Some(p) = self.blocked_push_promise.front() {
+            if let Some(headers) = self
+                .qpack_decoder
+                .borrow_mut()
+                .decode_header_block(&p.header_block, self.stream_id)?
+            {
+                self.push_handler
+                    .as_ref()
+                    .ok_or(Error::HttpFrameUnexpected)?
+                    .borrow_mut()
+                    .new_push_promise(p.push_id, self.stream_id, headers)?;
+                self.blocked_push_promise.pop_front();
+            } else {
+                return Ok(());
+            }
+        }
+
+        self.receive_internal(conn, true)
     }
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
