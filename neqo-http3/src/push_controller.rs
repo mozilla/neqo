@@ -447,6 +447,11 @@ impl PushController {
     }
 }
 
+/// `RecvPushEvents` relays a push stream events to `PushController`.
+/// It informs `PushController` when a push stream is done or canceled.
+/// Also when headers or data is ready and `PushController` decide whether to post
+/// PushHeaderReady and PushDataReadable events or to postpone them if
+/// a push_promise has not been yet received for the stream.
 #[derive(Debug)]
 pub(crate) struct RecvPushEvents {
     push_id: u64,
@@ -470,6 +475,18 @@ impl RecvStreamEvents for RecvPushEvents {
                 push_id: self.push_id,
             },
         );
+    }
+
+    fn reset(&self, _stream_id: u64, app_error: AppError, reset_type: ResetType) {
+        if reset_type != ResetType::App {
+            self.push_handler
+                .borrow_mut()
+                .push_stream_reset(self.push_id, app_error, reset_type);
+        }
+    }
+
+    fn done(&self) {
+        self.push_handler.borrow_mut().close(self.push_id);
     }
 }
 

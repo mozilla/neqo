@@ -7,8 +7,7 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{Http3Connection, Http3State};
 use crate::hframe::HFrame;
-use crate::push_controller::PushController;
-use crate::push_stream::PushStream;
+use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::{SendMessage, SendMessageEvents};
@@ -676,12 +675,13 @@ impl Http3Client {
 
         self.base_handler.add_recv_stream(
             stream_id,
-            Box::new(PushStream::new(
+            Box::new(RecvMessage::new(
+                MessageType::Response,
                 stream_id,
-                push_id,
-                Rc::clone(&self.push_handler),
                 Rc::clone(&self.base_handler.qpack_decoder),
-                Priority::default(),
+                Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
+                None,
+                PriorityHandler::new(true, Priority::default()),
             )),
         );
         let res = self
