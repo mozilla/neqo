@@ -29,7 +29,7 @@ const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
 const PSEUDO_HEADER_PATH: u8 = 0x10;
 const REGULAR_HEADER: u8 = 0x80;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MessageType {
     Request,
     Response,
@@ -153,7 +153,7 @@ impl RecvMessage {
         qtrace!([self], "Add new headers fin={}", fin);
         let interim = self.is_interim(&headers)?;
         self.headers_valid(&headers)?;
-        if matches!(self.message_type, MessageType::Response) {
+        if self.message_type == MessageType::Response {
             headers.retain(Header::is_allowed_for_response);
         }
 
@@ -327,6 +327,7 @@ impl RecvMessage {
                 .cancel_stream(self.stream_id);
         }
         self.state = RecvMessageState::Closed;
+        self.conn_events.done();
     }
 
     fn closing(&self) -> bool {
@@ -486,7 +487,11 @@ impl RecvStream for RecvMessage {
     }
 
     fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::Http
+        if self.message_type == MessageType::Response && self.push_handler.is_none() {
+            Http3StreamType::Push
+        } else {
+            Http3StreamType::Http
+        }
     }
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {

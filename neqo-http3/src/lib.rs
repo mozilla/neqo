@@ -16,7 +16,6 @@ mod control_stream_remote;
 pub mod hframe;
 mod priority;
 mod push_controller;
-mod push_stream;
 mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
