@@ -7,9 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL;
-use crate::{
-    AppError, Error, Http3StreamType, HttpRecvStream, ReceiveOutput, RecvStream, Res, ResetType,
-};
+use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType, Stream};
 use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
 use neqo_qpack::encoder::QPACK_UNI_STREAM_TYPE_ENCODER;
@@ -182,6 +180,12 @@ impl NewStreamHeadReader {
     }
 }
 
+impl Stream for NewStreamHeadReader {
+    fn stream_type(&self) -> Http3StreamType {
+        Http3StreamType::NewStream
+    }
+}
+
 impl RecvStream for NewStreamHeadReader {
     fn reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
         *self = NewStreamHeadReader::Done;
@@ -194,14 +198,6 @@ impl RecvStream for NewStreamHeadReader {
                 .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
             self.done(),
         ))
-    }
-
-    fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::NewStream
-    }
-
-    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
-        None
     }
 }
 

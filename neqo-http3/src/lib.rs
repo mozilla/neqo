@@ -306,7 +306,11 @@ impl Default for ReceiveOutput {
     }
 }
 
-pub trait RecvStream: Debug {
+pub trait Stream: Debug {
+    fn stream_type(&self) -> Http3StreamType;
+}
+
+pub trait RecvStream: Stream {
     /// The stream reads data from the corresponding quic stream and returns `ReceiveOutput`.
     /// The function also returns true as the second parameter if the stream is done and
     /// could be forgotten, i.e. removed from all records.
@@ -325,7 +329,6 @@ pub trait RecvStream: Debug {
         Err(Error::InvalidStreamId)
     }
 
-    fn stream_type(&self) -> Http3StreamType;
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         None
     }
@@ -350,6 +353,31 @@ pub trait RecvStreamEvents: Debug {
 
 pub(crate) trait HttpRecvStreamEvents: RecvStreamEvents {
     fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool);
+}
+
+pub trait SendStream: Stream {
+    /// # Errors
+    /// Error my occure during sending data, e.g. protocol error, etc.
+    fn send(&mut self, conn: &mut Connection) -> Res<()>;
+    fn has_data_to_send(&self) -> bool;
+    fn stream_writable(&self);
+    fn done(&self) -> bool;
+    /// # Errors
+    /// Error my occure during sending data, e.g. protocol error, etc.
+    fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
+    /// # Errors
+    /// It may happen that the transport stream is already close. This is unlikely.
+    fn close(&mut self, conn: &mut Connection) -> Res<()>;
+    fn stop_sending(&mut self, error: AppError);
+    fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
+        None
+    }
+}
+
+pub trait HttpSendStream: SendStream {
+    /// # Errors
+    /// Error my occure during sending data, e.g. protocol error, etc.
+    fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

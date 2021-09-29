@@ -49,6 +49,8 @@ impl Http3ServerHandler {
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
+            .http_stream()
+            .ok_or(Error::InvalidStreamId)?
             .set_message(headers, Some(data))?;
         self.base_handler
             .insert_streams_have_data_to_send(stream_id);
@@ -125,7 +127,11 @@ impl Http3ServerHandler {
                 ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
                     StreamType::BiDi => self.base_handler.add_streams(
                         stream_id.as_u64(),
-                        SendMessage::new(stream_id.as_u64(), Box::new(self.events.clone())),
+                        Box::new(SendMessage::new(
+                            stream_id.as_u64(),
+                            self.base_handler.qpack_encoder.clone(),
+                            Box::new(self.events.clone()),
+                        )),
                         Box::new(RecvMessage::new(
                             MessageType::Request,
                             stream_id.as_u64(),
