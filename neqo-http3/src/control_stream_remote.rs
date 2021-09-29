@@ -46,20 +46,16 @@ impl RecvStream for ControlStreamRemote {
     }
 
     #[allow(clippy::vec_init_then_push)] // Clippy fail.
-    fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
+    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
         let mut control_frames = Vec::new();
 
         loop {
             if let Some(f) = self.receive_single(conn)? {
                 control_frames.push(f);
             } else {
-                return Ok(ReceiveOutput::ControlFrames(control_frames));
+                return Ok((ReceiveOutput::ControlFrames(control_frames), false));
             }
         }
-    }
-
-    fn done(&self) -> bool {
-        false
     }
 
     fn stream_type(&self) -> Http3StreamType {

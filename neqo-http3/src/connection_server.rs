@@ -13,6 +13,7 @@ use crate::{Error, Header, Priority, PriorityHandler, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
+use std::mem;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -246,10 +247,10 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?;
 
         let res = recv_stream.read_data(conn, buf);
-        if let Err(e) = &res {
-            self.close(conn, now, e);
-        } else if recv_stream.done() {
-            self.base_handler.recv_streams.remove(&stream_id);
+        match &res {
+            Ok((_, true)) => mem::drop(self.base_handler.recv_streams.remove(&stream_id)),
+            Err(e) => self.close(conn, now, e),
+            _ => {}
         }
         res
     }

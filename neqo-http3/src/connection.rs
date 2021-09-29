@@ -210,11 +210,11 @@ impl Http3Connection {
         qtrace!([self], "Readable stream {}.", stream_id);
 
         if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
-            let output = recv_stream.receive(conn);
-            if recv_stream.done() {
+            let (output, done) = recv_stream.receive(conn)?;
+            if done {
                 self.recv_streams.remove(&stream_id);
             }
-            output
+            Ok(output)
         } else {
             Ok(ReceiveOutput::NoOutput)
         }
@@ -228,23 +228,27 @@ impl Http3Connection {
         for stream_id in unblocked_streams {
             qdebug!([self], "Stream {} is unblocked", stream_id);
             if let Some(r) = self.recv_streams.get_mut(&stream_id) {
-                if let Err(e) = r
+                match r
                     .http_stream()
                     .ok_or(Error::HttpInternal(10))?
                     .header_unblocked(conn)
                 {
-                    if e.stream_reset_error() {
-                        // Stream may be already be closed and we may get an error
-                        // here, but we do not care.
-                        mem::drop(conn.stream_stop_sending(stream_id, e.code()));
-                        r.reset(e.code(), ResetType::Local).unwrap();
-                        let res = self.recv_streams.remove(&stream_id);
-                        // The stream should still be in the list.
-                        debug_assert!(res.is_some());
-                    } else {
-                        return Err(e);
+                    Ok(true) => mem::drop(self.recv_streams.remove(&stream_id)),
+                    Ok(false) => {}
+                    Err(e) => {
+                        if e.stream_reset_error() {
+                            // Stream may be already be closed and we may get an error
+                            // here, but we do not care.
+                            mem::drop(conn.stream_stop_sending(stream_id, e.code()));
+                            r.reset(e.code(), ResetType::Local).unwrap();
+                            let r_stream = self.recv_streams.remove(&stream_id);
+                            // The stream should still be in the list.
+                            debug_assert!(r_stream.is_some());
+                        } else {
+                            return Err(e);
+                        }
                     }
-                }
+                };
             }
         }
         Ok(())
