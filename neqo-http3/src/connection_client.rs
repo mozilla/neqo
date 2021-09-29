@@ -10,10 +10,11 @@ use crate::hframe::HFrame;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::request_target::{AsRequestTarget, RequestTarget};
-use crate::send_message::{SendMessage, SendMessageEvents};
+use crate::send_message::SendMessage;
 use crate::settings::HSettings;
 use crate::{
     Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStreamEvents, ResetType,
+    SendStreamEvents,
 };
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,

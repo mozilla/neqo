@@ -5,7 +5,9 @@
 // except according to those terms.
 
 use crate::hframe::HFrame;
-use crate::{qlog, Error, Header, Http3StreamType, HttpSendStream, Res, SendStream, Stream};
+use crate::{
+    qlog, Error, Header, Http3StreamType, HttpSendStream, Res, SendStream, SendStreamEvents, Stream,
+};
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
@@ -21,12 +23,6 @@ const MAX_DATA_HEADER_SIZE_3: usize = (1 << 14) - 1; // Maximal amount of data w
 const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = MAX_DATA_HEADER_SIZE_3 + 5; // 16383 + 5 (size of the next buffer data frame header)
 const MAX_DATA_HEADER_SIZE_5: usize = (1 << 30) - 1; // Maximal amount of data with DATA frame header size 3
 const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 1073741823 + 9 (size of the next buffer data frame header)
-
-pub(crate) trait SendMessageEvents: Debug {
-    fn data_writable(&self, stream_id: u64);
-    fn remove_send_side_event(&self, stream_id: u64);
-    fn stop_sending(&self, stream_id: u64, app_err: AppError);
-}
 
 /*
  *  SendMessage states:
@@ -81,14 +77,14 @@ pub(crate) struct SendMessage {
     state: SendMessageState,
     stream_id: u64,
     encoder: Rc<RefCell<QPackEncoder>>,
-    conn_events: Box<dyn SendMessageEvents>,
+    conn_events: Box<dyn SendStreamEvents>,
 }
 
 impl SendMessage {
     pub fn new(
         stream_id: u64,
         encoder: Rc<RefCell<QPackEncoder>>,
-        conn_events: Box<dyn SendMessageEvents>,
+        conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
@@ -103,7 +99,7 @@ impl SendMessage {
         stream_id: u64,
         headers: Vec<Header>,
         encoder: Rc<RefCell<QPackEncoder>>,
-        conn_events: Box<dyn SendMessageEvents>,
+        conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
