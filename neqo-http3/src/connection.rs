@@ -205,7 +205,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_new_unidi_stream(&mut self, stream_id: u64, role: Role) {
+    pub fn add_new_stream(&mut self, stream_id: u64, role: Role) {
         qtrace!([self], "A new stream: {}.", stream_id);
         self.recv_streams.insert(
             stream_id,
@@ -279,7 +279,8 @@ impl Http3Connection {
                 }
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
-            ReceiveOutput::NewStream(NewStreamType::Push(_)) => Ok(output),
+            ReceiveOutput::NewStream(NewStreamType::Push(_))
+            | ReceiveOutput::NewStream(NewStreamType::Http) => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
@@ -438,7 +439,10 @@ impl Http3Connection {
                     )),
                 );
             }
-            NewStreamType::Unknown => {
+            NewStreamType::Http => {
+                qinfo!([self], "A new http stream {}.", stream_id);
+            }
+            NewStreamType::WebTransportStream(_) | NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
         };
@@ -447,8 +451,12 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id)
             }
-            NewStreamType::Push(_) => Ok(ReceiveOutput::NewStream(stream_type)),
-            NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
+            NewStreamType::Push(_) | NewStreamType::Http => {
+                Ok(ReceiveOutput::NewStream(stream_type))
+            }
+            NewStreamType::WebTransportStream(_) | NewStreamType::Unknown => {
+                Ok(ReceiveOutput::NoOutput)
+            }
         }
     }
 

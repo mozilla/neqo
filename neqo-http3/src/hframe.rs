@@ -186,6 +186,18 @@ impl HFrameReader {
         }
     }
 
+    #[must_use]
+    pub fn new_with_type(hframe_type: u64) -> Self {
+        Self {
+            state: HFrameReaderState::GetLength {
+                decoder: IncrementalDecoderUint::default(),
+            },
+            hframe_type,
+            hframe_len: 0,
+            payload: Vec::new(),
+        }
+    }
+
     fn reset(&mut self) {
         self.state = HFrameReaderState::GetType {
             decoder: IncrementalDecoderUint::default(),

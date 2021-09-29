@@ -308,6 +308,7 @@ impl Http3Client {
                 Box::new(self.events.clone()),
                 Some(Rc::clone(&self.push_handler)),
                 PriorityHandler::new(false, priority),
+                false,
             )),
         );
 
@@ -518,12 +519,9 @@ impl Http3Client {
         while let Some(e) = self.conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
-                    StreamType::BiDi => return Err(Error::HttpStreamCreation),
-                    StreamType::UniDi => self
-                        .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64(), Role::Client),
-                },
+                ConnectionEvent::NewStream { stream_id } => self
+                    .base_handler
+                    .add_new_stream(stream_id.as_u64(), Role::Client),
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
                         s.stream_writable();
@@ -586,6 +584,7 @@ impl Http3Client {
             ReceiveOutput::NewStream(NewStreamType::Push(push_id)) => {
                 self.handle_new_push_stream(stream_id, push_id)
             }
+            ReceiveOutput::NewStream(NewStreamType::Http) => Err(Error::HttpStreamCreation),
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
@@ -643,6 +642,7 @@ impl Http3Client {
                 None,
                 // TODO: think about the right prority for the push streams.
                 PriorityHandler::new(true, Priority::default()),
+                false,
             )),
         );
         let res = self

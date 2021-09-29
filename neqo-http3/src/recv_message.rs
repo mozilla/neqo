@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hframe::{HFrame, HFrameReader};
+use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_HEADERS};
 use crate::push_controller::PushController;
 use crate::{
     qlog, CloseType, Error, Header, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
@@ -94,10 +94,15 @@ impl RecvMessage {
         conn_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
         priority_handler: PriorityHandler,
+        header_frame_type_read: bool,
     ) -> Self {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders {
-                frame_reader: HFrameReader::new(),
+                frame_reader: if header_frame_type_read {
+                    HFrameReader::new_with_type(H3_FRAME_TYPE_HEADERS)
+                } else {
+                    HFrameReader::new()
+                },
             },
             message_type,
             qpack_decoder,
