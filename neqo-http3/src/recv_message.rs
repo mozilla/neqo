@@ -8,7 +8,7 @@ use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::{
     qlog, Error, Header, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents, ReceiveOutput,
-    RecvStream, Res, ResetType,
+    RecvStream, Res, ResetType, Stream,
 };
 
 use crate::priority::PriorityHandler;
@@ -423,6 +423,16 @@ impl RecvMessage {
     }
 }
 
+impl Stream for RecvMessage {
+    fn stream_type(&self) -> Http3StreamType {
+        if self.message_type == MessageType::Response && self.push_handler.is_none() {
+            Http3StreamType::Push
+        } else {
+            Http3StreamType::Http
+        }
+    }
+}
+
 impl RecvStream for RecvMessage {
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
         self.receive_internal(conn, true)?;
@@ -482,14 +492,6 @@ impl RecvStream for RecvMessage {
                 }
                 _ => break Ok((written, false)),
             }
-        }
-    }
-
-    fn stream_type(&self) -> Http3StreamType {
-        if self.message_type == MessageType::Response && self.push_handler.is_none() {
-            Http3StreamType::Push
-        } else {
-            Http3StreamType::Http
         }
     }
 

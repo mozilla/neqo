@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType};
+use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType, Stream};
 use neqo_qpack::QPackDecoder;
 use neqo_transport::Connection;
 use std::cell::RefCell;
@@ -22,6 +22,12 @@ impl DecoderRecvStream {
     }
 }
 
+impl Stream for DecoderRecvStream {
+    fn stream_type(&self) -> Http3StreamType {
+        Http3StreamType::Decoder
+    }
+}
+
 impl RecvStream for DecoderRecvStream {
     fn reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
         Err(Error::HttpClosedCriticalStream)
@@ -34,9 +40,5 @@ impl RecvStream for DecoderRecvStream {
             ),
             false,
         ))
-    }
-
-    fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::Decoder
     }
 }
