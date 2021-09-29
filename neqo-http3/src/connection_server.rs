@@ -9,10 +9,10 @@ use crate::hframe::HFrame;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{Error, Header, Priority, PriorityHandler, ReceiveOutput, Res};
+use crate::{Error, Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -124,27 +124,9 @@ impl Http3ServerHandler {
         while let Some(e) = conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
-                    StreamType::BiDi => self.base_handler.add_streams(
-                        stream_id.as_u64(),
-                        Box::new(SendMessage::new(
-                            stream_id.as_u64(),
-                            self.base_handler.qpack_encoder.clone(),
-                            Box::new(self.events.clone()),
-                        )),
-                        Box::new(RecvMessage::new(
-                            MessageType::Request,
-                            stream_id.as_u64(),
-                            Rc::clone(&self.base_handler.qpack_decoder),
-                            Box::new(self.events.clone()),
-                            None,
-                            PriorityHandler::new(false, Priority::default()),
-                        )),
-                    ),
-                    StreamType::UniDi => self
-                        .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64(), Role::Server),
-                },
+                ConnectionEvent::NewStream { stream_id } => self
+                    .base_handler
+                    .add_new_stream(stream_id.as_u64(), Role::Server),
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.handle_stream_readable(conn, stream_id)?;
                 }
@@ -188,7 +170,29 @@ impl Http3ServerHandler {
 
     fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         match self.base_handler.handle_stream_readable(conn, stream_id)? {
-            ReceiveOutput::PushStream => Err(Error::HttpStreamCreation),
+            ReceiveOutput::NewStream(NewStreamType::Push(_)) => Err(Error::HttpStreamCreation),
+            ReceiveOutput::NewStream(NewStreamType::Http) => {
+                self.base_handler.add_streams(
+                    stream_id,
+                    Box::new(SendMessage::new(
+                        stream_id,
+                        self.base_handler.qpack_encoder.clone(),
+                        Box::new(self.events.clone()),
+                    )),
+                    Box::new(RecvMessage::new(
+                        MessageType::Request,
+                        stream_id,
+                        Rc::clone(&self.base_handler.qpack_decoder),
+                        Box::new(self.events.clone()),
+                        None,
+                        PriorityHandler::new(false, Priority::default()),
+                        true,
+                    )),
+                );
+                let res = self.base_handler.handle_stream_readable(conn, stream_id)?;
+                assert_eq!(ReceiveOutput::NoOutput, res);
+                Ok(())
+            }
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
