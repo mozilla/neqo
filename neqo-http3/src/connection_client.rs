@@ -411,25 +411,20 @@ impl Http3Client {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
-        match recv_stream.read_data(&mut self.conn, buf) {
-            Ok((amount, fin)) => {
-                if recv_stream.done() {
-                    self.base_handler.recv_streams.remove(&stream_id);
-                }
-                Ok((amount, fin))
-            }
+        let mut res = recv_stream.read_data(&mut self.conn, buf);
+        match &res {
+            Ok((_, true)) => mem::drop(self.base_handler.recv_streams.remove(&stream_id)),
             Err(e) => {
                 if e.stream_reset_error() {
                     self.reset_stream_on_error(stream_id, e.code());
-                    Ok((0, false))
+                    res = Ok((0, false));
                 } else if e.connection_error() {
                     self.close(now, e.code(), "");
-                    Err(e)
-                } else {
-                    Err(e)
                 }
             }
-        }
+            _ => {}
+        };
+        res
     }
 
     // API: Push streams

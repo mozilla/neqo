@@ -176,6 +176,10 @@ impl NewStreamHeadReader {
             }
         }
     }
+
+    fn done(&self) -> bool {
+        matches!(self, NewStreamHeadReader::Done)
+    }
 }
 
 impl RecvStream for NewStreamHeadReader {
@@ -184,14 +188,12 @@ impl RecvStream for NewStreamHeadReader {
         Ok(())
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<ReceiveOutput> {
-        Ok(self
-            .get_type(conn)?
-            .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream))
-    }
-
-    fn done(&self) -> bool {
-        matches!(self, NewStreamHeadReader::Done)
+    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+        Ok((
+            self.get_type(conn)?
+                .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
+            self.done(),
+        ))
     }
 
     fn stream_type(&self) -> Http3StreamType {
@@ -243,7 +245,7 @@ mod tests {
             &mut self,
             enc: &[u8],
             fin: bool,
-            outcome: &Res<ReceiveOutput>,
+            outcome: &Res<(ReceiveOutput, bool)>,
             done: bool,
         ) {
             let len = enc.len() - 1;
@@ -255,7 +257,7 @@ mod tests {
                 mem::drop(self.conn_c.process(out.dgram(), now()));
                 assert_eq!(
                     self.decoder.receive(&mut self.conn_c).unwrap(),
-                    ReceiveOutput::NoOutput
+                    (ReceiveOutput::NoOutput, false)
                 );
                 assert!(!self.decoder.done());
             }
@@ -275,7 +277,7 @@ mod tests {
             &mut self,
             to_encode: &[u64],
             fin: bool,
-            outcome: &Res<ReceiveOutput>,
+            outcome: &Res<(ReceiveOutput, bool)>,
             done: bool,
         ) {
             let mut enc = Encoder::default();
@@ -292,7 +294,7 @@ mod tests {
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_DECODER],
             false,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Encoder)),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Encoder), true)),
             true,
         );
     }
@@ -303,7 +305,7 @@ mod tests {
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_ENCODER],
             false,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Decoder)),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Decoder), true)),
             true,
         );
     }
@@ -314,7 +316,7 @@ mod tests {
         t.decode(
             &[HTTP3_UNI_STREAM_TYPE_CONTROL],
             false,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Control)),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Control), true)),
             true,
         );
     }
@@ -325,7 +327,10 @@ mod tests {
         t.decode(
             &[HTTP3_UNI_STREAM_TYPE_PUSH, 0xaaaa_aaaa],
             false,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa))),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa)),
+                true,
+            )),
             true,
         );
 
@@ -344,7 +349,7 @@ mod tests {
         t.decode(
             &[0x3fff_ffff_ffff_ffff],
             false,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Unknown)),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
     }
@@ -355,14 +360,14 @@ mod tests {
         t.decode(
             &[0x3fff],
             false,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Unknown)),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
         // NewStreamHeadReader is done, it will not continue reading from the stream.
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_DECODER],
             false,
-            &Ok(ReceiveOutput::NoOutput),
+            &Ok((ReceiveOutput::NoOutput, true)),
             true,
         );
     }
@@ -370,7 +375,7 @@ mod tests {
     #[test]
     fn decoding_truncate() {
         let mut t = Test::new(Role::Client);
-        t.decode_buffer(&[0xff], false, &Ok(ReceiveOutput::NoOutput), false);
+        t.decode_buffer(&[0xff], false, &Ok((ReceiveOutput::NoOutput, false)), false);
     }
 
     #[test]
@@ -381,7 +386,7 @@ mod tests {
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_DECODER],
             false,
-            &Ok(ReceiveOutput::NoOutput),
+            &Ok((ReceiveOutput::NoOutput, true)),
             true,
         );
     }
@@ -444,7 +449,7 @@ mod tests {
         t.decode(
             &[0x3fff_ffff_ffff_ffff],
             true,
-            &Ok(ReceiveOutput::NewStream(NewStreamType::Unknown)),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
 
