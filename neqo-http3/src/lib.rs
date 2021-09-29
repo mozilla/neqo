@@ -297,6 +297,12 @@ pub enum ReceiveOutput {
     NewStream(NewStreamType),
 }
 
+impl Default for ReceiveOutput {
+    fn default() -> Self {
+        Self::NoOutput
+    }
+}
+
 pub trait RecvStream: Debug {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
@@ -319,7 +325,7 @@ pub trait RecvStream: Debug {
 pub trait HttpRecvStream: RecvStream {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<bool>;
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler;
 }

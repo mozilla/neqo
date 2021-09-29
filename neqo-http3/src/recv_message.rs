@@ -500,7 +500,7 @@ impl RecvStream for RecvMessage {
 }
 
 impl HttpRecvStream for RecvMessage {
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<bool> {
+    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
         while let Some(p) = self.blocked_push_promise.front() {
             if let Some(headers) = self
                 .qpack_decoder
@@ -514,12 +514,11 @@ impl HttpRecvStream for RecvMessage {
                     .new_push_promise(p.push_id, self.stream_id, headers)?;
                 self.blocked_push_promise.pop_front();
             } else {
-                return Ok(false);
+                return Ok((ReceiveOutput::NoOutput, false));
             }
         }
 
-        self.receive_internal(conn, true)?;
-        Ok(self.done())
+        self.receive(conn)
     }
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler {

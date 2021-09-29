@@ -210,11 +210,9 @@ impl Http3Connection {
         qtrace!([self], "Readable stream {}.", stream_id);
 
         if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
-            let (output, done) = recv_stream.receive(conn)?;
-            if done {
-                self.recv_streams.remove(&stream_id);
-            }
-            Ok(output)
+            let res = recv_stream.receive(conn);
+            self.handle_stream_manipulation_output(res, stream_id, conn)
+                .map_or_else(Err, |(output, _)| Ok(output))
         } else {
             Ok(ReceiveOutput::NoOutput)
         }
@@ -228,27 +226,11 @@ impl Http3Connection {
         for stream_id in unblocked_streams {
             qdebug!([self], "Stream {} is unblocked", stream_id);
             if let Some(r) = self.recv_streams.get_mut(&stream_id) {
-                match r
+                let res = r
                     .http_stream()
                     .ok_or(Error::HttpInternal(10))?
-                    .header_unblocked(conn)
-                {
-                    Ok(true) => mem::drop(self.recv_streams.remove(&stream_id)),
-                    Ok(false) => {}
-                    Err(e) => {
-                        if e.stream_reset_error() {
-                            // Stream may be already be closed and we may get an error
-                            // here, but we do not care.
-                            mem::drop(conn.stream_stop_sending(stream_id, e.code()));
-                            r.reset(e.code(), ResetType::Local).unwrap();
-                            let r_stream = self.recv_streams.remove(&stream_id);
-                            // The stream should still be in the list.
-                            debug_assert!(r_stream.is_some());
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                };
+                    .header_unblocked(conn);
+                self.handle_stream_manipulation_output(res, stream_id, conn)?;
             }
         }
         Ok(())
@@ -294,7 +276,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn is_critical_stream(&self, stream_id: u64) -> bool {
+    fn is_critical_stream(&self, stream_id: u64) -> bool {
         self.qpack_encoder
             .borrow()
             .local_stream_id()
@@ -478,6 +460,53 @@ impl Http3Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
+    }
+
+    fn handle_stream_manipulation_output<U>(
+        &mut self,
+        output: Res<(U, bool)>,
+        stream_id: u64,
+        conn: &mut Connection,
+    ) -> Res<(U, bool)>
+    where
+        U: Default,
+    {
+        match &output {
+            Ok((_, true)) => mem::drop(self.recv_streams.remove(&stream_id)),
+            Ok((_, false)) => {}
+            Err(e) => {
+                if e.stream_reset_error() && !self.stream_is_critical(stream_id) {
+                    mem::drop(conn.stream_stop_sending(stream_id, e.code()));
+                    if let Some(mut rs) = self.recv_streams.remove(&stream_id) {
+                        rs.reset(e.code(), ResetType::Local).unwrap();
+                    }
+                    return Ok((U::default(), false));
+                }
+            }
+        }
+        output
+    }
+
+    /// Stream data are read directly into a buffer supplied as a parameter of this function to avoid copying
+    /// data.
+    /// # Errors
+    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
+    /// early close, protocol error, etc.
+    pub fn read_data(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: u64,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)> {
+        qinfo!([self], "read_data from stream {}.", stream_id);
+        let res = self
+            .recv_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .http_stream()
+            .ok_or(Error::InvalidStreamId)?
+            .read_data(conn, buf);
+        self.handle_stream_manipulation_output(res, stream_id, conn)
     }
 
     /// This is called when an application resets a stream.

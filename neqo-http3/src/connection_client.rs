@@ -403,27 +403,12 @@ impl Http3Client {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qinfo!([self], "read_data from stream {}.", stream_id);
-        let recv_stream = self
-            .base_handler
-            .recv_streams
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?
-            .http_stream()
-            .ok_or(Error::InvalidStreamId)?;
-
-        let mut res = recv_stream.read_data(&mut self.conn, buf);
-        match &res {
-            Ok((_, true)) => mem::drop(self.base_handler.recv_streams.remove(&stream_id)),
-            Err(e) => {
-                if e.stream_reset_error() {
-                    self.reset_stream_on_error(stream_id, e.code());
-                    res = Ok((0, false));
-                } else if e.connection_error() {
-                    self.close(now, e.code(), "");
-                }
+        let res = self.base_handler.read_data(&mut self.conn, stream_id, buf);
+        if let Err(e) = &res {
+            if e.connection_error() {
+                self.close(now, e.code(), "");
             }
-            _ => {}
-        };
+        }
         res
     }
 
@@ -557,15 +542,7 @@ impl Http3Client {
                     }
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if let Err(e) = self.handle_stream_readable(stream_id) {
-                        if !self.base_handler.stream_is_critical(stream_id)
-                            && e.stream_reset_error()
-                        {
-                            self.reset_stream_on_error(stream_id, e.code());
-                        } else {
-                            return Err(e);
-                        }
-                    }
+                    self.handle_stream_readable(stream_id)?;
                 }
                 ConnectionEvent::RecvStreamReset {
                     stream_id,
@@ -766,13 +743,6 @@ impl Http3Client {
     #[must_use]
     pub fn transport_stats(&self) -> TransportStats {
         self.conn.stats()
-    }
-
-    fn reset_stream_on_error(&mut self, stream_id: u64, app_error: AppError) {
-        mem::drop(self.conn.stream_stop_sending(stream_id, app_error));
-        if let Some(mut rs) = self.base_handler.recv_streams.remove(&stream_id) {
-            rs.reset(app_error, ResetType::Local).unwrap();
-        }
     }
 }
 
