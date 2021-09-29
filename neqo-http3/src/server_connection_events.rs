@@ -5,10 +5,7 @@
 // except according to those terms.
 
 use crate::connection::Http3State;
-use crate::send_message::SendMessageEvents;
-use crate::{Header, HttpRecvStreamEvents, Priority, RecvStreamEvents};
-
-use neqo_transport::AppError;
+use crate::{Header, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -42,6 +39,8 @@ pub(crate) struct Http3ServerConnEvents {
     events: Rc<RefCell<VecDeque<Http3ServerConnEvent>>>,
 }
 
+impl SendStreamEvents for Http3ServerConnEvents {}
+
 impl RecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `DataReadable` event
     fn data_readable(&self, stream_id: u64) {
@@ -58,16 +57,6 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
             fin,
         });
     }
-}
-
-impl SendMessageEvents for Http3ServerConnEvents {
-    fn data_writable(&self, _stream_id: u64) {
-        // Curently not used on the server side.
-    }
-
-    fn remove_send_side_event(&self, _stream_id: u64) {}
-
-    fn stop_sending(&self, _stream_id: u64, _app_err: AppError) {}
 }
 
 impl Http3ServerConnEvents {

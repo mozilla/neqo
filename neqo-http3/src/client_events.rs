@@ -7,8 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::connection::Http3State;
-use crate::send_message::SendMessageEvents;
-use crate::{Header, HttpRecvStreamEvents, RecvStreamEvents, ResetType};
+use crate::{Header, HttpRecvStreamEvents, RecvStreamEvents, ResetType, SendStreamEvents};
 
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
@@ -122,7 +121,7 @@ impl HttpRecvStreamEvents for Http3ClientEvents {
     }
 }
 
-impl SendMessageEvents for Http3ClientEvents {
+impl SendStreamEvents for Http3ClientEvents {
     /// Add a new `DataWritable` event.
     fn data_writable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataWritable { stream_id });

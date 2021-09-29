@@ -380,6 +380,13 @@ pub trait HttpSendStream: SendStream {
     fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()>;
 }
 
+pub trait SendStreamEvents: Debug {
+    fn stop_sending(&self, _stream_id: u64, _error: AppError) {}
+    fn data_writable(&self, _stream_id: u64) {}
+    fn remove_send_side_event(&self, _stream_id: u64) {}
+    fn done(&self, _stream_id: u64) {}
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResetType {
     App,
