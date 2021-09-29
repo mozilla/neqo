@@ -7,6 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
+mod buffered_send_stream;
 mod client_events;
 mod connection;
 pub mod connection_client;
@@ -35,6 +36,7 @@ use neqo_transport::{AppError, Connection, Error as TransportError};
 use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
+pub use buffered_send_stream::BufferedStream;
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
