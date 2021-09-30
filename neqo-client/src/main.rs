@@ -298,7 +298,7 @@ fn get_output_file(
             return None;
         }
 
-        eprintln!("Saving {} to {:?}", url.clone().into_string(), out_path);
+        eprintln!("Saving {} to {:?}", url, out_path);
 
         let f = match OpenOptions::new()
             .write(true)
