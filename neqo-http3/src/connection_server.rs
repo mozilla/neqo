@@ -57,17 +57,19 @@ impl Http3ServerHandler {
         Ok(())
     }
 
-    /// Reset a request.
-    pub fn stream_reset(
+    /// An application may reset a stream(request).
+    /// Both sides, sending and receiving side, will be closed.
+    /// # Errors
+    /// An error will be return if a stream does not exist.
+    pub fn cancel_http_request(
         &mut self,
-        conn: &mut Connection,
         stream_id: u64,
-        app_error: AppError,
+        error: AppError,
+        conn: &mut Connection,
     ) -> Res<()> {
-        self.base_handler.stream_reset(conn, stream_id, app_error)?;
-        self.events.remove_events_for_stream_id(stream_id);
-        self.needs_processing = true;
-        Ok(())
+        qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
+        self.base_handler
+            .cancel_http_request(stream_id, error, conn)
     }
 
     /// Process HTTTP3 layer.

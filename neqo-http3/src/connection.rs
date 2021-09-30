@@ -14,7 +14,7 @@ use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
-    Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, ResetType, SendStream,
+    CloseType, Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, SendStream,
 };
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
@@ -150,26 +150,33 @@ impl Http3Connection {
         !self.streams_have_data_to_send.is_empty()
     }
 
+    fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
+        let to_send = mem::take(&mut self.streams_have_data_to_send);
+        for stream_id in to_send {
+            let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
+                s.send(conn)?;
+                if s.has_data_to_send() {
+                    self.streams_have_data_to_send.insert(stream_id);
+                }
+                s.done()
+            } else {
+                false
+            };
+            if done {
+                self.send_streams.remove(&stream_id);
+            }
+        }
+        Ok(())
+    }
+
     /// Call `send` for all streams that need to send data.
     pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local
             .send(conn, &mut self.recv_streams)?;
 
-        let to_send = mem::take(&mut self.streams_have_data_to_send);
-        for stream_id in to_send {
-            let mut remove = false;
-            if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
-                s.send(conn)?;
-                if s.has_data_to_send() {
-                    self.streams_have_data_to_send.insert(stream_id);
-                }
-                remove = s.done();
-            }
-            if remove {
-                self.send_streams.remove(&stream_id);
-            }
-        }
+        self.send_non_control_streams(conn)?;
+
         self.qpack_decoder.borrow_mut().send(conn)?;
         match self.qpack_encoder.borrow_mut().send(conn) {
             Ok(())
@@ -280,16 +287,6 @@ impl Http3Connection {
         }
     }
 
-    fn is_critical_stream(&self, stream_id: u64) -> bool {
-        self.qpack_encoder
-            .borrow()
-            .local_stream_id()
-            .iter()
-            .chain(self.qpack_decoder.borrow().local_stream_id().iter())
-            .chain(self.control_stream_local.stream_id().iter())
-            .any(|id| stream_id == *id)
-    }
-
     /// This is called when a RESET frame has been received.
     pub fn handle_stream_reset(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
         qinfo!(
@@ -301,7 +298,7 @@ impl Http3Connection {
 
         self.recv_streams
             .remove(&stream_id)
-            .map_or(Ok(()), |mut s| s.reset(app_error, ResetType::Remote))
+            .map_or(Ok(()), |mut s| s.reset(CloseType::ResetRemote(app_error)))
     }
 
     pub fn handle_stream_stop_sending(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
@@ -313,9 +310,9 @@ impl Http3Connection {
         );
 
         if let Some(mut s) = self.send_streams.remove(&stream_id) {
-            s.stop_sending(app_error);
+            s.stop_sending(CloseType::ResetRemote(app_error));
             Ok(())
-        } else if self.is_critical_stream(stream_id) {
+        } else if self.send_stream_is_critical(stream_id) {
             Err(Error::HttpClosedCriticalStream)
         } else {
             Ok(())
@@ -479,10 +476,10 @@ impl Http3Connection {
             Ok((_, true)) => mem::drop(self.recv_streams.remove(&stream_id)),
             Ok((_, false)) => {}
             Err(e) => {
-                if e.stream_reset_error() && !self.stream_is_critical(stream_id) {
+                if e.stream_reset_error() && !self.recv_stream_is_critical(stream_id) {
                     mem::drop(conn.stream_stop_sending(stream_id, e.code()));
                     if let Some(mut rs) = self.recv_streams.remove(&stream_id) {
-                        rs.reset(e.code(), ResetType::Local).unwrap();
+                        rs.reset(CloseType::LocalError(e.code())).unwrap();
                     }
                     return Ok((U::default(), false));
                 }
@@ -515,37 +512,99 @@ impl Http3Connection {
 
     /// This is called when an application resets a stream.
     /// The application reset will close both sides.
-    pub fn stream_reset(
+    pub fn stream_reset_send(
         &mut self,
         conn: &mut Connection,
         stream_id: u64,
         error: AppError,
     ) -> Res<()> {
-        qinfo!([self], "Reset stream {} error={}.", stream_id, error);
+        qinfo!(
+            [self],
+            "Reset sending side of stream {} error={}.",
+            stream_id,
+            error
+        );
 
-        // Make sure that an application cannot reset a control stream.
-        // self.send_streams holds only http streams therefore if the stream
-        // is present in self.send_streams we don not need to check recv_streams.
-        if self.send_streams.get(&stream_id).is_none()
-            && !matches!(
-                self.recv_streams
-                    .get(&stream_id)
-                    .ok_or(Error::InvalidStreamId)?
-                    .stream_type(),
-                Http3StreamType::Http | Http3StreamType::Push
-            )
-        {
+        if self.send_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
         }
-        self.send_streams.remove(&stream_id);
-        if let Some(mut s) = self.recv_streams.remove(&stream_id) {
-            s.reset(error, ResetType::App)?;
+
+        if let Some(mut s) = self.send_streams.remove(&stream_id) {
+            s.stop_sending(CloseType::ResetApp(error));
+        }
+        conn.stream_reset_send(stream_id, error)?;
+        Ok(())
+    }
+
+    pub fn stream_stop_sending(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: u64,
+        error: AppError,
+    ) -> Res<()> {
+        qinfo!(
+            [self],
+            "Send stop sending for stream {} error={}.",
+            stream_id,
+            error
+        );
+        if self.recv_stream_is_critical(stream_id) {
+            return Err(Error::InvalidStreamId);
         }
 
+        self.recv_streams
+            .remove(&stream_id)
+            .map_or(Ok(()), |mut s| s.reset(CloseType::ResetApp(error)))?;
+
         // Stream may be already be closed and we may get an error here, but we do not care.
-        mem::drop(conn.stream_reset_send(stream_id, error));
-        // Stream may be already be closed and we may get an error here, but we do not care.
-        mem::drop(conn.stream_stop_sending(stream_id, error));
+        conn.stream_stop_sending(stream_id, error)?;
+        Ok(())
+    }
+
+    pub fn cancel_http_request(
+        &mut self,
+        stream_id: u64,
+        error: AppError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
+        let send_stream = self.send_streams.get(&stream_id);
+        let recv_stream = self.recv_streams.get(&stream_id);
+        match (send_stream, recv_stream) {
+            (None, None) => return Err(Error::InvalidStreamId),
+            (Some(s), None) => {
+                if !matches!(s.stream_type(), Http3StreamType::Http) {
+                    return Err(Error::InvalidStreamId);
+                }
+                // Stream may be already be closed and we may get an error here, but we do not care.
+                mem::drop(self.stream_reset_send(conn, stream_id, error));
+            }
+            (None, Some(s)) => {
+                if !matches!(
+                    s.stream_type(),
+                    Http3StreamType::Http | Http3StreamType::Push
+                ) {
+                    return Err(Error::InvalidStreamId);
+                }
+
+                // Stream may be already be closed and we may get an error here, but we do not care.
+                mem::drop(self.stream_stop_sending(conn, stream_id, error));
+            }
+            (Some(s), Some(r)) => {
+                let st = s.stream_type();
+                let rt = r.stream_type();
+                if st != rt {
+                    panic!("The sender and receive stream types must be the same");
+                }
+                if !matches!(st, Http3StreamType::Http) {
+                    return Err(Error::InvalidStreamId);
+                }
+                // Stream may be already be closed and we may get an error here, but we do not care.
+                mem::drop(self.stream_reset_send(conn, stream_id, error));
+                // Stream may be already be closed and we may get an error here, but we do not care.
+                mem::drop(self.stream_stop_sending(conn, stream_id, error));
+            }
+        }
         Ok(())
     }
 
@@ -709,7 +768,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn stream_is_critical(&self, stream_id: u64) -> bool {
+    fn recv_stream_is_critical(&self, stream_id: u64) -> bool {
         if let Some(r) = self.recv_streams.get(&stream_id) {
             matches!(
                 r.stream_type(),
@@ -718,5 +777,15 @@ impl Http3Connection {
         } else {
             false
         }
+    }
+
+    fn send_stream_is_critical(&self, stream_id: u64) -> bool {
+        self.qpack_encoder
+            .borrow()
+            .local_stream_id()
+            .iter()
+            .chain(self.qpack_decoder.borrow().local_stream_id().iter())
+            .chain(self.control_stream_local.stream_id().iter())
+            .any(|id| stream_id == *id)
     }
 }

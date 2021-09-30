@@ -6,12 +6,13 @@
 
 use crate::hframe::HFrame;
 use crate::{
-    qlog, Error, Header, Http3StreamType, HttpSendStream, Res, SendStream, SendStreamEvents, Stream,
+    qlog, CloseType, Error, Header, Http3StreamType, HttpSendStream, Res, SendStream,
+    SendStreamEvents, Stream,
 };
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{AppError, Connection};
+use neqo_transport::Connection;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fmt::Debug;
@@ -290,14 +291,14 @@ impl SendStream for SendMessage {
             }
         }
 
-        self.conn_events.remove_send_side_event(self.stream_id);
+        self.conn_events
+            .send_closed(self.stream_id, CloseType::Done);
         Ok(())
     }
 
-    fn stop_sending(&mut self, app_err: AppError) {
+    fn stop_sending(&mut self, close_type: CloseType) {
         if !self.state.is_sending_closed() {
-            self.conn_events.remove_send_side_event(self.stream_id);
-            self.conn_events.stop_sending(self.stream_id, app_err);
+            self.conn_events.send_closed(self.stream_id, close_type);
         }
     }
 

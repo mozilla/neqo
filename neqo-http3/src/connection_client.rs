@@ -12,10 +12,7 @@ use crate::recv_message::{MessageType, RecvMessage};
 use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::SendMessage;
 use crate::settings::HSettings;
-use crate::{
-    Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStreamEvents, ResetType,
-    SendStreamEvents,
-};
+use crate::{Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
@@ -49,16 +46,6 @@ where
             None
         }
     }
-}
-
-// This is used for filtering send_streams and recv_Streams with a stream_ids less than a given id.
-// Only the same type (bidirectional or unidirectional) streams are filtered.
-fn id_lt<U>(base: StreamId) -> impl FnMut(&u64, &mut U) -> bool
-where
-    U: ?Sized,
-{
-    let mut f = id_gte(base);
-    move |id, v| f((id, v)).is_none()
 }
 
 fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
@@ -356,12 +343,10 @@ impl Http3Client {
     /// Both sides, sending and receiving side, will be closed.
     /// # Errors
     /// An error will be return if a stream does not exist.
-    pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
-        qinfo!([self], "reset_stream {} error={}.", stream_id, error);
+    pub fn cancel_http_request(&mut self, stream_id: u64, error: AppError) -> Res<()> {
+        qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
         self.base_handler
-            .stream_reset(&mut self.conn, stream_id, error)?;
-        self.events.remove_events_for_stream_id(stream_id);
-        Ok(())
+            .cancel_http_request(stream_id, error, &mut self.conn)
     }
 
     /// This is call when application is done sending a request.
@@ -691,36 +676,35 @@ impl Http3Client {
 
         let goaway_stream_id = StreamId::from(goaway_stream_id);
         // Issue reset events for streams >= goaway stream id
-        for id in self
+        let send_ids: Vec<u64> = self
             .base_handler
             .send_streams
             .iter()
             .filter_map(id_gte(goaway_stream_id))
-        {
-            self.events
-                .reset(id, Error::HttpRequestRejected.code(), ResetType::Remote);
+            .collect();
+        for id in send_ids {
+            // We do not care about streams that are going to be closed.
+            mem::drop(
+                self.base_handler
+                    .handle_stream_stop_sending(id, Error::HttpRequestRejected.code()),
+            );
         }
 
-        for id in self
+        let recv_ids: Vec<u64> = self
             .base_handler
             .recv_streams
             .iter()
             .filter_map(id_gte(goaway_stream_id))
-        {
-            self.events
-                .stop_sending(id, Error::HttpRequestRejected.code());
+            .collect();
+        for id in recv_ids {
+            // We do not care about streams that are going to be closed.
+            mem::drop(
+                self.base_handler
+                    .handle_stream_reset(id, Error::HttpRequestRejected.code()),
+            );
         }
 
         self.events.goaway_received();
-
-        // Actually remove (i.e. don't retain) these streams
-        self.base_handler
-            .send_streams
-            .retain(id_lt(goaway_stream_id));
-
-        self.base_handler
-            .recv_streams
-            .retain(id_lt(goaway_stream_id));
 
         Ok(())
     }
@@ -5770,7 +5754,9 @@ mod tests {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         setup_server_side_encoder(&mut client, &mut server);
         // Cancel request.
-        mem::drop(client.stream_reset(request_stream_id, Error::HttpRequestCancelled.code()));
+        mem::drop(
+            client.cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code()),
+        );
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
@@ -5853,7 +5839,7 @@ mod tests {
 
         // Cancel request.
         client
-            .stream_reset(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
@@ -5890,7 +5876,7 @@ mod tests {
 
         // Cancel request.
         client
-            .stream_reset(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
@@ -5947,7 +5933,7 @@ mod tests {
 
         // Cancel request.
         client
-            .stream_reset(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
         let out = client.process(None, now());
@@ -5961,7 +5947,7 @@ mod tests {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         // Cancel request.
         client
-            .stream_reset(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
@@ -6546,7 +6532,7 @@ mod tests {
     fn manipulate_conrol_stream(client: &mut Http3Client, stream_id: u64) {
         assert_eq!(
             client
-                .stream_reset(stream_id, Error::HttpNoError.code())
+                .cancel_http_request(stream_id, Error::HttpNoError.code())
                 .unwrap_err(),
             Error::InvalidStreamId
         );
@@ -6577,7 +6563,7 @@ mod tests {
         manipulate_conrol_stream(&mut client, server.encoder_stream_id.unwrap());
         manipulate_conrol_stream(&mut client, server.decoder_stream_id.unwrap());
         client
-            .stream_reset(request_stream_id, Error::HttpNoError.code())
+            .cancel_http_request(request_stream_id, Error::HttpNoError.code())
             .unwrap();
     }
 
