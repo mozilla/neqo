@@ -23,7 +23,7 @@ pub(crate) struct ControlStreamLocal {
 
 impl ::std::fmt::Display for ControlStreamLocal {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Local control stream {:?}", self.stream.stream_id())
+        write!(f, "Local control stream {:?}", self.stream)
     }
 }
 
@@ -103,6 +103,6 @@ impl ControlStreamLocal {
 
     #[must_use]
     pub fn stream_id(&self) -> Option<u64> {
-        self.stream.stream_id()
+        (&self.stream).into()
     }
 }
