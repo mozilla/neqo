@@ -212,7 +212,7 @@ impl Http3Connection {
         if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
             let res = recv_stream.receive(conn);
             self.handle_stream_manipulation_output(res, stream_id, conn)
-                .map_or_else(Err, |(output, _)| Ok(output))
+                .map(|(output, _)| output)
         } else {
             Ok(ReceiveOutput::NoOutput)
         }
@@ -230,7 +230,10 @@ impl Http3Connection {
                     .http_stream()
                     .ok_or(Error::HttpInternal(10))?
                     .header_unblocked(conn);
-                self.handle_stream_manipulation_output(res, stream_id, conn)?;
+                debug_assert!(matches!(
+                    self.handle_stream_manipulation_output(res, stream_id, conn)?,
+                    (ReceiveOutput::NoOutput, _)
+                ));
             }
         }
         Ok(())

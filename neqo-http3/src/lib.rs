@@ -288,6 +288,7 @@ pub enum Http3StreamType {
     Unknown,
 }
 
+#[must_use]
 #[derive(PartialEq, Debug)]
 pub enum ReceiveOutput {
     NoOutput,
@@ -304,12 +305,18 @@ impl Default for ReceiveOutput {
 }
 
 pub trait RecvStream: Debug {
+    /// The stream reads data from the corresponding quic stream and returns `ReceiveOutput`.
+    /// The function also returns true as the second parameter if the stream is done and
+    /// could be forgotten, i.e. removed from all records.
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, etc.
     fn reset(&mut self, error: AppError, reset_type: ResetType) -> Res<()>;
+    /// The function allows an app to read directly from the quic stream. The function
+    /// returns the number of bytes written into `buf` and true/false if the stream is
+    /// completely done and can be forgotten, i.e. removed from all records.
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
@@ -323,6 +330,9 @@ pub trait RecvStream: Debug {
 }
 
 pub trait HttpRecvStream: RecvStream {
+    /// This function is similar to the receive function and has the same output, i.e.
+    /// a `ReceiveOutput` enum and bool. The bool is true if the stream is completely done
+    /// and can be forgotten, i.e. removed from all records.
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;

@@ -29,7 +29,7 @@ const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
 const PSEUDO_HEADER_PATH: u8 = 0x10;
 const REGULAR_HEADER: u8 = 0x80;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
     Request,
     Response,
@@ -353,7 +353,7 @@ impl RecvMessage {
         }
     }
 
-    fn track_pseudo(name: &str, state: &mut u8, message_type: &MessageType) -> Res<bool> {
+    fn track_pseudo(name: &str, state: &mut u8, message_type: MessageType) -> Res<bool> {
         let (pseudo, bit) = if name.starts_with(':') {
             if *state & REGULAR_HEADER != 0 {
                 return Err(Error::InvalidHeader);
@@ -389,7 +389,7 @@ impl RecvMessage {
         let mut pseudo_state = 0;
         for header in headers {
             let is_pseudo =
-                Self::track_pseudo(header.name(), &mut pseudo_state, &self.message_type)?;
+                Self::track_pseudo(header.name(), &mut pseudo_state, self.message_type)?;
 
             let mut bytes = header.name().bytes();
             if is_pseudo {
@@ -421,16 +421,15 @@ impl RecvMessage {
 
         Ok(())
     }
-
-    fn done(&self) -> bool {
-        matches!(self.state, RecvMessageState::Closed)
-    }
 }
 
 impl RecvStream for RecvMessage {
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
         self.receive_internal(conn, true)?;
-        Ok((ReceiveOutput::NoOutput, self.done()))
+        Ok((
+            ReceiveOutput::NoOutput,
+            matches!(self.state, RecvMessageState::Closed),
+        ))
     }
 
     fn reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {

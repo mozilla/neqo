@@ -653,6 +653,7 @@ impl Http3Client {
                 Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
                 None,
+                // TODO: think about the right prority for the push streams.
                 PriorityHandler::new(true, Priority::default()),
             )),
         );
