@@ -5,7 +5,9 @@
 // except according to those terms.
 
 use crate::connection::Http3State;
-use crate::{Header, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents};
+use crate::{
+    CloseType, Header, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
+};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -45,6 +47,12 @@ impl RecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `DataReadable` event
     fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ServerConnEvent::DataReadable { stream_id });
+    }
+
+    fn recv_closed(&self, stream_id: u64, close_type: CloseType) {
+        if close_type != CloseType::Done {
+            self.remove_events_for_stream_id(stream_id);
+        }
     }
 }
 
@@ -90,7 +98,7 @@ impl Http3ServerConnEvents {
         });
     }
 
-    pub fn remove_events_for_stream_id(&self, stream_id: u64) {
+    fn remove_events_for_stream_id(&self, stream_id: u64) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ServerConnEvent::Headers { stream_id: x, .. } | Http3ServerConnEvent::DataReadable { stream_id: x, .. } if *x == stream_id)

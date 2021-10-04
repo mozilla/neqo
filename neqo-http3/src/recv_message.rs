@@ -7,14 +7,14 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::{
-    qlog, Error, Header, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents, ReceiveOutput,
-    RecvStream, Res, ResetType, Stream,
+    qlog, CloseType, Error, Header, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
+    ReceiveOutput, RecvStream, Res, Stream,
 };
 
 use crate::priority::PriorityHandler;
 use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
-use neqo_transport::{AppError, Connection};
+use neqo_transport::Connection;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::VecDeque;
@@ -327,7 +327,8 @@ impl RecvMessage {
                 .cancel_stream(self.stream_id);
         }
         self.state = RecvMessageState::Closed;
-        self.conn_events.done();
+        self.conn_events
+            .recv_closed(self.stream_id, CloseType::Done);
     }
 
     fn closing(&self) -> bool {
@@ -442,14 +443,13 @@ impl RecvStream for RecvMessage {
         ))
     }
 
-    fn reset(&mut self, app_error: AppError, reset_type: ResetType) -> Res<()> {
+    fn reset(&mut self, close_type: CloseType) -> Res<()> {
         if !self.closing() || !self.blocked_push_promise.is_empty() {
             self.qpack_decoder
                 .borrow_mut()
                 .cancel_stream(self.stream_id);
         }
-        self.conn_events
-            .reset(self.stream_id, app_error, reset_type);
+        self.conn_events.recv_closed(self.stream_id, close_type);
         self.state = RecvMessageState::Closed;
         Ok(())
     }

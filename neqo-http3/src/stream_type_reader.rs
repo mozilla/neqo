@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL;
-use crate::{AppError, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, ResetType, Stream};
+use crate::{CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream};
 use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
 use neqo_qpack::encoder::QPACK_UNI_STREAM_TYPE_ENCODER;
@@ -187,7 +187,7 @@ impl Stream for NewStreamHeadReader {
 }
 
 impl RecvStream for NewStreamHeadReader {
-    fn reset(&mut self, _error: AppError, _reset_type: ResetType) -> Res<()> {
+    fn reset(&mut self, _close_type: CloseType) -> Res<()> {
         *self = NewStreamHeadReader::Done;
         Ok(())
     }
@@ -209,7 +209,7 @@ mod tests {
     use test_fixture::{connect, now};
 
     use crate::control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL;
-    use crate::{Error, NewStreamType, ReceiveOutput, RecvStream, Res, ResetType};
+    use crate::{CloseType, Error, NewStreamType, ReceiveOutput, RecvStream, Res};
     use neqo_common::{Encoder, Role};
     use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
     use neqo_qpack::encoder::QPACK_UNI_STREAM_TYPE_ENCODER;
@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn reset() {
         let mut t = Test::new(Role::Client);
-        t.decoder.reset(0x100, ResetType::Remote).unwrap();
+        t.decoder.reset(CloseType::ResetRemote(0x100)).unwrap();
         // after a reset NewStreamHeadReader will not read more data.
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_DECODER],

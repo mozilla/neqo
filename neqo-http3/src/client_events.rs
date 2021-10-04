@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::connection::Http3State;
-use crate::{Header, HttpRecvStreamEvents, RecvStreamEvents, ResetType, SendStreamEvents};
+use crate::{CloseType, Header, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
 
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
@@ -88,19 +88,23 @@ impl RecvStreamEvents for Http3ClientEvents {
     }
 
     /// Add a new `Reset` event.
-    fn reset(&self, stream_id: u64, error: AppError, reset_type: ResetType) {
-        let local = match reset_type {
-            ResetType::App => return,
-            ResetType::Remote => false,
-            ResetType::Local => true,
+    fn recv_closed(&self, stream_id: u64, close_type: CloseType) {
+        let (local, error) = match close_type {
+            CloseType::ResetApp(_) => {
+                self.remove_recv_stream_events(stream_id);
+                return;
+            }
+            CloseType::Done => return,
+            CloseType::ResetRemote(e) => {
+                self.remove_recv_stream_events(stream_id);
+                (false, e)
+            }
+            CloseType::LocalError(e) => {
+                self.remove_recv_stream_events(stream_id);
+                (true, e)
+            }
         };
-        self.remove(|evt| {
-            matches!(evt,
-                Http3ClientEvent::HeaderReady { stream_id: x, .. }
-                | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::PushPromise { request_stream_id: x, .. }
-                | Http3ClientEvent::Reset { stream_id: x, .. } if *x == stream_id)
-        });
+
         self.insert(Http3ClientEvent::Reset {
             stream_id,
             error,
@@ -127,19 +131,11 @@ impl SendStreamEvents for Http3ClientEvents {
         self.insert(Http3ClientEvent::DataWritable { stream_id });
     }
 
-    fn remove_send_side_event(&self, stream_id: u64) {
-        self.remove(|evt| {
-            matches!(evt,
-                Http3ClientEvent::DataWritable { stream_id: x }
-                | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
-        });
-    }
-
-    /// Add a new `StopSending` event
-    fn stop_sending(&self, stream_id: u64, error: AppError) {
-        // The stream has received a STOP_SENDING frame, we should remove any DataWritable event.
-        self.remove_send_side_event(stream_id);
-        self.insert(Http3ClientEvent::StopSending { stream_id, error });
+    fn send_closed(&self, stream_id: u64, close_type: CloseType) {
+        self.remove_send_stream_events(stream_id);
+        if let CloseType::ResetRemote(error) = close_type {
+            self.insert(Http3ClientEvent::StopSending { stream_id, error });
+        }
     }
 }
 
@@ -222,14 +218,20 @@ impl Http3ClientEvents {
     }
 
     /// Remove all events for a stream
-    pub(crate) fn remove_events_for_stream_id(&self, stream_id: u64) {
+    fn remove_recv_stream_events(&self, stream_id: u64) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
-                | Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::DataReadable { stream_id: x }
                 | Http3ClientEvent::PushPromise { request_stream_id: x, .. }
-                | Http3ClientEvent::Reset { stream_id: x, .. }
+                | Http3ClientEvent::Reset { stream_id: x, .. } if *x == stream_id)
+        });
+    }
+
+    fn remove_send_stream_events(&self, stream_id: u64) {
+        self.remove(|evt| {
+            matches!(evt,
+                Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
         });
     }

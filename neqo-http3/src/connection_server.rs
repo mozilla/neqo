@@ -52,22 +52,22 @@ impl Http3ServerHandler {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
             .set_message(headers, Some(data))?;
-        self.base_handler
-            .insert_streams_have_data_to_send(stream_id);
+        self.base_handler.stream_has_pending_data(stream_id);
         Ok(())
     }
 
-    /// Reset a request.
-    pub fn stream_reset(
+    /// An application may reset a stream(request).
+    /// Both sides, sending and receiving side, will be closed.
+    /// # Errors
+    /// An error will be return if a stream does not exist.
+    pub fn cancel_fetch(
         &mut self,
-        conn: &mut Connection,
         stream_id: u64,
-        app_error: AppError,
+        error: AppError,
+        conn: &mut Connection,
     ) -> Res<()> {
-        self.base_handler.stream_reset(conn, stream_id, app_error)?;
-        self.events.remove_events_for_stream_id(stream_id);
-        self.needs_processing = true;
-        Ok(())
+        qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
+        self.base_handler.cancel_fetch(stream_id, error, conn)
     }
 
     /// Process HTTTP3 layer.

@@ -319,7 +319,7 @@ pub trait RecvStream: Stream {
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, etc.
-    fn reset(&mut self, error: AppError, reset_type: ResetType) -> Res<()>;
+    fn reset(&mut self, close_type: CloseType) -> Res<()>;
     /// The function allows an app to read directly from the quic stream. The function
     /// returns the number of bytes written into `buf` and true/false if the stream is
     /// completely done and can be forgotten, i.e. removed from all records.
@@ -347,8 +347,7 @@ pub trait HttpRecvStream: RecvStream {
 
 pub trait RecvStreamEvents: Debug {
     fn data_readable(&self, stream_id: u64);
-    fn reset(&self, _stream_id: u64, _error: AppError, _reset_type: ResetType) {}
-    fn done(&self) {}
+    fn recv_closed(&self, _stream_id: u64, _close_type: CloseType) {}
 }
 
 pub(crate) trait HttpRecvStreamEvents: RecvStreamEvents {
@@ -368,7 +367,7 @@ pub trait SendStream: Stream {
     /// # Errors
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
-    fn stop_sending(&mut self, error: AppError);
+    fn stop_sending(&mut self, close_type: CloseType);
     fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
         None
     }
@@ -381,15 +380,20 @@ pub trait HttpSendStream: SendStream {
 }
 
 pub trait SendStreamEvents: Debug {
-    fn stop_sending(&self, _stream_id: u64, _error: AppError) {}
+    fn send_closed(&self, _stream_id: u64, _close_type: CloseType) {}
     fn data_writable(&self, _stream_id: u64) {}
-    fn remove_send_side_event(&self, _stream_id: u64) {}
-    fn done(&self, _stream_id: u64) {}
 }
 
+/// This enum is used to mark a different type of closing a stream:
+///   `ResetApp` - the application has closed the stream.
+///   `ResetRemote` - the stream was closed by the peer.
+///   `LocalError` - There was a stream error on the stream. The stream errors are errors
+///                  that do not close the complete connection, e.g. unallowed headers.
+///   `Done` - the stream was closed without an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResetType {
-    App,
-    Remote,
-    Local,
+pub enum CloseType {
+    ResetApp(AppError),
+    ResetRemote(AppError),
+    LocalError(AppError),
+    Done,
 }

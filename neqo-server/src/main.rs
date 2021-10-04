@@ -294,7 +294,7 @@ impl HttpServer for Http3Server {
 
                     if response.is_none() {
                         request
-                            .stream_reset(Error::HttpRequestIncomplete.code())
+                            .cancel_fetch(Error::HttpRequestIncomplete.code())
                             .unwrap();
                         continue;
                     }

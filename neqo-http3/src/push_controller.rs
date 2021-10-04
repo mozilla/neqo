@@ -6,10 +6,10 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::Http3Connection;
 use crate::hframe::HFrame;
+use crate::{CloseType, HttpRecvStreamEvents, RecvStreamEvents};
 use crate::{Error, Header, Res};
-use crate::{HttpRecvStreamEvents, RecvStreamEvents, ResetType};
 use neqo_common::{qerror, qinfo, qtrace};
-use neqo_transport::{AppError, Connection};
+use neqo_transport::Connection;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -305,7 +305,7 @@ impl PushController {
                 }
                 PushState::OnlyPushStream { stream_id, .. }
                 | PushState::Active { stream_id, .. } => {
-                    mem::drop(base_handler.stream_reset(
+                    mem::drop(base_handler.stream_stop_sending(
                         conn,
                         stream_id,
                         Error::HttpRequestCancelled.code(),
@@ -359,7 +359,7 @@ impl PushController {
             Some(PushState::Active { stream_id, .. }) => {
                 self.conn_events.remove_events_for_push_id(push_id);
                 // Cancel the stream. the transport steam may already be done, so ignore an error.
-                mem::drop(base_handler.stream_reset(
+                mem::drop(base_handler.stream_stop_sending(
                     conn,
                     *stream_id,
                     Error::HttpRequestCancelled.code(),
@@ -371,7 +371,7 @@ impl PushController {
         }
     }
 
-    pub fn push_stream_reset(&mut self, push_id: u64, app_error: AppError, reset_type: ResetType) {
+    pub fn push_stream_reset(&mut self, push_id: u64, close_type: CloseType) {
         qtrace!("Push stream has been reset, push_id={}", push_id);
 
         if let Some(push_state) = self.push_streams.get(push_id) {
@@ -382,7 +382,7 @@ impl PushController {
                 PushState::Active { .. } => {
                     self.push_streams.close(push_id);
                     self.conn_events.remove_events_for_push_id(push_id);
-                    if reset_type == ResetType::Local {
+                    if let CloseType::LocalError(app_error) = close_type {
                         self.conn_events.push_reset(push_id, app_error);
                     } else {
                         self.conn_events.push_canceled(push_id);
@@ -477,16 +477,15 @@ impl RecvStreamEvents for RecvPushEvents {
         );
     }
 
-    fn reset(&self, _stream_id: u64, app_error: AppError, reset_type: ResetType) {
-        if reset_type != ResetType::App {
-            self.push_handler
+    fn recv_closed(&self, _stream_id: u64, close_type: CloseType) {
+        match close_type {
+            CloseType::ResetApp(_) => {}
+            CloseType::ResetRemote(_) | CloseType::LocalError(_) => self
+                .push_handler
                 .borrow_mut()
-                .push_stream_reset(self.push_id, app_error, reset_type);
+                .push_stream_reset(self.push_id, close_type),
+            CloseType::Done => self.push_handler.borrow_mut().close(self.push_id),
         }
-    }
-
-    fn done(&self) {
-        self.push_handler.borrow_mut().close(self.push_id);
     }
 }
 
