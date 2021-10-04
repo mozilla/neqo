@@ -471,6 +471,21 @@ impl Http3Connection {
         self.recv_streams.clear();
     }
 
+    /// This function will not handle the output of the function completely, but only
+    /// handle the indication that a stream is closed. There are 2 cases:
+    ///  - an error occurred or
+    ///  - the stream is done, i.e. the second value in `output` tuple is true if
+    ///    the stream is done and can be removed from the `recv_streams`
+    /// How it is handling `output`:
+    ///  - if the stream is done, it removes the stream from `recv_streams`
+    ///  - if the stream is not done and there is no error, return `output` and the caller will
+    ///    handle it.
+    ///  - in case of and error:
+    ///    - if it is only a stream error and the stream is not critical, send STOP_SENDING
+    ///      frame, remove the stream from `recv_streams` and inform the listener that the stream
+    ///      has been reset.
+    ///    - otherwise this is a connection error. In this case, propagate the error to the caller
+    ///      that will handle it properly.
     fn handle_stream_manipulation_output<U>(
         &mut self,
         output: Res<(U, bool)>,
