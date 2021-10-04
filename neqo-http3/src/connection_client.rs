@@ -343,10 +343,10 @@ impl Http3Client {
     /// Both sides, sending and receiving side, will be closed.
     /// # Errors
     /// An error will be return if a stream does not exist.
-    pub fn cancel_http_request(&mut self, stream_id: u64, error: AppError) -> Res<()> {
-        qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
+    pub fn cancel_fetch(&mut self, stream_id: u64, error: AppError) -> Res<()> {
+        qinfo!([self], "reset_stream {} error={}.", stream_id, error);
         self.base_handler
-            .cancel_http_request(stream_id, error, &mut self.conn)
+            .cancel_fetch(stream_id, error, &mut self.conn)
     }
 
     /// This is call when application is done sending a request.
@@ -5754,9 +5754,7 @@ mod tests {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         setup_server_side_encoder(&mut client, &mut server);
         // Cancel request.
-        mem::drop(
-            client.cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code()),
-        );
+        mem::drop(client.cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code()));
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
         mem::drop(server.conn.process(out.dgram(), now()));
@@ -5839,7 +5837,7 @@ mod tests {
 
         // Cancel request.
         client
-            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
@@ -5876,7 +5874,7 @@ mod tests {
 
         // Cancel request.
         client
-            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
@@ -5933,7 +5931,7 @@ mod tests {
 
         // Cancel request.
         client
-            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
         let out = client.process(None, now());
@@ -5947,7 +5945,7 @@ mod tests {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         // Cancel request.
         client
-            .cancel_http_request(request_stream_id, Error::HttpRequestCancelled.code())
+            .cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
         let out = client.process(None, now());
@@ -6532,7 +6530,7 @@ mod tests {
     fn manipulate_conrol_stream(client: &mut Http3Client, stream_id: u64) {
         assert_eq!(
             client
-                .cancel_http_request(stream_id, Error::HttpNoError.code())
+                .cancel_fetch(stream_id, Error::HttpNoError.code())
                 .unwrap_err(),
             Error::InvalidStreamId
         );
@@ -6563,7 +6561,7 @@ mod tests {
         manipulate_conrol_stream(&mut client, server.encoder_stream_id.unwrap());
         manipulate_conrol_stream(&mut client, server.decoder_stream_id.unwrap());
         client
-            .cancel_http_request(request_stream_id, Error::HttpNoError.code())
+            .cancel_fetch(request_stream_id, Error::HttpNoError.code())
             .unwrap();
     }
 

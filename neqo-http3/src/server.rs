@@ -973,7 +973,7 @@ mod tests {
                     assert!(!fin);
                     headers_frames += 1;
                     request
-                        .cancel_http_request(Error::HttpRequestRejected.code())
+                        .cancel_fetch(Error::HttpRequestRejected.code())
                         .unwrap();
                 }
                 Http3ServerEvent::Data { .. } => {

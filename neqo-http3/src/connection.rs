@@ -66,7 +66,7 @@ pub(crate) struct Http3Connection {
     pub qpack_encoder: Rc<RefCell<QPackEncoder>>,
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
-    streams_have_data_to_send: BTreeSet<u64>,
+    streams_with_pending_data: BTreeSet<u64>,
     pub send_streams: HashMap<u64, Box<dyn SendStream>>,
     pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
 }
@@ -92,7 +92,7 @@ impl Http3Connection {
             qpack_encoder: Rc::new(RefCell::new(QPackEncoder::new(local_qpack_settings, true))),
             qpack_decoder: Rc::new(RefCell::new(QPackDecoder::new(local_qpack_settings))),
             settings_state: Http3RemoteSettingsState::NotReceived,
-            streams_have_data_to_send: BTreeSet::new(),
+            streams_with_pending_data: BTreeSet::new(),
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
         }
@@ -141,22 +141,22 @@ impl Http3Connection {
     }
 
     /// Inform a `HttpConnection` that a stream has data to send and that `send` should be called for the stream.
-    pub fn insert_streams_have_data_to_send(&mut self, stream_id: u64) {
-        self.streams_have_data_to_send.insert(stream_id);
+    pub fn stream_has_pending_data(&mut self, stream_id: u64) {
+        self.streams_with_pending_data.insert(stream_id);
     }
 
     /// Return true if there is a stream that needs to send data.
     pub fn has_data_to_send(&self) -> bool {
-        !self.streams_have_data_to_send.is_empty()
+        !self.streams_with_pending_data.is_empty()
     }
 
     fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
-        let to_send = mem::take(&mut self.streams_have_data_to_send);
+        let to_send = mem::take(&mut self.streams_with_pending_data);
         for stream_id in to_send {
             let done = if let Some(s) = &mut self.send_streams.get_mut(&stream_id) {
                 s.send(conn)?;
                 if s.has_data_to_send() {
-                    self.streams_have_data_to_send.insert(stream_id);
+                    self.streams_with_pending_data.insert(stream_id);
                 }
                 s.done()
             } else {
@@ -367,7 +367,7 @@ impl Http3Connection {
             self.qpack_decoder =
                 Rc::new(RefCell::new(QPackDecoder::new(self.local_qpack_settings)));
             self.settings_state = Http3RemoteSettingsState::NotReceived;
-            self.streams_have_data_to_send.clear();
+            self.streams_with_pending_data.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.
             self.send_streams.clear();
             self.recv_streams.clear();
@@ -561,7 +561,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn cancel_http_request(
+    pub fn cancel_fetch(
         &mut self,
         stream_id: u64,
         error: AppError,
@@ -591,12 +591,8 @@ impl Http3Connection {
                 mem::drop(self.stream_stop_sending(conn, stream_id, error));
             }
             (Some(s), Some(r)) => {
-                let st = s.stream_type();
-                let rt = r.stream_type();
-                if st != rt {
-                    panic!("The sender and receive stream types must be the same");
-                }
-                if !matches!(st, Http3StreamType::Http) {
+                debug_assert_eq!(s.stream_type(), r.stream_type());
+                if !matches!(s.stream_type(), Http3StreamType::Http) {
                     return Err(Error::InvalidStreamId);
                 }
                 // Stream may be already be closed and we may get an error here, but we do not care.
@@ -734,7 +730,7 @@ impl Http3Connection {
         recv_stream: Box<dyn RecvStream>,
     ) {
         if send_stream.has_data_to_send() {
-            self.streams_have_data_to_send.insert(stream_id);
+            self.streams_with_pending_data.insert(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
         self.recv_streams.insert(stream_id, recv_stream);

@@ -52,8 +52,7 @@ impl Http3ServerHandler {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
             .set_message(headers, Some(data))?;
-        self.base_handler
-            .insert_streams_have_data_to_send(stream_id);
+        self.base_handler.stream_has_pending_data(stream_id);
         Ok(())
     }
 
@@ -61,15 +60,14 @@ impl Http3ServerHandler {
     /// Both sides, sending and receiving side, will be closed.
     /// # Errors
     /// An error will be return if a stream does not exist.
-    pub fn cancel_http_request(
+    pub fn cancel_fetch(
         &mut self,
         stream_id: u64,
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
         qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
-        self.base_handler
-            .cancel_http_request(stream_id, error, conn)
+        self.base_handler.cancel_fetch(stream_id, error, conn)
     }
 
     /// Process HTTTP3 layer.

@@ -384,6 +384,12 @@ pub trait SendStreamEvents: Debug {
     fn data_writable(&self, _stream_id: u64) {}
 }
 
+/// This enum is used to mark a different type of closing a stream:
+///   `ResetApp` - the application has closed the stream.
+///   `ResetRemote` - the stream was closed by the peer.
+///   `LocalError` - There was a stream error on the stream. The stream errors are errors
+///                  that do not close the complete connection, e.g. unallowed headers.
+///   `Done` - the stream was closed without an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseType {
     ResetApp(AppError),

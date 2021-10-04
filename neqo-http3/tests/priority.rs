@@ -184,7 +184,7 @@ fn priority_update_dont_send_for_cancelled_stream() {
 
     let update_priority = Priority::new(6, false);
     client.priority_update(stream_id, update_priority).unwrap();
-    client.cancel_http_request(stream_id, 11).unwrap();
+    client.cancel_fetch(stream_id, 11).unwrap();
     exchange_packets(&mut client, &mut server);
 
     while let Some(event) = server.next_event() {

@@ -77,9 +77,9 @@ impl ClientRequestStream {
     /// Reset a stream/request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore
-    pub fn cancel_http_request(&mut self, app_error: AppError) -> Res<()> {
+    pub fn cancel_fetch(&mut self, app_error: AppError) -> Res<()> {
         qdebug!([self], "reset error:{}.", app_error);
-        self.handler.borrow_mut().cancel_http_request(
+        self.handler.borrow_mut().cancel_fetch(
             self.stream_id,
             app_error,
             &mut self.conn.borrow_mut(),

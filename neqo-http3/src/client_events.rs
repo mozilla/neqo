@@ -89,14 +89,20 @@ impl RecvStreamEvents for Http3ClientEvents {
 
     /// Add a new `Reset` event.
     fn recv_closed(&self, stream_id: u64, close_type: CloseType) {
-        if close_type == CloseType::Done {
-            return;
-        }
-        self.remove_recv_side_events_for_stream_id(stream_id);
         let (local, error) = match close_type {
-            CloseType::ResetApp(_) | CloseType::Done => return,
-            CloseType::ResetRemote(e) => (false, e),
-            CloseType::LocalError(e) => (true, e),
+            CloseType::ResetApp(_) => {
+                self.remove_recv_stream_events(stream_id);
+                return;
+            }
+            CloseType::Done => return,
+            CloseType::ResetRemote(e) => {
+                self.remove_recv_stream_events(stream_id);
+                (false, e)
+            }
+            CloseType::LocalError(e) => {
+                self.remove_recv_stream_events(stream_id);
+                (true, e)
+            }
         };
 
         self.insert(Http3ClientEvent::Reset {
@@ -126,7 +132,7 @@ impl SendStreamEvents for Http3ClientEvents {
     }
 
     fn send_closed(&self, stream_id: u64, close_type: CloseType) {
-        self.remove_send_side_events_for_stream_id(stream_id);
+        self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
             self.insert(Http3ClientEvent::StopSending { stream_id, error });
         }
@@ -212,7 +218,7 @@ impl Http3ClientEvents {
     }
 
     /// Remove all events for a stream
-    fn remove_recv_side_events_for_stream_id(&self, stream_id: u64) {
+    fn remove_recv_stream_events(&self, stream_id: u64) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
@@ -222,7 +228,7 @@ impl Http3ClientEvents {
         });
     }
 
-    fn remove_send_side_events_for_stream_id(&self, stream_id: u64) {
+    fn remove_send_stream_events(&self, stream_id: u64) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::DataWritable { stream_id: x }
