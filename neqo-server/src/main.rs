@@ -30,8 +30,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
 };
-use neqo_http3::{Error, Http3Server, Http3ServerEvent};
-use neqo_qpack::QpackSettings;
+use neqo_http3::{Error, Http3Parameters, Http3Server, Http3ServerEvent};
 use neqo_transport::{
     server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
     ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
@@ -472,11 +471,10 @@ impl ServersRunner {
                 &[args.alpn.clone()],
                 anti_replay,
                 cid_mgr,
-                QpackSettings {
-                    max_table_size_encoder: args.max_table_size_encoder,
-                    max_table_size_decoder: args.max_table_size_decoder,
-                    max_blocked_streams: args.max_blocked_streams,
-                },
+                Http3Parameters::default()
+                    .max_table_size_encoder(args.max_table_size_encoder)
+                    .max_table_size_decoder(args.max_table_size_decoder)
+                    .max_blocked_streams(args.max_blocked_streams),
                 None,
             )
             .expect("We cannot make a server!");

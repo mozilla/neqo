@@ -11,7 +11,6 @@ use neqo_common::{event::Provider, Datagram, Decoder};
 
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
-use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, State,
@@ -237,14 +236,11 @@ pub fn default_http3_client() -> Http3Client {
         addr(),
         addr(),
         ConnectionParameters::default(),
-        &Http3Parameters {
-            qpack_settings: QpackSettings {
-                max_table_size_encoder: 100,
-                max_table_size_decoder: 100,
-                max_blocked_streams: 100,
-            },
-            max_concurrent_push_streams: 10,
-        },
+        Http3Parameters::default()
+            .max_table_size_encoder(100)
+            .max_table_size_decoder(100)
+            .max_blocked_streams(100)
+            .max_concurrent_push_streams(10),
         now(),
     )
     .expect("create a default client")
@@ -262,11 +258,11 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_ALPN_H3,
         anti_replay(),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        QpackSettings {
-            max_table_size_encoder: 100,
-            max_table_size_decoder: 100,
-            max_blocked_streams: 100,
-        },
+        Http3Parameters::default()
+            .max_table_size_encoder(100)
+            .max_table_size_decoder(100)
+            .max_blocked_streams(100)
+            .max_concurrent_push_streams(10),
         None,
     )
     .expect("create a default server")

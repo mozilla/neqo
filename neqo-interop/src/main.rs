@@ -10,7 +10,6 @@
 use neqo_common::{event::Provider, hex, Datagram};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
-use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
     Error, Output, State, StreamType,
@@ -509,14 +508,11 @@ fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Ha
         streams: HashSet::new(),
         h3: Http3Client::new_with_conn(
             client,
-            &Http3Parameters {
-                qpack_settings: QpackSettings {
-                    max_table_size_encoder: 16384,
-                    max_table_size_decoder: 16384,
-                    max_blocked_streams: 10,
-                },
-                max_concurrent_push_streams: 10,
-            },
+            Http3Parameters::default()
+                .max_table_size_encoder(16384)
+                .max_table_size_decoder(16384)
+                .max_blocked_streams(10)
+                .max_concurrent_push_streams(10),
         ),
         host: String::from(peer.host),
         path: String::from("/"),
@@ -614,14 +610,11 @@ fn test_h3_rz(
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
-        &Http3Parameters {
-            qpack_settings: QpackSettings {
-                max_table_size_encoder: 16384,
-                max_table_size_decoder: 16384,
-                max_blocked_streams: 10,
-            },
-            max_concurrent_push_streams: 0,
-        },
+        Http3Parameters::default()
+            .max_table_size_encoder(16384)
+            .max_table_size_decoder(16384)
+            .max_blocked_streams(10)
+            .max_concurrent_push_streams(0),
         Instant::now(),
     );
     if handler.is_err() {

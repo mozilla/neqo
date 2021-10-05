@@ -14,12 +14,12 @@ use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
-    CloseType, Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, SendStream,
+    CloseType, Http3Parameters, Http3StreamType, NewStreamType, Priority, ReceiveOutput,
+    RecvStream, SendStream,
 };
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionError, State, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -28,8 +28,6 @@ use std::mem;
 use std::rc::Rc;
 
 use crate::{Error, Res};
-
-const QPACK_TABLE_SIZE_LIMIT: u64 = 1 << 30;
 
 #[derive(Debug)]
 enum Http3RemoteSettingsState {
@@ -61,7 +59,7 @@ impl Http3State {
 #[derive(Debug)]
 pub(crate) struct Http3Connection {
     pub state: Http3State,
-    local_qpack_settings: QpackSettings,
+    local_params: Http3Parameters,
     control_stream_local: ControlStreamLocal,
     pub qpack_encoder: Rc<RefCell<QPackEncoder>>,
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
@@ -79,18 +77,18 @@ impl ::std::fmt::Display for Http3Connection {
 
 impl Http3Connection {
     /// Create a new connection.
-    pub fn new(local_qpack_settings: QpackSettings) -> Self {
-        if (local_qpack_settings.max_table_size_encoder >= QPACK_TABLE_SIZE_LIMIT)
-            || (local_qpack_settings.max_table_size_decoder >= QPACK_TABLE_SIZE_LIMIT)
-        {
-            panic!("Wrong max_table_size");
-        }
+    pub fn new(conn_params: Http3Parameters) -> Self {
         Self {
             state: Http3State::Initializing,
-            local_qpack_settings,
             control_stream_local: ControlStreamLocal::new(),
-            qpack_encoder: Rc::new(RefCell::new(QPackEncoder::new(local_qpack_settings, true))),
-            qpack_decoder: Rc::new(RefCell::new(QPackDecoder::new(local_qpack_settings))),
+            qpack_encoder: Rc::new(RefCell::new(QPackEncoder::new(
+                conn_params.get_qpack_settings(),
+                true,
+            ))),
+            qpack_decoder: Rc::new(RefCell::new(QPackDecoder::new(
+                conn_params.get_qpack_settings(),
+            ))),
+            local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: BTreeSet::new(),
             send_streams: HashMap::new(),
@@ -110,23 +108,14 @@ impl Http3Connection {
     fn send_settings(&mut self) {
         qdebug!([self], "Send settings.");
         self.control_stream_local.queue_frame(&HFrame::Settings {
-            settings: HSettings::new(&[
-                HSetting {
-                    setting_type: HSettingType::MaxTableCapacity,
-                    value: self.qpack_decoder.borrow().get_max_table_size(),
-                },
-                HSetting {
-                    setting_type: HSettingType::BlockedStreams,
-                    value: self.qpack_decoder.borrow().get_blocked_streams().into(),
-                },
-            ]),
+            settings: HSettings::from(&self.local_params),
         });
         self.control_stream_local.queue_frame(&HFrame::Grease);
     }
 
     /// Save settings for adding to the session ticket.
     pub(crate) fn save_settings(&self) -> Vec<u8> {
-        HttpZeroRttChecker::save(self.local_qpack_settings)
+        HttpZeroRttChecker::save(self.local_params.get_qpack_settings())
     }
 
     fn create_qpack_streams(&mut self, conn: &mut Connection) -> Res<()> {
@@ -362,11 +351,12 @@ impl Http3Connection {
             self.state = Http3State::Initializing;
             self.control_stream_local = ControlStreamLocal::new();
             self.qpack_encoder = Rc::new(RefCell::new(QPackEncoder::new(
-                self.local_qpack_settings,
+                self.local_params.get_qpack_settings(),
                 true,
             )));
-            self.qpack_decoder =
-                Rc::new(RefCell::new(QPackDecoder::new(self.local_qpack_settings)));
+            self.qpack_decoder = Rc::new(RefCell::new(QPackDecoder::new(
+                self.local_params.get_qpack_settings(),
+            )));
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_with_pending_data.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.

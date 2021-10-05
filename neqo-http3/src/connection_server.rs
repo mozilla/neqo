@@ -9,10 +9,9 @@ use crate::hframe::HFrame;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{Error, Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, Res};
+use crate::{Error, Header, Http3Parameters, Priority, PriorityHandler, ReceiveOutput, Res};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
-use neqo_qpack::QpackSettings;
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -30,9 +29,9 @@ impl ::std::fmt::Display for Http3ServerHandler {
 }
 
 impl Http3ServerHandler {
-    pub(crate) fn new(qpack_settings: QpackSettings) -> Self {
+    pub(crate) fn new(http3_parameters: Http3Parameters) -> Self {
         Self {
-            base_handler: Http3Connection::new(qpack_settings),
+            base_handler: Http3Connection::new(http3_parameters),
             events: Http3ServerConnEvents::default(),
             needs_processing: false,
         }

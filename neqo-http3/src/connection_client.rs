@@ -12,13 +12,13 @@ use crate::recv_message::{MessageType, RecvMessage};
 use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::SendMessage;
 use crate::settings::HSettings;
-use crate::{Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput};
+use crate::{Header, Http3Parameters, NewStreamType, Priority, PriorityHandler, ReceiveOutput};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
-use neqo_qpack::{QpackSettings, Stats as QpackStats};
+use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
     ConnectionParameters, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType,
@@ -58,11 +58,6 @@ fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
     }
 }
 
-pub struct Http3Parameters {
-    pub qpack_settings: QpackSettings,
-    pub max_concurrent_push_streams: u64,
-}
-
 pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
@@ -86,7 +81,7 @@ impl Http3Client {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         conn_params: ConnectionParameters,
-        http3_parameters: &Http3Parameters,
+        http3_parameters: Http3Parameters,
         now: Instant,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
@@ -104,16 +99,16 @@ impl Http3Client {
     }
 
     #[must_use]
-    pub fn new_with_conn(c: Connection, http3_parameters: &Http3Parameters) -> Self {
+    pub fn new_with_conn(c: Connection, http3_parameters: Http3Parameters) -> Self {
         let events = Http3ClientEvents::default();
         Self {
             conn: c,
-            base_handler: Http3Connection::new(http3_parameters.qpack_settings),
             events: events.clone(),
             push_handler: Rc::new(RefCell::new(PushController::new(
-                http3_parameters.max_concurrent_push_streams,
+                http3_parameters.get_max_concurrent_push_streams(),
                 events,
             ))),
+            base_handler: Http3Connection::new(http3_parameters),
         }
     }
 
@@ -754,7 +749,7 @@ impl EventProvider for Http3Client {
 mod tests {
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
-        Http3Parameters, Http3State, QpackSettings, Rc, RefCell, StreamType,
+        Http3Parameters, Http3State, Rc, RefCell, StreamType,
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::qpack_encoder_receiver::EncoderRecvStream;
@@ -762,7 +757,7 @@ mod tests {
     use crate::{Http3Server, Priority, RecvStream};
     use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
-    use neqo_qpack::encoder::QPackEncoder;
+    use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
         ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, RECV_BUFFER_SIZE,
@@ -798,14 +793,11 @@ mod tests {
             addr(),
             addr(),
             ConnectionParameters::default(),
-            &Http3Parameters {
-                qpack_settings: QpackSettings {
-                    max_table_size_encoder: max_table_size,
-                    max_table_size_decoder: max_table_size,
-                    max_blocked_streams: 100,
-                },
-                max_concurrent_push_streams: 5,
-            },
+            Http3Parameters::default()
+                .max_table_size_encoder(max_table_size)
+                .max_table_size_decoder(max_table_size)
+                .max_blocked_streams(100)
+                .max_concurrent_push_streams(5),
             now(),
         )
         .expect("create a default client")
@@ -869,7 +861,7 @@ mod tests {
             )
             .unwrap();
             let qpack = Rc::new(RefCell::new(QPackEncoder::new(
-                QpackSettings {
+                &QpackSettings {
                     max_table_size_encoder: max_table_size,
                     max_table_size_decoder: max_table_size,
                     max_blocked_streams,
@@ -891,7 +883,7 @@ mod tests {
 
         pub fn new_with_conn(conn: Connection) -> Self {
             let qpack = Rc::new(RefCell::new(QPackEncoder::new(
-                QpackSettings {
+                &QpackSettings {
                     max_table_size_encoder: 128,
                     max_table_size_decoder: 128,
                     max_blocked_streams: 0,
@@ -6484,11 +6476,10 @@ mod tests {
             DEFAULT_ALPN_H3,
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            QpackSettings {
-                max_table_size_encoder: MAX_TABLE_SIZE,
-                max_table_size_decoder: MAX_TABLE_SIZE,
-                max_blocked_streams: MAX_BLOCKED_STREAMS,
-            },
+            Http3Parameters::default()
+                .max_table_size_encoder(MAX_TABLE_SIZE)
+                .max_table_size_decoder(MAX_TABLE_SIZE)
+                .max_blocked_streams(MAX_BLOCKED_STREAMS),
             None,
         )
         .unwrap();

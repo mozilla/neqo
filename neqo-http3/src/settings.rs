@@ -6,7 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{Error, Res};
+use crate::{Error, Http3Parameters, Res};
 use neqo_common::{Decoder, Encoder};
 use neqo_crypto::{ZeroRttCheckResult, ZeroRttChecker};
 use neqo_qpack::QpackSettings;
@@ -129,6 +129,23 @@ impl Deref for HSettings {
     }
 }
 
+impl From<&Http3Parameters> for HSettings {
+    fn from(conn_param: &Http3Parameters) -> Self {
+        Self {
+            settings: vec![
+                HSetting {
+                    setting_type: HSettingType::MaxTableCapacity,
+                    value: conn_param.get_max_table_size_decoder(),
+                },
+                HSetting {
+                    setting_type: HSettingType::BlockedStreams,
+                    value: conn_param.get_max_blocked_streams().into(),
+                },
+            ],
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HttpZeroRttChecker {
     settings: QpackSettings,
@@ -143,7 +160,7 @@ impl HttpZeroRttChecker {
 
     /// Save the settings that matter for 0-RTT.
     #[must_use]
-    pub fn save(settings: QpackSettings) -> Vec<u8> {
+    pub fn save(settings: &QpackSettings) -> Vec<u8> {
         let mut enc = Encoder::new();
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION)
             .encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)

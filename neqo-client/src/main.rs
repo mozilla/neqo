@@ -18,7 +18,6 @@ use neqo_http3::{
     self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
     Priority,
 };
-use neqo_qpack::QpackSettings;
 use neqo_transport::{
     CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
     EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamType,
@@ -597,14 +596,11 @@ fn client(
     }
     let mut client = Http3Client::new_with_conn(
         transport,
-        &Http3Parameters {
-            qpack_settings: QpackSettings {
-                max_table_size_encoder: args.max_table_size_encoder,
-                max_table_size_decoder: args.max_table_size_decoder,
-                max_blocked_streams: args.max_blocked_streams,
-            },
-            max_concurrent_push_streams: args.max_concurrent_push_streams,
-        },
+        Http3Parameters::default()
+            .max_table_size_encoder(args.max_table_size_encoder)
+            .max_table_size_decoder(args.max_table_size_decoder)
+            .max_blocked_streams(args.max_blocked_streams)
+            .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
     let qlog = qlog_new(args, hostname, client.connection_id())?;

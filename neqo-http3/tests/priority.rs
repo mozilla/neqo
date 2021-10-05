@@ -11,7 +11,6 @@ use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
 };
-use neqo_qpack::QpackSettings;
 use neqo_transport::ConnectionParameters;
 use std::cell::RefCell;
 
@@ -19,12 +18,6 @@ use std::rc::Rc;
 
 use std::time::Instant;
 use test_fixture::*;
-
-const DEFAULT_SETTINGS: QpackSettings = QpackSettings {
-    max_table_size_encoder: 65536,
-    max_table_size_decoder: 65536,
-    max_blocked_streams: 100,
-};
 
 pub fn default_http3_client() -> Http3Client {
     fixture_init();
@@ -34,10 +27,7 @@ pub fn default_http3_client() -> Http3Client {
         addr(),
         addr(),
         ConnectionParameters::default(),
-        &Http3Parameters {
-            qpack_settings: DEFAULT_SETTINGS,
-            max_concurrent_push_streams: 5,
-        },
+        Http3Parameters::default().max_concurrent_push_streams(5),
         now(),
     )
     .expect("create a default client")
@@ -50,7 +40,7 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_ALPN_H3,
         anti_replay(),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_SETTINGS,
+        Http3Parameters::default(),
         None,
     )
     .expect("create a server")
