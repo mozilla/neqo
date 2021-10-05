@@ -11,10 +11,9 @@ use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
 use crate::settings::HttpZeroRttChecker;
-use crate::Res;
+use crate::{Http3Parameters, Res};
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
-use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{
     tparams::PreferredAddress, ConnectionIdGenerator, ConnectionParameters, Output,
@@ -32,7 +31,7 @@ const MAX_EVENT_DATA_SIZE: usize = 1024;
 
 pub struct Http3Server {
     server: Server,
-    qpack_settings: QpackSettings,
+    http3_parameters: Http3Parameters,
     http3_handlers: HashMap<ActiveConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
 }
@@ -53,7 +52,7 @@ impl Http3Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        qpack_settings: QpackSettings,
+        http3_parameters: Http3Parameters,
         zero_rtt_checker: Option<Box<dyn ZeroRttChecker>>,
     ) -> Res<Self> {
         Ok(Self {
@@ -62,12 +61,15 @@ impl Http3Server {
                 certs,
                 protocols,
                 anti_replay,
-                zero_rtt_checker
-                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(qpack_settings))),
+                zero_rtt_checker.unwrap_or_else(|| {
+                    Box::new(HttpZeroRttChecker::new(
+                        *http3_parameters.get_qpack_settings(),
+                    ))
+                }),
                 cid_manager,
                 ConnectionParameters::default(),
             )?,
-            qpack_settings,
+            http3_parameters,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
         })
@@ -148,12 +150,11 @@ impl Http3Server {
         active_conns
             .iter()
             .for_each(|conn| self.server.add_to_waiting(conn.clone()));
-        let qpack_settings = self.qpack_settings;
+        let http3_parameters = self.http3_parameters;
         for mut conn in active_conns {
-            let handler = self
-                .http3_handlers
-                .entry(conn.clone())
-                .or_insert_with(|| Rc::new(RefCell::new(Http3ServerHandler::new(qpack_settings))));
+            let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
+                Rc::new(RefCell::new(Http3ServerHandler::new(http3_parameters)))
+            });
 
             handler
                 .borrow_mut()
@@ -260,12 +261,11 @@ fn prepare_data(
 #[cfg(test)]
 mod tests {
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Priority};
+    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
     use neqo_common::event::Provider;
     use neqo_common::Encoder;
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
-    use neqo_qpack::encoder::QPackEncoder;
-    use neqo_qpack::QpackSettings;
+    use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
         Connection, ConnectionError, ConnectionEvent, State, StreamType, ZeroRttState,
     };
@@ -283,7 +283,14 @@ mod tests {
         max_blocked_streams: 100,
     };
 
-    pub fn create_server(settings: QpackSettings) -> Http3Server {
+    fn http3params(qpack_settings: QpackSettings) -> Http3Parameters {
+        Http3Parameters::default()
+            .max_table_size_encoder(qpack_settings.max_table_size_encoder)
+            .max_table_size_decoder(qpack_settings.max_table_size_decoder)
+            .max_blocked_streams(qpack_settings.max_blocked_streams)
+    }
+
+    pub fn create_server(conn_params: Http3Parameters) -> Http3Server {
         fixture_init();
         Http3Server::new(
             now(),
@@ -291,7 +298,7 @@ mod tests {
             DEFAULT_ALPN,
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            settings,
+            conn_params,
             None,
         )
         .expect("create a server")
@@ -299,7 +306,7 @@ mod tests {
 
     /// Create a http3 server with default configuration.
     pub fn default_server() -> Http3Server {
-        create_server(DEFAULT_SETTINGS)
+        create_server(http3params(DEFAULT_SETTINGS))
     }
 
     fn assert_closed(hconn: &mut Http3Server, expected: &Error) {
@@ -491,7 +498,7 @@ mod tests {
         );
         assert_eq!(sent, Ok(9));
         let mut encoder = QPackEncoder::new(
-            QpackSettings {
+            &QpackSettings {
                 max_table_size_encoder: 100,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
@@ -1089,7 +1096,7 @@ mod tests {
 
     /// Perform a handshake, then another with the token from the first.
     /// The second should always resume, but it might not always accept early data.
-    fn zero_rtt_with_settings(settings: QpackSettings, zero_rtt: &ZeroRttState) {
+    fn zero_rtt_with_settings(conn_params: Http3Parameters, zero_rtt: &ZeroRttState) {
         let (_, mut client) = connect();
         let token = client.events().find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
@@ -1100,7 +1107,7 @@ mod tests {
         });
         assert!(token.is_some());
 
-        let mut server = create_server(settings);
+        let mut server = create_server(conn_params);
         let mut client = default_client();
         client.enable_resumption(now(), token.unwrap()).unwrap();
 
@@ -1111,17 +1118,17 @@ mod tests {
 
     #[test]
     fn zero_rtt() {
-        zero_rtt_with_settings(DEFAULT_SETTINGS, &ZeroRttState::AcceptedClient);
+        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), &ZeroRttState::AcceptedClient);
     }
 
     /// A larger QPACK decoder table size isn't an impediment to 0-RTT.
     #[test]
     fn zero_rtt_larger_decoder_table() {
         zero_rtt_with_settings(
-            QpackSettings {
+            http3params(QpackSettings {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
                 ..DEFAULT_SETTINGS
-            },
+            }),
             &ZeroRttState::AcceptedClient,
         );
     }
@@ -1130,10 +1137,10 @@ mod tests {
     #[test]
     fn zero_rtt_smaller_decoder_table() {
         zero_rtt_with_settings(
-            QpackSettings {
+            http3params(QpackSettings {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
                 ..DEFAULT_SETTINGS
-            },
+            }),
             &ZeroRttState::Rejected,
         );
     }
@@ -1142,10 +1149,10 @@ mod tests {
     #[test]
     fn zero_rtt_more_blocked_streams() {
         zero_rtt_with_settings(
-            QpackSettings {
+            http3params(QpackSettings {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
                 ..DEFAULT_SETTINGS
-            },
+            }),
             &ZeroRttState::AcceptedClient,
         );
     }
@@ -1154,10 +1161,10 @@ mod tests {
     #[test]
     fn zero_rtt_fewer_blocked_streams() {
         zero_rtt_with_settings(
-            QpackSettings {
+            http3params(QpackSettings {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
                 ..DEFAULT_SETTINGS
-            },
+            }),
             &ZeroRttState::Rejected,
         );
     }
@@ -1166,10 +1173,10 @@ mod tests {
     #[test]
     fn zero_rtt_smaller_encoder_table() {
         zero_rtt_with_settings(
-            QpackSettings {
+            http3params(QpackSettings {
                 max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
                 ..DEFAULT_SETTINGS
-            },
+            }),
             &ZeroRttState::AcceptedClient,
         );
     }
@@ -1226,7 +1233,7 @@ mod tests {
             DEFAULT_ALPN,
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            DEFAULT_SETTINGS,
+            http3params(DEFAULT_SETTINGS),
             Some(Box::new(RejectZeroRtt::default())),
         )
         .expect("create a server");

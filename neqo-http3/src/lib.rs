@@ -9,6 +9,7 @@
 
 mod buffered_send_stream;
 mod client_events;
+mod conn_params;
 mod connection;
 pub mod connection_client;
 mod connection_server;
@@ -37,9 +38,9 @@ use std::fmt::Debug;
 use crate::priority::PriorityHandler;
 pub use buffered_send_stream::BufferedStream;
 pub use client_events::Http3ClientEvent;
+pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
-pub use connection_client::Http3Parameters;
 pub use hframe::{HFrame, HFrameReader};
 pub use neqo_common::Header;
 pub use priority::Priority;

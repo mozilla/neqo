@@ -36,7 +36,7 @@ impl QPackDecoder {
     /// # Panics
     /// If settings include invalid values.
     #[must_use]
-    pub fn new(qpack_settings: QpackSettings) -> Self {
+    pub fn new(qpack_settings: &QpackSettings) -> Self {
         qdebug!("Decoder: creating a new qpack decoder.");
         let mut send_buf = QpackData::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
@@ -288,7 +288,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
-        let mut decoder = QPackDecoder::new(QpackSettings {
+        let mut decoder = QPackDecoder::new(&QpackSettings {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 100,
