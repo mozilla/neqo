@@ -9,9 +9,11 @@ use crate::hframe::HFrame;
 use crate::recv_message::{MessageType, RecvMessage};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{Error, Header, Http3Parameters, Priority, PriorityHandler, ReceiveOutput, Res};
+use crate::{
+    Error, Header, Http3Parameters, NewStreamType, Priority, PriorityHandler, ReceiveOutput, Res,
+};
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
 use std::rc::Rc;
 use std::time::Instant;
 
