@@ -106,9 +106,9 @@ impl Http3Client {
             events: events.clone(),
             push_handler: Rc::new(RefCell::new(PushController::new(
                 http3_parameters.get_max_concurrent_push_streams(),
-                events,
+                events.clone(),
             ))),
-            base_handler: Http3Connection::new(http3_parameters),
+            base_handler: Http3Connection::new(http3_parameters, Some(Box::new(events))),
         }
     }
 
@@ -727,6 +727,11 @@ impl Http3Client {
     pub fn transport_stats(&self) -> TransportStats {
         self.conn.stats()
     }
+
+    #[must_use]
+    pub fn webtransport_enabled(&self) -> bool {
+        self.base_handler.webtransport_enabled()
+    }
 }
 
 impl EventProvider for Http3Client {
@@ -1042,7 +1047,10 @@ mod tests {
             let mut dec = Decoder::from(&buf[..amount]);
             assert_eq!(dec.decode_varint().unwrap(), 0); // control stream type
             assert_eq!(dec.decode_varint().unwrap(), 4); // SETTINGS
-            assert_eq!(dec.decode_vvec().unwrap(), &[1, 0x40, 0x64, 7, 0x40, 0x64]);
+            assert_eq!(
+                dec.decode_vvec().unwrap(),
+                &[1, 0x40, 0x64, 7, 0x40, 0x64, 0xab, 0x60, 0x37, 0x42, 0x00]
+            );
 
             assert_eq!((dec.decode_varint().unwrap() - 0x21) % 0x1f, 0); // Grease
             assert!(dec.decode_vvec().unwrap().len() < 8);
