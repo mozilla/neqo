@@ -15,6 +15,7 @@ pub mod connection_client;
 mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
+pub mod features;
 pub mod hframe;
 mod priority;
 mod push_controller;

@@ -7,8 +7,11 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::connection::Http3State;
-use crate::{CloseType, Header, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
-
+use crate::settings::HSettingType;
+use crate::{
+    features::NegotiationListener, CloseType, Header, HttpRecvStreamEvents, RecvStreamEvents,
+    SendStreamEvents,
+};
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamType};
@@ -74,6 +77,8 @@ pub enum Http3ClientEvent {
     GoawayReceived,
     /// Connection state change.
     StateChange(Http3State),
+    /// WebTransport successfully negotiated
+    WebTransportNegotiated(bool),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -135,6 +140,14 @@ impl SendStreamEvents for Http3ClientEvents {
         self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
             self.insert(Http3ClientEvent::StopSending { stream_id, error });
+        }
+    }
+}
+
+impl NegotiationListener for Http3ClientEvents {
+    fn negotiation_done(&self, feature_type: HSettingType, negotiated: bool) {
+        if feature_type == HSettingType::EnableWebTransport {
+            self.insert(Http3ClientEvent::WebTransportNegotiated(negotiated));
         }
     }
 }

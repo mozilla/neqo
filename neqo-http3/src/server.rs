@@ -61,11 +61,8 @@ impl Http3Server {
                 certs,
                 protocols,
                 anti_replay,
-                zero_rtt_checker.unwrap_or_else(|| {
-                    Box::new(HttpZeroRttChecker::new(
-                        *http3_parameters.get_qpack_settings(),
-                    ))
-                }),
+                zero_rtt_checker
+                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(http3_parameters))),
                 cid_manager,
                 ConnectionParameters::default(),
             )?,
