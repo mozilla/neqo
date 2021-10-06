@@ -481,7 +481,7 @@ impl Http3Connection {
     ///  - if the stream is not done and there is no error, return `output` and the caller will
     ///    handle it.
     ///  - in case of an error:
-    ///    - if it is only a stream error and the stream is not critical, send STOP_SENDING
+    ///    - if it is only a stream error and the stream is not critical, send `STOP_SENDING`
     ///      frame, remove the stream from `recv_streams` and inform the listener that the stream
     ///      has been reset.
     ///    - otherwise this is a connection error. In this case, propagate the error to the caller
