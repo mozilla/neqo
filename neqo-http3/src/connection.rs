@@ -685,7 +685,7 @@ impl Http3Connection {
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
-                self.webtransport.handle_setting(&new_settings);
+                self.webtransport.handle_settings(&new_settings);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
             }
