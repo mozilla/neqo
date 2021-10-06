@@ -480,7 +480,7 @@ impl Http3Connection {
     ///  - if the stream is done, it removes the stream from `recv_streams`
     ///  - if the stream is not done and there is no error, return `output` and the caller will
     ///    handle it.
-    ///  - in case of and error:
+    ///  - in case of an error:
     ///    - if it is only a stream error and the stream is not critical, send STOP_SENDING
     ///      frame, remove the stream from `recv_streams` and inform the listener that the stream
     ///      has been reset.
@@ -514,7 +514,7 @@ impl Http3Connection {
     /// Stream data are read directly into a buffer supplied as a parameter of this function to avoid copying
     /// data.
     /// # Errors
-    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
+    /// It returns an error if a stream does not exist or an error happens while reading a stream, e.g.
     /// early close, protocol error, etc.
     pub fn read_data(
         &mut self,
