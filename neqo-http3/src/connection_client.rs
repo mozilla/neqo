@@ -5,27 +5,22 @@
 // except according to those terms.
 
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
-use crate::connection::{Http3Connection, Http3State};
+use crate::connection::{Http3Connection, Http3State, RequestDescription};
 use crate::hframe::HFrame;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::RecvMessage;
-use crate::request_target::{AsRequestTarget, RequestTarget};
-use crate::send_message::SendMessage;
+use crate::request_target::AsRequestTarget;
 use crate::settings::HSettings;
-use crate::{
-    Header, Headers, Http3Parameters, MessageType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput, SendStream,
-};
+use crate::{Header, Http3Parameters, NewStreamType, Priority, PriorityHandler, ReceiveOutput};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
-    Datagram, Decoder, Encoder, Role,
+    Datagram, Decoder, Encoder, MessageType, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    ConnectionParameters, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType,
-    ZeroRttState,
+    ConnectionParameters, Output, QuicVersion, Stats as TransportStats, StreamId, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -258,87 +253,31 @@ impl Http3Client {
     pub fn fetch<'x, 't: 'x, T>(
         &mut self,
         now: Instant,
-        method: &str,
+        method: &'t str,
         target: &'t T,
-        headers: &[Header],
+        headers: &'t [Header],
         priority: Priority,
     ) -> Res<StreamId>
     where
         T: AsRequestTarget<'x> + ?Sized,
     {
-        let target = target
-            .as_request_target()
-            .map_err(|_| Error::InvalidRequestTarget)?;
-        qinfo!([self], "Fetch method={}, target={:?}", method, target);
-        // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
-        match self.base_handler.state() {
-            Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
-                return Err(Error::AlreadyClosed)
-            }
-            Http3State::Initializing => return Err(Error::Unavailable),
-            _ => {}
-        }
-
-        let id = self
-            .conn
-            .stream_create(StreamType::BiDi)
-            .map_err(|e| Error::map_stream_create_errors(&e))?;
-        self.conn.stream_keep_alive(id, true)?;
-
-        // Transform pseudo-header fields
-        let mut final_headers = Headers::new(&[
-            Header::new(":method", method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ]);
-        if let Some(priority_header) = priority.header() {
-            final_headers.push(priority_header);
-        }
-        final_headers.extend_from_slice(headers);
-
-        let mut send_message = SendMessage::new(
-            MessageType::Request,
-            id,
-            self.base_handler.qpack_encoder.clone(),
-            Box::new(self.events.clone()),
+        let output = self.base_handler.fetch(
+            &mut self.conn,
+            self.events.clone(),
+            Some(Rc::clone(&self.push_handler)),
+            &RequestDescription {
+                method,
+                target,
+                headers,
+                priority,
+            },
         );
-
-        send_message
-            .http_stream()
-            .unwrap()
-            .send_headers(final_headers, &mut self.conn)?;
-
-        self.base_handler.add_streams(
-            id,
-            Box::new(send_message),
-            Box::new(RecvMessage::new(
-                MessageType::Response,
-                id,
-                Rc::clone(&self.base_handler.qpack_decoder),
-                Box::new(self.events.clone()),
-                Some(Rc::clone(&self.push_handler)),
-                PriorityHandler::new(false, priority),
-                false,
-            )),
-        );
-
-        // Call immediately send so that at least headers get sent. This will make Firefox faster, since
-        // it can send request body immediatly in most cases and does not need to do a complete process loop.
-        let output = self
-            .base_handler
-            .send_streams
-            .get_mut(&id)
-            .ok_or(Error::InvalidStreamId)?
-            .send(&mut self.conn);
-        if let Err(e) = output {
+        if let Err(e) = &output {
             if e.connection_error() {
                 self.close(now, e.code(), "");
             }
-            return Err(e);
         }
-
-        Ok(id)
+        output
     }
 
     /// Send an [`PRIORITY_UPDATE`-frame][1] on next [Http3Client::process_output()]-call,
@@ -767,20 +706,20 @@ impl EventProvider for Http3Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthenticationStatus, Connection, Error, HSettings, Header, Headers, Http3Client,
-        Http3ClientEvent, Http3Parameters, Http3State, Rc, RefCell, StreamType,
+        AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
+        Http3Parameters, Http3State, Rc, RefCell,
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::qpack_encoder_receiver::EncoderRecvStream;
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
     use crate::{Http3Server, Priority, RecvStream};
-    use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
+    use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder, Headers};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
         ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, StreamId,
-        RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        StreamType, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::mem;

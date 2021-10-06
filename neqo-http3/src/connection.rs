@@ -9,15 +9,20 @@
 use crate::control_stream_local::ControlStreamLocal;
 use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::HFrame;
+use crate::push_controller::PushController;
 use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;
+use crate::recv_message::RecvMessage;
+use crate::request_target::{AsRequestTarget, RequestTarget};
+use crate::send_message::SendMessage;
 use crate::settings::{HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
-    client_events::Http3ClientEvents, features::NegotiationState, CloseType, Http3Parameters,
-    Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, SendStream,
+    client_events::Http3ClientEvents, features::NegotiationState, CloseType, Header,
+    Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, ReceiveOutput,
+    RecvStream, SendStream,
 };
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Headers, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{AppError, Connection, ConnectionError, State, StreamId, StreamType};
@@ -28,6 +33,16 @@ use std::mem;
 use std::rc::Rc;
 
 use crate::{Error, Res};
+
+pub struct RequestDescription<'x, 't: 'x, T>
+where
+    T: AsRequestTarget<'x> + ?Sized,
+{
+    pub method: &'x str,
+    pub target: &'t T,
+    pub headers: &'x [Header],
+    pub priority: Priority,
+}
 
 #[derive(Debug)]
 enum Http3RemoteSettingsState {
@@ -512,6 +527,87 @@ impl Http3Connection {
             }
         }
         output
+    }
+
+    pub fn fetch<'x, 't: 'x, T>(
+        &mut self,
+        conn: &mut Connection,
+        events: Http3ClientEvents,
+        push_handler: Option<Rc<RefCell<PushController>>>,
+        request: &RequestDescription<'x, 'x, T>,
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized,
+    {
+        let target = request
+            .target
+            .as_request_target()
+            .map_err(|_| Error::InvalidRequestTarget)?;
+        qinfo!(
+            [self],
+            "Fetch method={}, target={:?}",
+            request.method,
+            target
+        );
+        // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
+        match self.state() {
+            Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
+                return Err(Error::AlreadyClosed)
+            }
+            Http3State::Initializing => return Err(Error::Unavailable),
+            _ => {}
+        }
+
+        let id = conn
+            .stream_create(StreamType::BiDi)
+            .map_err(|e| Error::map_stream_create_errors(&e))?;
+        conn.stream_keep_alive(id, true)?;
+
+        // Transform pseudo-header fields
+        let mut final_headers = Headers::new(&[
+            Header::new(":method", request.method),
+            Header::new(":scheme", target.scheme()),
+            Header::new(":authority", target.authority()),
+            Header::new(":path", target.path()),
+        ]);
+        if let Some(priority_header) = request.priority.header() {
+            final_headers.push(priority_header);
+        }
+        final_headers.extend_from_slice(request.headers);
+
+        let mut send_message = SendMessage::new(
+            MessageType::Request,
+            id,
+            self.qpack_encoder.clone(),
+            Box::new(events.clone()),
+        );
+
+        send_message
+            .http_stream()
+            .unwrap()
+            .send_headers(final_headers, conn)?;
+
+        self.add_streams(
+            id,
+            Box::new(send_message),
+            Box::new(RecvMessage::new(
+                MessageType::Response,
+                id,
+                Rc::clone(&self.qpack_decoder),
+                Box::new(events),
+                push_handler,
+                PriorityHandler::new(false, request.priority),
+                false,
+            )),
+        );
+
+        // Call immediately send so that at least headers get sent. This will make Firefox faster, since
+        // it can send request body immediatly in most cases and does not need to do a complete process loop.
+        self.send_streams
+            .get_mut(&id)
+            .ok_or(Error::InvalidStreamId)?
+            .send(conn)?;
+        Ok(id)
     }
 
     /// Stream data are read directly into a buffer supplied as a parameter of this function to avoid copying
