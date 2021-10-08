@@ -4,21 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::settings::{HSettingType, HSettings};
+use crate::{
+    client_events::Http3ClientEvents,
+    settings::{HSettingType, HSettings},
+};
 use neqo_common::qtrace;
 use std::fmt::Debug;
 use std::mem;
-
-pub trait NegotiationListener: Debug {
-    fn negotiation_done(&self, feature_type: HSettingType, negotiated: bool);
-}
 
 #[derive(Debug)]
 pub enum NegotiationState {
     Disabled,
     Negotiating {
         feature_type: HSettingType,
-        listener: Option<Box<dyn NegotiationListener>>,
+        listener: Option<Http3ClientEvents>,
     },
     Negotiated,
     NegotiationFailed,
@@ -26,18 +25,20 @@ pub enum NegotiationState {
 
 impl NegotiationState {
     #[must_use]
-    pub fn new(
-        enable: bool,
-        feature_type: HSettingType,
-        listener: Option<Box<dyn NegotiationListener>>,
-    ) -> Self {
+    pub fn new(enable: bool, feature_type: HSettingType) -> Self {
         if enable {
             Self::Negotiating {
                 feature_type,
-                listener,
+                listener: None,
             }
         } else {
             Self::Disabled
+        }
+    }
+
+    pub fn set_listener(&mut self, new_listener: Http3ClientEvents) {
+        if let Self::Negotiating { listener, .. } = self {
+            *listener = Some(new_listener);
         }
     }
 
