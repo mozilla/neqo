@@ -37,6 +37,10 @@ use std::rc::Rc;
  *    ClosePending : waiting for app to pick up data, after that we can delete
  * the TransactionClient.
  *    Closed
+ *    ExtendedConnect: this request is for a WebTransport session. In this
+ *                         state RecvMessage will not be treated as a HTTP
+ *                         stream anymore. It is waiting to be transformed
+ *                         into WebTransport session or to be closed.
  */
 #[derive(Debug)]
 enum RecvMessageState {
@@ -47,6 +51,7 @@ enum RecvMessageState {
     WaitingForFinAfterTrailers { frame_reader: HFrameReader },
     ClosePending, // Close must first be read by application
     Closed,
+    ExtendedConnect,
 }
 
 #[derive(Debug)]
@@ -59,6 +64,7 @@ struct PushInfo {
 pub(crate) struct RecvMessage {
     state: RecvMessageState,
     message_type: MessageType,
+    stream_type: Http3StreamType,
     qpack_decoder: Rc<RefCell<QPackDecoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
@@ -76,6 +82,7 @@ impl ::std::fmt::Display for RecvMessage {
 impl RecvMessage {
     pub fn new(
         message_type: MessageType,
+        stream_type: Http3StreamType,
         stream_id: StreamId,
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
         conn_events: Box<dyn HttpRecvStreamEvents>,
@@ -92,6 +99,7 @@ impl RecvMessage {
                 },
             },
             message_type,
+            stream_type,
             qpack_decoder,
             conn_events,
             push_handler,
@@ -156,12 +164,27 @@ impl RecvMessage {
             return Err(Error::HttpGeneralProtocolStream);
         }
 
-        self.conn_events
-            .header_ready(self.stream_id, headers, interim, fin);
+        let is_web_transport = self.message_type == MessageType::Request
+            && headers
+                .iter()
+                .any(|h| h.name() == ":method" && h.value() == "CONNECT")
+            && headers
+                .iter()
+                .any(|h| h.name() == ":protocol" && h.value() == "webtransport");
+        if is_web_transport {
+            self.conn_events
+                .extended_connect_new_session(self.stream_id, headers);
+        } else {
+            self.conn_events
+                .header_ready(self.stream_id, headers, interim, fin);
+        }
+
         if fin {
             self.set_closed();
         } else {
-            self.state = if interim {
+            self.state = if is_web_transport {
+                RecvMessageState::ExtendedConnect
+            } else if interim {
                 RecvMessageState::WaitingForResponseHeaders {
                     frame_reader: HFrameReader::new(),
                 }
@@ -294,7 +317,10 @@ impl RecvMessage {
                         .decode_header_block(header_block, self.stream_id)?;
                     if let Some(headers) = d_headers {
                         self.add_headers(headers, done)?;
-                        if matches!(self.state, RecvMessageState::Closed) {
+                        if matches!(
+                            self.state,
+                            RecvMessageState::Closed | RecvMessageState::ExtendedConnect
+                        ) {
                             break Ok(());
                         }
                     } else {
@@ -310,6 +336,10 @@ impl RecvMessage {
                 }
                 RecvMessageState::ClosePending | RecvMessageState::Closed => {
                     panic!("Stream readable after being closed!");
+                }
+                RecvMessageState::ExtendedConnect => {
+                    // Ignore read event, this request is waiting to be picked up by a new WebTransportSession
+                    break Ok(());
                 }
             };
         }
@@ -336,11 +366,7 @@ impl RecvMessage {
 
 impl Stream for RecvMessage {
     fn stream_type(&self) -> Http3StreamType {
-        if self.message_type == MessageType::Response && self.push_handler.is_none() {
-            Http3StreamType::Push
-        } else {
-            Http3StreamType::Http
-        }
+        self.stream_type
     }
 }
 
@@ -434,5 +460,13 @@ impl HttpRecvStream for RecvMessage {
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
         &mut self.priority_handler
+    }
+
+    fn set_new_listener(&mut self, conn_events: Box<dyn HttpRecvStreamEvents>) {
+        self.conn_events = conn_events;
+    }
+
+    fn extended_connect_wait_for_response(&self) -> bool {
+        matches!(self.state, RecvMessageState::ExtendedConnect)
     }
 }

@@ -9,7 +9,9 @@
 use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
-use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
+use crate::server_events::{
+    ClientRequestStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest,
+};
 use crate::settings::HttpZeroRttChecker;
 use crate::{Http3Parameters, Res};
 use neqo_common::{qtrace, Datagram};
@@ -193,6 +195,18 @@ impl Http3Server {
                         } => {
                             self.events.priority_update(stream_id, priority);
                         }
+                        Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
+                            self.events.webtransport_new_session(
+                                WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
+                                headers,
+                            )
+                        }
+                        Http3ServerConnEvent::ExtendedConnectClosed {
+                            stream_id, error, ..
+                        } => self.events.webtransport_session_closed(
+                            WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
+                            error,
+                        ),
                     }
                 }
             }
@@ -872,7 +886,9 @@ mod tests {
                     request.send_data(RESPONSE_BODY).unwrap();
                     data_received += 1;
                 }
-                Http3ServerEvent::StateChange { .. } | Http3ServerEvent::PriorityUpdate { .. } => {}
+                Http3ServerEvent::StateChange { .. }
+                | Http3ServerEvent::PriorityUpdate { .. }
+                | Http3ServerEvent::WebTransport(_) => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -918,7 +934,9 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StateChange { .. } | Http3ServerEvent::PriorityUpdate { .. } => {}
+                Http3ServerEvent::StateChange { .. }
+                | Http3ServerEvent::PriorityUpdate { .. }
+                | Http3ServerEvent::WebTransport(_) => {}
             }
         }
         let out = hconn.process(None, now());
@@ -940,7 +958,9 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StateChange { .. } | Http3ServerEvent::PriorityUpdate { .. } => {}
+                Http3ServerEvent::StateChange { .. }
+                | Http3ServerEvent::PriorityUpdate { .. }
+                | Http3ServerEvent::WebTransport(_) => {}
             }
         }
         assert_eq!(headers_frames, 1);
@@ -979,7 +999,9 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StateChange { .. } | Http3ServerEvent::PriorityUpdate { .. } => {}
+                Http3ServerEvent::StateChange { .. }
+                | Http3ServerEvent::PriorityUpdate { .. }
+                | Http3ServerEvent::WebTransport(_) => {}
             }
         }
         let out = hconn.process(None, now());
@@ -1203,7 +1225,9 @@ mod tests {
                 Http3ServerEvent::Data { request, .. } => {
                     assert!(requests.get(&request).is_some());
                 }
-                Http3ServerEvent::StateChange { .. } | Http3ServerEvent::PriorityUpdate { .. } => {}
+                Http3ServerEvent::StateChange { .. }
+                | Http3ServerEvent::PriorityUpdate { .. }
+                | Http3ServerEvent::WebTransport(_) => {}
             }
         }
         assert_eq!(requests.len(), 2);

@@ -49,7 +49,7 @@ fn set_response(request: &mut ClientRequestStream) {
         ])
         .unwrap();
     request.send_data(RESPONSE_DATA).unwrap();
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
 }
 
 fn process_server_events(server: &mut Http3Server) {

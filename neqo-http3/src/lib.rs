@@ -38,7 +38,7 @@ use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
 pub use buffered_send_stream::BufferedStream;
-pub use client_events::Http3ClientEvent;
+pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
@@ -46,7 +46,9 @@ pub use hframe::{HFrame, HFrameReader};
 pub use neqo_common::{Error as CommonError, Header, Headers, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
-pub use server_events::{ClientRequestStream, Http3ServerEvent};
+pub use server_events::{
+    ClientRequestStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
+};
 pub use settings::HttpZeroRttChecker;
 pub use stream_type_reader::NewStreamType;
 
@@ -354,6 +356,11 @@ pub trait HttpRecvStream: RecvStream {
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
 
     fn priority_handler_mut(&mut self) -> &mut PriorityHandler;
+
+    fn set_new_listener(&mut self, _conn_events: Box<dyn HttpRecvStreamEvents>) {}
+    fn extended_connect_wait_for_response(&self) -> bool {
+        false
+    }
 }
 
 pub trait RecvStreamEvents: Debug {
@@ -361,8 +368,9 @@ pub trait RecvStreamEvents: Debug {
     fn recv_closed(&self, _stream_id: StreamId, _close_type: CloseType) {}
 }
 
-pub(crate) trait HttpRecvStreamEvents: RecvStreamEvents {
+pub trait HttpRecvStreamEvents: RecvStreamEvents {
     fn header_ready(&self, stream_id: StreamId, headers: Headers, interim: bool, fin: bool);
+    fn extended_connect_new_session(&self, _stream_id: StreamId, _headers: Headers) {}
 }
 
 pub trait SendStream: Stream {
@@ -393,6 +401,7 @@ pub trait HttpSendStream: SendStream {
     /// # Errors
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: Headers, conn: &mut Connection) -> Res<()>;
+    fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}
 }
 
 pub trait SendStreamEvents: Debug {
@@ -412,4 +421,15 @@ pub enum CloseType {
     ResetRemote(AppError),
     LocalError(AppError),
     Done,
+}
+
+impl CloseType {
+    pub fn error(&self) -> Option<AppError> {
+        match self {
+            Self::ResetApp(error) | Self::ResetRemote(error) | Self::LocalError(error) => {
+                Some(*error)
+            }
+            Self::Done => None,
+        }
+    }
 }

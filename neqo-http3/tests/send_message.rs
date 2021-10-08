@@ -168,7 +168,7 @@ fn response_trailers1() {
     send_headers(&mut request).unwrap();
     request.send_data(RESPONSE_DATA).unwrap();
     send_trailers(&mut request).unwrap();
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -180,7 +180,7 @@ fn response_trailers2() {
     request.send_data(RESPONSE_DATA).unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     send_trailers(&mut request).unwrap();
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -193,7 +193,7 @@ fn response_trailers3() {
     exchange_packets(&mut hconn_c, &mut hconn_s);
     send_trailers(&mut request).unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -205,7 +205,7 @@ fn response_trailers_no_data() {
     exchange_packets(&mut hconn_c, &mut hconn_s);
     send_trailers(&mut request).unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events_no_data(&mut hconn_c);
 }
@@ -221,7 +221,7 @@ fn multiple_response_trailers() {
 
     assert_eq!(send_trailers(&mut request), Err(Error::InvalidInput));
 
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -237,7 +237,7 @@ fn data_after_trailer() {
 
     assert_eq!(request.send_data(RESPONSE_DATA), Err(Error::InvalidInput));
 
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -247,7 +247,7 @@ fn trailers_after_close() {
     let (mut hconn_c, mut hconn_s, mut request) = connect_send_and_receive_request();
     send_headers(&mut request).unwrap();
     request.send_data(RESPONSE_DATA).unwrap();
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
 
     assert_eq!(send_trailers(&mut request), Err(Error::InvalidStreamId));
 
@@ -265,7 +265,7 @@ fn multiple_response_headers() {
         Err(Error::InvalidHeader)
     );
 
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events_no_data(&mut hconn_c);
 }
@@ -280,7 +280,7 @@ fn informational_after_response_headers() {
         Err(Error::InvalidHeader)
     );
 
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events_no_data(&mut hconn_c);
 }
@@ -294,7 +294,7 @@ fn data_after_informational() {
 
     send_headers(&mut request).unwrap();
     request.send_data(RESPONSE_DATA).unwrap();
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -311,7 +311,7 @@ fn non_trailers_headers_after_data() {
         Err(Error::InvalidHeader)
     );
 
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }
@@ -323,7 +323,7 @@ fn data_before_headers() {
 
     send_headers(&mut request).unwrap();
     request.send_data(RESPONSE_DATA).unwrap();
-    request.close_send().unwrap();
+    request.stream_close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events(&mut hconn_c);
 }

@@ -5,9 +5,11 @@
 // except according to those terms.
 
 use crate::connection::Http3State;
+use crate::features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType};
 use crate::{
     CloseType, Headers, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
 };
+use neqo_transport::AppError;
 
 use neqo_transport::StreamId;
 use std::cell::RefCell;
@@ -33,6 +35,15 @@ pub(crate) enum Http3ServerConnEvent {
     //Reset { stream_id: StreamId, error: AppError },
     /// Connection state change.
     StateChange(Http3State),
+    ExtendedConnect {
+        stream_id: StreamId,
+        headers: Headers,
+    },
+    ExtendedConnectClosed {
+        connect_type: ExtendedConnectType,
+        stream_id: StreamId,
+        error: Option<AppError>,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -62,6 +73,32 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
             stream_id,
             headers,
             fin,
+        });
+    }
+
+    fn extended_connect_new_session(&self, stream_id: StreamId, headers: Headers) {
+        self.insert(Http3ServerConnEvent::ExtendedConnect { stream_id, headers });
+    }
+}
+
+impl ExtendedConnectEvents for Http3ServerConnEvents {
+    fn extended_connect_session_established(
+        &self,
+        _connect_type: ExtendedConnectType,
+        _stream_id: StreamId,
+    ) {
+    }
+
+    fn extended_connect_session_closed(
+        &self,
+        connect_type: ExtendedConnectType,
+        stream_id: StreamId,
+        error: Option<AppError>,
+    ) {
+        self.insert(Http3ServerConnEvent::ExtendedConnectClosed {
+            connect_type,
+            stream_id,
+            error,
         });
     }
 }

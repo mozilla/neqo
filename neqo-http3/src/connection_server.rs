@@ -10,10 +10,10 @@ use crate::recv_message::RecvMessage;
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::{
-    Error, Header, Headers, Http3Parameters, MessageType, NewStreamType, Priority, PriorityHandler,
+    Error, Header, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
     ReceiveOutput, Res,
 };
-use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
+use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Headers, MessageType, Role};
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
 use std::rc::Rc;
 use std::time::Instant;
@@ -94,8 +94,44 @@ impl Http3ServerHandler {
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
-        qinfo!([self], "reset_:stream {} error={}.", stream_id, error);
+        qinfo!([self], "reset_stream {} error={}.", stream_id, error);
         self.base_handler.cancel_fetch(stream_id, error, conn)
+    }
+
+    pub fn stream_stop_sending(
+        &mut self,
+        stream_id: StreamId,
+        error: AppError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        qinfo!([self], "stream_stop_sending {} error={}.", stream_id, error);
+        self.base_handler
+            .stream_stop_sending(conn, stream_id, error)
+    }
+
+    pub fn stream_reset_send(
+        &mut self,
+        stream_id: StreamId,
+        error: AppError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        qinfo!([self], "stream_reset_send {} error={}.", stream_id, error);
+        self.base_handler.stream_reset_send(conn, stream_id, error)
+    }
+
+    /// Accept a WebTransport Session request
+    pub(crate) fn webtransport_session_response(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        accept: bool,
+    ) -> Res<()> {
+        self.base_handler.webtransport_session_response(
+            conn,
+            stream_id,
+            Box::new(self.events.clone()),
+            accept,
+        )
     }
 
     /// Process HTTTP3 layer.
@@ -210,6 +246,7 @@ impl Http3ServerHandler {
                     )),
                     Box::new(RecvMessage::new(
                         MessageType::Request,
+                        Http3StreamType::Http,
                         stream_id,
                         Rc::clone(&self.base_handler.qpack_decoder),
                         Box::new(self.events.clone()),

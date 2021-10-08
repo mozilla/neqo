@@ -11,7 +11,10 @@ use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::RecvMessage;
 use crate::request_target::AsRequestTarget;
 use crate::settings::HSettings;
-use crate::{Header, Http3Parameters, NewStreamType, Priority, PriorityHandler, ReceiveOutput};
+use crate::{
+    Header, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
+    ReceiveOutput,
+};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, MessageType, Role,
@@ -263,7 +266,8 @@ impl Http3Client {
     {
         let output = self.base_handler.fetch(
             &mut self.conn,
-            self.events.clone(),
+            Box::new(self.events.clone()),
+            Box::new(self.events.clone()),
             Some(Rc::clone(&self.push_handler)),
             &RequestDescription {
                 method,
@@ -380,6 +384,30 @@ impl Http3Client {
             .ok_or(Error::InvalidStreamId)?;
         self.conn.stream_keep_alive(stream_id, true)?;
         self.read_response_data(now, stream_id, buf)
+    }
+
+    // API WebTransport
+
+    pub fn webtransport_create_session<'x, 't: 'x, T>(
+        &mut self,
+        now: Instant,
+        target: &'t T,
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized,
+    {
+        let output = self.base_handler.webtransport_create_session(
+            &mut self.conn,
+            Box::new(self.events.clone()),
+            target,
+        );
+
+        if let Err(e) = &output {
+            if e.connection_error() {
+                self.close(now, e.code(), "");
+            }
+        }
+        output
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
@@ -586,6 +614,7 @@ impl Http3Client {
             stream_id,
             Box::new(RecvMessage::new(
                 MessageType::Response,
+                Http3StreamType::Push,
                 stream_id,
                 Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
