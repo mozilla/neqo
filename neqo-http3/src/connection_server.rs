@@ -33,7 +33,7 @@ impl ::std::fmt::Display for Http3ServerHandler {
 impl Http3ServerHandler {
     pub(crate) fn new(http3_parameters: Http3Parameters) -> Self {
         Self {
-            base_handler: Http3Connection::new(http3_parameters, None),
+            base_handler: Http3Connection::new(http3_parameters),
             events: Http3ServerConnEvents::default(),
             needs_processing: false,
         }

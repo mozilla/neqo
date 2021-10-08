@@ -14,9 +14,8 @@ use crate::qpack_encoder_receiver::EncoderRecvStream;
 use crate::settings::{HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
-    features::{NegotiationListener, NegotiationState},
-    CloseType, Http3Parameters, Http3StreamType, NewStreamType, Priority, ReceiveOutput,
-    RecvStream, SendStream,
+    client_events::Http3ClientEvents, features::NegotiationState, CloseType, Http3Parameters,
+    Http3StreamType, NewStreamType, Priority, ReceiveOutput, RecvStream, SendStream,
 };
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
@@ -79,10 +78,7 @@ impl ::std::fmt::Display for Http3Connection {
 
 impl Http3Connection {
     /// Create a new connection.
-    pub fn new(
-        conn_params: Http3Parameters,
-        feature_listener: Option<Box<dyn NegotiationListener>>,
-    ) -> Self {
+    pub fn new(conn_params: Http3Parameters) -> Self {
         Self {
             state: Http3State::Initializing,
             control_stream_local: ControlStreamLocal::new(),
@@ -96,7 +92,6 @@ impl Http3Connection {
             webtransport: NegotiationState::new(
                 conn_params.get_webtransport(),
                 HSettingType::EnableWebTransport,
-                feature_listener,
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
@@ -104,6 +99,10 @@ impl Http3Connection {
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
         }
+    }
+
+    pub fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
+        self.webtransport.set_listener(feature_listener);
     }
 
     fn initialize_http3_connection(&mut self, conn: &mut Connection) -> Res<()> {
@@ -671,12 +670,9 @@ impl Http3Connection {
     }
 
     fn set_qpack_settings(&mut self, settings: &HSettings) -> Res<()> {
-        self.qpack_encoder
-            .borrow_mut()
-            .set_max_capacity(settings.get(HSettingType::MaxTableCapacity))?;
-        self.qpack_encoder
-            .borrow_mut()
-            .set_max_blocked_streams(settings.get(HSettingType::BlockedStreams))?;
+        let mut qpe = self.qpack_encoder.borrow_mut();
+        qpe.set_max_capacity(settings.get(HSettingType::MaxTableCapacity))?;
+        qpe.set_max_blocked_streams(settings.get(HSettingType::BlockedStreams))?;
         Ok(())
     }
 

@@ -101,14 +101,18 @@ impl Http3Client {
     #[must_use]
     pub fn new_with_conn(c: Connection, http3_parameters: Http3Parameters) -> Self {
         let events = Http3ClientEvents::default();
+        let mut base_handler = Http3Connection::new(http3_parameters);
+        if http3_parameters.get_webtransport() {
+            base_handler.set_features_listener(events.clone());
+        }
         Self {
             conn: c,
             events: events.clone(),
             push_handler: Rc::new(RefCell::new(PushController::new(
                 http3_parameters.get_max_concurrent_push_streams(),
-                events.clone(),
+                events,
             ))),
-            base_handler: Http3Connection::new(http3_parameters, Some(Box::new(events))),
+            base_handler,
         }
     }
 

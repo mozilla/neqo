@@ -149,11 +149,11 @@ impl From<&Http3Parameters> for HSettings {
                 },
                 HSetting {
                     setting_type: HSettingType::BlockedStreams,
-                    value: conn_param.get_max_blocked_streams().into(),
+                    value: u64::from(conn_param.get_max_blocked_streams()),
                 },
                 HSetting {
                     setting_type: HSettingType::EnableWebTransport,
-                    value: if conn_param.get_webtransport() { 1 } else { 0 },
+                    value: u64::from(conn_param.get_webtransport()),
                 },
             ],
         }
