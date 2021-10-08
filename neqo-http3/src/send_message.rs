@@ -296,6 +296,10 @@ impl HttpSendStream for SendMessage {
         self.stream.buffer(&buf);
         Ok(())
     }
+
+    fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
+        self.conn_events = conn_events;
+    }
 }
 
 impl ::std::fmt::Display for SendMessage {

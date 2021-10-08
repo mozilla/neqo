@@ -8,6 +8,9 @@
 
 use crate::control_stream_local::ControlStreamLocal;
 use crate::control_stream_remote::ControlStreamRemote;
+use crate::features::extended_connect::{
+    ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectSession, ExtendedConnectType,
+};
 use crate::hframe::HFrame;
 use crate::push_controller::PushController;
 use crate::qpack_decoder_receiver::DecoderRecvStream;
@@ -18,9 +21,9 @@ use crate::send_message::SendMessage;
 use crate::settings::{HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
-    client_events::Http3ClientEvents, features::NegotiationState, CloseType, Header,
-    Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, ReceiveOutput,
-    RecvStream, SendStream,
+    client_events::Http3ClientEvents, CloseType, Header, Http3Parameters, Http3StreamType,
+    HttpRecvStreamEvents, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStream,
+    SendStream, SendStreamEvents,
 };
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Headers, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
@@ -34,13 +37,13 @@ use std::rc::Rc;
 
 use crate::{Error, Res};
 
-pub struct RequestDescription<'x, 't: 'x, T>
+pub struct RequestDescription<'b, 't, T>
 where
-    T: AsRequestTarget<'x> + ?Sized,
+    T: AsRequestTarget<'t> + ?Sized,
 {
-    pub method: &'x str,
+    pub method: &'b str,
     pub target: &'t T,
-    pub headers: &'x [Header],
+    pub headers: &'b [Header],
     pub priority: Priority,
 }
 
@@ -82,7 +85,7 @@ pub(crate) struct Http3Connection {
     streams_with_pending_data: BTreeSet<StreamId>,
     pub send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     pub recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
-    webtransport: NegotiationState,
+    webtransport: ExtendedConnectFeature,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -104,9 +107,9 @@ impl Http3Connection {
             qpack_decoder: Rc::new(RefCell::new(QPackDecoder::new(
                 conn_params.get_qpack_settings(),
             ))),
-            webtransport: NegotiationState::new(
+            webtransport: ExtendedConnectFeature::new(
+                ExtendedConnectType::WebTransport,
                 conn_params.get_webtransport(),
-                HSettingType::EnableWebTransport,
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
@@ -529,15 +532,16 @@ impl Http3Connection {
         output
     }
 
-    pub fn fetch<'x, 't: 'x, T>(
+    pub fn fetch<'b, 't, T>(
         &mut self,
         conn: &mut Connection,
-        events: Http3ClientEvents,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
-        request: &RequestDescription<'x, 'x, T>,
+        request: &RequestDescription<'b, 't, T>,
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized,
+        T: AsRequestTarget<'t> + ?Sized,
     {
         let target = request
             .target
@@ -579,7 +583,7 @@ impl Http3Connection {
             MessageType::Request,
             id,
             self.qpack_encoder.clone(),
-            Box::new(events.clone()),
+            send_events,
         );
 
         send_message
@@ -592,9 +596,10 @@ impl Http3Connection {
             Box::new(send_message),
             Box::new(RecvMessage::new(
                 MessageType::Response,
+                Http3StreamType::Http,
                 id,
                 Rc::clone(&self.qpack_decoder),
-                Box::new(events),
+                recv_events,
                 push_handler,
                 PriorityHandler::new(false, request.priority),
                 false,
@@ -741,6 +746,116 @@ impl Http3Connection {
             self.send_streams.remove(&stream_id);
         }
         Ok(())
+    }
+
+    pub fn webtransport_create_session<'x, 't: 'x, T>(
+        &mut self,
+        conn: &mut Connection,
+        events: Box<dyn ExtendedConnectEvents>,
+        target: &'t T,
+    ) -> Res<StreamId>
+    where
+        T: AsRequestTarget<'x> + ?Sized,
+    {
+        qinfo!([self], "Create WebTransport");
+        if !self.webtransport_enabled() {
+            return Err(Error::Unavailable);
+        }
+
+        let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(
+            ExtendedConnectType::WebTransport,
+            events,
+        )));
+        let id = self.fetch(
+            conn,
+            Box::new(extended_conn.clone()),
+            Box::new(extended_conn.clone()),
+            None,
+            &RequestDescription {
+                method: "CONNECT",
+                target,
+                headers: &[Header::new(
+                    ":protocol",
+                    ExtendedConnectType::WebTransport.string(),
+                )],
+                priority: Priority::default(),
+            },
+        )?;
+        self.webtransport.insert(id, extended_conn);
+        Ok(id)
+    }
+
+    pub(crate) fn webtransport_session_response(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        events: Box<dyn ExtendedConnectEvents>,
+        accept: bool,
+    ) -> Res<()> {
+        qtrace!("Respond to WebTransport session with accept={}.", accept);
+        if !self.webtransport_enabled() {
+            return Err(Error::Unavailable);
+        }
+        let mut recv_stream = self.recv_streams.get_mut(&stream_id);
+        if let Some(r) = &mut recv_stream {
+            if !r
+                .http_stream()
+                .ok_or(Error::InvalidStreamId)?
+                .extended_connect_wait_for_response()
+            {
+                return Err(Error::InvalidStreamId);
+            }
+        }
+
+        let send_stream = self.send_streams.get_mut(&stream_id);
+
+        match (send_stream, recv_stream, accept) {
+            (None, None, _) => Err(Error::InvalidStreamId),
+            (None, Some(_), _) | (Some(_), None, _) => {
+                // TODO this needs a better error
+                self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
+                Err(Error::InvalidStreamId)
+            }
+            (Some(s), Some(_r), false) => {
+                if s.http_stream()
+                    .ok_or(Error::InvalidStreamId)?
+                    .send_headers(Headers::new(&[Header::new(":status", "400")]), conn)
+                    .is_ok()
+                {
+                    mem::drop(self.stream_close_send(conn, stream_id));
+                }
+                mem::drop(self.stream_stop_sending(
+                    conn,
+                    stream_id,
+                    Error::HttpRequestRejected.code(),
+                ));
+                self.streams_with_pending_data.insert(stream_id);
+                Ok(())
+            }
+            (Some(s), Some(r), true) => {
+                if s.http_stream()
+                    .ok_or(Error::InvalidStreamId)?
+                    .send_headers(Headers::new(&[Header::new(":status", "200")]), conn)
+                    .is_ok()
+                {
+                    let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(
+                        ExtendedConnectType::WebTransport,
+                        events,
+                    )));
+                    s.http_stream()
+                        .ok_or(Error::InvalidStreamId)?
+                        .set_new_listener(Box::new(extended_conn.clone()));
+                    r.http_stream()
+                        .ok_or(Error::InvalidStreamId)?
+                        .set_new_listener(Box::new(extended_conn.clone()));
+                    self.webtransport.insert(stream_id, extended_conn);
+                    self.streams_with_pending_data.insert(stream_id);
+                } else {
+                    self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
+                }
+                Ok(())
+            }
+        }
     }
 
     // If the control stream has received frames MaxPushId or Goaway which handling is specific to

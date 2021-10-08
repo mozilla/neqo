@@ -13,6 +13,7 @@ const PSEUDO_HEADER_METHOD: u8 = 0x2;
 const PSEUDO_HEADER_SCHEME: u8 = 0x4;
 const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
 const PSEUDO_HEADER_PATH: u8 = 0x10;
+const PSEUDO_HEADER_PROTOCOL: u8 = 0x20;
 const REGULAR_HEADER: u8 = 0x80;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -62,6 +63,7 @@ impl Headers {
                 (MessageType::Request, ":scheme") => PSEUDO_HEADER_SCHEME,
                 (MessageType::Request, ":authority") => PSEUDO_HEADER_AUTHORITY,
                 (MessageType::Request, ":path") => PSEUDO_HEADER_PATH,
+                (MessageType::Request, ":protocol") => PSEUDO_HEADER_PROTOCOL,
                 (_, _) => return Err(Error::InvalidHeader),
             };
             (true, bit)
@@ -111,6 +113,14 @@ impl Headers {
                 }
             }
         };
+
+        if (MessageType::Request == message_type)
+            && ((pseudo_state & PSEUDO_HEADER_PROTOCOL) > 0)
+            && method_value != Some(&"CONNECT".to_string())
+        {
+            return Err(Error::InvalidHeader);
+        }
+
         if pseudo_state & pseudo_header_mask != pseudo_header_mask {
             return Err(Error::InvalidHeader);
         }

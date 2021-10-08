@@ -307,7 +307,7 @@ impl HttpServer for Http3Server {
                         ])
                         .unwrap();
                     request.send_data(&response).unwrap();
-                    request.close_send().unwrap();
+                    request.stream_close_send().unwrap();
                 }
                 Http3ServerEvent::Data { request, data, fin } => {
                     println!("Data (request={} fin={}): {:?}", request, fin, data);

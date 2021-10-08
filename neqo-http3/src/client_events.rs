@@ -8,14 +8,27 @@
 
 use crate::connection::Http3State;
 use crate::settings::HSettingType;
-use crate::{CloseType, Headers, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
-use neqo_common::event::Provider as EventProvider;
+use crate::{
+    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType},
+    CloseType, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
+};
+use neqo_common::{event::Provider as EventProvider, Headers};
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamId, StreamType};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum WebTransportEvent {
+    WebTransportNegotiated(bool),
+    WebTransportSession(StreamId),
+    WebTransportSessionClosed {
+        stream_id: StreamId,
+        error: Option<AppError>,
+    },
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Http3ClientEvent {
@@ -77,9 +90,8 @@ pub enum Http3ClientEvent {
     GoawayReceived,
     /// Connection state change.
     StateChange(Http3State),
-    /// The event when WebTransport negotiation has finished and
-    /// the negotiation may succeed or fail.
-    WebTransportNegotiated(bool),
+    /// WebTransport events
+    WebTransport(WebTransportEvent),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -141,6 +153,33 @@ impl SendStreamEvents for Http3ClientEvents {
         self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
             self.insert(Http3ClientEvent::StopSending { stream_id, error });
+        }
+    }
+}
+
+impl ExtendedConnectEvents for Http3ClientEvents {
+    fn extended_connect_session_established(
+        &self,
+        connect_type: ExtendedConnectType,
+        stream_id: StreamId,
+    ) {
+        if connect_type == ExtendedConnectType::WebTransport {
+            self.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::WebTransportSession(stream_id),
+            ))
+        }
+    }
+
+    fn extended_connect_session_closed(
+        &self,
+        connect_type: ExtendedConnectType,
+        stream_id: StreamId,
+        error: Option<AppError>,
+    ) {
+        if connect_type == ExtendedConnectType::WebTransport {
+            self.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::WebTransportSessionClosed { stream_id, error },
+            ));
         }
     }
 }
@@ -263,7 +302,9 @@ impl Http3ClientEvents {
 
     pub fn negotiation_done(&self, feature_type: HSettingType, negotiated: bool) {
         if feature_type == HSettingType::EnableWebTransport {
-            self.insert(Http3ClientEvent::WebTransportNegotiated(negotiated));
+            self.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::WebTransportNegotiated(negotiated),
+            ));
         }
     }
 }

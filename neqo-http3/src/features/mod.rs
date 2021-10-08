@@ -12,6 +12,8 @@ use neqo_common::qtrace;
 use std::fmt::Debug;
 use std::mem;
 
+pub mod extended_connect;
+
 /// States:
 /// - `Disable` - it is not turned on for this connection.
 /// - `Negotiating` - the feature is enabled locally, but settings from the peer
