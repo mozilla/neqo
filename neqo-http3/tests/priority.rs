@@ -118,7 +118,7 @@ fn priority_update() {
 
     match header_event {
         Http3ServerEvent::Headers {
-            request: _,
+            stream: _,
             headers,
             fin,
         } => {

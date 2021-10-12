@@ -7,11 +7,9 @@
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_HEADERS};
 use crate::push_controller::PushController;
 use crate::{
-    qlog, CloseType, Error, Headers, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    MessageType, ReceiveOutput, RecvStream, Res, Stream,
+    priority::PriorityHandler, qlog, CloseType, Error, Headers, Http3StreamInfo, Http3StreamType,
+    HttpRecvStream, HttpRecvStreamEvents, MessageType, ReceiveOutput, RecvStream, Res, Stream,
 };
-
-use crate::priority::PriorityHandler;
 use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
@@ -181,7 +179,7 @@ impl RecvMessage {
                 .extended_connect_new_session(self.stream_id, headers);
         } else {
             self.conn_events
-                .header_ready(self.stream_id, headers, interim, fin);
+                .header_ready(self.get_stream_info(), headers, interim, fin);
         }
 
         if fin {
@@ -215,7 +213,7 @@ impl RecvMessage {
             RecvMessageState::WaitingForData { .. }
             | RecvMessageState::WaitingForFinAfterTrailers { .. } => {
                 if post_readable_event {
-                    self.conn_events.data_readable(self.stream_id);
+                    self.conn_events.data_readable(self.get_stream_info());
                 }
             }
             _ => unreachable!("Closing an already closed transaction."),
@@ -335,7 +333,7 @@ impl RecvMessage {
                 }
                 RecvMessageState::ReadingData { .. } => {
                     if post_readable_event {
-                        self.conn_events.data_readable(self.stream_id);
+                        self.conn_events.data_readable(self.get_stream_info());
                     }
                     break Ok(());
                 }
@@ -358,7 +356,7 @@ impl RecvMessage {
         }
         self.state = RecvMessageState::Closed;
         self.conn_events
-            .recv_closed(self.stream_id, CloseType::Done);
+            .recv_closed(self.get_stream_info(), CloseType::Done);
     }
 
     fn closing(&self) -> bool {
@@ -366,6 +364,10 @@ impl RecvMessage {
             self.state,
             RecvMessageState::ClosePending | RecvMessageState::Closed
         )
+    }
+
+    fn get_stream_info(&self) -> Http3StreamInfo {
+        Http3StreamInfo::new(self.stream_id, Http3StreamType::Http)
     }
 }
 
@@ -390,7 +392,8 @@ impl RecvStream for RecvMessage {
                 .borrow_mut()
                 .cancel_stream(self.stream_id);
         }
-        self.conn_events.recv_closed(self.stream_id, close_type);
+        self.conn_events
+            .recv_closed(self.get_stream_info(), close_type);
         self.state = RecvMessageState::Closed;
         Ok(())
     }

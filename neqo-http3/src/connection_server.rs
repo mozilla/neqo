@@ -14,7 +14,7 @@ use crate::{
     ReceiveOutput, Res,
 };
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Headers, MessageType, Role};
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -34,26 +34,32 @@ impl ::std::fmt::Display for Http3ServerHandler {
 impl Http3ServerHandler {
     pub(crate) fn new(http3_parameters: Http3Parameters) -> Self {
         Self {
-            base_handler: Http3Connection::new(http3_parameters),
+            base_handler: Http3Connection::new(http3_parameters, Role::Server),
             events: Http3ServerConnEvents::default(),
             needs_processing: false,
         }
     }
 
     /// Supply a response for a request.
+    /// # Errors
+    /// `InvalidStreamId` if thee stream does not exist,
+    /// `AlreadyClosed` if the stream has already been closed.
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
+    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
+    /// `InvalidInput` if an empty buffer has been supplied.
     pub(crate) fn send_data(
         &mut self,
         stream_id: StreamId,
         data: &[u8],
         conn: &mut Connection,
-    ) -> Res<()> {
+    ) -> Res<usize> {
+        self.base_handler.stream_has_pending_data(stream_id);
+        self.needs_processing = true;
         self.base_handler
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send_data(conn, data)?;
-        self.base_handler.stream_has_pending_data(stream_id);
-        Ok(())
+            .send_data(conn, data)
     }
 
     /// Supply response heeaders for a request.
@@ -71,6 +77,7 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?
             .send_headers(Headers::from(headers), conn)?;
         self.base_handler.stream_has_pending_data(stream_id);
+        self.needs_processing = true;
         Ok(())
     }
 
@@ -81,6 +88,7 @@ impl Http3ServerHandler {
         qinfo!([self], "Close sending side stream={}.", stream_id);
         self.base_handler.stream_close_send(conn, stream_id)?;
         self.base_handler.stream_has_pending_data(stream_id);
+        self.needs_processing = true;
         Ok(())
     }
 
@@ -95,6 +103,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
     ) -> Res<()> {
         qinfo!([self], "reset_stream {} error={}.", stream_id, error);
+        self.needs_processing = true;
         self.base_handler.cancel_fetch(stream_id, error, conn)
     }
 
@@ -105,6 +114,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
     ) -> Res<()> {
         qinfo!([self], "stream_stop_sending {} error={}.", stream_id, error);
+        self.needs_processing = true;
         self.base_handler
             .stream_stop_sending(conn, stream_id, error)
     }
@@ -116,6 +126,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
     ) -> Res<()> {
         qinfo!([self], "stream_reset_send {} error={}.", stream_id, error);
+        self.needs_processing = true;
         self.base_handler.stream_reset_send(conn, stream_id, error)
     }
 
@@ -126,11 +137,28 @@ impl Http3ServerHandler {
         stream_id: StreamId,
         accept: bool,
     ) -> Res<()> {
+        self.needs_processing = true;
         self.base_handler.webtransport_session_accept(
             conn,
             stream_id,
             Box::new(self.events.clone()),
             accept,
+        )
+    }
+
+    pub fn webtransport_create_stream(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+    ) -> Res<StreamId> {
+        self.needs_processing = true;
+        self.base_handler.webtransport_create_stream_local(
+            conn,
+            session_id,
+            stream_type,
+            Box::new(self.events.clone()),
+            Box::new(self.events.clone()),
         )
     }
 
@@ -189,7 +217,7 @@ impl Http3ServerHandler {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
-                    self.base_handler.add_new_stream(stream_id, Role::Server);
+                    self.base_handler.add_new_stream(stream_id);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.handle_stream_readable(conn, stream_id)?;
@@ -261,6 +289,17 @@ impl Http3ServerHandler {
                 assert_eq!(ReceiveOutput::NoOutput, res);
                 Ok(())
             }
+            ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
+                self.base_handler.webtransport_create_stream_remote(
+                    StreamId::from(session_id),
+                    stream_id,
+                    Box::new(self.events.clone()),
+                    Box::new(self.events.clone()),
+                )?;
+                let res = self.base_handler.handle_stream_readable(conn, stream_id)?;
+                assert_eq!(ReceiveOutput::NoOutput, res);
+                Ok(())
+            }
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
@@ -307,7 +346,7 @@ impl Http3ServerHandler {
     /// # Errors
     /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
     /// early close, protocol error, etc.
-    pub fn read_request_data(
+    pub fn read_data(
         &mut self,
         conn: &mut Connection,
         now: Instant,

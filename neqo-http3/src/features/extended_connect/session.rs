@@ -7,16 +7,19 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{ExtendedConnectEvents, ExtendedConnectType};
-use crate::{CloseType, Error, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
-use neqo_common::{qtrace, Headers};
+use crate::{
+    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
+};
+use neqo_common::{qtrace, Headers, Role};
 use neqo_transport::{AppError, StreamId};
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 enum SessionState {
     Negotiating,
-    Active,
+    Active(StreamId),
     Done,
 }
 
@@ -25,6 +28,9 @@ pub struct ExtendedConnectSession {
     connect_type: ExtendedConnectType,
     state: SessionState,
     events: Box<dyn ExtendedConnectEvents>,
+    send_streams: BTreeSet<StreamId>,
+    recv_streams: BTreeSet<StreamId>,
+    role: Role,
 }
 
 impl ::std::fmt::Display for ExtendedConnectSession {
@@ -39,11 +45,18 @@ impl ::std::fmt::Display for ExtendedConnectSession {
 
 impl ExtendedConnectSession {
     #[must_use]
-    pub fn new(connect_type: ExtendedConnectType, events: Box<dyn ExtendedConnectEvents>) -> Self {
+    pub fn new(
+        connect_type: ExtendedConnectType,
+        events: Box<dyn ExtendedConnectEvents>,
+        role: Role,
+    ) -> Self {
         Self {
             connect_type,
             state: SessionState::Negotiating,
             events,
+            send_streams: BTreeSet::new(),
+            recv_streams: BTreeSet::new(),
+            role,
         }
     }
 
@@ -56,38 +69,81 @@ impl ExtendedConnectSession {
         self.events.session_end(self.connect_type, stream_id, error);
     }
 
-    fn negotiation_done(&mut self, stream_id: StreamId, succeeded: bool) {
+    pub fn negotiation_done(&mut self, stream_id: StreamId, succeeded: bool) {
         if self.state == SessionState::Done {
             return;
         }
         self.state = if succeeded {
             self.events.session_start(self.connect_type, stream_id);
-            SessionState::Active
+            SessionState::Active(stream_id)
         } else {
             self.events.session_end(self.connect_type, stream_id, None);
             SessionState::Done
         };
     }
+
+    pub fn add_stream(&mut self, stream_id: StreamId) {
+        if let SessionState::Active(session_id) = self.state {
+            if stream_id.is_bidi() {
+                self.send_streams.insert(stream_id);
+                self.recv_streams.insert(stream_id);
+            } else if stream_id.is_self_initiated(self.role) {
+                self.send_streams.insert(stream_id);
+            } else {
+                self.recv_streams.insert(stream_id);
+            }
+
+            if !stream_id.is_self_initiated(self.role) {
+                self.events
+                    .extended_connect_new_stream(Http3StreamInfo::new(
+                        stream_id,
+                        self.connect_type.get_stream_type(session_id),
+                    ));
+            }
+        }
+    }
+
+    pub fn remove_recv_stream(&mut self, stream_id: StreamId) {
+        self.recv_streams.remove(&stream_id);
+    }
+
+    pub fn remove_send_stream(&mut self, stream_id: StreamId) {
+        self.send_streams.remove(&stream_id);
+    }
+
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        matches!(self.state, SessionState::Active(_))
+    }
 }
 
 impl RecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
-    fn data_readable(&self, stream_id: StreamId) {
+    fn data_readable(&self, stream_info: Http3StreamInfo) {
         // A session request is not expected to receive any data. This may change in
         // the future.
-        self.borrow_mut()
-            .close(stream_id, Some(Error::HttpGeneralProtocolStream.code()));
+        self.borrow_mut().close(
+            stream_info.stream_id(),
+            Some(Error::HttpGeneralProtocolStream.code()),
+        );
     }
 
-    fn recv_closed(&self, stream_id: StreamId, close_type: CloseType) {
-        self.borrow_mut().close(stream_id, close_type.error());
+    fn recv_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
+        self.borrow_mut()
+            .close(stream_info.stream_id(), close_type.error());
     }
 }
 
 impl HttpRecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
-    fn header_ready(&self, stream_id: StreamId, headers: Headers, _interim: bool, _fin: bool) {
+    fn header_ready(
+        &self,
+        stream_info: Http3StreamInfo,
+        headers: Headers,
+        _interim: bool,
+        _fin: bool,
+    ) {
         qtrace!("ExtendedConnect response headers {:?}", headers);
         self.borrow_mut().negotiation_done(
-            stream_id,
+            stream_info.stream_id(),
             headers
                 .iter()
                 .find_map(|h| {
@@ -103,10 +159,11 @@ impl HttpRecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
 }
 
 impl SendStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
-    fn data_writable(&self, _stream_id: StreamId) {}
+    fn data_writable(&self, _stream_info: Http3StreamInfo) {}
 
     /// Add a new `StopSending` event
-    fn send_closed(&self, stream_id: StreamId, close_type: CloseType) {
-        self.borrow_mut().close(stream_id, close_type.error());
+    fn send_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
+        self.borrow_mut()
+            .close(stream_info.stream_id(), close_type.error());
     }
 }

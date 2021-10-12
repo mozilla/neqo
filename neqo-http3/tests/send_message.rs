@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use neqo_common::event::Provider;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    ClientRequestStream, Error, Header, Http3Client, Http3ClientEvent, Http3Server,
+    Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
     Http3ServerEvent, Priority,
 };
 use test_fixture::*;
@@ -36,10 +36,10 @@ fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     }
 }
 
-fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
+fn receive_request(server: &mut Http3Server) -> Option<Http3OrWebTransportStream> {
     while let Some(event) = server.next_event() {
         if let Http3ServerEvent::Headers {
-            request,
+            stream,
             headers,
             fin,
         } = event
@@ -54,24 +54,24 @@ fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
                 ]
             );
             assert!(fin);
-            return Some(request);
+            return Some(stream);
         }
     }
     None
 }
 
-fn send_trailers(request: &mut ClientRequestStream) -> Result<(), Error> {
+fn send_trailers(request: &mut Http3OrWebTransportStream) -> Result<(), Error> {
     request.send_headers(&[
         Header::new("something1", "something"),
         Header::new("something2", "3"),
     ])
 }
 
-fn send_informational_headers(request: &mut ClientRequestStream) -> Result<(), Error> {
+fn send_informational_headers(request: &mut Http3OrWebTransportStream) -> Result<(), Error> {
     request.send_headers(&RESPONSE_HEADER_103)
 }
 
-fn send_headers(request: &mut ClientRequestStream) -> Result<(), Error> {
+fn send_headers(request: &mut Http3OrWebTransportStream) -> Result<(), Error> {
     request.send_headers(&[
         Header::new(":status", "200"),
         Header::new("content-length", "3"),
@@ -97,7 +97,7 @@ fn process_client_events(conn: &mut Http3Client) {
             }
             Http3ClientEvent::DataReadable { stream_id } => {
                 let mut buf = [0u8; 100];
-                let (amount, fin) = conn.read_response_data(now(), stream_id, &mut buf).unwrap();
+                let (amount, fin) = conn.read_data(now(), stream_id, &mut buf).unwrap();
                 assert!(fin);
                 assert_eq!(amount, RESPONSE_DATA.len());
                 assert_eq!(&buf[..RESPONSE_DATA.len()], RESPONSE_DATA);
@@ -122,7 +122,7 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
             }
             Http3ClientEvent::DataReadable { stream_id } => {
                 let mut buf = [0u8; 100];
-                let (amount, fin) = conn.read_response_data(now(), stream_id, &mut buf).unwrap();
+                let (amount, fin) = conn.read_data(now(), stream_id, &mut buf).unwrap();
                 assert!(fin);
                 fin_received = true;
                 assert_eq!(amount, 0);
@@ -134,7 +134,7 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
     assert!(fin_received);
 }
 
-fn connect_send_and_receive_request() -> (Http3Client, Http3Server, ClientRequestStream) {
+fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 

@@ -6,8 +6,9 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::Http3Connection;
 use crate::hframe::HFrame;
-use crate::{CloseType, HttpRecvStreamEvents, RecvStreamEvents};
-use crate::{Error, Headers, Res};
+use crate::{
+    CloseType, Error, Headers, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
+};
 use neqo_common::{qerror, qinfo, qtrace};
 use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
@@ -468,7 +469,7 @@ impl RecvPushEvents {
 }
 
 impl RecvStreamEvents for RecvPushEvents {
-    fn data_readable(&self, _stream_id: StreamId) {
+    fn data_readable(&self, _stream_info: Http3StreamInfo) {
         self.push_handler.borrow_mut().new_stream_event(
             self.push_id,
             Http3ClientEvent::PushDataReadable {
@@ -477,7 +478,7 @@ impl RecvStreamEvents for RecvPushEvents {
         );
     }
 
-    fn recv_closed(&self, _stream_id: StreamId, close_type: CloseType) {
+    fn recv_closed(&self, _stream_info: Http3StreamInfo, close_type: CloseType) {
         match close_type {
             CloseType::ResetApp(_) => {}
             CloseType::ResetRemote(_) | CloseType::LocalError(_) => self
@@ -490,7 +491,13 @@ impl RecvStreamEvents for RecvPushEvents {
 }
 
 impl HttpRecvStreamEvents for RecvPushEvents {
-    fn header_ready(&self, _stream_id: StreamId, headers: Headers, interim: bool, fin: bool) {
+    fn header_ready(
+        &self,
+        _stream_info: Http3StreamInfo,
+        headers: Headers,
+        interim: bool,
+        fin: bool,
+    ) {
         self.push_handler.borrow_mut().new_stream_event(
             self.push_id,
             Http3ClientEvent::PushHeaderReady {

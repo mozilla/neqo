@@ -10,15 +10,15 @@ use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{
-    ClientRequestStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest,
+    Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents, WebTransportRequest,
 };
 use crate::settings::HttpZeroRttChecker;
-use crate::{Http3Parameters, Res};
+use crate::{Http3Parameters, Http3StreamInfo, Res};
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{
-    tparams::PreferredAddress, ConnectionIdGenerator, ConnectionParameters, Output, StreamId,
+    tparams::PreferredAddress, ConnectionIdGenerator, ConnectionParameters, Output,
 };
 use std::cell::RefCell;
 use std::cell::RefMut;
@@ -149,70 +149,92 @@ impl Http3Server {
         active_conns
             .iter()
             .for_each(|conn| self.server.add_to_waiting(conn.clone()));
-        let http3_parameters = self.http3_parameters;
         for mut conn in active_conns {
+            self.process_events(&mut conn, now);
+        }
+    }
+
+    fn process_events(&mut self, conn: &mut ActiveConnectionRef, now: Instant) {
+        let mut remove = false;
+        let http3_parameters = self.http3_parameters;
+        {
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
                 Rc::new(RefCell::new(Http3ServerHandler::new(http3_parameters)))
             });
-
             handler
                 .borrow_mut()
                 .process_http3(&mut conn.borrow_mut(), now);
-            let mut remove = false;
-            {
-                let mut handler_borrowed = handler.borrow_mut();
-                while let Some(e) = handler_borrowed.next_event() {
-                    match e {
-                        Http3ServerConnEvent::Headers {
-                            stream_id,
-                            headers,
-                            fin,
-                        } => self.events.headers(
-                            ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
-                            headers,
-                            fin,
-                        ),
-                        Http3ServerConnEvent::DataReadable { stream_id } => {
-                            prepare_data(
-                                stream_id,
-                                &mut handler_borrowed,
-                                &mut conn,
-                                handler,
-                                now,
-                                &mut self.events,
-                            );
-                        }
-                        Http3ServerConnEvent::StateChange(state) => {
-                            self.events
-                                .connection_state_change(conn.clone(), state.clone());
-                            if let Http3State::Closed { .. } = state {
-                                remove = true;
-                            }
-                        }
-                        Http3ServerConnEvent::PriorityUpdate {
-                            stream_id,
-                            priority,
-                        } => {
-                            self.events.priority_update(stream_id, priority);
-                        }
-                        Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
-                            self.events.webtransport_new_session(
-                                WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
-                                headers,
-                            );
-                        }
-                        Http3ServerConnEvent::ExtendedConnectClosed {
-                            stream_id, error, ..
-                        } => self.events.webtransport_session_closed(
-                            WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
-                            error,
-                        ),
+            let mut handler_borrowed = handler.borrow_mut();
+            while let Some(e) = handler_borrowed.next_event() {
+                match e {
+                    Http3ServerConnEvent::Headers {
+                        stream_info,
+                        headers,
+                        fin,
+                    } => self.events.headers(
+                        Http3OrWebTransportStream::new(conn.clone(), handler.clone(), stream_info),
+                        headers,
+                        fin,
+                    ),
+                    Http3ServerConnEvent::DataReadable { stream_info } => {
+                        prepare_data(
+                            stream_info,
+                            &mut handler_borrowed,
+                            conn,
+                            handler,
+                            now,
+                            &mut self.events,
+                        );
                     }
+                    Http3ServerConnEvent::StreamReset { stream_info, error } => {
+                        self.events
+                            .stream_reset(conn.clone(), handler.clone(), stream_info, error);
+                    }
+                    Http3ServerConnEvent::StreamStopSending { stream_info, error } => {
+                        self.events.stream_stop_sending(
+                            conn.clone(),
+                            handler.clone(),
+                            stream_info,
+                            error,
+                        );
+                    }
+                    Http3ServerConnEvent::StateChange(state) => {
+                        self.events
+                            .connection_state_change(conn.clone(), state.clone());
+                        if let Http3State::Closed { .. } = state {
+                            remove = true;
+                        }
+                    }
+                    Http3ServerConnEvent::PriorityUpdate {
+                        stream_id,
+                        priority,
+                    } => {
+                        self.events.priority_update(stream_id, priority);
+                    }
+                    Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
+                        self.events.webtransport_new_session(
+                            WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
+                            headers,
+                        );
+                    }
+                    Http3ServerConnEvent::ExtendedConnectClosed {
+                        stream_id, error, ..
+                    } => self.events.webtransport_session_closed(
+                        WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
+                        error,
+                    ),
+                    Http3ServerConnEvent::ExtendedConnectNewStream(stream_info) => self
+                        .events
+                        .webtransport_new_stream(Http3OrWebTransportStream::new(
+                            conn.clone(),
+                            handler.clone(),
+                            stream_info,
+                        )),
                 }
             }
-            if remove {
-                self.http3_handlers.remove(&conn.clone());
-            }
+        }
+        if remove {
+            self.http3_handlers.remove(&conn.clone());
         }
     }
 
@@ -236,7 +258,7 @@ impl Http3Server {
     }
 }
 fn prepare_data(
-    stream_id: StreamId,
+    stream_info: Http3StreamInfo,
     handler_borrowed: &mut RefMut<Http3ServerHandler>,
     conn: &mut ActiveConnectionRef,
     handler: &HandlerRef,
@@ -245,18 +267,19 @@ fn prepare_data(
 ) {
     loop {
         let mut data = vec![0; MAX_EVENT_DATA_SIZE];
-        let res =
-            handler_borrowed.read_request_data(&mut conn.borrow_mut(), now, stream_id, &mut data);
+        let res = handler_borrowed.read_data(
+            &mut conn.borrow_mut(),
+            now,
+            stream_info.stream_id(),
+            &mut data,
+        );
         if let Ok((amount, fin)) = res {
-            if amount > 0 {
+            if amount > 0 || fin {
                 if amount < MAX_EVENT_DATA_SIZE {
                     data.resize(amount, 0);
                 }
-                events.data(
-                    ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
-                    data,
-                    fin,
-                );
+
+                events.data(conn.clone(), handler.clone(), stream_info, data, fin);
             }
             if amount < MAX_EVENT_DATA_SIZE || fin {
                 break;
@@ -871,22 +894,24 @@ mod tests {
                     headers_frames += 1;
                 }
                 Http3ServerEvent::Data {
-                    mut request,
+                    mut stream,
                     data,
                     fin,
                 } => {
                     assert_eq!(data, REQUEST_BODY);
                     assert!(fin);
-                    request
+                    stream
                         .send_headers(&[
                             Header::new(":status", "200"),
                             Header::new("content-length", "3"),
                         ])
                         .unwrap();
-                    request.send_data(RESPONSE_BODY).unwrap();
+                    stream.send_data(RESPONSE_BODY).unwrap();
                     data_received += 1;
                 }
-                Http3ServerEvent::StateChange { .. }
+                Http3ServerEvent::StreamReset { .. }
+                | Http3ServerEvent::StreamStopSending { .. }
+                | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_) => {}
             }
@@ -913,28 +938,30 @@ mod tests {
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers {
-                    mut request,
+                    mut stream,
                     headers,
                     fin,
                 } => {
                     check_request_header(&headers);
                     assert!(!fin);
                     headers_frames += 1;
-                    request
+                    stream
                         .stream_stop_sending(Error::HttpNoError.code())
                         .unwrap();
-                    request
+                    stream
                         .send_headers(&[
                             Header::new(":status", "200"),
                             Header::new("content-length", "3"),
                         ])
                         .unwrap();
-                    request.send_data(RESPONSE_BODY).unwrap();
+                    stream.send_data(RESPONSE_BODY).unwrap();
                 }
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StateChange { .. }
+                Http3ServerEvent::StreamReset { .. }
+                | Http3ServerEvent::StreamStopSending { .. }
+                | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_) => {}
             }
@@ -958,7 +985,9 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StateChange { .. }
+                Http3ServerEvent::StreamReset { .. }
+                | Http3ServerEvent::StreamStopSending { .. }
+                | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_) => {}
             }
@@ -985,21 +1014,23 @@ mod tests {
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers {
-                    mut request,
+                    mut stream,
                     headers,
                     fin,
                 } => {
                     check_request_header(&headers);
                     assert!(!fin);
                     headers_frames += 1;
-                    request
+                    stream
                         .cancel_fetch(Error::HttpRequestRejected.code())
                         .unwrap();
                 }
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StateChange { .. }
+                Http3ServerEvent::StreamReset { .. }
+                | Http3ServerEvent::StreamStopSending { .. }
+                | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_) => {}
             }
@@ -1218,14 +1249,16 @@ mod tests {
         let mut requests = HashMap::new();
         while let Some(event) = hconn.next_event() {
             match event {
-                Http3ServerEvent::Headers { request, .. } => {
-                    assert!(requests.get(&request).is_none());
-                    requests.insert(request, 0);
+                Http3ServerEvent::Headers { stream, .. } => {
+                    assert!(requests.get(&stream).is_none());
+                    requests.insert(stream, 0);
                 }
-                Http3ServerEvent::Data { request, .. } => {
-                    assert!(requests.get(&request).is_some());
+                Http3ServerEvent::Data { stream, .. } => {
+                    assert!(requests.get(&stream).is_some());
                 }
-                Http3ServerEvent::StateChange { .. }
+                Http3ServerEvent::StreamReset { .. }
+                | Http3ServerEvent::StreamStopSending { .. }
+                | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_) => {}
             }

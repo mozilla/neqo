@@ -9,18 +9,18 @@
 use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    ClientRequestStream, Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent,
-    Http3State, Priority,
+    Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
+    Http3ServerEvent, Http3State, Priority,
 };
 use std::mem;
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
 
-fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
+fn receive_request(server: &mut Http3Server) -> Option<Http3OrWebTransportStream> {
     while let Some(event) = server.next_event() {
         if let Http3ServerEvent::Headers {
-            request,
+            stream,
             headers,
             fin,
         } = event
@@ -35,13 +35,14 @@ fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
                 ]
             );
             assert!(fin);
-            return Some(request);
+
+            return Some(stream);
         }
     }
     None
 }
 
-fn set_response(request: &mut ClientRequestStream) {
+fn set_response(request: &mut Http3OrWebTransportStream) {
     request
         .send_headers(&[
             Header::new(":status", "200"),
@@ -75,7 +76,7 @@ fn process_client_events(conn: &mut Http3Client) {
             }
             Http3ClientEvent::DataReadable { stream_id } => {
                 let mut buf = [0u8; 100];
-                let (amount, fin) = conn.read_response_data(now(), stream_id, &mut buf).unwrap();
+                let (amount, fin) = conn.read_data(now(), stream_id, &mut buf).unwrap();
                 assert!(fin);
                 assert_eq!(amount, RESPONSE_DATA.len());
                 assert_eq!(&buf[..RESPONSE_DATA.len()], RESPONSE_DATA);
