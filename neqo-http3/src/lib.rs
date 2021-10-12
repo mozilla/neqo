@@ -47,7 +47,7 @@ pub use neqo_common::{Error as CommonError, Header, Headers, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{
-    ClientRequestStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
+    Http3OrWebTransportStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
 };
 pub use settings::HttpZeroRttChecker;
 pub use stream_type_reader::NewStreamType;
@@ -292,7 +292,7 @@ impl ::std::fmt::Display for Error {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Http3StreamType {
     Control,
     Decoder,
@@ -300,6 +300,7 @@ pub enum Http3StreamType {
     NewStream,
     Http,
     Push,
+    WebTransport(StreamId),
     Unknown,
 }
 
@@ -363,13 +364,54 @@ pub trait HttpRecvStream: RecvStream {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct Http3StreamInfo {
+    stream_id: StreamId,
+    stream_type: Http3StreamType,
+}
+
+impl Http3StreamInfo {
+    #[must_use]
+    pub fn new(stream_id: StreamId, stream_type: Http3StreamType) -> Self {
+        Self {
+            stream_id,
+            stream_type,
+        }
+    }
+
+    #[must_use]
+    pub fn stream_id(&self) -> StreamId {
+        self.stream_id
+    }
+
+    #[must_use]
+    pub fn session_id(&self) -> Option<StreamId> {
+        if let Http3StreamType::WebTransport(session) = self.stream_type {
+            Some(session)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn is_http(&self) -> bool {
+        self.stream_type == Http3StreamType::Http
+    }
+}
+
 pub trait RecvStreamEvents: Debug {
-    fn data_readable(&self, stream_id: StreamId);
-    fn recv_closed(&self, _stream_id: StreamId, _close_type: CloseType) {}
+    fn data_readable(&self, stream_id: Http3StreamInfo);
+    fn recv_closed(&self, _stream_id: Http3StreamInfo, _close_type: CloseType) {}
 }
 
 pub trait HttpRecvStreamEvents: RecvStreamEvents {
-    fn header_ready(&self, stream_id: StreamId, headers: Headers, interim: bool, fin: bool);
+    fn header_ready(
+        &self,
+        stream_info: Http3StreamInfo,
+        headers: Headers,
+        interim: bool,
+        fin: bool,
+    );
     fn extended_connect_new_session(&self, _stream_id: StreamId, _headers: Headers) {}
 }
 
@@ -405,8 +447,8 @@ pub trait HttpSendStream: SendStream {
 }
 
 pub trait SendStreamEvents: Debug {
-    fn send_closed(&self, _stream_id: StreamId, _close_type: CloseType) {}
-    fn data_writable(&self, _stream_id: StreamId) {}
+    fn send_closed(&self, _stream_id: Http3StreamInfo, _close_type: CloseType) {}
+    fn data_writable(&self, _stream_id: Http3StreamInfo) {}
 }
 
 /// This enum is used to mark a different type of closing a stream:

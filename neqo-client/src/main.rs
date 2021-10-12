@@ -511,7 +511,7 @@ impl<'a> Handler<'a> {
                         Some(out_file) => loop {
                             let mut data = vec![0; 4096];
                             let (sz, fin) = client
-                                .read_response_data(Instant::now(), stream_id, &mut data)
+                                .read_data(Instant::now(), stream_id, &mut data)
                                 .expect("Read should succeed");
 
                             if let Some(out_file) = out_file {

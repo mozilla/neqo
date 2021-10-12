@@ -340,7 +340,7 @@ impl H3Handler {
 
                     let (_sz, fin) = self
                         .h3
-                        .read_response_data(Instant::now(), stream_id, &mut data)
+                        .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     if let Ok(txt) = String::from_utf8(data.clone()) {
                         eprintln!("READ[{}]: {}", stream_id, txt);

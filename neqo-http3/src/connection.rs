@@ -9,6 +9,7 @@
 use crate::control_stream_local::ControlStreamLocal;
 use crate::control_stream_remote::ControlStreamRemote;
 use crate::features::extended_connect::{
+    webtransport::{WebTransportRecvStream, WebTransportSendStream},
     ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectSession, ExtendedConnectType,
 };
 use crate::hframe::HFrame;
@@ -23,7 +24,7 @@ use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
     client_events::Http3ClientEvents, CloseType, Header, Http3Parameters, Http3StreamType,
     HttpRecvStreamEvents, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStream,
-    SendStream, SendStreamEvents,
+    RecvStreamEvents, SendStream, SendStreamEvents,
 };
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Headers, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
@@ -77,6 +78,7 @@ impl Http3State {
 
 #[derive(Debug)]
 pub(crate) struct Http3Connection {
+    role: Role,
     pub state: Http3State,
     local_params: Http3Parameters,
     control_stream_local: ControlStreamLocal,
@@ -97,7 +99,7 @@ impl ::std::fmt::Display for Http3Connection {
 
 impl Http3Connection {
     /// Create a new connection.
-    pub fn new(conn_params: Http3Parameters) -> Self {
+    pub fn new(conn_params: Http3Parameters, role: Role) -> Self {
         Self {
             state: Http3State::Initializing,
             control_stream_local: ControlStreamLocal::new(),
@@ -117,6 +119,7 @@ impl Http3Connection {
             streams_with_pending_data: BTreeSet::new(),
             send_streams: HashMap::new(),
             recv_streams: HashMap::new(),
+            role,
         }
     }
 
@@ -222,11 +225,11 @@ impl Http3Connection {
         }
     }
 
-    pub fn add_new_stream(&mut self, stream_id: StreamId, role: Role) {
+    pub fn add_new_stream(&mut self, stream_id: StreamId) {
         qtrace!([self], "A new stream: {}.", stream_id);
         self.recv_streams.insert(
             stream_id,
-            Box::new(NewStreamHeadReader::new(stream_id, role)),
+            Box::new(NewStreamHeadReader::new(stream_id, self.role)),
         );
     }
 
@@ -297,7 +300,8 @@ impl Http3Connection {
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(NewStreamType::Push(_))
-            | ReceiveOutput::NewStream(NewStreamType::Http) => Ok(output),
+            | ReceiveOutput::NewStream(NewStreamType::Http)
+            | ReceiveOutput::NewStream(NewStreamType::WebTransportStream(_)) => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
@@ -464,7 +468,17 @@ impl Http3Connection {
             NewStreamType::Http => {
                 qinfo!([self], "A new http stream {}.", stream_id);
             }
-            NewStreamType::WebTransportStream(_) | NewStreamType::Unknown => {
+            NewStreamType::WebTransportStream(session_id) => {
+                if self
+                    .webtransport
+                    .get_session(StreamId::from(session_id))
+                    .is_none()
+                {
+                    conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
+                    return Ok(ReceiveOutput::NoOutput);
+                }
+            }
+            NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
         };
@@ -473,12 +487,10 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id)
             }
-            NewStreamType::Push(_) | NewStreamType::Http => {
+            NewStreamType::Push(_) | NewStreamType::Http | NewStreamType::WebTransportStream(_) => {
                 Ok(ReceiveOutput::NewStream(stream_type))
             }
-            NewStreamType::WebTransportStream(_) | NewStreamType::Unknown => {
-                Ok(ReceiveOutput::NoOutput)
-            }
+            NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
         }
     }
 
@@ -647,8 +659,6 @@ impl Http3Connection {
             .recv_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .http_stream()
-            .ok_or(Error::InvalidStreamId)?
             .read_data(conn, buf);
         self.handle_stream_manipulation_output(res, stream_id, conn)
     }
@@ -782,6 +792,7 @@ impl Http3Connection {
         let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(
             ExtendedConnectType::WebTransport,
             events,
+            self.role,
         )));
         let id = self.fetch(
             conn,
@@ -859,6 +870,7 @@ impl Http3Connection {
                     let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(
                         ExtendedConnectType::WebTransport,
                         events,
+                        self.role,
                     )));
                     s.http_stream()
                         .unwrap()
@@ -866,6 +878,7 @@ impl Http3Connection {
                     r.http_stream()
                         .unwrap()
                         .set_new_listener(Box::new(extended_conn.clone()));
+                    extended_conn.borrow_mut().negotiation_done(stream_id, true);
                     self.webtransport.insert(stream_id, extended_conn);
                     self.streams_with_pending_data.insert(stream_id);
                 } else {
@@ -873,6 +886,126 @@ impl Http3Connection {
                 }
                 Ok(())
             }
+        }
+    }
+
+    pub fn webtransport_create_stream_local(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn RecvStreamEvents>,
+    ) -> Res<StreamId> {
+        qtrace!(
+            "Create new WebTransport stream session={} type={:?}",
+            session_id,
+            stream_type
+        );
+
+        let wt = self
+            .webtransport
+            .get_session(session_id)
+            .ok_or(Error::InvalidStreamId)?;
+        if !wt.borrow().is_active() {
+            return Err(Error::InvalidStreamId);
+        }
+
+        let stream_id = conn
+            .stream_create(stream_type)
+            .map_err(|e| Error::map_stream_create_errors(&e))?;
+
+        self.webtransport_create_stream_internal(
+            wt,
+            stream_id,
+            session_id,
+            send_events,
+            recv_events,
+            true,
+        );
+        Ok(stream_id)
+    }
+
+    pub fn webtransport_create_stream_remote(
+        &mut self,
+        session_id: StreamId,
+        stream_id: StreamId,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn RecvStreamEvents>,
+    ) -> Res<()> {
+        qtrace!(
+            "Create new WebTransport stream session={} stream_id={}",
+            session_id,
+            stream_id
+        );
+
+        let wt = self
+            .webtransport
+            .get_session(session_id)
+            .ok_or(Error::InvalidStreamId)?;
+
+        self.webtransport_create_stream_internal(
+            wt,
+            stream_id,
+            session_id,
+            send_events,
+            recv_events,
+            false,
+        );
+        Ok(())
+    }
+
+    fn webtransport_create_stream_internal(
+        &mut self,
+        webtransport_session: Rc<RefCell<ExtendedConnectSession>>,
+        stream_id: StreamId,
+        session_id: StreamId,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn RecvStreamEvents>,
+        local: bool,
+    ) {
+        // TODO conn.stream_keep_alive(stream_id, true)?;
+        webtransport_session.borrow_mut().add_stream(stream_id);
+        if stream_id.stream_type() == StreamType::UniDi {
+            if local {
+                self.send_streams.insert(
+                    stream_id,
+                    Box::new(WebTransportSendStream::new(
+                        stream_id,
+                        session_id,
+                        send_events,
+                        webtransport_session,
+                        true,
+                    )),
+                );
+            } else {
+                self.recv_streams.insert(
+                    stream_id,
+                    Box::new(WebTransportRecvStream::new(
+                        stream_id,
+                        session_id,
+                        recv_events,
+                        webtransport_session,
+                    )),
+                );
+            }
+        } else {
+            self.add_streams(
+                stream_id,
+                Box::new(WebTransportSendStream::new(
+                    stream_id,
+                    session_id,
+                    send_events,
+                    webtransport_session.clone(),
+                    local,
+                )),
+                Box::new(WebTransportRecvStream::new(
+                    stream_id,
+                    session_id,
+                    recv_events,
+                    webtransport_session,
+                )),
+            );
         }
     }
 

@@ -272,11 +272,11 @@ impl HttpServer for Http3Server {
         while let Some(event) = self.next_event() {
             match event {
                 Http3ServerEvent::Headers {
-                    mut request,
+                    mut stream,
                     headers,
                     fin,
                 } => {
-                    println!("Headers (request={} fin={}): {:?}", request, fin, headers);
+                    println!("Headers (request={} fin={}): {:?}", stream, fin, headers);
 
                     let default_ret = b"Hello World".to_vec();
 
@@ -292,7 +292,7 @@ impl HttpServer for Http3Server {
                     });
 
                     if response.is_none() {
-                        request
+                        stream
                             .cancel_fetch(Error::HttpRequestIncomplete.code())
                             .unwrap();
                         continue;
@@ -300,17 +300,17 @@ impl HttpServer for Http3Server {
 
                     let response = response.unwrap();
 
-                    request
+                    stream
                         .send_headers(&[
                             Header::new(":status", "200"),
                             Header::new("content-length", response.len()),
                         ])
                         .unwrap();
-                    request.send_data(&response).unwrap();
-                    request.stream_close_send().unwrap();
+                    stream.send_data(&response).unwrap();
+                    stream.stream_close_send().unwrap();
                 }
-                Http3ServerEvent::Data { request, data, fin } => {
-                    println!("Data (request={} fin={}): {:?}", request, fin, data);
+                Http3ServerEvent::Data { stream, data, fin } => {
+                    println!("Data (request={} fin={}): {:?}", stream, fin, data);
                 }
                 _ => {}
             }

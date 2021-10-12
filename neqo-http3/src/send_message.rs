@@ -6,8 +6,8 @@
 
 use crate::hframe::HFrame;
 use crate::{
-    qlog, BufferedStream, CloseType, Error, Header, Headers, Http3StreamType, HttpSendStream, Res,
-    SendStream, SendStreamEvents, Stream,
+    qlog, BufferedStream, CloseType, Error, Header, Headers, Http3StreamInfo, Http3StreamType,
+    HttpSendStream, Res, SendStream, SendStreamEvents, Stream,
 };
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder, MessageType};
@@ -150,6 +150,10 @@ impl SendMessage {
     fn stream_id(&self) -> StreamId {
         Option::<StreamId>::from(&self.stream).unwrap()
     }
+
+    fn get_stream_info(&self) -> Http3StreamInfo {
+        Http3StreamInfo::new(self.stream_id(), Http3StreamType::Http)
+    }
 }
 
 impl Stream for SendMessage {
@@ -222,7 +226,7 @@ impl SendStream for SendMessage {
             // DataWritable is just a signal for an application to try to write more data,
             // if writing fails it is fine. Therefore we do not need to properly check
             // whether more credits are available on the transport layer.
-            self.conn_events.data_writable(self.stream_id());
+            self.conn_events.data_writable(self.get_stream_info());
         }
     }
 
@@ -237,7 +241,6 @@ impl SendStream for SendMessage {
         qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id(), sent);
 
         qtrace!([self], "{} bytes sent", sent);
-
         if !self.stream.has_buffered_data() {
             if self.state.done() {
                 Error::map_error(
@@ -249,7 +252,7 @@ impl SendStream for SendMessage {
                 // DataWritable is just a signal for an application to try to write more data,
                 // if writing fails it is fine. Therefore we do not need to properly check
                 // whether more credits are available on the transport layer.
-                self.conn_events.data_writable(self.stream_id());
+                self.conn_events.data_writable(self.get_stream_info());
             }
         }
         Ok(())
@@ -269,13 +272,14 @@ impl SendStream for SendMessage {
         }
 
         self.conn_events
-            .send_closed(self.stream_id(), CloseType::Done);
+            .send_closed(self.get_stream_info(), CloseType::Done);
         Ok(())
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {
         if !self.state.done() {
-            self.conn_events.send_closed(self.stream_id(), close_type);
+            self.conn_events
+                .send_closed(self.get_stream_info(), close_type);
         }
     }
 
