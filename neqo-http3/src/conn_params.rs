@@ -39,7 +39,7 @@ impl Http3Parameters {
     /// The table size must be smaller than 1 << 30 by the spec.
     #[must_use]
     pub fn max_table_size_encoder(mut self, mut max_table: u64) -> Self {
-        debug_assert!(max_table <= QPACK_TABLE_SIZE_LIMIT);
+        assert!(max_table <= QPACK_TABLE_SIZE_LIMIT);
         max_table = min(max_table, QPACK_TABLE_SIZE_LIMIT);
         self.qpack_settings.max_table_size_encoder = max_table;
         self
@@ -54,7 +54,7 @@ impl Http3Parameters {
     /// The table size must be smaller than 1 << 30 by the spec.
     #[must_use]
     pub fn max_table_size_decoder(mut self, mut max_table: u64) -> Self {
-        debug_assert!(max_table <= QPACK_TABLE_SIZE_LIMIT);
+        assert!(max_table <= QPACK_TABLE_SIZE_LIMIT);
         max_table = min(max_table, QPACK_TABLE_SIZE_LIMIT);
         self.qpack_settings.max_table_size_decoder = max_table;
         self
