@@ -12,6 +12,13 @@ use neqo_common::qtrace;
 use std::fmt::Debug;
 use std::mem;
 
+/// States:
+/// - `Disable` - it is not turned on for this connection.
+/// - `Negotiating` - the feature is enabled locally, but settings from the peer
+///                  have not been received yet.
+/// - `Negotiated` - the settings have been received and both sides support the feature.
+/// - `NegotiationFailed` - the settings have been received and the peer does not
+///                         support the feature.
 #[derive(Debug)]
 pub enum NegotiationState {
     Disabled,
