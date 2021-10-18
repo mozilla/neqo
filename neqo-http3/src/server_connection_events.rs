@@ -82,14 +82,9 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 }
 
 impl ExtendedConnectEvents for Http3ServerConnEvents {
-    fn extended_connect_session_established(
-        &self,
-        _connect_type: ExtendedConnectType,
-        _stream_id: StreamId,
-    ) {
-    }
+    fn session_start(&self, _connect_type: ExtendedConnectType, _stream_id: StreamId) {}
 
-    fn extended_connect_session_closed(
+    fn session_end(
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,

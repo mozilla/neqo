@@ -424,6 +424,7 @@ pub enum CloseType {
 }
 
 impl CloseType {
+    #[must_use]
     pub fn error(&self) -> Option<AppError> {
         match self {
             Self::ResetApp(error) | Self::ResetRemote(error) | Self::LocalError(error) => {

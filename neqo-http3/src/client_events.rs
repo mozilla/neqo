@@ -158,19 +158,15 @@ impl SendStreamEvents for Http3ClientEvents {
 }
 
 impl ExtendedConnectEvents for Http3ClientEvents {
-    fn extended_connect_session_established(
-        &self,
-        connect_type: ExtendedConnectType,
-        stream_id: StreamId,
-    ) {
+    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId) {
         if connect_type == ExtendedConnectType::WebTransport {
             self.insert(Http3ClientEvent::WebTransport(
                 WebTransportEvent::WebTransportSession(stream_id),
-            ))
+            ));
         }
     }
 
-    fn extended_connect_session_closed(
+    fn session_end(
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
@@ -180,6 +176,8 @@ impl ExtendedConnectEvents for Http3ClientEvents {
             self.insert(Http3ClientEvent::WebTransport(
                 WebTransportEvent::WebTransportSessionClosed { stream_id, error },
             ));
+        } else {
+            unreachable!("There are no other types.");
         }
     }
 }

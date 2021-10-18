@@ -15,6 +15,7 @@ use neqo_transport::{AppError, Connection, StreamId};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -172,19 +173,19 @@ impl ClientRequestStream {
         qinfo!([self], "Set new response.");
         self.stream_handler.stream_close_send()
     }
+}
 
-    /// Request a peer to stop sending a request.
-    /// # Errors
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn stream_stop_sending(&mut self, app_error: AppError) -> Res<()> {
-        self.stream_handler.stream_stop_sending(app_error)
+impl Deref for ClientRequestStream {
+    type Target = StreamHandler;
+    #[must_use]
+    fn deref(&self) -> &Self::Target {
+        &self.stream_handler
     }
+}
 
-    /// Reset a stream/request.
-    /// # Errors
-    /// It may return `InvalidStreamId` if a stream does not exist anymore
-    pub fn cancel_fetch(&mut self, app_error: AppError) -> Res<()> {
-        self.stream_handler.cancel_fetch(app_error)
+impl DerefMut for ClientRequestStream {
+    fn deref_mut(&mut self) -> &mut StreamHandler {
+        &mut self.stream_handler
     }
 }
 
@@ -229,15 +230,15 @@ impl WebTransportRequest {
         }
     }
 
-    /// Respond to a webTransport session request.
+    /// Respond to a `WebTransport` session request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn response(&mut self, accept: bool) -> Res<()> {
-        qinfo!([self], "Set a respons for a WebTransport session.");
+        qinfo!([self], "Set a response for a WebTransport session.");
         self.stream_handler
             .handler
             .borrow_mut()
-            .webtransport_session_response(
+            .webtransport_session_accept(
                 &mut self.stream_handler.conn.borrow_mut(),
                 self.stream_handler.stream_id,
                 accept,

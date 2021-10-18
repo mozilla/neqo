@@ -199,7 +199,7 @@ impl Http3Server {
                             self.events.webtransport_new_session(
                                 WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
                                 headers,
-                            )
+                            );
                         }
                         Http3ServerConnEvent::ExtendedConnectClosed {
                             stream_id, error, ..

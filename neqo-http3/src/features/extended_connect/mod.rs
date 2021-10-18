@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::module_name_repetitions)]
+
 pub mod session;
 
 use crate::client_events::Http3ClientEvents;
@@ -17,12 +19,8 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 pub trait ExtendedConnectEvents: Debug {
-    fn extended_connect_session_established(
-        &self,
-        connect_type: ExtendedConnectType,
-        stream_id: StreamId,
-    );
-    fn extended_connect_session_closed(
+    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId);
+    fn session_end(
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
@@ -36,10 +34,14 @@ pub enum ExtendedConnectType {
 }
 
 impl ExtendedConnectType {
+    #[must_use]
+    #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     pub fn string(&self) -> &str {
         "webtransport"
     }
 
+    #[must_use]
+    #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     pub fn setting_type(&self) -> HSettingType {
         HSettingType::EnableWebTransport
     }
@@ -53,6 +55,7 @@ pub struct ExtendedConnectFeature {
 }
 
 impl ExtendedConnectFeature {
+    #[must_use]
     pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
         Self {
             feature_negotiation: NegotiationState::new(enable, connect_type.setting_type()),
@@ -73,6 +76,7 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.handle_settings(settings);
     }
 
+    #[must_use]
     pub fn enabled(&self) -> bool {
         self.feature_negotiation.enabled()
     }

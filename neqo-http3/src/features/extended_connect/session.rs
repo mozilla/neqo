@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::module_name_repetitions)]
+
 use super::{ExtendedConnectEvents, ExtendedConnectType};
 use crate::{CloseType, Error, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
 use neqo_common::{qtrace, Headers};
@@ -36,6 +38,7 @@ impl ::std::fmt::Display for ExtendedConnectSession {
 }
 
 impl ExtendedConnectSession {
+    #[must_use]
     pub fn new(connect_type: ExtendedConnectType, events: Box<dyn ExtendedConnectEvents>) -> Self {
         Self {
             connect_type,
@@ -50,8 +53,7 @@ impl ExtendedConnectSession {
         }
         qtrace!("ExtendedConnect close the session");
         self.state = SessionState::Done;
-        self.events
-            .extended_connect_session_closed(self.connect_type, stream_id, error);
+        self.events.session_end(self.connect_type, stream_id, error);
     }
 
     fn negotiation_done(&mut self, stream_id: StreamId, succeeded: bool) {
@@ -59,12 +61,10 @@ impl ExtendedConnectSession {
             return;
         }
         self.state = if succeeded {
-            self.events
-                .extended_connect_session_established(self.connect_type, stream_id);
+            self.events.session_start(self.connect_type, stream_id);
             SessionState::Active
         } else {
-            self.events
-                .extended_connect_session_closed(self.connect_type, stream_id, None);
+            self.events.session_end(self.connect_type, stream_id, None);
             SessionState::Done
         };
     }
