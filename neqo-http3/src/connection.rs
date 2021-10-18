@@ -15,7 +15,7 @@ use crate::hframe::HFrame;
 use crate::push_controller::PushController;
 use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;
-use crate::recv_message::RecvMessage;
+use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::SendMessage;
 use crate::settings::{HSettingType, HSettings, HttpZeroRttChecker};
@@ -39,9 +39,10 @@ use crate::{Error, Res};
 
 pub struct RequestDescription<'b, 't, T>
 where
-    T: AsRequestTarget<'t> + ?Sized,
+    T: AsRequestTarget<'t> + ?Sized + Debug,
 {
     pub method: &'b str,
+    pub connect_type: Option<ExtendedConnectType>,
     pub target: &'t T,
     pub headers: &'b [Header],
     pub priority: Priority,
@@ -532,6 +533,33 @@ impl Http3Connection {
         output
     }
 
+    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Headers>
+    where
+        T: AsRequestTarget<'t> + ?Sized + Debug,
+    {
+        let target = request
+            .target
+            .as_request_target()
+            .map_err(|_| Error::InvalidRequestTarget)?;
+
+        // Transform pseudo-header fields
+        let mut final_headers = Headers::new(&[
+            Header::new(":method", request.method),
+            Header::new(":scheme", target.scheme()),
+            Header::new(":authority", target.authority()),
+            Header::new(":path", target.path()),
+        ]);
+        if let Some(conn_type) = request.connect_type {
+            final_headers.push(Header::new(":protocol", conn_type.string()));
+        }
+
+        if let Some(priority_header) = request.priority.header() {
+            final_headers.push(priority_header);
+        }
+        final_headers.extend_from_slice(request.headers);
+        Ok(final_headers)
+    }
+
     pub fn fetch<'b, 't, T>(
         &mut self,
         conn: &mut Connection,
@@ -541,17 +569,13 @@ impl Http3Connection {
         request: &RequestDescription<'b, 't, T>,
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'t> + ?Sized,
+        T: AsRequestTarget<'t> + ?Sized + Debug,
     {
-        let target = request
-            .target
-            .as_request_target()
-            .map_err(|_| Error::InvalidRequestTarget)?;
         qinfo!(
             [self],
-            "Fetch method={}, target={:?}",
+            "Fetch method={} target: {:?}",
             request.method,
-            target
+            request.target,
         );
         // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
         match self.state() {
@@ -567,17 +591,7 @@ impl Http3Connection {
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         conn.stream_keep_alive(id, true)?;
 
-        // Transform pseudo-header fields
-        let mut final_headers = Headers::new(&[
-            Header::new(":method", request.method),
-            Header::new(":scheme", target.scheme()),
-            Header::new(":authority", target.authority()),
-            Header::new(":path", target.path()),
-        ]);
-        if let Some(priority_header) = request.priority.header() {
-            final_headers.push(priority_header);
-        }
-        final_headers.extend_from_slice(request.headers);
+        let final_headers = Http3Connection::create_fetch_headers(request)?;
 
         let mut send_message = SendMessage::new(
             MessageType::Request,
@@ -595,14 +609,16 @@ impl Http3Connection {
             id,
             Box::new(send_message),
             Box::new(RecvMessage::new(
-                MessageType::Response,
-                Http3StreamType::Http,
-                id,
+                &RecvMessageInfo {
+                    message_type: MessageType::Response,
+                    stream_type: Http3StreamType::Http,
+                    stream_id: id,
+                    header_frame_type_read: false,
+                },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,
                 push_handler,
                 PriorityHandler::new(false, request.priority),
-                false,
             )),
         );
 
@@ -753,9 +769,10 @@ impl Http3Connection {
         conn: &mut Connection,
         events: Box<dyn ExtendedConnectEvents>,
         target: &'t T,
+        headers: &'t [Header],
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized,
+        T: AsRequestTarget<'x> + ?Sized + Debug,
     {
         qinfo!([self], "Create WebTransport");
         if !self.webtransport_enabled() {
@@ -774,10 +791,8 @@ impl Http3Connection {
             &RequestDescription {
                 method: "CONNECT",
                 target,
-                headers: &[Header::new(
-                    ":protocol",
-                    ExtendedConnectType::WebTransport.string(),
-                )],
+                headers,
+                connect_type: Some(ExtendedConnectType::WebTransport),
                 priority: Priority::default(),
             },
         )?;
@@ -785,7 +800,7 @@ impl Http3Connection {
         Ok(id)
     }
 
-    pub(crate) fn webtransport_session_response(
+    pub(crate) fn webtransport_session_accept(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -823,13 +838,16 @@ impl Http3Connection {
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
+
+                    mem::drop(self.stream_stop_sending(
+                        conn,
+                        stream_id,
+                        Error::HttpRequestRejected.code(),
+                    ));
+                    self.streams_with_pending_data.insert(stream_id);
+                } else {
+                    self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 }
-                mem::drop(self.stream_stop_sending(
-                    conn,
-                    stream_id,
-                    Error::HttpRequestRejected.code(),
-                ));
-                self.streams_with_pending_data.insert(stream_id);
                 Ok(())
             }
             (Some(s), Some(r), true) => {
@@ -843,10 +861,10 @@ impl Http3Connection {
                         events,
                     )));
                     s.http_stream()
-                        .ok_or(Error::InvalidStreamId)?
+                        .unwrap()
                         .set_new_listener(Box::new(extended_conn.clone()));
                     r.http_stream()
-                        .ok_or(Error::InvalidStreamId)?
+                        .unwrap()
                         .set_new_listener(Box::new(extended_conn.clone()));
                     self.webtransport.insert(stream_id, extended_conn);
                     self.streams_with_pending_data.insert(stream_id);

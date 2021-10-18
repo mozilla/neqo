@@ -22,6 +22,14 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::rc::Rc;
 
+#[allow(clippy::module_name_repetitions)]
+pub struct RecvMessageInfo {
+    pub message_type: MessageType,
+    pub stream_type: Http3StreamType,
+    pub stream_id: StreamId,
+    pub header_frame_type_read: bool,
+}
+
 /*
  * Response stream state:
  *    WaitingForResponseHeaders : we wait for headers. in this state we can
@@ -81,29 +89,26 @@ impl ::std::fmt::Display for RecvMessage {
 
 impl RecvMessage {
     pub fn new(
-        message_type: MessageType,
-        stream_type: Http3StreamType,
-        stream_id: StreamId,
+        message_info: &RecvMessageInfo,
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
         conn_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
         priority_handler: PriorityHandler,
-        header_frame_type_read: bool,
     ) -> Self {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders {
-                frame_reader: if header_frame_type_read {
+                frame_reader: if message_info.header_frame_type_read {
                     HFrameReader::new_with_type(H3_FRAME_TYPE_HEADERS)
                 } else {
                     HFrameReader::new()
                 },
             },
-            message_type,
-            stream_type,
+            message_type: message_info.message_type,
+            stream_type: message_info.stream_type,
             qpack_decoder,
             conn_events,
             push_handler,
-            stream_id,
+            stream_id: message_info.stream_id,
             priority_handler,
             blocked_push_promise: VecDeque::new(),
         }

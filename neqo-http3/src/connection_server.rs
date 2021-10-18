@@ -6,7 +6,7 @@
 
 use crate::connection::{Http3Connection, Http3State};
 use crate::hframe::HFrame;
-use crate::recv_message::RecvMessage;
+use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::{
@@ -119,14 +119,14 @@ impl Http3ServerHandler {
         self.base_handler.stream_reset_send(conn, stream_id, error)
     }
 
-    /// Accept a WebTransport Session request
-    pub(crate) fn webtransport_session_response(
+    /// Accept a `WebTransport` Session request
+    pub(crate) fn webtransport_session_accept(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
         accept: bool,
     ) -> Res<()> {
-        self.base_handler.webtransport_session_response(
+        self.base_handler.webtransport_session_accept(
             conn,
             stream_id,
             Box::new(self.events.clone()),
@@ -245,14 +245,16 @@ impl Http3ServerHandler {
                         Box::new(self.events.clone()),
                     )),
                     Box::new(RecvMessage::new(
-                        MessageType::Request,
-                        Http3StreamType::Http,
-                        stream_id,
+                        &RecvMessageInfo {
+                            message_type: MessageType::Request,
+                            stream_type: Http3StreamType::Http,
+                            stream_id,
+                            header_frame_type_read: true,
+                        },
                         Rc::clone(&self.base_handler.qpack_decoder),
                         Box::new(self.events.clone()),
                         None,
                         PriorityHandler::new(false, Priority::default()),
-                        true,
                     )),
                 );
                 let res = self.base_handler.handle_stream_readable(conn, stream_id)?;

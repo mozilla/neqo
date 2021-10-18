@@ -4,6 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+mod negotiation;
+mod sessions;
+
 use neqo_common::event::Provider;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
@@ -106,7 +109,7 @@ impl WtTest {
     fn negotiate_wt_session(&mut self, accept: bool) -> (StreamId, Option<WebTransportRequest>) {
         let wt_session_id = self
             .client
-            .webtransport_create_session(now(), &("https", "something.com", "/"))
+            .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
             .unwrap();
         self.exchange_packets();
 
@@ -141,7 +144,7 @@ impl WtTest {
         (wt_session_id, wt_server_session)
     }
 
-    fn create_wt_session(&mut self) -> (StreamId, WebTransportRequest) {
+    fn create_wt_session(&mut self) -> WebTransportRequest {
         let (wt_session_id, wt_server_session) = self.negotiate_wt_session(true);
         let wt_session_negotiated_event = |e| {
             matches!(
@@ -151,7 +154,9 @@ impl WtTest {
         };
         assert!(self.client.events().any(wt_session_negotiated_event));
 
-        (wt_session_id, wt_server_session.unwrap())
+        let wt_server_session = wt_server_session.unwrap();
+        assert_eq!(wt_session_id, wt_server_session.stream_id());
+        wt_server_session
     }
 
     fn exchange_packets(&mut self) {
@@ -172,18 +177,36 @@ impl WtTest {
         self.exchange_packets();
     }
 
+    fn session_closed_client(
+        e: &Http3ClientEvent,
+        id: StreamId,
+        expected_error: &Option<AppError>,
+    ) -> bool {
+        if let Http3ClientEvent::WebTransport(e) = e {
+            if let WebTransportEvent::WebTransportSessionClosed { stream_id, error } = e {
+                *stream_id == id && error == expected_error
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn check_session_closed_event_client(
         &mut self,
         wt_session_id: StreamId,
         expected_error: Option<AppError>,
     ) {
-        let wt_session_closed = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::WebTransport(WebTransportEvent::WebTransportSessionClosed{stream_id, error}) if stream_id == wt_session_id && error == expected_error
-            )
-        };
-        assert!(self.client.events().any(wt_session_closed));
+        let mut event_found = false;
+
+        while let Some(event) = self.client.next_event() {
+            event_found = WtTest::session_closed_client(&event, wt_session_id, &expected_error);
+            if event_found {
+                break;
+            }
+        }
+        assert!(event_found);
     }
 
     pub fn cancel_session_server(&mut self, wt_session: &mut WebTransportRequest) {
@@ -191,15 +214,32 @@ impl WtTest {
         self.exchange_packets();
     }
 
+    fn session_closed_server(
+        e: &Http3ServerEvent,
+        id: StreamId,
+        expected_error: &Option<AppError>,
+    ) -> bool {
+        if let Http3ServerEvent::WebTransport(e) = e {
+            if let WebTransportServerEvent::WebTransportSessionClosed { session, error } = e {
+                session.stream_id() == id && error == expected_error
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn check_session_closed_event_server(
         &mut self,
         wt_session: &mut WebTransportRequest,
         expected_error: Option<AppError>,
     ) {
-        let wt_session_closed = |e| matches!(e, Http3ServerEvent::WebTransport(WebTransportServerEvent::WebTransportSessionClosed{session, error}) if session.stream_id() == wt_session.stream_id() && error == expected_error);
-        assert!(self.server.events().any(wt_session_closed));
+        let event = self.server.next_event().unwrap();
+        assert!(WtTest::session_closed_server(
+            &event,
+            wt_session.stream_id(),
+            &expected_error
+        ));
     }
 }
-
-mod negotiation;
-mod sessions;

@@ -8,7 +8,7 @@ use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{Http3Connection, Http3State, RequestDescription};
 use crate::hframe::HFrame;
 use crate::push_controller::{PushController, RecvPushEvents};
-use crate::recv_message::RecvMessage;
+use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::request_target::AsRequestTarget;
 use crate::settings::HSettings;
 use crate::{
@@ -26,6 +26,7 @@ use neqo_transport::{
     ConnectionParameters, Output, QuicVersion, Stats as TransportStats, StreamId, ZeroRttState,
 };
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::mem;
 use std::net::SocketAddr;
@@ -262,7 +263,7 @@ impl Http3Client {
         priority: Priority,
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized,
+        T: AsRequestTarget<'x> + ?Sized + Debug,
     {
         let output = self.base_handler.fetch(
             &mut self.conn,
@@ -271,6 +272,7 @@ impl Http3Client {
             Some(Rc::clone(&self.push_handler)),
             &RequestDescription {
                 method,
+                connect_type: None,
                 target,
                 headers,
                 priority,
@@ -388,18 +390,23 @@ impl Http3Client {
 
     // API WebTransport
 
+    /// # Errors
+    /// If `WebTransport` cannot be created, e.g. the `WebTransport` support is
+    /// not negotiated or the HTTP/3 connection is closed.
     pub fn webtransport_create_session<'x, 't: 'x, T>(
         &mut self,
         now: Instant,
         target: &'t T,
+        headers: &'t [Header],
     ) -> Res<StreamId>
     where
-        T: AsRequestTarget<'x> + ?Sized,
+        T: AsRequestTarget<'x> + ?Sized + Debug,
     {
         let output = self.base_handler.webtransport_create_session(
             &mut self.conn,
             Box::new(self.events.clone()),
             target,
+            headers,
         );
 
         if let Err(e) = &output {
@@ -613,15 +620,17 @@ impl Http3Client {
         self.base_handler.add_recv_stream(
             stream_id,
             Box::new(RecvMessage::new(
-                MessageType::Response,
-                Http3StreamType::Push,
-                stream_id,
+                &RecvMessageInfo {
+                    message_type: MessageType::Response,
+                    stream_type: Http3StreamType::Push,
+                    stream_id,
+                    header_frame_type_read: false,
+                },
                 Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
                 None,
                 // TODO: think about the right prority for the push streams.
                 PriorityHandler::new(true, Priority::default()),
-                false,
             )),
         );
         let res = self

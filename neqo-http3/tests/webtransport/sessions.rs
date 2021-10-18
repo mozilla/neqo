@@ -25,30 +25,30 @@ fn wt_session_reject() {
 #[test]
 fn wt_session_close_client() {
     let mut wt = WtTest::new();
-    let (wt_session_id, mut wt_session) = wt.create_wt_session();
+    let mut wt_session = wt.create_wt_session();
 
-    wt.cancel_session_client(wt_session_id);
+    wt.cancel_session_client(wt_session.stream_id());
     wt.check_session_closed_event_server(&mut wt_session, Some(Error::HttpNoError.code()));
 }
 
 #[test]
 fn wt_session_close_server() {
     let mut wt = WtTest::new();
-    let (wt_session_id, mut wt_session) = wt.create_wt_session();
+    let mut wt_session = wt.create_wt_session();
 
     wt.cancel_session_server(&mut wt_session);
-    wt.check_session_closed_event_client(wt_session_id, Some(Error::HttpNoError.code()));
+    wt.check_session_closed_event_client(wt_session.stream_id(), Some(Error::HttpNoError.code()));
 }
 
 #[test]
 fn wt_session_close_server_close_send() {
     let mut wt = WtTest::new();
-    let (wt_session_id, mut wt_session) = wt.create_wt_session();
+    let mut wt_session = wt.create_wt_session();
 
     wt_session.stream_close_send().unwrap();
     wt.exchange_packets();
     wt.check_session_closed_event_client(
-        wt_session_id,
+        wt_session.stream_id(),
         Some(Error::HttpGeneralProtocolStream.code()),
     );
 }
@@ -56,23 +56,23 @@ fn wt_session_close_server_close_send() {
 #[test]
 fn wt_session_close_server_stop_sending() {
     let mut wt = WtTest::new();
-    let (wt_session_id, mut wt_session) = wt.create_wt_session();
+    let mut wt_session = wt.create_wt_session();
 
     wt_session
         .stream_stop_sending(Error::HttpNoError.code())
         .unwrap();
     wt.exchange_packets();
-    wt.check_session_closed_event_client(wt_session_id, Some(Error::HttpNoError.code()));
+    wt.check_session_closed_event_client(wt_session.stream_id(), Some(Error::HttpNoError.code()));
 }
 
 #[test]
 fn wt_session_close_server_reset() {
     let mut wt = WtTest::new();
-    let (wt_session_id, mut wt_session) = wt.create_wt_session();
+    let mut wt_session = wt.create_wt_session();
 
     wt_session
         .stream_reset_send(Error::HttpNoError.code())
         .unwrap();
     wt.exchange_packets();
-    wt.check_session_closed_event_client(wt_session_id, Some(Error::HttpNoError.code()));
+    wt.check_session_closed_event_client(wt_session.stream_id(), Some(Error::HttpNoError.code()));
 }
