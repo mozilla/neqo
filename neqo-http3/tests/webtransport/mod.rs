@@ -247,13 +247,9 @@ impl WtTest {
         wt_session_id: StreamId,
         stream_type: StreamType,
     ) -> StreamId {
-        let wt_stream_id = self
-            .client
+        self.client
             .webtransport_create_stream(wt_session_id, stream_type)
-            .unwrap();
-        // TODO investigate why this is needed.
-        self.exchange_packets();
-        wt_stream_id
+            .unwrap()
     }
 
     fn send_data_client(&mut self, wt_stream_id: StreamId, data: &[u8]) {
@@ -331,7 +327,15 @@ impl WtTest {
     }
 
     fn receive_stop_sending_client(&mut self, expected_stream_id: StreamId) {
-        let wt_stop_sending_event = |e| matches!(e,  Http3ClientEvent::StopSending { stream_id, error } if stream_id == expected_stream_id && error == Error::HttpNoError.code());
+        let wt_stop_sending_event = |e| {
+            matches!(
+                e,
+                Http3ClientEvent::StopSending {
+                    stream_id,
+                    error
+                } if stream_id == expected_stream_id && error == Error::HttpNoError.code()
+            )
+        };
         assert!(self.client.events().any(wt_stop_sending_event));
     }
 
@@ -407,14 +411,22 @@ impl WtTest {
     }
 
     fn receive_reset_server(&mut self, expected_stream_id: StreamId) {
-        assert!(
-            matches!(self.server.next_event().unwrap(), Http3ServerEvent::StreamReset { stream, error } if stream.stream_id() == expected_stream_id && error == Error::HttpNoError.code())
-        );
+        assert!(matches!(
+            self.server.next_event().unwrap(),
+            Http3ServerEvent::StreamReset {
+                stream,
+                error
+            } if stream.stream_id() == expected_stream_id && error == Error::HttpNoError.code()
+        ));
     }
 
     fn receive_stop_sending_server(&mut self, expected_stream_id: StreamId) {
-        assert!(
-            matches!(self.server.next_event().unwrap(), Http3ServerEvent::StreamStopSending { stream, error } if stream.stream_id() == expected_stream_id && error == Error::HttpNoError.code())
-        );
+        assert!(matches!(
+            self.server.next_event().unwrap(),
+            Http3ServerEvent::StreamStopSending {
+                stream,
+                error
+            } if stream.stream_id() == expected_stream_id && error == Error::HttpNoError.code()
+        ));
     }
 }
