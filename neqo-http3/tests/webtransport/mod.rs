@@ -182,12 +182,12 @@ impl WtTest {
         id: StreamId,
         expected_error: &Option<AppError>,
     ) -> bool {
-        if let Http3ClientEvent::WebTransport(e) = e {
-            if let WebTransportEvent::WebTransportSessionClosed { stream_id, error } = e {
-                *stream_id == id && error == expected_error
-            } else {
-                false
-            }
+        if let Http3ClientEvent::WebTransport(WebTransportEvent::WebTransportSessionClosed {
+            stream_id,
+            error,
+        }) = e
+        {
+            *stream_id == id && error == expected_error
         } else {
             false
         }
@@ -219,12 +219,11 @@ impl WtTest {
         id: StreamId,
         expected_error: &Option<AppError>,
     ) -> bool {
-        if let Http3ServerEvent::WebTransport(e) = e {
-            if let WebTransportServerEvent::WebTransportSessionClosed { session, error } = e {
-                session.stream_id() == id && error == expected_error
-            } else {
-                false
-            }
+        if let Http3ServerEvent::WebTransport(
+            WebTransportServerEvent::WebTransportSessionClosed { session, error },
+        ) = e
+        {
+            session.stream_id() == id && error == expected_error
         } else {
             false
         }
