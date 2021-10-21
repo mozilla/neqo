@@ -44,15 +44,22 @@ impl ExtendedConnectType {
     }
 
     #[must_use]
-    #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
+    #[allow(clippy::unused_self)] // this will change when there is more types of the extended CONNECT.
     pub fn setting_type(self) -> HSettingType {
         HSettingType::EnableWebTransport
     }
 
-    #[allow(clippy::unused_self)] // this will change when there is more types of the extended CONNECT.
+    #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     #[must_use]
-    pub fn get_stream_type(&self, session_id: StreamId) -> Http3StreamType {
+    pub fn get_stream_type(self, session_id: StreamId) -> Http3StreamType {
         Http3StreamType::WebTransport(session_id)
+    }
+}
+
+impl From<ExtendedConnectType> for HSettingType {
+    fn from(_type: ExtendedConnectType) -> Self {
+        // This will change when we have more features using ExtendedConnectType.
+        HSettingType::EnableWebTransport
     }
 }
 
@@ -67,7 +74,7 @@ impl ExtendedConnectFeature {
     #[must_use]
     pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
         Self {
-            feature_negotiation: NegotiationState::new(enable, connect_type.setting_type()),
+            feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
             connect_type,
             sessions: HashMap::new(),
         }
