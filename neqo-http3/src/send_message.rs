@@ -12,7 +12,7 @@ use crate::{
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fmt::Debug;
@@ -76,14 +76,14 @@ impl SendMessageState {
 #[derive(Debug)]
 pub(crate) struct SendMessage {
     state: SendMessageState,
-    stream_id: u64,
+    stream_id: StreamId,
     encoder: Rc<RefCell<QPackEncoder>>,
     conn_events: Box<dyn SendStreamEvents>,
 }
 
 impl SendMessage {
     pub fn new(
-        stream_id: u64,
+        stream_id: StreamId,
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
@@ -97,7 +97,7 @@ impl SendMessage {
     }
 
     pub fn new_with_headers(
-        stream_id: u64,
+        stream_id: StreamId,
         headers: Vec<Header>,
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,

@@ -9,6 +9,7 @@ use crate::{
     CloseType, Header, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
 };
 
+use neqo_transport::StreamId;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -17,21 +18,19 @@ use std::rc::Rc;
 pub(crate) enum Http3ServerConnEvent {
     /// Headers are ready.
     Headers {
-        stream_id: u64,
+        stream_id: StreamId,
         headers: Vec<Header>,
         fin: bool,
     },
     PriorityUpdate {
-        stream_id: u64,
+        stream_id: StreamId,
         priority: Priority,
     },
     /// Request data is ready.
-    DataReadable {
-        stream_id: u64,
-    },
+    DataReadable { stream_id: StreamId },
     //TODO: This is never used. Do we need it?
     // Peer reset the stream.
-    //Reset { stream_id: u64, error: AppError },
+    //Reset { stream_id: StreamId, error: AppError },
     /// Connection state change.
     StateChange(Http3State),
 }
@@ -45,11 +44,11 @@ impl SendStreamEvents for Http3ServerConnEvents {}
 
 impl RecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `DataReadable` event
-    fn data_readable(&self, stream_id: u64) {
+    fn data_readable(&self, stream_id: StreamId) {
         self.insert(Http3ServerConnEvent::DataReadable { stream_id });
     }
 
-    fn recv_closed(&self, stream_id: u64, close_type: CloseType) {
+    fn recv_closed(&self, stream_id: StreamId, close_type: CloseType) {
         if close_type != CloseType::Done {
             self.remove_events_for_stream_id(stream_id);
         }
@@ -58,7 +57,7 @@ impl RecvStreamEvents for Http3ServerConnEvents {
 
 impl HttpRecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `HeaderReady` event.
-    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, _interim: bool, fin: bool) {
+    fn header_ready(&self, stream_id: StreamId, headers: Vec<Header>, _interim: bool, fin: bool) {
         self.insert(Http3ServerConnEvent::Headers {
             stream_id,
             headers,
@@ -91,14 +90,14 @@ impl Http3ServerConnEvents {
         self.insert(Http3ServerConnEvent::StateChange(state));
     }
 
-    pub fn priority_update(&self, stream_id: u64, priority: Priority) {
+    pub fn priority_update(&self, stream_id: StreamId, priority: Priority) {
         self.insert(Http3ServerConnEvent::PriorityUpdate {
             stream_id,
             priority,
         });
     }
 
-    fn remove_events_for_stream_id(&self, stream_id: u64) {
+    fn remove_events_for_stream_id(&self, stream_id: StreamId) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ServerConnEvent::Headers { stream_id: x, .. } | Http3ServerConnEvent::DataReadable { stream_id: x, .. } if *x == stream_id)

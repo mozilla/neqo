@@ -32,8 +32,8 @@ mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
-pub use neqo_transport::Output;
 use neqo_transport::{AppError, Connection, Error as TransportError};
+pub use neqo_transport::{Output, StreamId};
 use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
@@ -298,7 +298,7 @@ pub enum ReceiveOutput {
     NoOutput,
     PushStream,
     ControlFrames(Vec<HFrame>),
-    UnblockedStreams(Vec<u64>),
+    UnblockedStreams(Vec<StreamId>),
     NewStream(NewStreamType),
 }
 
@@ -348,12 +348,12 @@ pub trait HttpRecvStream: RecvStream {
 }
 
 pub trait RecvStreamEvents: Debug {
-    fn data_readable(&self, stream_id: u64);
-    fn recv_closed(&self, _stream_id: u64, _close_type: CloseType) {}
+    fn data_readable(&self, stream_id: StreamId);
+    fn recv_closed(&self, _stream_id: StreamId, _close_type: CloseType) {}
 }
 
 pub(crate) trait HttpRecvStreamEvents: RecvStreamEvents {
-    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool);
+    fn header_ready(&self, stream_id: StreamId, headers: Vec<Header>, interim: bool, fin: bool);
 }
 
 pub trait SendStream: Stream {
@@ -382,8 +382,8 @@ pub trait HttpSendStream: SendStream {
 }
 
 pub trait SendStreamEvents: Debug {
-    fn send_closed(&self, _stream_id: u64, _close_type: CloseType) {}
-    fn data_writable(&self, _stream_id: u64) {}
+    fn send_closed(&self, _stream_id: StreamId, _close_type: CloseType) {}
+    fn data_writable(&self, _stream_id: StreamId) {}
 }
 
 /// This enum is used to mark a different type of closing a stream:

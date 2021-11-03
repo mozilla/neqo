@@ -10,7 +10,7 @@ use neqo_common::{
     IncrementalDecoderUint,
 };
 use neqo_crypto::random;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::convert::TryFrom;
 use std::io::Write;
 use std::mem;
@@ -52,7 +52,7 @@ pub enum HFrame {
         header_block: Vec<u8>,
     },
     Goaway {
-        stream_id: u64,
+        stream_id: StreamId,
     },
     MaxPushId {
         push_id: u64,
@@ -116,7 +116,7 @@ impl HFrame {
             }
             Self::Goaway { stream_id } => {
                 enc.encode_vvec_with(|enc_inner| {
-                    enc_inner.encode_varint(*stream_id);
+                    enc_inner.encode_varint(stream_id.as_u64());
                 });
             }
             Self::MaxPushId { push_id } => {
@@ -229,7 +229,7 @@ impl HFrameReader {
     pub fn receive(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Res<(Option<HFrame>, bool)> {
         loop {
             let to_read = std::cmp::min(self.min_remaining(), MAX_READ_SIZE);
@@ -384,7 +384,7 @@ impl HFrameReader {
                 header_block: dec.decode_remainder().to_vec(),
             },
             H3_FRAME_TYPE_GOAWAY => HFrame::Goaway {
-                stream_id: dec.decode_varint().ok_or(Error::HttpFrame)?,
+                stream_id: StreamId::new(dec.decode_varint().ok_or(Error::HttpFrame)?),
             },
             H3_FRAME_TYPE_MAX_PUSH_ID => HFrame::MaxPushId {
                 push_id: dec.decode_varint().ok_or(Error::HttpFrame)?,
@@ -418,7 +418,7 @@ mod tests {
     use crate::settings::{HSetting, HSettingType};
     use crate::Priority;
     use neqo_crypto::AuthenticationStatus;
-    use neqo_transport::{Connection, StreamType};
+    use neqo_transport::{Connection, StreamId, StreamType};
     use std::mem;
     use test_fixture::{connect, default_client, default_server, fixture_init, now};
 
@@ -503,7 +503,9 @@ mod tests {
 
     #[test]
     fn test_goaway_frame4() {
-        let f = HFrame::Goaway { stream_id: 5 };
+        let f = HFrame::Goaway {
+            stream_id: StreamId::new(5),
+        };
         enc_dec(&f, "070105", 0);
     }
 
@@ -581,7 +583,7 @@ mod tests {
         pub fr: HFrameReader,
         pub conn_c: Connection,
         pub conn_s: Connection,
-        pub stream_id: u64,
+        pub stream_id: StreamId,
     }
 
     impl HFrameReaderTest {
@@ -946,7 +948,9 @@ mod tests {
         test_complete_and_incomplete_frame(&buf, buf.len());
 
         // H3_FRAME_TYPE_GOAWAY
-        let f = HFrame::Goaway { stream_id: 5 };
+        let f = HFrame::Goaway {
+            stream_id: StreamId::new(5),
+        };
         let mut enc = Encoder::default();
         f.encode(&mut enc);
         let buf: Vec<_> = enc.into();

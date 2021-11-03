@@ -7,12 +7,12 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::{CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream};
 use neqo_common::qdebug;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 
 /// The remote control stream is responsible only for reading frames. The frames are handled by `Http3Connection`.
 #[derive(Debug)]
 pub(crate) struct ControlStreamRemote {
-    stream_id: u64,
+    stream_id: StreamId,
     frame_reader: HFrameReader,
 }
 
@@ -23,7 +23,7 @@ impl ::std::fmt::Display for ControlStreamRemote {
 }
 
 impl ControlStreamRemote {
-    pub fn new(stream_id: u64) -> Self {
+    pub fn new(stream_id: StreamId) -> Self {
         Self {
             stream_id,
             frame_reader: HFrameReader::new(),

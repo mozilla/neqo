@@ -42,7 +42,7 @@ impl Http3ServerHandler {
     /// Supply a response for a request.
     pub(crate) fn set_response(
         &mut self,
-        stream_id: u64,
+        stream_id: StreamId,
         headers: &[Header],
         data: &[u8],
     ) -> Res<()> {
@@ -63,7 +63,7 @@ impl Http3ServerHandler {
     /// An error will be return if a stream does not exist.
     pub fn cancel_fetch(
         &mut self,
-        stream_id: u64,
+        stream_id: StreamId,
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
@@ -125,9 +125,9 @@ impl Http3ServerHandler {
         while let Some(e) = conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::NewStream { stream_id } => self
-                    .base_handler
-                    .add_new_stream(stream_id.as_u64(), Role::Server),
+                ConnectionEvent::NewStream { stream_id } => {
+                    self.base_handler.add_new_stream(stream_id, Role::Server);
+                }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.handle_stream_readable(conn, stream_id)?;
                 }
@@ -169,7 +169,7 @@ impl Http3ServerHandler {
         Ok(())
     }
 
-    fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+    fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         match self.base_handler.handle_stream_readable(conn, stream_id)? {
             ReceiveOutput::NewStream(NewStreamType::Push(_)) => Err(Error::HttpStreamCreation),
             ReceiveOutput::NewStream(NewStreamType::Http) => {
@@ -207,7 +207,7 @@ impl Http3ServerHandler {
                         HFrame::PriorityUpdatePush { element_id, priority } => {
                             // TODO: check if the element_id references a promised push stream or
                             //       is greater than the maximum Push ID.
-                            self.events.priority_update(element_id, priority);
+                            self.events.priority_update(StreamId::from(element_id), priority);
                             Ok(())
                         }
                         HFrame::PriorityUpdateRequest { element_id, priority } => {
@@ -221,7 +221,7 @@ impl Http3ServerHandler {
                                 return Err(Error::HttpId)
                             }
 
-                            self.events.priority_update(element_id, priority);
+                            self.events.priority_update(element_stream_id, priority);
                             Ok(())
                         }
                         _ => unreachable!(
@@ -244,7 +244,7 @@ impl Http3ServerHandler {
         &mut self,
         conn: &mut Connection,
         now: Instant,
-        stream_id: u64,
+        stream_id: StreamId,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qinfo!([self], "read_data from stream {}.", stream_id);

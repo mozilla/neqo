@@ -16,7 +16,7 @@ use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{
-    tparams::PreferredAddress, ConnectionIdGenerator, ConnectionParameters, Output,
+    tparams::PreferredAddress, ConnectionIdGenerator, ConnectionParameters, Output, StreamId,
 };
 use std::cell::RefCell;
 use std::cell::RefMut;
@@ -222,7 +222,7 @@ impl Http3Server {
     }
 }
 fn prepare_data(
-    stream_id: u64,
+    stream_id: StreamId,
     handler_borrowed: &mut RefMut<Http3ServerHandler>,
     conn: &mut ActiveConnectionRef,
     handler: &HandlerRef,
@@ -264,7 +264,7 @@ mod tests {
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
-        Connection, ConnectionError, ConnectionEvent, State, StreamType, ZeroRttState,
+        Connection, ConnectionError, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
     use std::collections::HashMap;
     use std::mem;
@@ -343,12 +343,12 @@ mod tests {
         assert!(!hconn.events().any(closed));
     }
 
-    const CLIENT_SIDE_CONTROL_STREAM_ID: u64 = 2;
-    const CLIENT_SIDE_ENCODER_STREAM_ID: u64 = 6;
-    const CLIENT_SIDE_DECODER_STREAM_ID: u64 = 10;
-    const SERVER_SIDE_CONTROL_STREAM_ID: u64 = 3;
-    const SERVER_SIDE_ENCODER_STREAM_ID: u64 = 7;
-    const SERVER_SIDE_DECODER_STREAM_ID: u64 = 11;
+    const CLIENT_SIDE_CONTROL_STREAM_ID: StreamId = StreamId::new(2);
+    const CLIENT_SIDE_ENCODER_STREAM_ID: StreamId = StreamId::new(6);
+    const CLIENT_SIDE_DECODER_STREAM_ID: StreamId = StreamId::new(10);
+    const SERVER_SIDE_CONTROL_STREAM_ID: StreamId = StreamId::new(3);
+    const SERVER_SIDE_ENCODER_STREAM_ID: StreamId = StreamId::new(7);
+    const SERVER_SIDE_DECODER_STREAM_ID: StreamId = StreamId::new(11);
 
     fn connect_transport(server: &mut Http3Server, client: &mut Connection, resume: bool) {
         let c1 = client.process(None, now()).dgram();
@@ -388,9 +388,9 @@ mod tests {
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
                     assert!(
-                        (stream_id.as_u64() == SERVER_SIDE_CONTROL_STREAM_ID)
-                            || (stream_id.as_u64() == SERVER_SIDE_ENCODER_STREAM_ID)
-                            || (stream_id.as_u64() == SERVER_SIDE_DECODER_STREAM_ID)
+                        (stream_id == SERVER_SIDE_CONTROL_STREAM_ID)
+                            || (stream_id == SERVER_SIDE_ENCODER_STREAM_ID)
+                            || (stream_id == SERVER_SIDE_DECODER_STREAM_ID)
                     );
                     assert_eq!(stream_id.stream_type(), StreamType::UniDi);
                 }
@@ -461,7 +461,7 @@ mod tests {
 
     struct PeerConnection {
         conn: Connection,
-        control_stream_id: u64,
+        control_stream_id: StreamId,
     }
 
     impl PeerConnection {
@@ -571,11 +571,11 @@ mod tests {
         assert_closed(&mut hconn, &Error::HttpFrameUnexpected);
     }
 
-    fn priority_update_check_id(stream_id: u64, valid: bool) {
+    fn priority_update_check_id(stream_id: StreamId, valid: bool) {
         let (mut hconn, mut peer_conn) = connect();
         // send a priority update
         let frame = HFrame::PriorityUpdateRequest {
-            element_id: stream_id,
+            element_id: stream_id.as_u64(),
             priority: Priority::default(),
         };
         let mut e = Encoder::default();
@@ -594,28 +594,28 @@ mod tests {
     #[test]
     fn test_priority_update_valid_id_0() {
         // Client-Initiated, Bidirectional
-        priority_update_check_id(0, true);
+        priority_update_check_id(StreamId::new(0), true);
     }
     #[test]
     fn test_priority_update_invalid_id_1() {
         // Server-Initiated, Bidirectional
-        priority_update_check_id(1, false);
+        priority_update_check_id(StreamId::new(1), false);
     }
     #[test]
     fn test_priority_update_invalid_id_2() {
         // Client-Initiated, Unidirectional
-        priority_update_check_id(2, false);
+        priority_update_check_id(StreamId::new(2), false);
     }
     #[test]
     fn test_priority_update_invalid_id_3() {
         // Server-Initiated, Unidirectional
-        priority_update_check_id(3, false);
+        priority_update_check_id(StreamId::new(3), false);
     }
 
     #[test]
     fn test_priority_update_invalid_large_id() {
-        // Server-Initiated, Unidirectional (dividable by 4)
-        priority_update_check_id(1_000_000_000, false);
+        // Server-Initiated, Unidirectional (divisible by 4)
+        priority_update_check_id(StreamId::new(1_000_000_000), false);
     }
 
     fn test_wrong_frame_on_control_stream(v: &[u8]) {

@@ -20,7 +20,7 @@ use crate::{
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{AppError, Connection, ConnectionError, State, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionError, State, StreamId, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
@@ -41,7 +41,7 @@ pub enum Http3State {
     Initializing,
     ZeroRtt,
     Connected,
-    GoingAway(u64),
+    GoingAway(StreamId),
     Closing(ConnectionError),
     Closed(ConnectionError),
 }
@@ -64,9 +64,9 @@ pub(crate) struct Http3Connection {
     pub qpack_encoder: Rc<RefCell<QPackEncoder>>,
     pub qpack_decoder: Rc<RefCell<QPackDecoder>>,
     settings_state: Http3RemoteSettingsState,
-    streams_with_pending_data: BTreeSet<u64>,
-    pub send_streams: HashMap<u64, Box<dyn SendStream>>,
-    pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
+    streams_with_pending_data: BTreeSet<StreamId>,
+    pub send_streams: HashMap<StreamId, Box<dyn SendStream>>,
+    pub recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: NegotiationState,
 }
 
@@ -139,7 +139,7 @@ impl Http3Connection {
     }
 
     /// Inform a `HttpConnection` that a stream has data to send and that `send` should be called for the stream.
-    pub fn stream_has_pending_data(&mut self, stream_id: u64) {
+    pub fn stream_has_pending_data(&mut self, stream_id: StreamId) {
         self.streams_with_pending_data.insert(stream_id);
     }
 
@@ -203,7 +203,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn add_new_stream(&mut self, stream_id: u64, role: Role) {
+    pub fn add_new_stream(&mut self, stream_id: StreamId, role: Role) {
         qtrace!([self], "A new stream: {}.", stream_id);
         self.recv_streams.insert(
             stream_id,
@@ -212,7 +212,7 @@ impl Http3Connection {
     }
 
     #[allow(clippy::option_if_let_else)] // False positive as borrow scope isn't lexical here.
-    fn stream_receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<ReceiveOutput> {
+    fn stream_receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<ReceiveOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
         if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
@@ -226,7 +226,7 @@ impl Http3Connection {
 
     fn handle_unblocked_streams(
         &mut self,
-        unblocked_streams: Vec<u64>,
+        unblocked_streams: Vec<StreamId>,
         conn: &mut Connection,
     ) -> Res<()> {
         for stream_id in unblocked_streams {
@@ -254,7 +254,7 @@ impl Http3Connection {
     pub fn handle_stream_readable(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Res<ReceiveOutput> {
         let mut output = self.stream_receive(conn, stream_id)?;
 
@@ -287,7 +287,7 @@ impl Http3Connection {
     }
 
     /// This is called when a RESET frame has been received.
-    pub fn handle_stream_reset(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
+    pub fn handle_stream_reset(&mut self, stream_id: StreamId, app_error: AppError) -> Res<()> {
         qinfo!(
             [self],
             "Handle a stream reset stream_id={} app_err={}",
@@ -300,7 +300,11 @@ impl Http3Connection {
             .map_or(Ok(()), |mut s| s.reset(CloseType::ResetRemote(app_error)))
     }
 
-    pub fn handle_stream_stop_sending(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
+    pub fn handle_stream_stop_sending(
+        &mut self,
+        stream_id: StreamId,
+        app_error: AppError,
+    ) -> Res<()> {
         qinfo!(
             [self],
             "Handle stream_stop_sending stream_id={} app_err={}",
@@ -399,7 +403,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         stream_type: NewStreamType,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Res<ReceiveOutput> {
         match stream_type {
             NewStreamType::Control => {
@@ -488,7 +492,7 @@ impl Http3Connection {
     fn handle_stream_manipulation_output<U>(
         &mut self,
         output: Res<(U, bool)>,
-        stream_id: u64,
+        stream_id: StreamId,
         conn: &mut Connection,
     ) -> Res<(U, bool)>
     where
@@ -518,7 +522,7 @@ impl Http3Connection {
     pub fn read_data(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qinfo!([self], "read_data from stream {}.", stream_id);
@@ -537,7 +541,7 @@ impl Http3Connection {
     pub fn stream_reset_send(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
         qinfo!(
@@ -561,7 +565,7 @@ impl Http3Connection {
     pub fn stream_stop_sending(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
         qinfo!(
@@ -585,7 +589,7 @@ impl Http3Connection {
 
     pub fn cancel_fetch(
         &mut self,
-        stream_id: u64,
+        stream_id: StreamId,
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
@@ -627,7 +631,7 @@ impl Http3Connection {
     }
 
     /// This is called when an application wants to close the sending side of a stream.
-    pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+    pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         qinfo!([self], "Close the sending side for stream {}.", stream_id);
         debug_assert!(self.state.active());
         let send_stream = self
@@ -739,7 +743,7 @@ impl Http3Connection {
     /// Adds a new send and receive stream.
     pub fn add_streams(
         &mut self,
-        stream_id: u64,
+        stream_id: StreamId,
         send_stream: Box<dyn SendStream>,
         recv_stream: Box<dyn RecvStream>,
     ) {
@@ -751,7 +755,7 @@ impl Http3Connection {
     }
 
     /// Add a new recv stream. This is used for push streams.
-    pub fn add_recv_stream(&mut self, stream_id: u64, recv_stream: Box<dyn RecvStream>) {
+    pub fn add_recv_stream(&mut self, stream_id: StreamId, recv_stream: Box<dyn RecvStream>) {
         self.recv_streams.insert(stream_id, recv_stream);
     }
 
@@ -759,7 +763,7 @@ impl Http3Connection {
         self.control_stream_local.queue_frame(frame);
     }
 
-    pub fn queue_update_priority(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
+    pub fn queue_update_priority(&mut self, stream_id: StreamId, priority: Priority) -> Res<bool> {
         let stream = self
             .recv_streams
             .get_mut(&stream_id)
@@ -778,7 +782,7 @@ impl Http3Connection {
         }
     }
 
-    fn recv_stream_is_critical(&self, stream_id: u64) -> bool {
+    fn recv_stream_is_critical(&self, stream_id: StreamId) -> bool {
         if let Some(r) = self.recv_streams.get(&stream_id) {
             matches!(
                 r.stream_type(),
@@ -789,7 +793,7 @@ impl Http3Connection {
         }
     }
 
-    fn send_stream_is_critical(&self, stream_id: u64) -> bool {
+    fn send_stream_is_critical(&self, stream_id: StreamId) -> bool {
         self.qpack_encoder
             .borrow()
             .local_stream_id()

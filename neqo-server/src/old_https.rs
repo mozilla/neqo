@@ -22,7 +22,7 @@ use neqo_http3::Error;
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     tparams::PreferredAddress,
-    ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State,
+    ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State, StreamId,
 };
 
 use super::{qns_read_response, Args, HttpServer};
@@ -35,8 +35,8 @@ struct Http09StreamState {
 
 pub struct Http09Server {
     server: Server,
-    write_state: HashMap<u64, Http09StreamState>,
-    read_state: HashMap<u64, Vec<u8>>,
+    write_state: HashMap<StreamId, Http09StreamState>,
+    read_state: HashMap<StreamId, Vec<u8>>,
 }
 
 impl Http09Server {
@@ -68,7 +68,12 @@ impl Http09Server {
         })
     }
 
-    fn save_partial(&mut self, stream_id: u64, partial: Vec<u8>, conn: &mut ActiveConnectionRef) {
+    fn save_partial(
+        &mut self,
+        stream_id: StreamId,
+        partial: Vec<u8>,
+        conn: &mut ActiveConnectionRef,
+    ) {
         let url_dbg = String::from_utf8(partial.clone())
             .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)));
         if partial.len() < 4096 {
@@ -80,7 +85,12 @@ impl Http09Server {
         }
     }
 
-    fn write(&mut self, stream_id: u64, data: Option<Vec<u8>>, conn: &mut ActiveConnectionRef) {
+    fn write(
+        &mut self,
+        stream_id: StreamId,
+        data: Option<Vec<u8>>,
+        conn: &mut ActiveConnectionRef,
+    ) {
         let resp = data.unwrap_or_else(|| Vec::from(&b"404 That request was nonsense\r\n"[..]));
         if let Some(stream_state) = self.write_state.get_mut(&stream_id) {
             match stream_state.data_to_send {
@@ -103,8 +113,13 @@ impl Http09Server {
         }
     }
 
-    fn stream_readable(&mut self, stream_id: u64, conn: &mut ActiveConnectionRef, args: &Args) {
-        if stream_id % 4 != 0 {
+    fn stream_readable(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut ActiveConnectionRef,
+        args: &Args,
+    ) {
+        if !stream_id.is_client_initiated() || !stream_id.is_bidi() {
             qdebug!("Stream {} not client-initiated bidi, ignoring", stream_id);
             return;
         }
@@ -161,7 +176,7 @@ impl Http09Server {
         self.write(stream_id, resp, conn);
     }
 
-    fn stream_writable(&mut self, stream_id: u64, conn: &mut ActiveConnectionRef) {
+    fn stream_writable(&mut self, stream_id: StreamId, conn: &mut ActiveConnectionRef) {
         match self.write_state.get_mut(&stream_id) {
             None => {
                 eprintln!("Unknown stream {}, ignoring event", stream_id);
@@ -206,13 +221,13 @@ impl HttpServer for Http09Server {
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
                         self.write_state
-                            .insert(stream_id.as_u64(), Http09StreamState::default());
+                            .insert(stream_id, Http09StreamState::default());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         self.stream_readable(stream_id, &mut acr, args);
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
-                        self.stream_writable(stream_id.as_u64(), &mut acr);
+                        self.stream_writable(stream_id, &mut acr);
                     }
                     ConnectionEvent::StateChange(State::Connected) => {
                         acr.connection()

@@ -35,12 +35,12 @@ use crate::{Error, Res};
 
 // This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal a given id.
 // Only the same type (bidirectional or unidirectionsl) streams are filtered.
-fn id_gte<U>(base: StreamId) -> impl FnMut((&u64, &U)) -> Option<u64> + 'static
+fn id_gte<U>(base: StreamId) -> impl FnMut((&StreamId, &U)) -> Option<StreamId> + 'static
 where
     U: ?Sized,
 {
     move |(id, _)| {
-        if *id >= base.as_u64() && !(StreamId::from(*id).is_bidi() ^ base.is_bidi()) {
+        if *id >= base && !(id.is_bidi() ^ base.is_bidi()) {
             Some(*id)
         } else {
             None
@@ -257,7 +257,7 @@ impl Http3Client {
         target: &'t T,
         headers: &[Header],
         priority: Priority,
-    ) -> Res<u64>
+    ) -> Res<StreamId>
     where
         T: AsRequestTarget<'x> + ?Sized,
     {
@@ -335,7 +335,7 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
-    pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
+    pub fn priority_update(&mut self, stream_id: StreamId, priority: Priority) -> Res<bool> {
         self.base_handler.queue_update_priority(stream_id, priority)
     }
 
@@ -343,7 +343,7 @@ impl Http3Client {
     /// Both sides, sending and receiving side, will be closed.
     /// # Errors
     /// An error will be return if a stream does not exist.
-    pub fn cancel_fetch(&mut self, stream_id: u64, error: AppError) -> Res<()> {
+    pub fn cancel_fetch(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
         qinfo!([self], "reset_stream {} error={}.", stream_id, error);
         self.base_handler
             .cancel_fetch(stream_id, error, &mut self.conn)
@@ -352,7 +352,7 @@ impl Http3Client {
     /// This is call when application is done sending a request.
     /// # Errors
     /// An error will be return if stream does not exist.
-    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
+    pub fn stream_close_send(&mut self, stream_id: StreamId) -> Res<()> {
         qinfo!([self], "Close sending side stream={}.", stream_id);
         self.base_handler
             .stream_close_send(&mut self.conn, stream_id)
@@ -365,7 +365,7 @@ impl Http3Client {
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
     /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
     /// `InvalidInput` if an empty buffer has been supplied.
-    pub fn send_request_body(&mut self, stream_id: u64, buf: &[u8]) -> Res<usize> {
+    pub fn send_request_body(&mut self, stream_id: StreamId, buf: &[u8]) -> Res<usize> {
         qinfo!(
             [self],
             "send_request_body from stream {} sending {} bytes.",
@@ -387,7 +387,7 @@ impl Http3Client {
     pub fn read_response_data(
         &mut self,
         now: Instant,
-        stream_id: u64,
+        stream_id: StreamId,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qinfo!([self], "read_data from stream {}.", stream_id);
@@ -518,11 +518,11 @@ impl Http3Client {
         while let Some(e) = self.conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::NewStream { stream_id } => self
-                    .base_handler
-                    .add_new_stream(stream_id.as_u64(), Role::Client),
+                ConnectionEvent::NewStream { stream_id } => {
+                    self.base_handler.add_new_stream(stream_id, Role::Client);
+                }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
+                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
                         s.stream_writable();
                     }
                 }
@@ -575,7 +575,7 @@ impl Http3Client {
         Ok(())
     }
 
-    fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
+    fn handle_stream_readable(&mut self, stream_id: StreamId) -> Res<()> {
         match self
             .base_handler
             .handle_stream_readable(&mut self.conn, stream_id)?
@@ -608,7 +608,7 @@ impl Http3Client {
         }
     }
 
-    fn handle_new_push_stream(&mut self, stream_id: u64, push_id: u64) -> Res<()> {
+    fn handle_new_push_stream(&mut self, stream_id: StreamId, push_id: u64) -> Res<()> {
         if !self.push_handler.borrow().can_receive_push() {
             return Err(Error::HttpId);
         }
@@ -651,11 +651,10 @@ impl Http3Client {
         Ok(())
     }
 
-    fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
+    fn handle_goaway(&mut self, goaway_stream_id: StreamId) -> Res<()> {
         qinfo!([self], "handle_goaway {}", goaway_stream_id);
 
-        let id = StreamId::from(goaway_stream_id);
-        if id.is_uni() || id.is_server_initiated() {
+        if goaway_stream_id.is_uni() || goaway_stream_id.is_server_initiated() {
             return Err(Error::HttpId);
         }
 
@@ -673,9 +672,8 @@ impl Http3Client {
             _ => unreachable!("Should not receive Goaway frame in this state."),
         }
 
-        let goaway_stream_id = StreamId::from(goaway_stream_id);
         // Issue reset events for streams >= goaway stream id
-        let send_ids: Vec<u64> = self
+        let send_ids: Vec<StreamId> = self
             .base_handler
             .send_streams
             .iter()
@@ -689,7 +687,7 @@ impl Http3Client {
             );
         }
 
-        let recv_ids: Vec<u64> = self
+        let recv_ids: Vec<StreamId> = self
             .base_handler
             .recv_streams
             .iter()
@@ -712,7 +710,7 @@ impl Http3Client {
     /// # Errors
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
-    pub fn set_stream_max_data(&mut self, stream_id: u64, max_data: u64) -> Res<()> {
+    pub fn set_stream_max_data(&mut self, stream_id: StreamId, max_data: u64) -> Res<()> {
         self.conn.set_stream_max_data(stream_id, max_data)?;
         Ok(())
     }
@@ -769,8 +767,8 @@ mod tests {
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
-        ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, RECV_BUFFER_SIZE,
-        SEND_BUFFER_SIZE,
+        ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, StreamId,
+        RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::mem;
@@ -833,18 +831,18 @@ mod tests {
 
     const PUSH_STREAM_TYPE: &[u8] = &[0x1];
 
-    const CLIENT_SIDE_CONTROL_STREAM_ID: u64 = 2;
-    const CLIENT_SIDE_ENCODER_STREAM_ID: u64 = 6;
-    const CLIENT_SIDE_DECODER_STREAM_ID: u64 = 10;
+    const CLIENT_SIDE_CONTROL_STREAM_ID: StreamId = StreamId::new(2);
+    const CLIENT_SIDE_ENCODER_STREAM_ID: StreamId = StreamId::new(6);
+    const CLIENT_SIDE_DECODER_STREAM_ID: StreamId = StreamId::new(10);
 
     struct TestServer {
         settings: HFrame,
         conn: Connection,
-        control_stream_id: Option<u64>,
+        control_stream_id: Option<StreamId>,
         encoder: Rc<RefCell<QPackEncoder>>,
         encoder_receiver: EncoderRecvStream,
-        encoder_stream_id: Option<u64>,
-        decoder_stream_id: Option<u64>,
+        encoder_stream_id: Option<StreamId>,
+        decoder_stream_id: Option<StreamId>,
     }
 
     impl TestServer {
@@ -1068,7 +1066,7 @@ mod tests {
 
         pub fn read_and_check_stream_data(
             &mut self,
-            stream_id: u64,
+            stream_id: StreamId,
             expected_data: &[u8],
             expected_fin: bool,
         ) {
@@ -1081,7 +1079,7 @@ mod tests {
 
         pub fn encode_headers(
             &mut self,
-            stream_id: u64,
+            stream_id: StreamId,
             headers: &[Header],
             encoder: &mut Encoder,
         ) {
@@ -1197,7 +1195,11 @@ mod tests {
     }
 
     // Fetch request fetch("GET", "https", "something.com", "/", headers).
-    fn make_request(client: &mut Http3Client, close_sending_side: bool, headers: &[Header]) -> u64 {
+    fn make_request(
+        client: &mut Http3Client,
+        close_sending_side: bool,
+        headers: &[Header],
+    ) -> StreamId {
         let request_stream_id = client
             .fetch(
                 now(),
@@ -1299,7 +1301,7 @@ mod tests {
         client: &mut Http3Client,
         server: &mut TestServer,
         close_sending_side: bool,
-    ) -> u64 {
+    ) -> StreamId {
         let request_stream_id = make_request(client, close_sending_side, &[]);
 
         let dgram = client.process(None, now()).dgram();
@@ -1309,7 +1311,7 @@ mod tests {
         while let Some(e) = server.conn.next_event() {
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
-                    assert_eq!(stream_id.as_u64(), request_stream_id);
+                    assert_eq!(stream_id, request_stream_id);
                     assert_eq!(stream_id.stream_type(), StreamType::BiDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
@@ -1338,7 +1340,7 @@ mod tests {
         request_stream_id
     }
 
-    fn connect_and_send_request(close_sending_side: bool) -> (Http3Client, TestServer, u64) {
+    fn connect_and_send_request(close_sending_side: bool) -> (Http3Client, TestServer, StreamId) {
         let (mut client, mut server) = connect();
         let request_stream_id =
             make_request_and_exchange_pkts(&mut client, &mut server, close_sending_side);
@@ -1350,7 +1352,7 @@ mod tests {
     fn server_send_response_and_exchange_packet(
         client: &mut Http3Client,
         server: &mut TestServer,
-        stream_id: u64,
+        stream_id: StreamId,
         response: &[u8],
         close_stream: bool,
     ) {
@@ -1379,7 +1381,7 @@ mod tests {
     }
 
     // Send a push promise with push_id and request_stream_id.
-    fn send_push_promise(conn: &mut Connection, stream_id: u64, push_id: u64) {
+    fn send_push_promise(conn: &mut Connection, stream_id: StreamId, push_id: u64) {
         let frame = HFrame::PushPromise {
             push_id,
             header_block: PUSH_PROMISE_DATA.to_vec(),
@@ -1394,7 +1396,7 @@ mod tests {
         server: &mut TestServer,
         push_id: u8,
         close_push_stream: bool,
-    ) -> u64 {
+    ) -> StreamId {
         let push_stream_id = send_push_data(&mut server.conn, push_id, close_push_stream);
 
         let out = server.conn.process(None, now());
@@ -1407,7 +1409,7 @@ mod tests {
     fn send_push_promise_and_exchange_packets(
         client: &mut Http3Client,
         server: &mut TestServer,
-        stream_id: u64,
+        stream_id: StreamId,
         push_id: u64,
     ) {
         send_push_promise(&mut server.conn, stream_id, push_id);
@@ -1461,7 +1463,7 @@ mod tests {
     // This function can only handle small push_id numbers that fit in a varint of length 1 byte.
     fn send_data_on_push(
         conn: &mut Connection,
-        push_stream_id: u64,
+        push_stream_id: StreamId,
         push_id: u8,
         data: &[u8],
         close_push_stream: bool,
@@ -1480,7 +1482,7 @@ mod tests {
     //  2) push_id
     //  3) PUSH_DATA that contains encoded headers and a data frame.
     // This function can only handle small push_id numbers that fit in a varint of length 1 byte.
-    fn send_push_data(conn: &mut Connection, push_id: u8, close_push_stream: bool) -> u64 {
+    fn send_push_data(conn: &mut Connection, push_id: u8, close_push_stream: bool) -> StreamId {
         send_push_with_data(conn, push_id, PUSH_DATA, close_push_stream)
     }
 
@@ -1494,7 +1496,7 @@ mod tests {
         push_id: u8,
         data: &[u8],
         close_push_stream: bool,
-    ) -> u64 {
+    ) -> StreamId {
         // create a push stream
         let push_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
         // send data
@@ -1504,7 +1506,7 @@ mod tests {
 
     struct PushPromiseInfo {
         pub push_id: u64,
-        pub ref_stream_id: u64,
+        pub ref_stream_id: StreamId,
     }
 
     // Helper function: read response when a server sends:
@@ -1517,7 +1519,7 @@ mod tests {
         client: &mut Http3Client,
         push_promises: &[PushPromiseInfo],
         push_streams: &[u64],
-        response_stream_id: u64,
+        response_stream_id: StreamId,
     ) {
         let mut num_push_promises = 0;
         let mut num_push_stream_headers = 0;
@@ -2085,7 +2087,11 @@ mod tests {
     }
 
     // Helper function: read response when a server sends HTTP_RESPONSE_2.
-    fn read_response(client: &mut Http3Client, server: &mut Connection, request_stream_id: u64) {
+    fn read_response(
+        client: &mut Http3Client,
+        server: &mut Connection,
+        request_stream_id: StreamId,
+    ) {
         let out = server.process(None, now());
         client.process(out.dgram(), now());
 
@@ -2153,7 +2159,7 @@ mod tests {
         while let Some(e) = server.conn.next_event() {
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
-                    assert_eq!(stream_id.as_u64(), request_stream_id);
+                    assert_eq!(stream_id, request_stream_id);
                     assert_eq!(stream_id.stream_type(), StreamType::BiDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
@@ -2892,7 +2898,7 @@ mod tests {
         }
 
         assert!(stream_reset);
-        assert_eq!(client.state(), Http3State::GoingAway(8));
+        assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(8)));
 
         // Check that a new request cannot be made.
         assert_eq!(
@@ -2948,7 +2954,7 @@ mod tests {
         }
 
         assert_eq!(stream_reset_1, 1);
-        assert_eq!(client.state(), Http3State::GoingAway(8));
+        assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(8)));
 
         // Server sends another GOAWAY frame
         let _ = server
@@ -2997,7 +3003,7 @@ mod tests {
         }
 
         assert_eq!(stream_reset_2, 1);
-        assert_eq!(client.state(), Http3State::GoingAway(4));
+        assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(4)));
     }
 
     #[test]
@@ -3019,7 +3025,7 @@ mod tests {
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
 
-        assert_eq!(client.state(), Http3State::GoingAway(4));
+        assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(4)));
 
         // Now send a Goaway frame with an higher number
         let _ = server
@@ -3072,7 +3078,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -3110,7 +3116,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -3177,7 +3183,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -3305,7 +3311,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -3370,7 +3376,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -3408,7 +3414,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -3455,7 +3461,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -4302,7 +4308,10 @@ mod tests {
         );
 
         let mut buf = [0_u8; 100];
-        assert_eq!(client.read_response_data(now(), 0, &mut buf), Ok((3, true)));
+        assert_eq!(
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
+            Ok((3, true))
+        );
 
         client.process(None, now());
     }
@@ -5051,7 +5060,7 @@ mod tests {
             |e| matches!(e, ConnectionEvent::RecvStreamReadable{stream_id: x} if x == 2);
         assert!(server.conn.events().any(control_stream_readable));
         let mut buf = [0_u8; 100];
-        let (amount, fin) = server.conn.stream_recv(2, &mut buf).unwrap();
+        let (amount, fin) = server.conn.stream_recv(StreamId::new(2), &mut buf).unwrap();
         assert!(!fin);
 
         assert_eq!(amount, MAX_PUSH_ID_FRAME.len());
@@ -5112,7 +5121,7 @@ mod tests {
 
     fn assert_stop_sending_event(
         server: &mut TestServer,
-        push_stream_id: u64,
+        push_stream_id: StreamId,
         expected_error: u64,
     ) {
         assert!(server.conn.events().any(|e| matches!(
@@ -5373,7 +5382,7 @@ mod tests {
     fn send_push_promise_using_encoder(
         client: &mut Http3Client,
         server: &mut TestServer,
-        stream_id: u64,
+        stream_id: StreamId,
         push_id: u64,
     ) -> Option<Datagram> {
         send_push_promise_using_encoder_with_custom_headers(
@@ -5388,7 +5397,7 @@ mod tests {
     fn send_push_promise_using_encoder_with_custom_headers(
         client: &mut Http3Client,
         server: &mut TestServer,
-        stream_id: u64,
+        stream_id: StreamId,
         push_id: u64,
         additional_header: Header,
     ) -> Option<Datagram> {
@@ -5769,7 +5778,7 @@ mod tests {
     fn send_headers_using_encoder(
         client: &mut Http3Client,
         server: &mut TestServer,
-        request_stream_id: u64,
+        request_stream_id: StreamId,
         headers: &[Header],
         data: &[u8],
     ) -> Option<Datagram> {
@@ -6165,7 +6174,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0_u8; 100];
         assert_eq!(
-            client.read_response_data(now(), 0, &mut buf),
+            client.read_response_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
     }
@@ -6530,7 +6539,7 @@ mod tests {
         assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
     }
 
-    fn manipulate_conrol_stream(client: &mut Http3Client, stream_id: u64) {
+    fn manipulate_conrol_stream(client: &mut Http3Client, stream_id: StreamId) {
         assert_eq!(
             client
                 .cancel_fetch(stream_id, Error::HttpNoError.code())
@@ -6624,14 +6633,17 @@ mod tests {
 
         // make sure that the server didn't receive a priority_update on client control stream (stream_id 2) yet
         let mut buf = [0; 32];
-        assert_eq!(server.conn.stream_recv(2, &mut buf), Ok((0, false)));
+        assert_eq!(
+            server.conn.stream_recv(StreamId::new(2), &mut buf),
+            Ok((0, false))
+        );
 
         // the client now sends the priority update
         let out = client.process(out, now()).dgram();
         server.conn.process_input(out.unwrap(), now());
 
         // check that the priority_update arrived at the client control stream
-        let num_read = server.conn.stream_recv(2, &mut buf).unwrap();
+        let num_read = server.conn.stream_recv(StreamId::new(2), &mut buf).unwrap();
         assert_eq!(b"\x80\x0f\x07\x00\x04\x00\x75\x3d\x36", &buf[0..num_read.0]);
     }
 

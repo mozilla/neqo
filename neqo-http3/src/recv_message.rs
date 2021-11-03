@@ -14,7 +14,7 @@ use crate::{
 use crate::priority::PriorityHandler;
 use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::VecDeque;
@@ -75,7 +75,7 @@ pub(crate) struct RecvMessage {
     qpack_decoder: Rc<RefCell<QPackDecoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
-    stream_id: u64,
+    stream_id: StreamId,
     priority_handler: PriorityHandler,
     blocked_push_promise: VecDeque<PushInfo>,
 }
@@ -89,7 +89,7 @@ impl ::std::fmt::Display for RecvMessage {
 impl RecvMessage {
     pub fn new(
         message_type: MessageType,
-        stream_id: u64,
+        stream_id: StreamId,
         qpack_decoder: Rc<RefCell<QPackDecoder>>,
         conn_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,

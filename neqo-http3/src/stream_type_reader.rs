@@ -79,18 +79,18 @@ pub enum NewStreamHeadReader {
     ReadType {
         role: Role,
         reader: IncrementalDecoderUint,
-        stream_id: u64,
+        stream_id: StreamId,
     },
     ReadId {
         stream_type: u64,
         reader: IncrementalDecoderUint,
-        stream_id: u64,
+        stream_id: StreamId,
     },
     Done,
 }
 
 impl NewStreamHeadReader {
-    pub fn new(stream_id: u64, role: Role) -> Self {
+    pub fn new(stream_id: StreamId, role: Role) -> Self {
         NewStreamHeadReader::ReadType {
             role,
             reader: IncrementalDecoderUint::default(),
@@ -149,11 +149,8 @@ impl NewStreamHeadReader {
                     //  - None - if a stream is not identified by the type only, but it needs
                     //    additional data from the header to produce the final type, e.g.
                     //    a push stream needs pushId as well.
-                    let final_type = NewStreamType::final_stream_type(
-                        output,
-                        StreamId::new(*stream_id).stream_type(),
-                        *role,
-                    );
+                    let final_type =
+                        NewStreamType::final_stream_type(output, stream_id.stream_type(), *role);
                     match (&final_type, fin) {
                         (Err(_), _) => {
                             *self = NewStreamHeadReader::Done;
@@ -244,7 +241,7 @@ mod tests {
         NewStreamHeadReader, HTTP3_UNI_STREAM_TYPE_PUSH, WEBTRANSPORT_STREAM,
         WEBTRANSPORT_UNI_STREAM,
     };
-    use neqo_transport::{Connection, StreamType};
+    use neqo_transport::{Connection, StreamId, StreamType};
     use std::mem;
     use test_fixture::{connect, now};
 
@@ -258,7 +255,7 @@ mod tests {
     struct Test {
         conn_c: Connection,
         conn_s: Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         decoder: NewStreamHeadReader,
     }
 

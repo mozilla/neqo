@@ -20,7 +20,7 @@ use neqo_http3::{
 };
 use neqo_transport::{
     CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamType,
+    EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamId, StreamType,
 };
 
 use std::cell::RefCell;
@@ -380,7 +380,7 @@ fn process_loop(
 }
 
 struct Handler<'a> {
-    streams: HashMap<u64, Option<File>>,
+    streams: HashMap<StreamId, Option<File>>,
     url_queue: VecDeque<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
@@ -455,7 +455,7 @@ impl<'a> Handler<'a> {
         self.streams.is_empty() && self.url_queue.is_empty()
     }
 
-    fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: u64) -> bool {
+    fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId) -> bool {
         self.streams.remove(&stream_id);
         self.download_urls(client);
         if self.done() {
@@ -807,13 +807,13 @@ mod old {
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, QuicVersion, State,
-        StreamType,
+        StreamId, StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
 
     struct HandlerOld<'b> {
-        streams: HashMap<u64, Option<File>>,
+        streams: HashMap<StreamId, Option<File>>,
         url_queue: VecDeque<Url>,
         all_paths: Vec<PathBuf>,
         args: &'b Args,
@@ -873,7 +873,7 @@ mod old {
         // Returns bool: was fin received?
         fn read_from_stream(
             client: &mut Connection,
-            stream_id: u64,
+            stream_id: StreamId,
             output_read_data: bool,
             maybe_out_file: &mut Option<File>,
         ) -> Res<bool> {
@@ -907,7 +907,7 @@ mod old {
             Ok(())
         }
 
-        fn read(&mut self, client: &mut Connection, stream_id: u64) -> Res<bool> {
+        fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<bool> {
             let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
             match &mut maybe_maybe_out_file {
                 None => {
