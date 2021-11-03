@@ -9,7 +9,7 @@ use crate::hframe::HFrame;
 use crate::{CloseType, HttpRecvStreamEvents, RecvStreamEvents};
 use crate::{Error, Header, Res};
 use neqo_common::{qerror, qinfo, qtrace};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -35,11 +35,11 @@ enum PushState {
         headers: Vec<Header>,
     },
     OnlyPushStream {
-        stream_id: u64,
+        stream_id: StreamId,
         events: Vec<Http3ClientEvent>,
     },
     Active {
-        stream_id: u64,
+        stream_id: StreamId,
         headers: Vec<Header>,
     },
     Closed,
@@ -177,7 +177,7 @@ impl PushController {
     pub fn new_push_promise(
         &mut self,
         push_id: u64,
-        ref_stream_id: u64,
+        ref_stream_id: StreamId,
         new_headers: Vec<Header>,
     ) -> Res<()> {
         qtrace!(
@@ -231,7 +231,7 @@ impl PushController {
         }
     }
 
-    pub fn add_new_push_stream(&mut self, push_id: u64, stream_id: u64) -> Res<bool> {
+    pub fn add_new_push_stream(&mut self, push_id: u64, stream_id: StreamId) -> Res<bool> {
         qtrace!(
             "A new push stream with push_id={} stream_id={}",
             push_id,
@@ -398,7 +398,7 @@ impl PushController {
         }
     }
 
-    pub fn get_active_stream_id(&mut self, push_id: u64) -> Option<u64> {
+    pub fn get_active_stream_id(&mut self, push_id: u64) -> Option<StreamId> {
         match self.push_streams.get(push_id) {
             Some(PushState::Active { stream_id, .. }) => Some(*stream_id),
             _ => None,
@@ -468,7 +468,7 @@ impl RecvPushEvents {
 }
 
 impl RecvStreamEvents for RecvPushEvents {
-    fn data_readable(&self, _stream_id: u64) {
+    fn data_readable(&self, _stream_id: StreamId) {
         self.push_handler.borrow_mut().new_stream_event(
             self.push_id,
             Http3ClientEvent::PushDataReadable {
@@ -477,7 +477,7 @@ impl RecvStreamEvents for RecvPushEvents {
         );
     }
 
-    fn recv_closed(&self, _stream_id: u64, close_type: CloseType) {
+    fn recv_closed(&self, _stream_id: StreamId, close_type: CloseType) {
         match close_type {
             CloseType::ResetApp(_) => {}
             CloseType::ResetRemote(_) | CloseType::LocalError(_) => self
@@ -490,7 +490,7 @@ impl RecvStreamEvents for RecvPushEvents {
 }
 
 impl HttpRecvStreamEvents for RecvPushEvents {
-    fn header_ready(&self, _stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool) {
+    fn header_ready(&self, _stream_id: StreamId, headers: Vec<Header>, interim: bool, fin: bool) {
         self.push_handler.borrow_mut().new_stream_event(
             self.push_id,
             Http3ClientEvent::PushHeaderReady {

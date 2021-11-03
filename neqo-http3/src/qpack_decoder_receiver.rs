@@ -6,18 +6,18 @@
 
 use crate::{CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream};
 use neqo_qpack::QPackDecoder;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct DecoderRecvStream {
-    stream_id: u64,
+    stream_id: StreamId,
     decoder: Rc<RefCell<QPackDecoder>>,
 }
 
 impl DecoderRecvStream {
-    pub fn new(stream_id: u64, decoder: Rc<RefCell<QPackDecoder>>) -> Self {
+    pub fn new(stream_id: StreamId, decoder: Rc<RefCell<QPackDecoder>>) -> Self {
         Self { stream_id, decoder }
     }
 }

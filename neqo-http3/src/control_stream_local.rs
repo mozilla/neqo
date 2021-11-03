@@ -18,7 +18,7 @@ pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 pub(crate) struct ControlStreamLocal {
     stream: BufferedStream,
     /// `stream_id`s of outstanding request streams
-    outstanding_priority_update: VecDeque<u64>,
+    outstanding_priority_update: VecDeque<StreamId>,
 }
 
 impl ::std::fmt::Display for ControlStreamLocal {
@@ -42,7 +42,7 @@ impl ControlStreamLocal {
         self.stream.buffer(&enc);
     }
 
-    pub fn queue_update_priority(&mut self, stream_id: u64) {
+    pub fn queue_update_priority(&mut self, stream_id: StreamId) {
         self.outstanding_priority_update.push_back(stream_id);
     }
 
@@ -50,7 +50,7 @@ impl ControlStreamLocal {
     pub fn send(
         &mut self,
         conn: &mut Connection,
-        recv_conn: &mut HashMap<u64, Box<dyn RecvStream>>,
+        recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
     ) -> Res<()> {
         self.stream.send_buffer(conn)?;
         self.send_priority_update(conn, recv_conn)
@@ -59,7 +59,7 @@ impl ControlStreamLocal {
     fn send_priority_update(
         &mut self,
         conn: &mut Connection,
-        recv_conn: &mut HashMap<u64, Box<dyn RecvStream>>,
+        recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
     ) -> Res<()> {
         // send all necessary priority updates
         while let Some(update_id) = self.outstanding_priority_update.pop_front() {
@@ -94,15 +94,14 @@ impl ControlStreamLocal {
     /// Create a control stream.
     pub fn create(&mut self, conn: &mut Connection) -> Res<()> {
         qtrace!([self], "Create a control stream.");
-        self.stream
-            .init(StreamId::from(conn.stream_create(StreamType::UniDi)?));
+        self.stream.init(conn.stream_create(StreamType::UniDi)?);
         self.stream
             .buffer(&[u8::try_from(HTTP3_UNI_STREAM_TYPE_CONTROL).unwrap()]);
         Ok(())
     }
 
     #[must_use]
-    pub fn stream_id(&self) -> Option<u64> {
+    pub fn stream_id(&self) -> Option<StreamId> {
         (&self.stream).into()
     }
 }

@@ -11,7 +11,7 @@ use crate::connection_server::Http3ServerHandler;
 use crate::{Header, Priority, Res};
 use neqo_common::{qdebug, qinfo};
 use neqo_transport::server::ActiveConnectionRef;
-use neqo_transport::{AppError, Connection};
+use neqo_transport::{AppError, Connection, StreamId};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -21,7 +21,7 @@ use std::rc::Rc;
 pub struct ClientRequestStream {
     conn: ActiveConnectionRef,
     handler: Rc<RefCell<Http3ServerHandler>>,
-    stream_id: u64,
+    stream_id: StreamId,
 }
 
 impl ::std::fmt::Display for ClientRequestStream {
@@ -39,7 +39,7 @@ impl ClientRequestStream {
     pub(crate) fn new(
         conn: ActiveConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Self {
         Self {
             conn,
@@ -90,7 +90,7 @@ impl ClientRequestStream {
 impl std::hash::Hash for ClientRequestStream {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.conn.hash(state);
-        state.write_u64(self.stream_id);
+        state.write_u64(self.stream_id.as_u64());
         state.finish();
     }
 }
@@ -123,7 +123,7 @@ pub enum Http3ServerEvent {
         state: Http3State,
     },
     PriorityUpdate {
-        stream_id: u64,
+        stream_id: StreamId,
         priority: Priority,
     },
 }
@@ -172,7 +172,7 @@ impl Http3ServerEvents {
         self.insert(Http3ServerEvent::Data { request, data, fin });
     }
 
-    pub(crate) fn priority_update(&self, stream_id: u64, priority: Priority) {
+    pub(crate) fn priority_update(&self, stream_id: StreamId, priority: Priority) {
         self.insert(Http3ServerEvent::PriorityUpdate {
             stream_id,
             priority,

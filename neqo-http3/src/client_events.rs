@@ -11,7 +11,7 @@ use crate::settings::HSettingType;
 use crate::{CloseType, Header, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
-use neqo_transport::{AppError, StreamType};
+use neqo_transport::{AppError, StreamId, StreamType};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -21,27 +21,30 @@ use std::rc::Rc;
 pub enum Http3ClientEvent {
     /// Response headers are received.
     HeaderReady {
-        stream_id: u64,
+        stream_id: StreamId,
         headers: Vec<Header>,
         interim: bool,
         fin: bool,
     },
     /// A stream can accept new data.
-    DataWritable { stream_id: u64 },
+    DataWritable { stream_id: StreamId },
     /// New bytes available for reading.
-    DataReadable { stream_id: u64 },
+    DataReadable { stream_id: StreamId },
     /// Peer reset the stream or there was an parsing error.
     Reset {
-        stream_id: u64,
+        stream_id: StreamId,
         error: AppError,
         local: bool,
     },
     /// Peer has sent a STOP_SENDING.
-    StopSending { stream_id: u64, error: AppError },
+    StopSending {
+        stream_id: StreamId,
+        error: AppError,
+    },
     /// A new push promise.
     PushPromise {
         push_id: u64,
-        request_stream_id: u64,
+        request_stream_id: StreamId,
         headers: Vec<Header>,
     },
     /// A push response headers are ready.
@@ -86,12 +89,12 @@ pub struct Http3ClientEvents {
 
 impl RecvStreamEvents for Http3ClientEvents {
     /// Add a new `DataReadable` event
-    fn data_readable(&self, stream_id: u64) {
+    fn data_readable(&self, stream_id: StreamId) {
         self.insert(Http3ClientEvent::DataReadable { stream_id });
     }
 
     /// Add a new `Reset` event.
-    fn recv_closed(&self, stream_id: u64, close_type: CloseType) {
+    fn recv_closed(&self, stream_id: StreamId, close_type: CloseType) {
         let (local, error) = match close_type {
             CloseType::ResetApp(_) => {
                 self.remove_recv_stream_events(stream_id);
@@ -118,7 +121,7 @@ impl RecvStreamEvents for Http3ClientEvents {
 
 impl HttpRecvStreamEvents for Http3ClientEvents {
     /// Add a new `HeaderReady` event.
-    fn header_ready(&self, stream_id: u64, headers: Vec<Header>, interim: bool, fin: bool) {
+    fn header_ready(&self, stream_id: StreamId, headers: Vec<Header>, interim: bool, fin: bool) {
         self.insert(Http3ClientEvent::HeaderReady {
             stream_id,
             headers,
@@ -130,11 +133,11 @@ impl HttpRecvStreamEvents for Http3ClientEvents {
 
 impl SendStreamEvents for Http3ClientEvents {
     /// Add a new `DataWritable` event.
-    fn data_writable(&self, stream_id: u64) {
+    fn data_writable(&self, stream_id: StreamId) {
         self.insert(Http3ClientEvent::DataWritable { stream_id });
     }
 
-    fn send_closed(&self, stream_id: u64, close_type: CloseType) {
+    fn send_closed(&self, stream_id: StreamId, close_type: CloseType) {
         self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
             self.insert(Http3ClientEvent::StopSending { stream_id, error });
@@ -143,7 +146,7 @@ impl SendStreamEvents for Http3ClientEvents {
 }
 
 impl Http3ClientEvents {
-    pub fn push_promise(&self, push_id: u64, request_stream_id: u64, headers: Vec<Header>) {
+    pub fn push_promise(&self, push_id: u64, request_stream_id: StreamId, headers: Vec<Header>) {
         self.insert(Http3ClientEvent::PushPromise {
             push_id,
             request_stream_id,
@@ -221,7 +224,7 @@ impl Http3ClientEvents {
     }
 
     /// Remove all events for a stream
-    fn remove_recv_stream_events(&self, stream_id: u64) {
+    fn remove_recv_stream_events(&self, stream_id: StreamId) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
@@ -231,7 +234,7 @@ impl Http3ClientEvents {
         });
     }
 
-    fn remove_send_stream_events(&self, stream_id: u64) {
+    fn remove_send_stream_events(&self, stream_id: StreamId) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::DataWritable { stream_id: x }

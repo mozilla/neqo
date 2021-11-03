@@ -22,7 +22,7 @@ impl Default for BufferedStream {
 
 impl ::std::fmt::Display for BufferedStream {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "BufferedStream {:?}", Option::<u64>::from(self))
+        write!(f, "BufferedStream {:?}", Option::<StreamId>::from(self))
     }
 }
 
@@ -63,7 +63,7 @@ impl BufferedStream {
         if let Self::Initialized { stream_id, buf } = self {
             if !buf.is_empty() {
                 qtrace!([label], "sending data.");
-                sent = conn.stream_send(stream_id.as_u64(), &buf[..])?;
+                sent = conn.stream_send(*stream_id, &buf[..])?;
                 if sent == buf.len() {
                     buf.clear();
                 } else {
@@ -82,7 +82,7 @@ impl BufferedStream {
         self.send_buffer(conn)?;
         if let Self::Initialized { stream_id, buf } = self {
             if buf.is_empty() {
-                let res = conn.stream_send_atomic(stream_id.as_u64(), to_send)?;
+                let res = conn.stream_send_atomic(*stream_id, to_send)?;
                 Ok(res)
             } else {
                 Ok(false)
@@ -93,10 +93,10 @@ impl BufferedStream {
     }
 }
 
-impl From<&BufferedStream> for Option<u64> {
-    fn from(stream: &BufferedStream) -> Option<u64> {
+impl From<&BufferedStream> for Option<StreamId> {
+    fn from(stream: &BufferedStream) -> Option<StreamId> {
         if let BufferedStream::Initialized { stream_id, .. } = stream {
-            Some(stream_id.as_u64())
+            Some(*stream_id)
         } else {
             None
         }

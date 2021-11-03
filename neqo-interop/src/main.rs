@@ -12,7 +12,7 @@ use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
-    Error, Output, State, StreamType,
+    Error, Output, State, StreamId, StreamType,
 };
 
 use std::cell::RefCell;
@@ -168,7 +168,7 @@ impl Handler for PreConnectHandler {
 struct H9Handler {
     rbytes: usize,
     rsfin: bool,
-    streams: HashSet<u64>,
+    streams: HashSet<StreamId>,
 }
 
 // This is a bit fancier than actually needed.
@@ -246,7 +246,7 @@ impl FromStr for Headers {
 }
 
 struct H3Handler {
-    streams: HashSet<u64>,
+    streams: HashSet<StreamId>,
     h3: Http3Client,
     host: String,
     path: String,
