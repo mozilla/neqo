@@ -268,6 +268,7 @@ impl Http3Client {
     {
         let output = self.base_handler.fetch(
             &mut self.conn,
+            Http3StreamType::Http,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
             Some(Rc::clone(&self.push_handler)),
@@ -554,13 +555,15 @@ impl Http3Client {
                     app_error,
                 } => self
                     .base_handler
-                    .handle_stream_reset(stream_id, app_error)?,
+                    .handle_stream_reset(stream_id, app_error, &mut self.conn)?,
                 ConnectionEvent::SendStreamStopSending {
                     stream_id,
                     app_error,
-                } => self
-                    .base_handler
-                    .handle_stream_stop_sending(stream_id, app_error)?,
+                } => self.base_handler.handle_stream_stop_sending(
+                    stream_id,
+                    app_error,
+                    &mut self.conn,
+                )?,
 
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.events.new_requests_creatable(stream_type);
@@ -717,10 +720,11 @@ impl Http3Client {
             .collect();
         for id in send_ids {
             // We do not care about streams that are going to be closed.
-            mem::drop(
-                self.base_handler
-                    .handle_stream_stop_sending(id, Error::HttpRequestRejected.code()),
-            );
+            mem::drop(self.base_handler.handle_stream_stop_sending(
+                id,
+                Error::HttpRequestRejected.code(),
+                &mut self.conn,
+            ));
         }
 
         let recv_ids: Vec<StreamId> = self
@@ -731,10 +735,11 @@ impl Http3Client {
             .collect();
         for id in recv_ids {
             // We do not care about streams that are going to be closed.
-            mem::drop(
-                self.base_handler
-                    .handle_stream_reset(id, Error::HttpRequestRejected.code()),
-            );
+            mem::drop(self.base_handler.handle_stream_reset(
+                id,
+                Error::HttpRequestRejected.code(),
+                &mut self.conn,
+            ));
         }
 
         self.events.goaway_received();

@@ -16,6 +16,7 @@ use crate::{Http3StreamInfo, Http3StreamType};
 use neqo_transport::{AppError, StreamId};
 pub use session::ExtendedConnectSession;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -106,5 +107,14 @@ impl ExtendedConnectFeature {
     #[must_use]
     pub fn enabled(&self) -> bool {
         self.feature_negotiation.enabled()
+    }
+
+    pub fn remove(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Option<(BTreeSet<StreamId>, BTreeSet<StreamId>)> {
+        self.sessions
+            .remove(&stream_id)
+            .and_then(|ec| ec.borrow_mut().take_sub_streams())
     }
 }

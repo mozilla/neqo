@@ -11,9 +11,10 @@ use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
 };
 use neqo_common::{qtrace, Headers, Role};
-use neqo_transport::{AppError, StreamId};
+use neqo_transport::StreamId;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::mem;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
@@ -60,13 +61,17 @@ impl ExtendedConnectSession {
         }
     }
 
-    fn close(&mut self, stream_id: StreamId, error: Option<AppError>) {
+    fn close(&mut self, stream_id: StreamId, close_type: CloseType) {
         if self.state == SessionState::Done {
             return;
         }
         qtrace!("ExtendedConnect close the session");
         self.state = SessionState::Done;
-        self.events.session_end(self.connect_type, stream_id, error);
+        if let CloseType::ResetApp(_) = close_type {
+            return;
+        }
+        self.events
+            .session_end(self.connect_type, stream_id, close_type.error());
     }
 
     pub fn negotiation_done(&mut self, stream_id: StreamId, succeeded: bool) {
@@ -115,6 +120,13 @@ impl ExtendedConnectSession {
     pub fn is_active(&self) -> bool {
         matches!(self.state, SessionState::Active(_))
     }
+
+    pub fn take_sub_streams(&mut self) -> Option<(BTreeSet<StreamId>, BTreeSet<StreamId>)> {
+        Some((
+            mem::take(&mut self.recv_streams),
+            mem::take(&mut self.send_streams),
+        ))
+    }
 }
 
 impl RecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
@@ -123,13 +135,12 @@ impl RecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
         // the future.
         self.borrow_mut().close(
             stream_info.stream_id(),
-            Some(Error::HttpGeneralProtocolStream.code()),
+            CloseType::LocalError(Error::HttpGeneralProtocolStream.code()),
         );
     }
 
     fn recv_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
-        self.borrow_mut()
-            .close(stream_info.stream_id(), close_type.error());
+        self.borrow_mut().close(stream_info.stream_id(), close_type);
     }
 }
 
@@ -163,7 +174,6 @@ impl SendStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
 
     /// Add a new `StopSending` event
     fn send_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
-        self.borrow_mut()
-            .close(stream_info.stream_id(), close_type.error());
+        self.borrow_mut().close(stream_info.stream_id(), close_type);
     }
 }

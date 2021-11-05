@@ -183,7 +183,7 @@ impl Http3Connection {
                 false
             };
             if done {
-                self.send_streams.remove(&stream_id);
+                self.remove_send_stream(stream_id, conn);
             }
         }
         Ok(())
@@ -310,7 +310,12 @@ impl Http3Connection {
     }
 
     /// This is called when a RESET frame has been received.
-    pub fn handle_stream_reset(&mut self, stream_id: StreamId, app_error: AppError) -> Res<()> {
+    pub fn handle_stream_reset(
+        &mut self,
+        stream_id: StreamId,
+        app_error: AppError,
+        conn: &mut Connection,
+    ) -> Res<()> {
         qinfo!(
             [self],
             "Handle a stream reset stream_id={} app_err={}",
@@ -318,15 +323,14 @@ impl Http3Connection {
             app_error
         );
 
-        self.recv_streams
-            .remove(&stream_id)
-            .map_or(Ok(()), |mut s| s.reset(CloseType::ResetRemote(app_error)))
+        self.close_recv(stream_id, CloseType::ResetRemote(app_error), conn)
     }
 
     pub fn handle_stream_stop_sending(
         &mut self,
         stream_id: StreamId,
         app_error: AppError,
+        conn: &mut Connection,
     ) -> Res<()> {
         qinfo!(
             [self],
@@ -335,14 +339,12 @@ impl Http3Connection {
             app_error
         );
 
-        if let Some(mut s) = self.send_streams.remove(&stream_id) {
-            s.handle_stop_sending(CloseType::ResetRemote(app_error));
-            Ok(())
-        } else if self.send_stream_is_critical(stream_id) {
-            Err(Error::HttpClosedCriticalStream)
-        } else {
-            Ok(())
+        if self.send_stream_is_critical(stream_id) {
+            return Err(Error::HttpClosedCriticalStream);
         }
+
+        self.close_send(stream_id, CloseType::ResetRemote(app_error), conn);
+        Ok(())
     }
 
     /// This is called when `neqo_transport::Connection` state has been change to take proper actions in
@@ -530,14 +532,14 @@ impl Http3Connection {
         U: Default,
     {
         match &output {
-            Ok((_, true)) => mem::drop(self.recv_streams.remove(&stream_id)),
+            Ok((_, true)) => {
+                self.remove_recv_stream(stream_id, conn);
+            }
             Ok((_, false)) => {}
             Err(e) => {
                 if e.stream_reset_error() && !self.recv_stream_is_critical(stream_id) {
                     mem::drop(conn.stream_stop_sending(stream_id, e.code()));
-                    if let Some(mut rs) = self.recv_streams.remove(&stream_id) {
-                        rs.reset(CloseType::LocalError(e.code())).unwrap();
-                    }
+                    self.close_recv(stream_id, CloseType::LocalError(e.code()), conn)?;
                     return Ok((U::default(), false));
                 }
             }
@@ -575,6 +577,7 @@ impl Http3Connection {
     pub fn fetch<'b, 't, T>(
         &mut self,
         conn: &mut Connection,
+        stream_type: Http3StreamType,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
@@ -607,6 +610,7 @@ impl Http3Connection {
 
         let mut send_message = SendMessage::new(
             MessageType::Request,
+            stream_type,
             id,
             self.qpack_encoder.clone(),
             send_events,
@@ -623,7 +627,7 @@ impl Http3Connection {
             Box::new(RecvMessage::new(
                 &RecvMessageInfo {
                     message_type: MessageType::Response,
-                    stream_type: Http3StreamType::Http,
+                    stream_type,
                     stream_id: id,
                     header_frame_type_read: false,
                 },
@@ -682,9 +686,7 @@ impl Http3Connection {
             return Err(Error::InvalidStreamId);
         }
 
-        if let Some(mut s) = self.send_streams.remove(&stream_id) {
-            s.handle_stop_sending(CloseType::ResetApp(error));
-        }
+        self.close_send(stream_id, CloseType::ResetApp(error), conn);
         conn.stream_reset_send(stream_id, error)?;
         Ok(())
     }
@@ -705,9 +707,7 @@ impl Http3Connection {
             return Err(Error::InvalidStreamId);
         }
 
-        self.recv_streams
-            .remove(&stream_id)
-            .map_or(Ok(()), |mut s| s.reset(CloseType::ResetApp(error)))?;
+        self.close_recv(stream_id, CloseType::ResetApp(error), conn)?;
 
         // Stream may be already be closed and we may get an error here, but we do not care.
         conn.stream_stop_sending(stream_id, error)?;
@@ -726,7 +726,10 @@ impl Http3Connection {
         match (send_stream, recv_stream) {
             (None, None) => return Err(Error::InvalidStreamId),
             (Some(s), None) => {
-                if !matches!(s.stream_type(), Http3StreamType::Http) {
+                if !matches!(
+                    s.stream_type(),
+                    Http3StreamType::Http | Http3StreamType::ExtendedConnect
+                ) {
                     return Err(Error::InvalidStreamId);
                 }
                 // Stream may be already be closed and we may get an error here, but we do not care.
@@ -735,7 +738,9 @@ impl Http3Connection {
             (None, Some(s)) => {
                 if !matches!(
                     s.stream_type(),
-                    Http3StreamType::Http | Http3StreamType::Push
+                    Http3StreamType::Http
+                        | Http3StreamType::Push
+                        | Http3StreamType::ExtendedConnect
                 ) {
                     return Err(Error::InvalidStreamId);
                 }
@@ -745,7 +750,10 @@ impl Http3Connection {
             }
             (Some(s), Some(r)) => {
                 debug_assert_eq!(s.stream_type(), r.stream_type());
-                if !matches!(s.stream_type(), Http3StreamType::Http) {
+                if !matches!(
+                    s.stream_type(),
+                    Http3StreamType::Http | Http3StreamType::ExtendedConnect
+                ) {
                     return Err(Error::InvalidStreamId);
                 }
                 // Stream may be already be closed and we may get an error here, but we do not care.
@@ -769,7 +777,7 @@ impl Http3Connection {
         // already. It is ok to ignore it here.
         mem::drop(send_stream.close(conn));
         if send_stream.done() {
-            self.send_streams.remove(&stream_id);
+            self.remove_send_stream(stream_id, conn);
         }
         Ok(())
     }
@@ -796,6 +804,7 @@ impl Http3Connection {
         )));
         let id = self.fetch(
             conn,
+            Http3StreamType::ExtendedConnect,
             Box::new(extended_conn.clone()),
             Box::new(extended_conn.clone()),
             None,
@@ -1163,6 +1172,75 @@ impl Http3Connection {
             .chain(self.qpack_decoder.borrow().local_stream_id().iter())
             .chain(self.control_stream_local.stream_id().iter())
             .any(|id| stream_id == *id)
+    }
+
+    fn close_send(&mut self, stream_id: StreamId, close_type: CloseType, conn: &mut Connection) {
+        if let Some(mut s) = self.remove_send_stream(stream_id, conn) {
+            s.handle_stop_sending(close_type);
+        }
+    }
+
+    fn close_recv(
+        &mut self,
+        stream_id: StreamId,
+        close_type: CloseType,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        if let Some(mut s) = self.remove_recv_stream(stream_id, conn) {
+            s.reset(close_type)?;
+        }
+        Ok(())
+    }
+
+    fn remove_extended_connect(&mut self, stream_id: StreamId, conn: &mut Connection) {
+        if let Some((recv, send)) = self.webtransport.remove(stream_id) {
+            for id in recv {
+                qtrace!("Remove the extended connect sub receiver stream {}", id);
+                // Use CloseType::ResetRemote so that an event will be sent. CloseType::LocalError would have
+                // the same effect.
+                if let Some(mut s) = self.recv_streams.remove(&id) {
+                    mem::drop(s.reset(CloseType::ResetRemote(Error::HttpRequestCancelled.code())));
+                }
+                mem::drop(conn.stream_stop_sending(id, Error::HttpRequestCancelled.code()));
+            }
+            for id in send {
+                qtrace!("Remove the extended connect sub send stream {}", id);
+                if let Some(mut s) = self.send_streams.remove(&id) {
+                    s.handle_stop_sending(CloseType::ResetRemote(
+                        Error::HttpRequestCancelled.code(),
+                    ));
+                }
+                mem::drop(conn.stream_reset_send(id, Error::HttpRequestCancelled.code()));
+            }
+        }
+    }
+
+    fn remove_recv_stream(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut Connection,
+    ) -> Option<Box<dyn RecvStream>> {
+        let stream = self.recv_streams.remove(&stream_id);
+        if let Some(ref s) = stream {
+            if s.stream_type() == Http3StreamType::ExtendedConnect {
+                self.remove_extended_connect(stream_id, conn);
+            }
+        }
+        stream
+    }
+
+    fn remove_send_stream(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut Connection,
+    ) -> Option<Box<dyn SendStream>> {
+        let stream = self.send_streams.remove(&stream_id);
+        if let Some(ref s) = stream {
+            if s.stream_type() == Http3StreamType::ExtendedConnect {
+                self.remove_extended_connect(stream_id, conn);
+            }
+        }
+        stream
     }
 
     pub fn webtransport_enabled(&self) -> bool {

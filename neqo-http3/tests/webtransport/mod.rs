@@ -339,6 +339,51 @@ impl WtTest {
         assert!(self.client.events().any(wt_stop_sending_event));
     }
 
+    fn check_events_after_closing_session_client(
+        &mut self,
+        expected_reset_ids: &[StreamId],
+        expected_error_stream_reset: Option<u64>,
+        expected_stop_sending_ids: &[StreamId],
+        expected_error_stream_stop_sending: Option<u64>,
+        expected_local: bool,
+        expected_session_close: Option<(StreamId, Option<u64>)>,
+    ) {
+        let mut reset_ids_count = 0;
+        let mut stop_sending_ids_count = 0;
+        let mut close_event = false;
+        while let Some(event) = self.client.next_event() {
+            match event {
+                Http3ClientEvent::Reset {
+                    stream_id,
+                    error,
+                    local,
+                } => {
+                    assert!(expected_reset_ids.contains(&stream_id));
+                    assert_eq!(expected_error_stream_reset.unwrap(), error);
+                    assert_eq!(expected_local, local);
+                    reset_ids_count += 1;
+                }
+                Http3ClientEvent::StopSending { stream_id, error } => {
+                    assert!(expected_stop_sending_ids.contains(&stream_id));
+                    assert_eq!(expected_error_stream_stop_sending.unwrap(), error);
+                    stop_sending_ids_count += 1;
+                }
+                Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
+                    stream_id,
+                    error,
+                }) => {
+                    close_event = true;
+                    assert_eq!(stream_id, expected_session_close.unwrap().0);
+                    assert_eq!(expected_session_close.unwrap().1, error);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(reset_ids_count, expected_reset_ids.len());
+        assert_eq!(stop_sending_ids_count, expected_stop_sending_ids.len());
+        assert_eq!(close_event, expected_session_close.is_some());
+    }
+
     fn create_wt_stream_server(
         &mut self,
         wt_server_session: &mut WebTransportRequest,
@@ -410,23 +455,62 @@ impl WtTest {
         self.exchange_packets();
     }
 
-    fn receive_reset_server(&mut self, expected_stream_id: StreamId) {
+    fn receive_reset_server(&mut self, expected_stream_id: StreamId, expected_error: u64) {
         assert!(matches!(
             self.server.next_event().unwrap(),
             Http3ServerEvent::StreamReset {
                 stream,
                 error
-            } if stream.stream_id() == expected_stream_id && error == Error::HttpNoError.code()
+            } if stream.stream_id() == expected_stream_id && error == expected_error
         ));
     }
 
-    fn receive_stop_sending_server(&mut self, expected_stream_id: StreamId) {
+    fn receive_stop_sending_server(&mut self, expected_stream_id: StreamId, expected_error: u64) {
         assert!(matches!(
             self.server.next_event().unwrap(),
             Http3ServerEvent::StreamStopSending {
                 stream,
                 error
-            } if stream.stream_id() == expected_stream_id && error == Error::HttpNoError.code()
+            } if stream.stream_id() == expected_stream_id && error == expected_error
         ));
+    }
+
+    fn check_events_after_closing_session_server(
+        &mut self,
+        expected_reset_ids: &[StreamId],
+        expected_error_stream_reset: Option<u64>,
+        expected_stop_sending_ids: &[StreamId],
+        expected_error_stream_stop_sending: Option<u64>,
+        expected_session_close: Option<(StreamId, Option<u64>)>,
+    ) {
+        let mut reset_ids_count = 0;
+        let mut stop_sending_ids_count = 0;
+        let mut close_event = false;
+        while let Some(event) = self.server.next_event() {
+            match event {
+                Http3ServerEvent::StreamReset { stream, error } => {
+                    assert!(expected_reset_ids.contains(&stream.stream_id()));
+                    assert_eq!(expected_error_stream_reset.unwrap(), error);
+                    reset_ids_count += 1;
+                }
+                Http3ServerEvent::StreamStopSending { stream, error } => {
+                    assert!(expected_stop_sending_ids.contains(&stream.stream_id()));
+                    assert_eq!(expected_error_stream_stop_sending.unwrap(), error);
+                    stop_sending_ids_count += 1;
+                }
+                Http3ServerEvent::WebTransport(WebTransportServerEvent::SessionClosed {
+                    session,
+                    error,
+                }) => {
+                    close_event = true;
+                    assert_eq!(session.stream_id(), expected_session_close.unwrap().0);
+                    assert_eq!(expected_session_close.unwrap().1, error);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(reset_ids_count, expected_reset_ids.len());
+        assert_eq!(stop_sending_ids_count, expected_stop_sending_ids.len());
+        assert_eq!(close_event, expected_session_close.is_some());
     }
 }

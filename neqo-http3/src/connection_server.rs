@@ -227,14 +227,14 @@ impl Http3ServerHandler {
                     app_error,
                 } => {
                     self.base_handler
-                        .handle_stream_reset(stream_id, app_error)?;
+                        .handle_stream_reset(stream_id, app_error, conn)?;
                 }
                 ConnectionEvent::SendStreamStopSending {
                     stream_id,
                     app_error,
                 } => self
                     .base_handler
-                    .handle_stream_stop_sending(stream_id, app_error)?,
+                    .handle_stream_stop_sending(stream_id, app_error, conn)?,
                 ConnectionEvent::StateChange(state) => {
                     if self.base_handler.handle_state_change(conn, &state)? {
                         if self.base_handler.state() == Http3State::Connected {
@@ -268,6 +268,7 @@ impl Http3ServerHandler {
                     stream_id,
                     Box::new(SendMessage::new(
                         MessageType::Response,
+                        Http3StreamType::Http,
                         stream_id,
                         self.base_handler.qpack_encoder.clone(),
                         Box::new(self.events.clone()),
