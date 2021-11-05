@@ -106,6 +106,7 @@ impl MessageState {
 pub(crate) struct SendMessage {
     state: MessageState,
     message_type: MessageType,
+    stream_type: Http3StreamType,
     stream: BufferedStream,
     encoder: Rc<RefCell<QPackEncoder>>,
     conn_events: Box<dyn SendStreamEvents>,
@@ -114,6 +115,7 @@ pub(crate) struct SendMessage {
 impl SendMessage {
     pub fn new(
         message_type: MessageType,
+        stream_type: Http3StreamType,
         stream_id: StreamId,
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
@@ -122,6 +124,7 @@ impl SendMessage {
         Self {
             state: MessageState::WaitingForHeaders,
             message_type,
+            stream_type,
             stream: BufferedStream::new(stream_id),
             encoder,
             conn_events,
@@ -158,7 +161,7 @@ impl SendMessage {
 
 impl Stream for SendMessage {
     fn stream_type(&self) -> Http3StreamType {
-        Http3StreamType::Http
+        self.stream_type
     }
 }
 impl SendStream for SendMessage {

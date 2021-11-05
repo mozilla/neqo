@@ -300,6 +300,7 @@ pub enum Http3StreamType {
     NewStream,
     Http,
     Push,
+    ExtendedConnect,
     WebTransport(StreamId),
     Unknown,
 }
