@@ -26,7 +26,7 @@ use neqo_transport::{
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
-use std::fs::{File, OpenOptions};
+use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -299,15 +299,16 @@ fn get_output_file(
 
         eprintln!("Saving {} to {:?}", url, out_path);
 
-        let f = match OpenOptions::new()
+        if let Some(parent) = out_path.parent() {
+            create_dir_all(parent).ok()?;
+        }
+
+        let f = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(&out_path)
-        {
-            Err(_) => return None,
-            Ok(f) => f,
-        };
+            .ok()?;
 
         all_paths.push(out_path);
         Some(f)
