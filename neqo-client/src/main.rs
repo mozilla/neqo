@@ -227,6 +227,14 @@ pub struct Args {
 
     #[structopt(flatten)]
     quic_parameters: QuicParameters,
+
+    #[structopt(name = "ipv4-only", short = "4", long)]
+    /// Connect only over IPv4
+    ipv4_only: bool,
+
+    #[structopt(name = "ipv6-only", short = "6", long)]
+    /// Connect only over IPv6
+    ipv6_only: bool,
 }
 
 impl Args {
@@ -703,8 +711,21 @@ fn main() -> Res<()> {
             None
         }
     }) {
-        let addrs: Vec<_> = format!("{}:{}", host, port).to_socket_addrs()?.collect();
-        let remote_addr = *addrs.first().unwrap();
+        let remote_addr = format!("{}:{}", host, port)
+            .to_socket_addrs()?
+            .find(|addr| {
+                !matches!(
+                    (addr, args.ipv4_only, args.ipv6_only),
+                    (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
+                )
+            });
+        let remote_addr = match remote_addr {
+            Some(a) => a,
+            None => {
+                eprintln!("No compatible address found for: {}", host);
+                exit(1);
+            }
+        };
 
         let local_addr = match remote_addr {
             SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
