@@ -28,13 +28,9 @@ const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 10737
 /*
  *  SendMessage states:
  *    Uninitialized
- *    Initialized : Headers are present but still not encoded. A message body may be present as well.
- *                  The client side sends a message body using the send_body() function that directly
- *                  writes into a transport stream. The server side sets headers and body when
- *                  initializing a send message (TODO: make server use send_body as well)
  *    SendingInitialMessage : sending headers and maybe message body. From here we may switch to
- *                     SendingData or Closed (if the app does not want to send data and
- *                     has already closed the send stream).
+ *                            SendingData or Closed (if the app does not want to send data and
+ *                            has already closed the send stream).
  *    SendingData : We are sending request data until the app closes the stream.
  *    Closed
  */
@@ -42,15 +38,7 @@ const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 10737
 #[derive(PartialEq, Debug)]
 enum SendMessageState {
     Uninitialized,
-    Initialized {
-        headers: Vec<Header>,
-        data: Option<Vec<u8>>,
-        fin: bool,
-    },
-    SendingInitialMessage {
-        buf: Vec<u8>,
-        fin: bool,
-    },
+    SendingInitialMessage { buf: Vec<u8>, fin: bool },
     SendingData,
     Closed,
 }
@@ -58,7 +46,7 @@ enum SendMessageState {
 impl SendMessageState {
     pub fn is_sending_closed(&self) -> bool {
         match self {
-            Self::Initialized { fin, .. } | Self::SendingInitialMessage { fin, .. } => *fin,
+            Self::SendingInitialMessage { fin, .. } => *fin,
             Self::SendingData => false,
             _ => true,
         }
@@ -98,17 +86,15 @@ impl SendMessage {
 
     pub fn new_with_headers(
         stream_id: StreamId,
-        headers: Vec<Header>,
+        headers: &[Header],
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
+        conn: &mut Connection,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
+        let buf = SendMessage::encode(&mut encoder.borrow_mut(), headers, None, conn, stream_id);
         Self {
-            state: SendMessageState::Initialized {
-                headers,
-                data: None,
-                fin: false,
-            },
+            state: SendMessageState::SendingInitialMessage { buf, fin: false },
             stream_id,
             encoder,
             conn_events,
@@ -118,32 +104,30 @@ impl SendMessage {
     /// # Errors
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
-    fn ensure_encoded(&mut self, conn: &mut Connection) {
-        if let SendMessageState::Initialized { headers, data, fin } = &self.state {
-            qdebug!([self], "Encoding headers");
-            let header_block =
-                self.encoder
-                    .borrow_mut()
-                    .encode_header_block(conn, headers, self.stream_id);
-            let hframe = HFrame::Headers {
-                header_block: header_block.to_vec(),
+    fn encode(
+        encoder: &mut QPackEncoder,
+        headers: &[Header],
+        data: Option<&[u8]>,
+        conn: &mut Connection,
+        stream_id: StreamId,
+    ) -> Vec<u8> {
+        qdebug!("Encoding headers");
+        let header_block = encoder.encode_header_block(conn, headers, stream_id);
+        let hframe = HFrame::Headers {
+            header_block: header_block.to_vec(),
+        };
+        let mut d = Encoder::default();
+        hframe.encode(&mut d);
+        if let Some(buf) = data {
+            qdebug!("Encoding data");
+            let d_frame = HFrame::Data {
+                len: buf.len() as u64,
             };
-            let mut d = Encoder::default();
-            hframe.encode(&mut d);
-            if let Some(buf) = data {
-                qdebug!([self], "Encoding data");
-                let d_frame = HFrame::Data {
-                    len: buf.len() as u64,
-                };
-                d_frame.encode(&mut d);
-                d.encode(buf);
-            }
-
-            self.state = SendMessageState::SendingInitialMessage {
-                buf: d.into(),
-                fin: *fin,
-            };
+            d_frame.encode(&mut d);
+            d.encode(buf);
         }
+
+        d.into()
     }
 }
 
@@ -161,9 +145,9 @@ impl SendStream for SendMessage {
             buf.len()
         );
         match self.state {
-            SendMessageState::Uninitialized
-            | SendMessageState::Initialized { .. }
-            | SendMessageState::SendingInitialMessage { .. } => Ok(0),
+            SendMessageState::Uninitialized | SendMessageState::SendingInitialMessage { .. } => {
+                Ok(0)
+            }
             SendMessageState::SendingData => {
                 let available = conn
                     .stream_avail_send_space(self.stream_id)
@@ -223,15 +207,12 @@ impl SendStream for SendMessage {
     }
 
     /// # Errors
-    /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
     /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.ensure_encoded(conn);
-
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -272,22 +253,15 @@ impl SendStream for SendMessage {
     // This method returns if they're still being sent. Request body (if any) is sent by
     // http client afterwards using `send_request_body` after receiving DataWritable event.
     fn has_data_to_send(&self) -> bool {
-        matches!(
-            self.state,
-            SendMessageState::Initialized { .. } | SendMessageState::SendingInitialMessage { .. }
-        )
+        matches!(self.state, SendMessageState::SendingInitialMessage { .. })
     }
 
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
-        match self.state {
-            SendMessageState::SendingInitialMessage { ref mut fin, .. }
-            | SendMessageState::Initialized { ref mut fin, .. } => {
-                *fin = true;
-            }
-            _ => {
-                self.state = SendMessageState::Closed;
-                conn.stream_close_send(self.stream_id)?;
-            }
+        if let SendMessageState::SendingInitialMessage { ref mut fin, .. } = self.state {
+            *fin = true;
+        } else {
+            self.state = SendMessageState::Closed;
+            conn.stream_close_send(self.stream_id)?;
         }
 
         self.conn_events
@@ -307,16 +281,23 @@ impl SendStream for SendMessage {
 }
 
 impl HttpSendStream for SendMessage {
-    fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()> {
+    fn set_message(
+        &mut self,
+        headers: &[Header],
+        data: Option<&[u8]>,
+        conn: &mut Connection,
+    ) -> Res<()> {
         if !matches!(self.state, SendMessageState::Uninitialized) {
             return Err(Error::AlreadyInitialized);
         }
-
-        self.state = SendMessageState::Initialized {
-            headers: headers.to_vec(),
-            data: data.map(|d| d.to_vec()),
-            fin: true,
-        };
+        let buf = SendMessage::encode(
+            &mut self.encoder.borrow_mut(),
+            headers,
+            data,
+            conn,
+            self.stream_id,
+        );
+        self.state = SendMessageState::SendingInitialMessage { buf, fin: true };
         Ok(())
     }
 }

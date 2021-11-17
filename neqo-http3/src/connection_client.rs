@@ -296,9 +296,10 @@ impl Http3Client {
             id,
             Box::new(SendMessage::new_with_headers(
                 id,
-                final_headers,
+                &final_headers,
                 self.base_handler.qpack_encoder.clone(),
                 Box::new(self.events.clone()),
+                &mut self.conn,
             )),
             Box::new(RecvMessage::new(
                 MessageType::Response,
