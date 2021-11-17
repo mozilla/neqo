@@ -1083,11 +1083,10 @@ mod tests {
             headers: &[Header],
             encoder: &mut Encoder,
         ) {
-            let header_block = self
-                .encoder
-                .borrow_mut()
-                .encode_header_block(&mut self.conn, headers, stream_id)
-                .unwrap();
+            let header_block =
+                self.encoder
+                    .borrow_mut()
+                    .encode_header_block(&mut self.conn, headers, stream_id);
             let hframe = HFrame::Headers {
                 header_block: header_block.to_vec(),
             };
@@ -3477,11 +3476,11 @@ mod tests {
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -3545,11 +3544,11 @@ mod tests {
             Header::new("my-header", "my-header"),
             Header::new("content-length", "0"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &sent_headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &sent_headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -4462,11 +4461,11 @@ mod tests {
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -5410,11 +5409,11 @@ mod tests {
         ];
         headers.push(additional_header);
 
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, stream_id)
-            .unwrap();
+        let encoded_headers =
+            server
+                .encoder
+                .borrow_mut()
+                .encode_header_block(&mut server.conn, &headers, stream_id);
         let push_promise_frame = HFrame::PushPromise {
             push_id,
             header_block: encoded_headers.to_vec(),
@@ -5560,11 +5559,11 @@ mod tests {
             Header::new(":status", "200"),
             Header::new("content-length", "1234"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &response_headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &response_headers,
+            request_stream_id,
+        );
         let header_hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -5633,11 +5632,11 @@ mod tests {
             Header::new("content-length", "1234"),
             Header::new("myn3", "myv3"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &response_headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &response_headers,
+            request_stream_id,
+        );
         let header_hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -5718,11 +5717,11 @@ mod tests {
             Header::new("my-header", "my-header"),
             Header::new("content-length", "0"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -5782,11 +5781,11 @@ mod tests {
         headers: &[Header],
         data: &[u8],
     ) -> Option<Datagram> {
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -5907,11 +5906,11 @@ mod tests {
             Header::new(":status", "200"),
             Header::new("content-length", "3"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -5978,11 +5977,11 @@ mod tests {
             Header::new("my-header", "my-header"),
             Header::new("content-length", "0"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
@@ -6659,11 +6658,11 @@ mod tests {
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
         ];
-        let encoded_headers = server
-            .encoder
-            .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
+        let encoded_headers = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &headers,
+            request_stream_id,
+        );
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
