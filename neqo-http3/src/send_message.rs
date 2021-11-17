@@ -118,13 +118,13 @@ impl SendMessage {
     /// # Errors
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
-    fn ensure_encoded(&mut self, conn: &mut Connection) -> Res<()> {
+    fn ensure_encoded(&mut self, conn: &mut Connection) {
         if let SendMessageState::Initialized { headers, data, fin } = &self.state {
             qdebug!([self], "Encoding headers");
             let header_block =
                 self.encoder
                     .borrow_mut()
-                    .encode_header_block(conn, headers, self.stream_id)?;
+                    .encode_header_block(conn, headers, self.stream_id);
             let hframe = HFrame::Headers {
                 header_block: header_block.to_vec(),
             };
@@ -144,7 +144,6 @@ impl SendMessage {
                 fin: *fin,
             };
         }
-        Ok(())
     }
 }
 
@@ -231,7 +230,7 @@ impl SendStream for SendMessage {
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
     /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.ensure_encoded(conn)?;
+        self.ensure_encoded(conn);
 
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
