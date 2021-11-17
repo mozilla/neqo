@@ -408,27 +408,24 @@ impl QPackEncoder {
             } else if can_block && !encoder_blocked {
                 // Insert using an InsertWithNameLiteral instruction. This entry name does not match any name in the
                 // tables therefore we cannot use any other instruction.
-                match self.send_and_insert(conn, &name, &value) {
-                    Ok(index) => {
-                        encoded_h.encode_indexed_dynamic(index);
-                        ref_entries.insert(index);
-                        self.table.add_ref(index);
-                    }
-                    Err(_) => {
-                        // The errors can be:
-                        //   1) `EncoderStreamBlocked` - this is an error that
-                        //      can occur.
-                        //   2) `DynamicTableFull` - this is an error that
-                        //      can occur.
-                        //   3) `InternalError` - this is unexpected error.
-                        //   4) `ClosedCriticalStream` - this is error that should
-                        //      close the HTTP/3 session.
-                        // The last 2 errors are ignored here and will be pcked up
-                        // by the main loop.
-                        // As soon as one of the instructions cannot be written or the table is full, do not try again.
-                        encoder_blocked = true;
-                        encoded_h.encode_literal_with_name_literal(&name, &value);
-                    }
+                if let Ok(index) = self.send_and_insert(conn, &name, &value) {
+                    encoded_h.encode_indexed_dynamic(index);
+                    ref_entries.insert(index);
+                    self.table.add_ref(index);
+                } else {
+                    // The errors can be:
+                    //   1) `EncoderStreamBlocked` - this is an error that
+                    //      can occur.
+                    //   2) `DynamicTableFull` - this is an error that
+                    //      can occur.
+                    //   3) `InternalError` - this is unexpected error.
+                    //   4) `ClosedCriticalStream` - this is error that should
+                    //      close the HTTP/3 session.
+                    // The last 2 errors are ignored here and will be pcked up
+                    // by the main loop.
+                    // As soon as one of the instructions cannot be written or the table is full, do not try again.
+                    encoder_blocked = true;
+                    encoded_h.encode_literal_with_name_literal(&name, &value);
                 }
             } else {
                 encoded_h.encode_literal_with_name_literal(&name, &value);

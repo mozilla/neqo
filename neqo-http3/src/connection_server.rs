@@ -45,6 +45,7 @@ impl Http3ServerHandler {
         stream_id: StreamId,
         headers: &[Header],
         data: &[u8],
+        conn: &mut Connection,
     ) -> Res<()> {
         self.base_handler
             .send_streams
@@ -52,7 +53,7 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
-            .set_message(headers, Some(data))?;
+            .set_message(headers, Some(data), conn)?;
         self.base_handler.stream_has_pending_data(stream_id);
         Ok(())
     }

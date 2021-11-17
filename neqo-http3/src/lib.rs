@@ -378,7 +378,12 @@ pub trait SendStream: Stream {
 pub trait HttpSendStream: SendStream {
     /// # Errors
     /// Error my occure during sending data, e.g. protocol error, etc.
-    fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()>;
+    fn set_message(
+        &mut self,
+        headers: &[Header],
+        data: Option<&[u8]>,
+        conn: &mut Connection,
+    ) -> Res<()>;
 }
 
 pub trait SendStreamEvents: Debug {

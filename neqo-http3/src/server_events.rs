@@ -53,9 +53,12 @@ impl ClientRequestStream {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn set_response(&mut self, headers: &[Header], data: &[u8]) -> Res<()> {
         qinfo!([self], "Set new response.");
-        self.handler
-            .borrow_mut()
-            .set_response(self.stream_id, headers, data)
+        self.handler.borrow_mut().set_response(
+            self.stream_id,
+            headers,
+            data,
+            &mut self.conn.borrow_mut(),
+        )
     }
 
     /// Request a peer to stop sending a request.
