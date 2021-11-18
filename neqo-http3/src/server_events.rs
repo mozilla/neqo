@@ -48,17 +48,32 @@ impl ClientRequestStream {
         }
     }
 
-    /// Supply a response to a request.
+    /// Supply response data to a request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn set_response(&mut self, headers: &[Header], data: &[u8]) -> Res<()> {
+    pub fn send_data(&mut self, data: &[u8]) -> Res<()> {
         qinfo!([self], "Set new response.");
-        self.handler.borrow_mut().set_response(
-            self.stream_id,
-            headers,
-            data,
-            &mut self.conn.borrow_mut(),
-        )
+        self.handler
+            .borrow_mut()
+            .send_data(self.stream_id, data, &mut self.conn.borrow_mut())
+    }
+
+    /// Supply a response header to a request.
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn send_headers(&mut self, headers: &[Header]) -> Res<()> {
+        self.handler
+            .borrow_mut()
+            .send_headers(self.stream_id, headers, &mut self.conn.borrow_mut())
+    }
+
+    /// Close senidng side of the stream.
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn close_send(&mut self) -> Res<()> {
+        self.handler
+            .borrow_mut()
+            .stream_close_send(self.stream_id, &mut self.conn.borrow_mut())
     }
 
     /// Request a peer to stop sending a request.

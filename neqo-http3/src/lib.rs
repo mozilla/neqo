@@ -157,12 +157,13 @@ impl Error {
     /// # Panics
     /// On unexpected errors, in debug mode.
     #[must_use]
-    pub fn map_stream_send_errors(err: &TransportError) -> Self {
+    pub fn map_stream_send_errors(err: &Error) -> Self {
         match err {
-            TransportError::InvalidStreamId | TransportError::FinalSizeError => {
+            Self::TransportError(TransportError::InvalidStreamId)
+            | Self::TransportError(TransportError::FinalSizeError) => {
                 Error::TransportStreamDoesNotExist
             }
-            TransportError::InvalidInput => Error::InvalidInput,
+            Self::TransportError(TransportError::InvalidInput) => Error::InvalidInput,
             _ => {
                 debug_assert!(false, "Unexpected error");
                 Error::TransportStreamDoesNotExist
@@ -376,14 +377,10 @@ pub trait SendStream: Stream {
 }
 
 pub trait HttpSendStream: SendStream {
+    /// This function sets informational response.
     /// # Errors
-    /// Error my occure during sending data, e.g. protocol error, etc.
-    fn set_message(
-        &mut self,
-        headers: &[Header],
-        data: Option<&[u8]>,
-        conn: &mut Connection,
-    ) -> Res<()>;
+    /// This can also return an error if the underlying stream is closed.
+    fn send_headers(&mut self, headers: &[Header], conn: &mut Connection);
 }
 
 pub trait SendStreamEvents: Debug {

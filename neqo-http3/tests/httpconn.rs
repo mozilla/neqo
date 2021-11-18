@@ -9,18 +9,18 @@
 use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State, Priority,
+    ClientRequestStream, Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent,
+    Http3State, Priority,
 };
 use std::mem;
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
 
-fn process_server_events(server: &mut Http3Server) {
-    let mut request_found = false;
+fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
     while let Some(event) = server.next_event() {
         if let Http3ServerEvent::Headers {
-            mut request,
+            request,
             headers,
             fin,
         } = event
@@ -35,19 +35,26 @@ fn process_server_events(server: &mut Http3Server) {
                 ]
             );
             assert!(fin);
-            request
-                .set_response(
-                    &[
-                        Header::new(":status", "200"),
-                        Header::new("content-length", "3"),
-                    ],
-                    RESPONSE_DATA,
-                )
-                .unwrap();
-            request_found = true;
+            return Some(request);
         }
     }
-    assert!(request_found);
+    None
+}
+
+fn set_response(request: &mut ClientRequestStream) {
+    request
+        .send_headers(&[
+            Header::new(":status", "200"),
+            Header::new("content-length", "3"),
+        ])
+        .unwrap();
+    request.send_data(RESPONSE_DATA).unwrap();
+    request.close_send().unwrap();
+}
+
+fn process_server_events(server: &mut Http3Server) {
+    let mut request = receive_request(server).unwrap();
+    set_response(&mut request);
 }
 
 fn process_client_events(conn: &mut Http3Client) {
@@ -138,4 +145,48 @@ fn test_fetch() {
     let out = hconn_s.process(None, now());
     mem::drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
+}
+
+#[test]
+fn test_103_response() {
+    let (mut hconn_c, mut hconn_s, dgram) = connect();
+
+    let req = hconn_c
+        .fetch(
+            now(),
+            "GET",
+            &("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    assert_eq!(req, 0);
+    hconn_c.stream_close_send(req).unwrap();
+    let out = hconn_c.process(dgram, now());
+
+    let out = hconn_s.process(out.dgram(), now());
+    mem::drop(hconn_c.process(out.dgram(), now()));
+    let mut request = receive_request(&mut hconn_s).unwrap();
+
+    let info_headers = [
+        Header::new(":status", "103"),
+        Header::new("link", "</style.css>; rel=preload; as=style"),
+    ];
+    // Send 103
+    request.send_headers(&info_headers).unwrap();
+    let out = hconn_s.process(None, now());
+
+    mem::drop(hconn_c.process(out.dgram(), now()));
+
+    let info_headers_event = |e| {
+        matches!(e, Http3ClientEvent::HeaderReady { headers,
+                    interim,
+                    fin, .. } if !fin && interim && headers == info_headers)
+    };
+    assert!(hconn_c.events().any(info_headers_event));
+
+    set_response(&mut request);
+    let out = hconn_s.process(None, now());
+    mem::drop(hconn_c.process(out.dgram(), now()));
+    process_client_events(&mut hconn_c)
 }
