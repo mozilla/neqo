@@ -91,6 +91,15 @@ impl BufferedStream {
             Ok(false)
         }
     }
+
+    #[must_use]
+    pub fn has_buffered_data(&self) -> bool {
+        if let Self::Initialized { buf, .. } = self {
+            !buf.is_empty()
+        } else {
+            false
+        }
+    }
 }
 
 impl From<&BufferedStream> for Option<StreamId> {

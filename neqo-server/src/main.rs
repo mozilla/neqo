@@ -301,14 +301,13 @@ impl HttpServer for Http3Server {
                     let response = response.unwrap();
 
                     request
-                        .set_response(
-                            &[
-                                Header::new(":status", "200"),
-                                Header::new("content-length", response.len()),
-                            ],
-                            &response,
-                        )
+                        .send_headers(&[
+                            Header::new(":status", "200"),
+                            Header::new("content-length", response.len()),
+                        ])
                         .unwrap();
+                    request.send_data(&response).unwrap();
+                    request.close_send().unwrap();
                 }
                 Http3ServerEvent::Data { request, data, fin } => {
                     println!("Data (request={} fin={}): {:?}", request, fin, data);

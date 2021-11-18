@@ -40,11 +40,26 @@ impl Http3ServerHandler {
     }
 
     /// Supply a response for a request.
-    pub(crate) fn set_response(
+    pub(crate) fn send_data(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+        conn: &mut Connection,
+    ) -> Res<()> {
+        self.base_handler
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .send_data(conn, data)?;
+        self.base_handler.stream_has_pending_data(stream_id);
+        Ok(())
+    }
+
+    /// Supply response heeaders for a request.
+    pub(crate) fn send_headers(
         &mut self,
         stream_id: StreamId,
         headers: &[Header],
-        data: &[u8],
         conn: &mut Connection,
     ) -> Res<()> {
         self.base_handler
@@ -53,9 +68,17 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
-            .set_message(headers, Some(data), conn)?;
+            .send_headers(headers, conn);
         self.base_handler.stream_has_pending_data(stream_id);
         Ok(())
+    }
+
+    /// This is call when application is done sending a request.
+    /// # Errors
+    /// An error will be return if stream does not exist.
+    pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
+        qinfo!([self], "Close sending side stream={}.", stream_id);
+        self.base_handler.stream_close_send(conn, stream_id)
     }
 
     /// An application may reset a stream(request).

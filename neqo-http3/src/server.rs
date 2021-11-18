@@ -864,14 +864,12 @@ mod tests {
                     assert_eq!(data, REQUEST_BODY);
                     assert!(fin);
                     request
-                        .set_response(
-                            &[
-                                Header::new(":status", "200"),
-                                Header::new("content-length", "3"),
-                            ],
-                            RESPONSE_BODY,
-                        )
+                        .send_headers(&[
+                            Header::new(":status", "200"),
+                            Header::new("content-length", "3"),
+                        ])
                         .unwrap();
+                    request.send_data(RESPONSE_BODY).unwrap();
                     data_received += 1;
                 }
                 Http3ServerEvent::StateChange { .. } | Http3ServerEvent::PriorityUpdate { .. } => {}
@@ -910,14 +908,12 @@ mod tests {
                         .stream_stop_sending(Error::HttpNoError.code())
                         .unwrap();
                     request
-                        .set_response(
-                            &[
-                                Header::new(":status", "200"),
-                                Header::new("content-length", "3"),
-                            ],
-                            RESPONSE_BODY,
-                        )
+                        .send_headers(&[
+                            Header::new(":status", "200"),
+                            Header::new("content-length", "3"),
+                        ])
                         .unwrap();
+                    request.send_data(RESPONSE_BODY).unwrap();
                 }
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
