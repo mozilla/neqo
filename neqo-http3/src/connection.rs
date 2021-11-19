@@ -176,7 +176,7 @@ impl Http3Connection {
         self.send_non_control_streams(conn)?;
 
         self.qpack_decoder.borrow_mut().send(conn)?;
-        match self.qpack_encoder.borrow_mut().send(conn) {
+        match self.qpack_encoder.borrow_mut().send_encoder_updates(conn) {
             Ok(())
             | Err(neqo_qpack::Error::EncoderStreamBlocked)
             | Err(neqo_qpack::Error::DynamicTableFull) => {}
