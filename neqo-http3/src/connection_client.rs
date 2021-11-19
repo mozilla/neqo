@@ -917,7 +917,10 @@ mod tests {
             self.encoder
                 .borrow_mut()
                 .add_send_stream(self.encoder_stream_id.unwrap());
-            self.encoder.borrow_mut().send(&mut self.conn).unwrap();
+            self.encoder
+                .borrow_mut()
+                .send_encoder_updates(&mut self.conn)
+                .unwrap();
 
             // Create decoder stream
             self.decoder_stream_id = Some(self.conn.stream_create(StreamType::UniDi).unwrap());
@@ -5370,7 +5373,11 @@ mod tests {
             .borrow_mut()
             .set_max_blocked_streams(100)
             .unwrap();
-        server.encoder.borrow_mut().send(&mut server.conn).unwrap();
+        server
+            .encoder
+            .borrow_mut()
+            .send_encoder_updates(&mut server.conn)
+            .unwrap();
         let out = server.conn.process(None, now());
         mem::drop(client.process(out.dgram(), now()));
     }

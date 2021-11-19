@@ -304,7 +304,7 @@ impl QPackEncoder {
     /// Sends any qpack encoder instructions.
     /// # Errors
     ///   returns `EncoderStream` in case of an error.
-    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
+    pub fn send_encoder_updates(&mut self, conn: &mut Connection) -> Res<()> {
         match self.local_stream {
             LocalStreamState::NoStream => {
                 qerror!("Send call but there is no stream yet.");
@@ -353,19 +353,19 @@ impl QPackEncoder {
 
         let mut encoder_blocked = false;
         // Try to send capacity instructions if present.
-        match self.send(conn) {
-            Ok(()) => {}
-            Err(_) => {
-                // The errors can be:
-                //   1) `EncoderStreamBlocked` - this is an error that
-                //      can occur.
-                //   2) `InternalError` - this is unexpected error.
-                //   3) `ClosedCriticalStream` - this is error that should
-                //      close the HTTP/3 session.
-                // The last 2 errors are ignored here and will be pcked up
-                // by the main loop.
-                encoder_blocked = true;
-            }
+        if self.send_encoder_updates(conn).is_err() {
+            // This code doesn't try to deal with errors, it just tries
+            // to write to the encoder stream AND if it can't uses
+            // literal instructions.
+            // The errors can be:
+            //   1) `EncoderStreamBlocked` - this is an error that
+            //      can occur.
+            //   2) `InternalError` - this is unexpected error.
+            //   3) `ClosedCriticalStream` - this is error that should
+            //      close the HTTP/3 session.
+            // The last 2 errors are ignored here and will be picked up
+            // by the main loop.
+            encoder_blocked = true;
         }
 
         let mut encoded_h =
@@ -413,6 +413,9 @@ impl QPackEncoder {
                     ref_entries.insert(index);
                     self.table.add_ref(index);
                 } else {
+                    // This code doesn't try to deal with errors, it just tries
+                    // to write to the encoder stream AND if it can't uses
+                    // literal instructions.
                     // The errors can be:
                     //   1) `EncoderStreamBlocked` - this is an error that
                     //      can occur.
@@ -421,7 +424,7 @@ impl QPackEncoder {
                     //   3) `InternalError` - this is unexpected error.
                     //   4) `ClosedCriticalStream` - this is error that should
                     //      close the HTTP/3 session.
-                    // The last 2 errors are ignored here and will be pcked up
+                    // The last 2 errors are ignored here and will be picked up
                     // by the main loop.
                     // As soon as one of the instructions cannot be written or the table is full, do not try again.
                     encoder_blocked = true;
@@ -527,7 +530,7 @@ mod tests {
         pub fn change_capacity(&mut self, capacity: u64) -> Res<()> {
             self.encoder.set_max_capacity(capacity).unwrap();
             // We will try to really change the table only when we send the change capacity instruction.
-            self.encoder.send(&mut self.conn)
+            self.encoder.send_encoder_updates(&mut self.conn)
         }
 
         pub fn insert(&mut self, header: &[u8], value: &[u8], inst: &[u8]) {
@@ -551,7 +554,7 @@ mod tests {
         }
 
         pub fn send_instructions(&mut self, encoder_instruction: &[u8]) {
-            self.encoder.send(&mut self.conn).unwrap();
+            self.encoder.send_encoder_updates(&mut self.conn).unwrap();
             let out = self.conn.process(None, now());
             let out2 = self.peer_conn.process(out.dgram(), now());
             mem::drop(self.conn.process(out2.dgram(), now()));
@@ -1578,7 +1581,10 @@ mod tests {
             .send_and_insert(&mut encoder.conn, b"something5", b"1234")
             .unwrap();
 
-        encoder.encoder.send(&mut encoder.conn).unwrap();
+        encoder
+            .encoder
+            .send_encoder_updates(&mut encoder.conn)
+            .unwrap();
         let out = encoder.conn.process(None, now());
         mem::drop(encoder.peer_conn.process(out.dgram(), now()));
         // receive an insert count increment.

@@ -503,7 +503,7 @@ mod tests {
             true,
         );
         encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
-        encoder.send(&mut neqo_trans_conn).unwrap();
+        encoder.send_encoder_updates(&mut neqo_trans_conn).unwrap();
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
         assert_eq!(sent, Ok(1));
