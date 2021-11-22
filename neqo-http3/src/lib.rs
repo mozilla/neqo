@@ -43,7 +43,7 @@ pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
 pub use hframe::{HFrame, HFrameReader};
-pub use neqo_common::Header;
+pub use neqo_common::{Error as CommonError, Header, Headers, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{ClientRequestStream, Http3ServerEvent};
@@ -240,6 +240,14 @@ impl From<QpackError> for Error {
     }
 }
 
+impl From<CommonError> for Error {
+    fn from(err: CommonError) -> Self {
+        match err {
+            CommonError::InvalidHeader => Error::InvalidHeader,
+        }
+    }
+}
+
 impl From<AppError> for Error {
     fn from(error: AppError) -> Self {
         match error {
@@ -354,7 +362,7 @@ pub trait RecvStreamEvents: Debug {
 }
 
 pub(crate) trait HttpRecvStreamEvents: RecvStreamEvents {
-    fn header_ready(&self, stream_id: StreamId, headers: Vec<Header>, interim: bool, fin: bool);
+    fn header_ready(&self, stream_id: StreamId, headers: Headers, interim: bool, fin: bool);
 }
 
 pub trait SendStream: Stream {
@@ -380,7 +388,7 @@ pub trait HttpSendStream: SendStream {
     /// This function sets informational response.
     /// # Errors
     /// This can also return an error if the underlying stream is closed.
-    fn send_headers(&mut self, headers: &[Header], conn: &mut Connection);
+    fn send_headers(&mut self, headers: Headers, conn: &mut Connection);
 }
 
 pub trait SendStreamEvents: Debug {

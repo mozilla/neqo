@@ -14,7 +14,7 @@ use crate::qpack_send_buf::QpackData;
 use crate::reader::{to_string, ReceiverBufferWrapper};
 use crate::table::HeaderTable;
 use crate::{Error, Res};
-use neqo_common::{qtrace, Header};
+use neqo_common::{qtrace, Header, Headers};
 use std::mem;
 use std::ops::{Deref, Div};
 
@@ -180,7 +180,7 @@ impl<'a> ::std::fmt::Display for HeaderDecoder<'a> {
 #[derive(Debug, PartialEq)]
 pub enum HeaderDecoderResult {
     Blocked(u64),
-    Headers(Vec<Header>),
+    Headers(Headers),
 }
 
 impl<'a> HeaderDecoder<'a> {
@@ -223,7 +223,7 @@ impl<'a> HeaderDecoder<'a> {
             );
             return Ok(HeaderDecoderResult::Blocked(self.req_insert_cnt));
         }
-        let mut h: Vec<Header> = Vec::new();
+        let mut h = Headers::default();
 
         while !self.buf.done() {
             let b = Error::map_error(self.buf.peek(), Error::DecompressionFailed)?;

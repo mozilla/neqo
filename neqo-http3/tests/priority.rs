@@ -122,14 +122,14 @@ fn priority_update() {
             headers,
             fin,
         } => {
-            let expected_headers = vec![
+            let expected_headers = &[
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
                 Header::new(":authority", "something.com"),
                 Header::new(":path", "/"),
                 Header::new("priority", "u=4,i"),
             ];
-            assert_eq!(headers, expected_headers);
+            assert_eq!(&headers.as_ref(), &expected_headers);
             assert!(!fin);
         }
         other => panic!("unexpected server event: {:?}", other),

@@ -6,7 +6,7 @@
 
 use crate::hframe::HFrame;
 use crate::{
-    qlog, BufferedStream, CloseType, Error, Header, Http3StreamType, HttpSendStream, Res,
+    qlog, BufferedStream, CloseType, Error, Header, Headers, Http3StreamType, HttpSendStream, Res,
     SendStream, SendStreamEvents, Stream,
 };
 
@@ -199,10 +199,10 @@ impl SendStream for SendMessage {
 }
 
 impl HttpSendStream for SendMessage {
-    fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) {
+    fn send_headers(&mut self, headers: Headers, conn: &mut Connection) {
         let buf = SendMessage::encode(
             &mut self.encoder.borrow_mut(),
-            headers,
+            &headers,
             conn,
             self.stream_id(),
         );

@@ -8,7 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
-use crate::{Header, Priority, Res};
+use crate::{Header, Headers, Priority, Res};
 use neqo_common::{qdebug, qinfo};
 use neqo_transport::server::ActiveConnectionRef;
 use neqo_transport::{AppError, Connection, StreamId};
@@ -126,7 +126,7 @@ pub enum Http3ServerEvent {
     /// Headers are ready.
     Headers {
         request: ClientRequestStream,
-        headers: Vec<Header>,
+        headers: Headers,
         fin: bool,
     },
     /// Request data is ready.
@@ -172,7 +172,7 @@ impl Http3ServerEvents {
     }
 
     /// Insert a `Headers` event.
-    pub(crate) fn headers(&self, request: ClientRequestStream, headers: Vec<Header>, fin: bool) {
+    pub(crate) fn headers(&self, request: ClientRequestStream, headers: Headers, fin: bool) {
         self.insert(Http3ServerEvent::Headers {
             request,
             headers,

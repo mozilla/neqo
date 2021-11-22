@@ -6,7 +6,7 @@
 
 use crate::connection::Http3State;
 use crate::{
-    CloseType, Header, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
+    CloseType, Headers, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
 };
 
 use neqo_transport::StreamId;
@@ -19,7 +19,7 @@ pub(crate) enum Http3ServerConnEvent {
     /// Headers are ready.
     Headers {
         stream_id: StreamId,
-        headers: Vec<Header>,
+        headers: Headers,
         fin: bool,
     },
     PriorityUpdate {
@@ -57,7 +57,7 @@ impl RecvStreamEvents for Http3ServerConnEvents {
 
 impl HttpRecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `HeaderReady` event.
-    fn header_ready(&self, stream_id: StreamId, headers: Vec<Header>, _interim: bool, fin: bool) {
+    fn header_ready(&self, stream_id: StreamId, headers: Headers, _interim: bool, fin: bool) {
         self.insert(Http3ServerConnEvent::Headers {
             stream_id,
             headers,

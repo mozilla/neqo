@@ -8,7 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::settings::HSettingType;
-use crate::{CloseType, Header, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
+use crate::{CloseType, Headers, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents};
 use neqo_common::event::Provider as EventProvider;
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamId, StreamType};
@@ -22,7 +22,7 @@ pub enum Http3ClientEvent {
     /// Response headers are received.
     HeaderReady {
         stream_id: StreamId,
-        headers: Vec<Header>,
+        headers: Headers,
         interim: bool,
         fin: bool,
     },
@@ -45,12 +45,12 @@ pub enum Http3ClientEvent {
     PushPromise {
         push_id: u64,
         request_stream_id: StreamId,
-        headers: Vec<Header>,
+        headers: Headers,
     },
     /// A push response headers are ready.
     PushHeaderReady {
         push_id: u64,
-        headers: Vec<Header>,
+        headers: Headers,
         interim: bool,
         fin: bool,
     },
@@ -121,7 +121,7 @@ impl RecvStreamEvents for Http3ClientEvents {
 
 impl HttpRecvStreamEvents for Http3ClientEvents {
     /// Add a new `HeaderReady` event.
-    fn header_ready(&self, stream_id: StreamId, headers: Vec<Header>, interim: bool, fin: bool) {
+    fn header_ready(&self, stream_id: StreamId, headers: Headers, interim: bool, fin: bool) {
         self.insert(Http3ClientEvent::HeaderReady {
             stream_id,
             headers,
@@ -146,7 +146,7 @@ impl SendStreamEvents for Http3ClientEvents {
 }
 
 impl Http3ClientEvents {
-    pub fn push_promise(&self, push_id: u64, request_stream_id: StreamId, headers: Vec<Header>) {
+    pub fn push_promise(&self, push_id: u64, request_stream_id: StreamId, headers: Headers) {
         self.insert(Http3ClientEvent::PushPromise {
             push_id,
             request_stream_id,

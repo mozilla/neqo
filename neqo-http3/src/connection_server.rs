@@ -6,11 +6,12 @@
 
 use crate::connection::{Http3Connection, Http3State};
 use crate::hframe::HFrame;
-use crate::recv_message::{MessageType, RecvMessage};
+use crate::recv_message::RecvMessage;
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::{
-    Error, Header, Http3Parameters, NewStreamType, Priority, PriorityHandler, ReceiveOutput, Res,
+    Error, Header, Headers, Http3Parameters, MessageType, NewStreamType, Priority, PriorityHandler,
+    ReceiveOutput, Res,
 };
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Role};
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
@@ -68,7 +69,7 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
-            .send_headers(headers, conn);
+            .send_headers(Headers::from(headers), conn);
         self.base_handler.stream_has_pending_data(stream_id);
         Ok(())
     }

@@ -7,8 +7,8 @@
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_HEADERS};
 use crate::push_controller::PushController;
 use crate::{
-    qlog, CloseType, Error, Header, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    ReceiveOutput, RecvStream, Res, Stream,
+    qlog, CloseType, Error, Headers, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
+    MessageType, ReceiveOutput, RecvStream, Res, Stream,
 };
 
 use crate::priority::PriorityHandler;
@@ -21,19 +21,6 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::rc::Rc;
-
-const PSEUDO_HEADER_STATUS: u8 = 0x1;
-const PSEUDO_HEADER_METHOD: u8 = 0x2;
-const PSEUDO_HEADER_SCHEME: u8 = 0x4;
-const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
-const PSEUDO_HEADER_PATH: u8 = 0x10;
-const REGULAR_HEADER: u8 = 0x80;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageType {
-    Request,
-    Response,
-}
 
 /*
  * Response stream state:
@@ -154,12 +141,15 @@ impl RecvMessage {
         Ok(())
     }
 
-    fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
+    fn add_headers(&mut self, mut headers: Headers, fin: bool) -> Res<()> {
         qtrace!([self], "Add new headers fin={}", fin);
-        let interim = self.is_interim(&headers)?;
-        self.headers_valid(&headers)?;
+        let interim = match self.message_type {
+            MessageType::Request => false,
+            MessageType::Response => headers.is_interim()?,
+        };
+        headers.headers_valid(self.message_type)?;
         if self.message_type == MessageType::Response {
-            headers.retain(Header::is_allowed_for_response);
+            headers.retain_valid_for_response();
         }
 
         if fin && interim {
@@ -341,91 +331,6 @@ impl RecvMessage {
             self.state,
             RecvMessageState::ClosePending | RecvMessageState::Closed
         )
-    }
-
-    fn is_interim(&self, headers: &[Header]) -> Res<bool> {
-        match self.message_type {
-            MessageType::Response => {
-                let status = headers.iter().find(|h| h.name() == ":status");
-                if let Some(h) = status {
-                    #[allow(clippy::map_err_ignore)]
-                    let status_code = h.value().parse::<i32>().map_err(|_| Error::InvalidHeader)?;
-                    Ok((100..200).contains(&status_code))
-                } else {
-                    Err(Error::InvalidHeader)
-                }
-            }
-            MessageType::Request => Ok(false),
-        }
-    }
-
-    fn track_pseudo(name: &str, state: &mut u8, message_type: MessageType) -> Res<bool> {
-        let (pseudo, bit) = if name.starts_with(':') {
-            if *state & REGULAR_HEADER != 0 {
-                return Err(Error::InvalidHeader);
-            }
-            let bit = match message_type {
-                MessageType::Response => match name {
-                    ":status" => PSEUDO_HEADER_STATUS,
-                    _ => return Err(Error::InvalidHeader),
-                },
-                MessageType::Request => match name {
-                    ":method" => PSEUDO_HEADER_METHOD,
-                    ":scheme" => PSEUDO_HEADER_SCHEME,
-                    ":authority" => PSEUDO_HEADER_AUTHORITY,
-                    ":path" => PSEUDO_HEADER_PATH,
-                    _ => return Err(Error::InvalidHeader),
-                },
-            };
-            (true, bit)
-        } else {
-            (false, REGULAR_HEADER)
-        };
-
-        if *state & bit == 0 || !pseudo {
-            *state |= bit;
-            Ok(pseudo)
-        } else {
-            Err(Error::InvalidHeader)
-        }
-    }
-
-    fn headers_valid(&self, headers: &[Header]) -> Res<()> {
-        let mut method_value: Option<&str> = None;
-        let mut pseudo_state = 0;
-        for header in headers {
-            let is_pseudo =
-                Self::track_pseudo(header.name(), &mut pseudo_state, self.message_type)?;
-
-            let mut bytes = header.name().bytes();
-            if is_pseudo {
-                if header.name() == ":method" {
-                    method_value = Some(header.value());
-                }
-                let _ = bytes.next();
-            }
-
-            if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
-                return Err(Error::InvalidHeader); // illegal characters.
-            }
-        }
-        // Clear the regular header bit, since we only check pseudo headers below.
-        pseudo_state &= !REGULAR_HEADER;
-        let pseudo_header_mask = match self.message_type {
-            MessageType::Response => PSEUDO_HEADER_STATUS,
-            MessageType::Request => {
-                if method_value == Some(&"CONNECT".to_string()) {
-                    PSEUDO_HEADER_METHOD | PSEUDO_HEADER_AUTHORITY
-                } else {
-                    PSEUDO_HEADER_METHOD | PSEUDO_HEADER_SCHEME | PSEUDO_HEADER_PATH
-                }
-            }
-        };
-        if pseudo_state & pseudo_header_mask != pseudo_header_mask {
-            return Err(Error::InvalidHeader);
-        }
-
-        Ok(())
     }
 }
 
