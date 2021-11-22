@@ -11,6 +11,7 @@ mod codec;
 mod datagram;
 pub mod event;
 pub mod header;
+pub mod headers;
 pub mod hrtime;
 mod incrdecoder;
 pub mod log;
@@ -20,9 +21,16 @@ pub mod timer;
 pub use self::codec::{Decoder, Encoder};
 pub use self::datagram::Datagram;
 pub use self::header::Header;
+pub use self::headers::Headers;
 pub use self::incrdecoder::{
     IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
+
+type Res<T> = Result<T, Error>;
+
+pub enum Error {
+    InvalidHeader,
+}
 
 #[macro_use]
 extern crate lazy_static;
@@ -97,4 +105,10 @@ impl ::std::fmt::Display for Role {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{:?}", self)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageType {
+    Request,
+    Response,
 }

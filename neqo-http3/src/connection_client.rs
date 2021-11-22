@@ -8,12 +8,13 @@ use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{Http3Connection, Http3State};
 use crate::hframe::HFrame;
 use crate::push_controller::{PushController, RecvPushEvents};
-use crate::recv_message::{MessageType, RecvMessage};
+use crate::recv_message::RecvMessage;
 use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::SendMessage;
 use crate::settings::HSettings;
 use crate::{
-    Header, Http3Parameters, NewStreamType, Priority, PriorityHandler, ReceiveOutput, SendStream,
+    Header, Headers, Http3Parameters, MessageType, NewStreamType, Priority, PriorityHandler,
+    ReceiveOutput, SendStream,
 };
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
@@ -285,12 +286,12 @@ impl Http3Client {
         self.conn.stream_keep_alive(id, true)?;
 
         // Transform pseudo-header fields
-        let mut final_headers = vec![
+        let mut final_headers = Headers::new(&[
             Header::new(":method", method),
             Header::new(":scheme", target.scheme()),
             Header::new(":authority", target.authority()),
             Header::new(":path", target.path()),
-        ];
+        ]);
         if let Some(priority_header) = priority.header() {
             final_headers.push(priority_header);
         }
@@ -306,7 +307,7 @@ impl Http3Client {
         send_message
             .http_stream()
             .unwrap()
-            .send_headers(&final_headers, &mut self.conn);
+            .send_headers(final_headers, &mut self.conn);
 
         self.base_handler.add_streams(
             id,
@@ -766,8 +767,8 @@ impl EventProvider for Http3Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
-        Http3Parameters, Http3State, Rc, RefCell, StreamType,
+        AuthenticationStatus, Connection, Error, HSettings, Header, Headers, Http3Client,
+        Http3ClientEvent, Http3Parameters, Http3State, Rc, RefCell, StreamType,
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::qpack_encoder_receiver::EncoderRecvStream;
@@ -3598,7 +3599,7 @@ mod tests {
             } = e
             {
                 assert_eq!(stream_id, request_stream_id);
-                assert_eq!(headers, sent_headers);
+                assert_eq!(headers.as_ref(), sent_headers);
                 assert!(fin);
                 assert!(!interim);
                 recv_header = true;
@@ -6088,15 +6089,15 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let mut d = Encoder::default();
-        let headers1xx = vec![Header::new(":status", "103")];
-        server.encode_headers(request_stream_id, &headers1xx, &mut d);
+        let headers1xx: &[Header] = &[Header::new(":status", "103")];
+        server.encode_headers(request_stream_id, headers1xx, &mut d);
 
-        let headers200 = vec![
+        let headers200: &[Header] = &[
             Header::new(":status", "200"),
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
         ];
-        server.encode_headers(request_stream_id, &headers200, &mut d);
+        server.encode_headers(request_stream_id, headers200, &mut d);
 
         // Send 1xx and 200 headers response.
         server_send_response_and_exchange_packet(
@@ -6131,13 +6132,13 @@ mod tests {
         });
         let (stream_id_1xx_rec, interim1xx_rec, headers1xx_rec) = events.next().unwrap();
         assert_eq!(
-            (stream_id_1xx_rec, interim1xx_rec, headers1xx_rec),
+            (stream_id_1xx_rec, interim1xx_rec, headers1xx_rec.as_ref()),
             (request_stream_id, true, headers1xx)
         );
 
         let (stream_id_200_rec, interim200_rec, headers200_rec) = events.next().unwrap();
         assert_eq!(
-            (stream_id_200_rec, interim200_rec, headers200_rec),
+            (stream_id_200_rec, interim200_rec, headers200_rec.as_ref()),
             (request_stream_id, false, headers200)
         );
         assert!(events.next().is_none());
@@ -6209,10 +6210,10 @@ mod tests {
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
         let mut d = Encoder::default();
-        let headers1xx = vec![Header::new(":status", "101")];
+        let headers1xx: &[Header] = &[Header::new(":status", "101")];
         server.encode_headers(push_stream_id, &headers1xx, &mut d);
 
-        let headers200 = vec![
+        let headers200: &[Header] = &[
             Header::new(":status", "200"),
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6252,13 +6253,13 @@ mod tests {
 
         let (push_id_1xx_rec, interim1xx_rec, headers1xx_rec) = events.next().unwrap();
         assert_eq!(
-            (push_id_1xx_rec, interim1xx_rec, headers1xx_rec),
+            (push_id_1xx_rec, interim1xx_rec, headers1xx_rec.as_ref()),
             (FIRST_PUSH_ID, true, headers1xx)
         );
 
         let (push_id_200_rec, interim200_rec, headers200_rec) = events.next().unwrap();
         assert_eq!(
-            (push_id_200_rec, interim200_rec, headers200_rec),
+            (push_id_200_rec, interim200_rec, headers200_rec.as_ref()),
             (FIRST_PUSH_ID, false, headers200)
         );
         assert!(events.next().is_none());
@@ -6437,10 +6438,10 @@ mod tests {
             e,
             Http3ClientEvent::HeaderReady {
                 stream_id: request_stream_id,
-                headers: vec!(
+                headers: Headers::new(&[
                     Header::new(":status", "200"),
                     Header::new("content-type", "text/plain")
-                ),
+                ]),
                 interim: false,
                 fin: false,
             }

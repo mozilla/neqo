@@ -26,8 +26,8 @@ fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
         } = event
         {
             assert_eq!(
-                headers,
-                vec![
+                headers.as_ref(),
+                &[
                     Header::new(":method", "GET"),
                     Header::new(":scheme", "https"),
                     Header::new(":authority", "something.com"),
@@ -64,8 +64,8 @@ fn process_client_events(conn: &mut Http3Client) {
         match event {
             Http3ClientEvent::HeaderReady { headers, fin, .. } => {
                 assert_eq!(
-                    headers,
-                    vec![
+                    headers.as_ref(),
+                    &[
                         Header::new(":status", "200"),
                         Header::new("content-length", "3"),
                     ]
@@ -181,7 +181,7 @@ fn test_103_response() {
     let info_headers_event = |e| {
         matches!(e, Http3ClientEvent::HeaderReady { headers,
                     interim,
-                    fin, .. } if !fin && interim && headers == info_headers)
+                    fin, .. } if !fin && interim && &headers.as_ref() == &info_headers)
     };
     assert!(hconn_c.events().any(info_headers_event));
 
