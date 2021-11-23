@@ -50,7 +50,7 @@ pub use server_events::{ClientRequestStream, Http3ServerEvent};
 pub use settings::HttpZeroRttChecker;
 pub use stream_type_reader::NewStreamType;
 
-type Res<T> = Result<T, Error>;
+pub type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(
@@ -388,7 +388,7 @@ pub trait HttpSendStream: SendStream {
     /// This function sets informational response.
     /// # Errors
     /// This can also return an error if the underlying stream is closed.
-    fn send_headers(&mut self, headers: Headers, conn: &mut Connection);
+    fn send_headers(&mut self, headers: Headers, conn: &mut Connection) -> Res<()>;
 }
 
 pub trait SendStreamEvents: Debug {
