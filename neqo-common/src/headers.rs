@@ -29,12 +29,17 @@ impl Default for Headers {
 }
 
 impl Headers {
+    #[must_use]
     pub fn new(headers: &[Header]) -> Self {
         Self {
             headers: headers.to_vec(),
         }
     }
 
+    /// Check whether the response is informational(1xx).
+    /// # Errors
+    /// Returns an error if response headers do not contain
+    /// a status header or if the value of the header cannot be parsed. 
     pub fn is_interim(&self) -> Res<bool> {
         let status = self.headers.iter().find(|h| h.name() == ":status");
         if let Some(h) = status {
@@ -77,6 +82,10 @@ impl Headers {
         }
     }
 
+    /// Checks if request/response headers are well formed, i.e. contain
+    /// allowed pseudo headers and in a right order, etc.
+    /// # Errors
+    /// Returns an error if headers are not well formed.
     pub fn headers_valid(&self, message_type: MessageType) -> Res<()> {
         let mut method_value: Option<&str> = None;
         let mut pseudo_state = 0;
@@ -114,6 +123,10 @@ impl Headers {
         Ok(())
     }
 
+    /// Checks if trailers are well formed, i.e. pseudo headers are not
+    /// allowed in trailers.
+    /// # Errors
+    /// Returns an error if trailers are not well formed.
     pub fn trailers_valid(&self) -> Res<()> {
         for header in &self.headers {
             if header.name().starts_with(':') {
