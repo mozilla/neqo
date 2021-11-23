@@ -298,16 +298,16 @@ impl Http3Client {
         final_headers.extend_from_slice(headers);
 
         let mut send_message = SendMessage::new(
+            MessageType::Request,
             id,
             self.base_handler.qpack_encoder.clone(),
             Box::new(self.events.clone()),
         );
 
-        // SendMessage implements http_stream so ith will not panic.
         send_message
             .http_stream()
             .unwrap()
-            .send_headers(final_headers, &mut self.conn);
+            .send_headers(final_headers, &mut self.conn)?;
 
         self.base_handler.add_streams(
             id,

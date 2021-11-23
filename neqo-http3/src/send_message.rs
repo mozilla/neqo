@@ -10,7 +10,7 @@ use crate::{
     SendStream, SendStreamEvents, Stream,
 };
 
-use neqo_common::{qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, Encoder, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
@@ -25,24 +25,102 @@ const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = MAX_DATA_HEADER_SIZE_3 + 5; // 16383
 const MAX_DATA_HEADER_SIZE_5: usize = (1 << 30) - 1; // Maximal amount of data with DATA frame header size 3
 const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 1073741823 + 9 (size of the next buffer data frame header)
 
+/// A HTTP message, request and response, consists of headers, optional data and an optional
+/// trailer header block. This state machine does not reflect what was already sent to the
+/// transport layer but only reflect what has been supplied to the `SendMessage`.It is
+/// represented by the following states:
+///   `WaitingForHeaders` - the headers have not been supplied yet. In this state only a
+///                         request/response header can be added. When headers are supplied
+///                         the state changes to `WaitingForData`. A response may contain
+///                         multiple messages only if all but the last one are informational(1xx)
+///                         responses. The informational responses can only contain headers,
+///                         therefore after an informational response is received the state
+///                         machine states in `WaitingForHeaders` state.
+///   `WaitingForData` - in this state, data and trailers can be supplied. This state means that
+///                      a request or response header is already supplied.
+///   `TrailersSet` - trailers have been supplied. At this stage no more data or headers can be
+///                   supply only a fin.
+///   `Done` - in this state no more data or headers can be added. This state is entered when the
+///            message is closed.
+
+#[derive(Debug, PartialEq)]
+enum MessageState {
+    WaitingForHeaders,
+    WaitingForData,
+    TrailersSet,
+    Done,
+}
+
+impl MessageState {
+    fn new_headers(&mut self, headers: &Headers, message_type: MessageType) -> Res<()> {
+        match &self {
+            Self::WaitingForHeaders => {
+                debug_assert!(headers.headers_valid(message_type).is_ok());
+                match message_type {
+                    MessageType::Request => {
+                        *self = Self::WaitingForData;
+                    }
+                    MessageType::Response => {
+                        if !headers.is_interim()? {
+                            *self = Self::WaitingForData;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Self::WaitingForData => {
+                headers.trailers_valid()?;
+                *self = Self::TrailersSet;
+                Ok(())
+            }
+            Self::TrailersSet | Self::Done => Err(Error::InvalidInput),
+        }
+    }
+
+    fn new_data(&self) -> Res<()> {
+        if &Self::WaitingForData == self {
+            Ok(())
+        } else {
+            Err(Error::InvalidInput)
+        }
+    }
+
+    fn fin(&mut self) -> Res<()> {
+        match &self {
+            Self::WaitingForHeaders | Self::Done => Err(Error::InvalidInput),
+            Self::WaitingForData | Self::TrailersSet => {
+                *self = Self::Done;
+                Ok(())
+            }
+        }
+    }
+
+    fn done(&self) -> bool {
+        &Self::Done == self
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct SendMessage {
+    state: MessageState,
+    message_type: MessageType,
     stream: BufferedStream,
-    fin: bool,
     encoder: Rc<RefCell<QPackEncoder>>,
     conn_events: Box<dyn SendStreamEvents>,
 }
 
 impl SendMessage {
     pub fn new(
+        message_type: MessageType,
         stream_id: StreamId,
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
+            state: MessageState::WaitingForHeaders,
+            message_type,
             stream: BufferedStream::new(stream_id),
-            fin: false,
             encoder,
             conn_events,
         }
@@ -80,9 +158,9 @@ impl Stream for SendMessage {
 impl SendStream for SendMessage {
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
         qtrace!([self], "send_body: len={}", buf.len());
-        if self.fin {
-            return Err(Error::AlreadyClosed);
-        }
+
+        self.state.new_data()?;
+
         self.stream.send_buffer(conn)?;
         if self.stream.has_buffered_data() {
             return Ok(0);
@@ -134,11 +212,11 @@ impl SendStream for SendMessage {
     }
 
     fn done(&self) -> bool {
-        !self.stream.has_buffered_data() && self.fin
+        !self.stream.has_buffered_data() && self.state.done()
     }
 
     fn stream_writable(&self) {
-        if !self.stream.has_buffered_data() && !self.fin {
+        if !self.stream.has_buffered_data() && !self.state.done() {
             self.conn_events.data_writable(self.stream_id());
         }
     }
@@ -156,7 +234,7 @@ impl SendStream for SendMessage {
         qtrace!([self], "{} bytes sent", sent);
 
         if !self.stream.has_buffered_data() {
-            if self.fin {
+            if self.state.done() {
                 Error::map_error(
                     conn.stream_close_send(self.stream_id()),
                     Error::HttpInternal(6),
@@ -177,7 +255,7 @@ impl SendStream for SendMessage {
     }
 
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
-        self.fin = true;
+        self.state.fin()?;
         if !self.stream.has_buffered_data() {
             conn.stream_close_send(self.stream_id())?;
         }
@@ -188,7 +266,7 @@ impl SendStream for SendMessage {
     }
 
     fn stop_sending(&mut self, close_type: CloseType) {
-        if !self.fin {
+        if !self.state.done() {
             self.conn_events.send_closed(self.stream_id(), close_type);
         }
     }
@@ -199,7 +277,8 @@ impl SendStream for SendMessage {
 }
 
 impl HttpSendStream for SendMessage {
-    fn send_headers(&mut self, headers: Headers, conn: &mut Connection) {
+    fn send_headers(&mut self, headers: Headers, conn: &mut Connection) -> Res<()> {
+        self.state.new_headers(&headers, self.message_type)?;
         let buf = SendMessage::encode(
             &mut self.encoder.borrow_mut(),
             &headers,
@@ -207,6 +286,7 @@ impl HttpSendStream for SendMessage {
             self.stream_id(),
         );
         self.stream.buffer(&buf);
+        Ok(())
     }
 }
 

@@ -69,7 +69,7 @@ impl Http3ServerHandler {
             .ok_or(Error::InvalidStreamId)?
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
-            .send_headers(Headers::from(headers), conn);
+            .send_headers(Headers::from(headers), conn)?;
         self.base_handler.stream_has_pending_data(stream_id);
         Ok(())
     }
@@ -79,7 +79,9 @@ impl Http3ServerHandler {
     /// An error will be return if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
         qinfo!([self], "Close sending side stream={}.", stream_id);
-        self.base_handler.stream_close_send(conn, stream_id)
+        self.base_handler.stream_close_send(conn, stream_id)?;
+        self.base_handler.stream_has_pending_data(stream_id);
+        Ok(())
     }
 
     /// An application may reset a stream(request).
@@ -201,6 +203,7 @@ impl Http3ServerHandler {
                 self.base_handler.add_streams(
                     stream_id,
                     Box::new(SendMessage::new(
+                        MessageType::Response,
                         stream_id,
                         self.base_handler.qpack_encoder.clone(),
                         Box::new(self.events.clone()),

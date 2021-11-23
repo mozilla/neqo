@@ -114,6 +114,15 @@ impl Headers {
         Ok(())
     }
 
+    pub fn trailers_valid(&self) -> Res<()> {
+        for header in &self.headers {
+            if header.name().starts_with(':') {
+                return Err(Error::InvalidHeader);
+            }
+        }
+        Ok(())
+    }
+
     pub fn retain_valid_for_response(&mut self) {
         self.headers.retain(Header::is_allowed_for_response);
     }
