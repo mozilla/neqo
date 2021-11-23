@@ -39,7 +39,7 @@ impl Headers {
     /// Check whether the response is informational(1xx).
     /// # Errors
     /// Returns an error if response headers do not contain
-    /// a status header or if the value of the header cannot be parsed. 
+    /// a status header or if the value of the header cannot be parsed.
     pub fn is_interim(&self) -> Res<bool> {
         let status = self.headers.iter().find(|h| h.name() == ":status");
         if let Some(h) = status {

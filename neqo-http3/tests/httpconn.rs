@@ -181,7 +181,7 @@ fn test_103_response() {
     let info_headers_event = |e| {
         matches!(e, Http3ClientEvent::HeaderReady { headers,
                     interim,
-                    fin, .. } if !fin && interim && &headers.as_ref() == &info_headers)
+                    fin, .. } if !fin && interim && headers.as_ref() == info_headers)
     };
     assert!(hconn_c.events().any(info_headers_event));
 
