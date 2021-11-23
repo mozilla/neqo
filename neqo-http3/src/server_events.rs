@@ -48,6 +48,15 @@ impl ClientRequestStream {
         }
     }
 
+    /// Supply a response header to a request.
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn send_headers(&mut self, headers: &[Header]) -> Res<()> {
+        self.handler
+            .borrow_mut()
+            .send_headers(self.stream_id, headers, &mut self.conn.borrow_mut())
+    }
+
     /// Supply response data to a request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -56,15 +65,6 @@ impl ClientRequestStream {
         self.handler
             .borrow_mut()
             .send_data(self.stream_id, data, &mut self.conn.borrow_mut())
-    }
-
-    /// Supply a response header to a request.
-    /// # Errors
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn send_headers(&mut self, headers: &[Header]) -> Res<()> {
-        self.handler
-            .borrow_mut()
-            .send_headers(self.stream_id, headers, &mut self.conn.borrow_mut())
     }
 
     /// Close senidng side of the stream.
