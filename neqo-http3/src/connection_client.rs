@@ -6211,14 +6211,14 @@ mod tests {
 
         let mut d = Encoder::default();
         let headers1xx: &[Header] = &[Header::new(":status", "101")];
-        server.encode_headers(push_stream_id, &headers1xx, &mut d);
+        server.encode_headers(push_stream_id, headers1xx, &mut d);
 
         let headers200: &[Header] = &[
             Header::new(":status", "200"),
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
         ];
-        server.encode_headers(push_stream_id, &headers200, &mut d);
+        server.encode_headers(push_stream_id, headers200, &mut d);
 
         // create a push stream.
         send_data_on_push(
