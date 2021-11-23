@@ -378,14 +378,18 @@ pub trait SendStream: Stream {
     /// # Errors
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
-    fn stop_sending(&mut self, close_type: CloseType);
+    /// This function is called when sending side is closed abruptly by the pear or
+    /// the application.
+    fn handle_stop_sending(&mut self, close_type: CloseType);
     fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
         None
     }
 }
 
 pub trait HttpSendStream: SendStream {
-    /// This function sets informational response.
+    /// This function is used to supply headers to a http message. The
+    /// function is used for request headers, response headers, 1xx response and
+    /// trailers.
     /// # Errors
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: Headers, conn: &mut Connection) -> Res<()>;

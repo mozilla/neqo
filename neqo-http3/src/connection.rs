@@ -313,7 +313,7 @@ impl Http3Connection {
         );
 
         if let Some(mut s) = self.send_streams.remove(&stream_id) {
-            s.stop_sending(CloseType::ResetRemote(app_error));
+            s.handle_stop_sending(CloseType::ResetRemote(app_error));
             Ok(())
         } else if self.send_stream_is_critical(stream_id) {
             Err(Error::HttpClosedCriticalStream)
@@ -556,7 +556,7 @@ impl Http3Connection {
         }
 
         if let Some(mut s) = self.send_streams.remove(&stream_id) {
-            s.stop_sending(CloseType::ResetApp(error));
+            s.handle_stop_sending(CloseType::ResetApp(error));
         }
         conn.stream_reset_send(stream_id, error)?;
         Ok(())

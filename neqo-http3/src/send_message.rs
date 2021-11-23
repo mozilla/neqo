@@ -265,7 +265,7 @@ impl SendStream for SendMessage {
         Ok(())
     }
 
-    fn stop_sending(&mut self, close_type: CloseType) {
+    fn handle_stop_sending(&mut self, close_type: CloseType) {
         if !self.state.done() {
             self.conn_events.send_closed(self.stream_id(), close_type);
         }
