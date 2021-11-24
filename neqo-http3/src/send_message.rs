@@ -6,11 +6,12 @@
 
 use crate::hframe::HFrame;
 use crate::{
-    qlog, BufferedStream, CloseType, Error, Header, Headers, Http3StreamInfo, Http3StreamType,
-    HttpSendStream, Res, SendStream, SendStreamEvents, Stream,
+    headers_checks::{headers_valid, is_interim, trailers_valid},
+    qlog, BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
+    SendStream, SendStreamEvents, Stream,
 };
 
-use neqo_common::{qdebug, qinfo, qtrace, Encoder, MessageType};
+use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
@@ -52,18 +53,18 @@ enum MessageState {
 }
 
 impl MessageState {
-    fn new_headers(&mut self, headers: &Headers, message_type: MessageType) -> Res<()> {
+    fn new_headers(&mut self, headers: &[Header], message_type: MessageType) -> Res<()> {
         match &self {
             Self::WaitingForHeaders => {
                 // This is only a debug assertion because we expect that application will
                 // do the right thing here and performing the check costs.
-                debug_assert!(headers.headers_valid(message_type).is_ok());
+                debug_assert!(headers_valid(headers, message_type).is_ok());
                 match message_type {
                     MessageType::Request => {
                         *self = Self::WaitingForData;
                     }
                     MessageType::Response => {
-                        if !headers.is_interim()? {
+                        if !is_interim(headers)? {
                             *self = Self::WaitingForData;
                         }
                     }
@@ -71,7 +72,7 @@ impl MessageState {
                 Ok(())
             }
             Self::WaitingForData => {
-                headers.trailers_valid()?;
+                trailers_valid(headers)?;
                 *self = Self::TrailersSet;
                 Ok(())
             }
@@ -292,11 +293,11 @@ impl SendStream for SendMessage {
 }
 
 impl HttpSendStream for SendMessage {
-    fn send_headers(&mut self, headers: Headers, conn: &mut Connection) -> Res<()> {
-        self.state.new_headers(&headers, self.message_type)?;
+    fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
+        self.state.new_headers(headers, self.message_type)?;
         let buf = SendMessage::encode(
             &mut self.encoder.borrow_mut(),
-            &headers,
+            headers,
             conn,
             self.stream_id(),
         );

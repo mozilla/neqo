@@ -10,7 +10,7 @@ use super::{ExtendedConnectEvents, ExtendedConnectType};
 use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
 };
-use neqo_common::{qtrace, Headers, Role};
+use neqo_common::{qtrace, Header, Role};
 use neqo_transport::StreamId;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -148,7 +148,7 @@ impl HttpRecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
     fn header_ready(
         &self,
         stream_info: Http3StreamInfo,
-        headers: Headers,
+        headers: Vec<Header>,
         _interim: bool,
         _fin: bool,
     ) {

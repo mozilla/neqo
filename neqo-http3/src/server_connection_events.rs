@@ -5,13 +5,12 @@
 // except according to those terms.
 
 use crate::connection::Http3State;
-use crate::features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType};
 use crate::{
-    CloseType, Headers, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents,
-    SendStreamEvents,
+    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType},
+    CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
 };
+use neqo_common::Header;
 use neqo_transport::AppError;
-
 use neqo_transport::StreamId;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -22,7 +21,7 @@ pub(crate) enum Http3ServerConnEvent {
     /// Headers are ready.
     Headers {
         stream_info: Http3StreamInfo,
-        headers: Headers,
+        headers: Vec<Header>,
         fin: bool,
     },
     PriorityUpdate {
@@ -45,7 +44,7 @@ pub(crate) enum Http3ServerConnEvent {
     StateChange(Http3State),
     ExtendedConnect {
         stream_id: StreamId,
-        headers: Headers,
+        headers: Vec<Header>,
     },
     ExtendedConnectClosed {
         connect_type: ExtendedConnectType,
@@ -93,7 +92,7 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
     fn header_ready(
         &self,
         stream_info: Http3StreamInfo,
-        headers: Headers,
+        headers: Vec<Header>,
         _interim: bool,
         fin: bool,
     ) {
@@ -104,7 +103,7 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
         });
     }
 
-    fn extended_connect_new_session(&self, stream_id: StreamId, headers: Headers) {
+    fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         self.insert(Http3ServerConnEvent::ExtendedConnect { stream_id, headers });
     }
 }

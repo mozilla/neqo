@@ -12,12 +12,11 @@ use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::request_target::AsRequestTarget;
 use crate::settings::HSettings;
 use crate::{
-    Header, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput,
+    Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, ReceiveOutput,
 };
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
-    Datagram, Decoder, Encoder, MessageType, Role,
+    Datagram, Decoder, Encoder, Header, MessageType, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
@@ -803,7 +802,7 @@ mod tests {
     use crate::qpack_encoder_receiver::EncoderRecvStream;
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
     use crate::{Http3Server, Priority, RecvStream};
-    use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder, Headers};
+    use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::tparams::{self, TransportParameter};
@@ -6446,10 +6445,10 @@ mod tests {
             e,
             Http3ClientEvent::HeaderReady {
                 stream_id: request_stream_id,
-                headers: Headers::new(&[
+                headers: vec![
                     Header::new(":status", "200"),
                     Header::new("content-type", "text/plain")
-                ]),
+                ],
                 interim: false,
                 fin: false,
             }
