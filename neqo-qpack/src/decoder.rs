@@ -12,7 +12,7 @@ use crate::reader::ReceiverConnWrapper;
 use crate::stats::Stats;
 use crate::table::HeaderTable;
 use crate::{Error, QpackSettings, Res};
-use neqo_common::{qdebug, Headers};
+use neqo_common::{qdebug, Header};
 use neqo_transport::{Connection, StreamId};
 use std::convert::TryFrom;
 
@@ -195,7 +195,11 @@ impl QPackDecoder {
     /// May return `DecompressionFailed` if header block is incorrect or incomplete.
     /// # Panics
     /// When there is a programming error.
-    pub fn decode_header_block(&mut self, buf: &[u8], stream_id: StreamId) -> Res<Option<Headers>> {
+    pub fn decode_header_block(
+        &mut self,
+        buf: &[u8],
+        stream_id: StreamId,
+    ) -> Res<Option<Vec<Header>>> {
         qdebug!([self], "decode header block.");
         let mut decoder = HeaderDecoder::new(buf);
 
@@ -346,7 +350,7 @@ mod tests {
             .decode_header_block(header_block, stream_id)
             .unwrap();
         let h = decoded_headers.unwrap();
-        assert_eq!(h.as_ref(), headers);
+        assert_eq!(h, headers);
     }
 
     fn test_instruction(

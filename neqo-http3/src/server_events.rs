@@ -8,7 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
-use crate::{Headers, Http3StreamInfo, Http3StreamType, Priority, Res};
+use crate::{Http3StreamInfo, Http3StreamType, Priority, Res};
 use neqo_common::{qdebug, qinfo, Header};
 use neqo_transport::server::ActiveConnectionRef;
 use neqo_transport::{AppError, Connection, StreamId, StreamType};
@@ -310,7 +310,7 @@ impl Eq for WebTransportRequest {}
 pub enum WebTransportServerEvent {
     NewSession {
         session: WebTransportRequest,
-        headers: Headers,
+        headers: Vec<Header>,
     },
     SessionClosed {
         session: WebTransportRequest,
@@ -324,7 +324,7 @@ pub enum Http3ServerEvent {
     /// Headers are ready.
     Headers {
         stream: Http3OrWebTransportStream,
-        headers: Headers,
+        headers: Vec<Header>,
         fin: bool,
     },
     /// Request data is ready.
@@ -379,7 +379,12 @@ impl Http3ServerEvents {
     }
 
     /// Insert a `Headers` event.
-    pub(crate) fn headers(&self, request: Http3OrWebTransportStream, headers: Headers, fin: bool) {
+    pub(crate) fn headers(
+        &self,
+        request: Http3OrWebTransportStream,
+        headers: Vec<Header>,
+        fin: bool,
+    ) {
         self.insert(Http3ServerEvent::Headers {
             stream: request,
             headers,
@@ -441,7 +446,11 @@ impl Http3ServerEvents {
         });
     }
 
-    pub(crate) fn webtransport_new_session(&self, session: WebTransportRequest, headers: Headers) {
+    pub(crate) fn webtransport_new_session(
+        &self,
+        session: WebTransportRequest,
+        headers: Vec<Header>,
+    ) {
         self.insert(Http3ServerEvent::WebTransport(
             WebTransportServerEvent::NewSession { session, headers },
         ));

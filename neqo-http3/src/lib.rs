@@ -16,6 +16,7 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod features;
+mod headers_checks;
 pub mod hframe;
 mod priority;
 mod push_controller;
@@ -43,7 +44,7 @@ pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
 pub use hframe::{HFrame, HFrameReader};
-pub use neqo_common::{Error as CommonError, Header, Headers, MessageType};
+pub use neqo_common::{Header, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{
@@ -242,14 +243,6 @@ impl From<QpackError> for Error {
     }
 }
 
-impl From<CommonError> for Error {
-    fn from(err: CommonError) -> Self {
-        match err {
-            CommonError::InvalidHeader => Error::InvalidHeader,
-        }
-    }
-}
-
 impl From<AppError> for Error {
     fn from(error: AppError) -> Self {
         match error {
@@ -409,11 +402,11 @@ pub trait HttpRecvStreamEvents: RecvStreamEvents {
     fn header_ready(
         &self,
         stream_info: Http3StreamInfo,
-        headers: Headers,
+        headers: Vec<Header>,
         interim: bool,
         fin: bool,
     );
-    fn extended_connect_new_session(&self, _stream_id: StreamId, _headers: Headers) {}
+    fn extended_connect_new_session(&self, _stream_id: StreamId, _headers: Vec<Header>) {}
 }
 
 pub trait SendStream: Stream {
@@ -443,7 +436,7 @@ pub trait HttpSendStream: SendStream {
     /// trailers.
     /// # Errors
     /// This can also return an error if the underlying stream is closed.
-    fn send_headers(&mut self, headers: Headers, conn: &mut Connection) -> Res<()>;
+    fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()>;
     fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}
 }
 

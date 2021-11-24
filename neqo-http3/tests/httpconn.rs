@@ -26,7 +26,7 @@ fn receive_request(server: &mut Http3Server) -> Option<Http3OrWebTransportStream
         } = event
         {
             assert_eq!(
-                headers.as_ref(),
+                &headers,
                 &[
                     Header::new(":method", "GET"),
                     Header::new(":scheme", "https"),
@@ -65,7 +65,7 @@ fn process_client_events(conn: &mut Http3Client) {
         match event {
             Http3ClientEvent::HeaderReady { headers, fin, .. } => {
                 assert_eq!(
-                    headers.as_ref(),
+                    &headers,
                     &[
                         Header::new(":status", "200"),
                         Header::new("content-length", "3"),

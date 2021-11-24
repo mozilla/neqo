@@ -22,11 +22,11 @@ use crate::send_message::SendMessage;
 use crate::settings::{HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamHeadReader;
 use crate::{
-    client_events::Http3ClientEvents, CloseType, Header, Http3Parameters, Http3StreamType,
+    client_events::Http3ClientEvents, CloseType, Http3Parameters, Http3StreamType,
     HttpRecvStreamEvents, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStream,
     RecvStreamEvents, SendStream, SendStreamEvents,
 };
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Headers, MessageType, Role};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Header, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{AppError, Connection, ConnectionError, State, StreamId, StreamType};
@@ -547,7 +547,7 @@ impl Http3Connection {
         output
     }
 
-    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Headers>
+    fn create_fetch_headers<'b, 't, T>(request: &RequestDescription<'b, 't, T>) -> Res<Vec<Header>>
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
@@ -557,12 +557,12 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidRequestTarget)?;
 
         // Transform pseudo-header fields
-        let mut final_headers = Headers::new(&[
+        let mut final_headers = vec![
             Header::new(":method", request.method),
             Header::new(":scheme", target.scheme()),
             Header::new(":authority", target.authority()),
             Header::new(":path", target.path()),
-        ]);
+        ];
         if let Some(conn_type) = request.connect_type {
             final_headers.push(Header::new(":protocol", conn_type.string()));
         }
@@ -619,7 +619,7 @@ impl Http3Connection {
         send_message
             .http_stream()
             .unwrap()
-            .send_headers(final_headers, conn)?;
+            .send_headers(&final_headers, conn)?;
 
         self.add_streams(
             id,
@@ -854,7 +854,7 @@ impl Http3Connection {
             (Some(s), Some(_r), false) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(Headers::new(&[Header::new(":status", "400")]), conn)
+                    .send_headers(&[Header::new(":status", "400")], conn)
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
@@ -873,7 +873,7 @@ impl Http3Connection {
             (Some(s), Some(r), true) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(Headers::new(&[Header::new(":status", "200")]), conn)
+                    .send_headers(&[Header::new(":status", "200")], conn)
                     .is_ok()
                 {
                     let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(

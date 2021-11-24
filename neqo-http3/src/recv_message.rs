@@ -7,10 +7,12 @@
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_HEADERS};
 use crate::push_controller::PushController;
 use crate::{
-    priority::PriorityHandler, qlog, CloseType, Error, Headers, Http3StreamInfo, Http3StreamType,
-    HttpRecvStream, HttpRecvStreamEvents, MessageType, ReceiveOutput, RecvStream, Res, Stream,
+    headers_checks::{headers_valid, is_interim},
+    priority::PriorityHandler,
+    qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
+    MessageType, ReceiveOutput, RecvStream, Res, Stream,
 };
-use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_common::{qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
@@ -152,15 +154,15 @@ impl RecvMessage {
         Ok(())
     }
 
-    fn add_headers(&mut self, mut headers: Headers, fin: bool) -> Res<()> {
+    fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
         qtrace!([self], "Add new headers fin={}", fin);
         let interim = match self.message_type {
             MessageType::Request => false,
-            MessageType::Response => headers.is_interim()?,
+            MessageType::Response => is_interim(&headers)?,
         };
-        headers.headers_valid(self.message_type)?;
+        headers_valid(&headers, self.message_type)?;
         if self.message_type == MessageType::Response {
-            headers.retain_valid_for_response();
+            headers.retain(Header::is_allowed_for_response);
         }
 
         if fin && interim {

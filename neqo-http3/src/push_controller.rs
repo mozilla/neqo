@@ -6,10 +6,8 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::Http3Connection;
 use crate::hframe::HFrame;
-use crate::{
-    CloseType, Error, Headers, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
-};
-use neqo_common::{qerror, qinfo, qtrace};
+use crate::{CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res};
+use neqo_common::{qerror, qinfo, qtrace, Header};
 use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -33,7 +31,7 @@ use std::slice::SliceIndex;
 enum PushState {
     Init,
     PushPromise {
-        headers: Headers,
+        headers: Vec<Header>,
     },
     OnlyPushStream {
         stream_id: StreamId,
@@ -41,7 +39,7 @@ enum PushState {
     },
     Active {
         stream_id: StreamId,
-        headers: Headers,
+        headers: Vec<Header>,
     },
     Closed,
 }
@@ -179,7 +177,7 @@ impl PushController {
         &mut self,
         push_id: u64,
         ref_stream_id: StreamId,
-        new_headers: Headers,
+        new_headers: Vec<Header>,
     ) -> Res<()> {
         qtrace!(
             [self],
@@ -494,7 +492,7 @@ impl HttpRecvStreamEvents for RecvPushEvents {
     fn header_ready(
         &self,
         _stream_info: Http3StreamInfo,
-        headers: Headers,
+        headers: Vec<Header>,
         interim: bool,
         fin: bool,
     ) {

@@ -45,7 +45,7 @@ fn receive_request(server: &mut Http3Server) -> Option<Http3OrWebTransportStream
         } = event
         {
             assert_eq!(
-                headers.as_ref(),
+                &headers,
                 &[
                     Header::new(":method", "GET"),
                     Header::new(":scheme", "https"),
