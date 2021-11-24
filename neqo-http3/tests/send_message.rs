@@ -86,7 +86,7 @@ fn process_client_events(conn: &mut Http3Client) {
             Http3ClientEvent::HeaderReady { headers, fin, .. } => {
                 assert!(
                     (headers.as_ref()
-                        == &[
+                        == [
                             Header::new(":status", "200"),
                             Header::new("content-length", "3"),
                         ])
