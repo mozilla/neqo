@@ -55,6 +55,8 @@ impl MessageState {
     fn new_headers(&mut self, headers: &Headers, message_type: MessageType) -> Res<()> {
         match &self {
             Self::WaitingForHeaders => {
+                // This is only a debug assertion because we expect that application will
+                // do the right thing here and performing the check costs.
                 debug_assert!(headers.headers_valid(message_type).is_ok());
                 match message_type {
                     MessageType::Request => {
@@ -217,6 +219,9 @@ impl SendStream for SendMessage {
 
     fn stream_writable(&self) {
         if !self.stream.has_buffered_data() && !self.state.done() {
+            // DataWritable is just a signal for an application to try to write more data,
+            // if writing fails it is fine. Therefore we do not need to properly check
+            // whether more credits are available on the transport layer.
             self.conn_events.data_writable(self.stream_id());
         }
     }
@@ -241,6 +246,9 @@ impl SendStream for SendMessage {
                 )?;
                 qtrace!([self], "done sending request");
             } else {
+                // DataWritable is just a signal for an application to try to write more data,
+                // if writing fails it is fine. Therefore we do not need to properly check
+                // whether more credits are available on the transport layer.
                 self.conn_events.data_writable(self.stream_id());
             }
         }

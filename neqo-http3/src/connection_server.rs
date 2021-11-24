@@ -74,9 +74,9 @@ impl Http3ServerHandler {
         Ok(())
     }
 
-    /// This is call when application is done sending a request.
+    /// This is called when application is done sending a request.
     /// # Errors
-    /// An error will be return if stream does not exist.
+    /// An error will be returned if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
         qinfo!([self], "Close sending side stream={}.", stream_id);
         self.base_handler.stream_close_send(conn, stream_id)?;

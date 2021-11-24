@@ -41,7 +41,7 @@ impl Headers {
     /// Returns an error if response headers do not contain
     /// a status header or if the value of the header cannot be parsed.
     pub fn is_interim(&self) -> Res<bool> {
-        let status = self.headers.iter().find(|h| h.name() == ":status");
+        let status = self.headers.iter().take(1).find(|h| h.name() == ":status");
         if let Some(h) = status {
             #[allow(clippy::map_err_ignore)]
             let status_code = h.value().parse::<i32>().map_err(|_| Error::InvalidHeader)?;
@@ -56,18 +56,13 @@ impl Headers {
             if *state & REGULAR_HEADER != 0 {
                 return Err(Error::InvalidHeader);
             }
-            let bit = match message_type {
-                MessageType::Response => match name {
-                    ":status" => PSEUDO_HEADER_STATUS,
-                    _ => return Err(Error::InvalidHeader),
-                },
-                MessageType::Request => match name {
-                    ":method" => PSEUDO_HEADER_METHOD,
-                    ":scheme" => PSEUDO_HEADER_SCHEME,
-                    ":authority" => PSEUDO_HEADER_AUTHORITY,
-                    ":path" => PSEUDO_HEADER_PATH,
-                    _ => return Err(Error::InvalidHeader),
-                },
+            let bit = match (message_type, name) {
+                (MessageType::Response, ":status") => PSEUDO_HEADER_STATUS,
+                (MessageType::Request, ":method") => PSEUDO_HEADER_METHOD,
+                (MessageType::Request, ":scheme") => PSEUDO_HEADER_SCHEME,
+                (MessageType::Request, ":authority") => PSEUDO_HEADER_AUTHORITY,
+                (MessageType::Request, ":path") => PSEUDO_HEADER_PATH,
+                (_, _) => return Err(Error::InvalidHeader),
             };
             (true, bit)
         } else {
