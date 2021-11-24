@@ -50,7 +50,7 @@ pub use server_events::{ClientRequestStream, Http3ServerEvent};
 pub use settings::HttpZeroRttChecker;
 pub use stream_type_reader::NewStreamType;
 
-pub type Res<T> = Result<T, Error>;
+type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(
@@ -378,7 +378,7 @@ pub trait SendStream: Stream {
     /// # Errors
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
-    /// This function is called when sending side is closed abruptly by the pear or
+    /// This function is called when sending side is closed abruptly by the peer or
     /// the application.
     fn handle_stop_sending(&mut self, close_type: CloseType);
     fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {

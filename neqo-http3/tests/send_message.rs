@@ -4,15 +4,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use lazy_static::lazy_static;
 use neqo_common::event::Provider;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     ClientRequestStream, Error, Header, Http3Client, Http3ClientEvent, Http3Server,
-    Http3ServerEvent, Priority, Res,
+    Http3ServerEvent, Priority,
 };
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
+
+lazy_static! {
+    static ref RESPONSE_HEADER_NO_DATA: Vec<Header> =
+        vec![Header::new(":status", "200"), Header::new("something", "3")];
+}
+
+lazy_static! {
+    static ref RESPONSE_HEADER_103: Vec<Header> =
+        vec![Header::new(":status", "103"), Header::new("link", "...")];
+}
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
@@ -49,14 +60,18 @@ fn receive_request(server: &mut Http3Server) -> Option<ClientRequestStream> {
     None
 }
 
-fn send_trailers(request: &mut ClientRequestStream) -> Res<()> {
+fn send_trailers(request: &mut ClientRequestStream) -> Result<(), Error> {
     request.send_headers(&[
         Header::new("something1", "something"),
         Header::new("something2", "3"),
     ])
 }
 
-fn send_headers(request: &mut ClientRequestStream) -> Res<()> {
+fn send_informational_headers(request: &mut ClientRequestStream) -> Result<(), Error> {
+    request.send_headers(&RESPONSE_HEADER_103)
+}
+
+fn send_headers(request: &mut ClientRequestStream) -> Result<(), Error> {
     request.send_headers(&[
         Header::new(":status", "200"),
         Header::new("content-length", "3"),
@@ -69,12 +84,13 @@ fn process_client_events(conn: &mut Http3Client) {
     while let Some(event) = conn.next_event() {
         match event {
             Http3ClientEvent::HeaderReady { headers, fin, .. } => {
-                assert_eq!(
-                    headers.as_ref(),
-                    &[
-                        Header::new(":status", "200"),
-                        Header::new("content-length", "3"),
-                    ]
+                assert!(
+                    (headers.as_ref()
+                        == &[
+                            Header::new(":status", "200"),
+                            Header::new("content-length", "3"),
+                        ])
+                        || (headers.as_ref() == *RESPONSE_HEADER_103)
                 );
                 assert!(!fin);
                 response_header_found = true;
@@ -100,10 +116,7 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
     while let Some(event) = conn.next_event() {
         match event {
             Http3ClientEvent::HeaderReady { headers, fin, .. } => {
-                assert_eq!(
-                    headers.as_ref(),
-                    &[Header::new(":status", "200"), Header::new("something", "3"),]
-                );
+                assert_eq!(headers.as_ref(), *RESPONSE_HEADER_NO_DATA);
                 fin_received = fin;
                 response_header_found = true;
             }
@@ -188,9 +201,7 @@ fn response_trailers3() {
 #[test]
 fn response_trailers_no_data() {
     let (mut hconn_c, mut hconn_s, mut request) = connect_send_and_receive_request();
-    request
-        .send_headers(&[Header::new(":status", "200"), Header::new("something", "3")])
-        .unwrap();
+    request.send_headers(&RESPONSE_HEADER_NO_DATA).unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     send_trailers(&mut request).unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
@@ -216,7 +227,7 @@ fn multiple_response_trailers() {
 }
 
 #[test]
-fn data_after_tralier() {
+fn data_after_trailer() {
     let (mut hconn_c, mut hconn_s, mut request) = connect_send_and_receive_request();
     send_headers(&mut request).unwrap();
     request.send_data(RESPONSE_DATA).unwrap();
@@ -247,18 +258,45 @@ fn trailers_after_close() {
 #[test]
 fn multiple_response_headers() {
     let (mut hconn_c, mut hconn_s, mut request) = connect_send_and_receive_request();
-    request
-        .send_headers(&[Header::new(":status", "200"), Header::new("something", "3")])
-        .unwrap();
+    request.send_headers(&RESPONSE_HEADER_NO_DATA).unwrap();
 
     assert_eq!(
-        request.send_headers(&[Header::new(":status", "200"), Header::new("something", "3"),]),
+        request.send_headers(&RESPONSE_HEADER_NO_DATA),
         Err(Error::InvalidHeader)
     );
 
     request.close_send().unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
     process_client_events_no_data(&mut hconn_c);
+}
+
+#[test]
+fn informational_after_response_headers() {
+    let (mut hconn_c, mut hconn_s, mut request) = connect_send_and_receive_request();
+    request.send_headers(&RESPONSE_HEADER_NO_DATA).unwrap();
+
+    assert_eq!(
+        send_informational_headers(&mut request),
+        Err(Error::InvalidHeader)
+    );
+
+    request.close_send().unwrap();
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+    process_client_events_no_data(&mut hconn_c);
+}
+
+#[test]
+fn data_after_informational() {
+    let (mut hconn_c, mut hconn_s, mut request) = connect_send_and_receive_request();
+    send_informational_headers(&mut request).unwrap();
+
+    assert_eq!(request.send_data(RESPONSE_DATA), Err(Error::InvalidInput));
+
+    send_headers(&mut request).unwrap();
+    request.send_data(RESPONSE_DATA).unwrap();
+    request.close_send().unwrap();
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+    process_client_events(&mut hconn_c);
 }
 
 #[test]
@@ -269,7 +307,7 @@ fn non_trailers_headers_after_data() {
     exchange_packets(&mut hconn_c, &mut hconn_s);
 
     assert_eq!(
-        request.send_headers(&[Header::new(":status", "200"), Header::new("something", "3"),]),
+        request.send_headers(&RESPONSE_HEADER_NO_DATA),
         Err(Error::InvalidHeader)
     );
 
