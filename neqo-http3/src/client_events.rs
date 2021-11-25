@@ -179,6 +179,8 @@ impl ExtendedConnectEvents for Http3ClientEvents {
             self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session(
                 stream_id,
             )));
+        } else {
+            unreachable!("There is only ExtendedConnectType::WebTransport.");
         }
     }
 

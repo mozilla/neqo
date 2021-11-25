@@ -320,7 +320,7 @@ impl Http3Client {
     /// # Errors
     /// An error will be return if a stream does not exist.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
-        qinfo!([self], "stream_reset {} error={}.", stream_id, error);
+        qinfo!([self], "stream_reset_send {} error={}.", stream_id, error);
         self.base_handler
             .stream_reset_send(&mut self.conn, stream_id, error)
     }
@@ -436,7 +436,7 @@ impl Http3Client {
     }
 
     /// # Errors
-    /// This may return an error if the particula session does not exist
+    /// This may return an error if the particular session does not exist
     /// or the connection is not in the active state.
     pub fn webtransport_create_stream(
         &mut self,
