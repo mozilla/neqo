@@ -42,7 +42,7 @@ impl Http3ServerHandler {
 
     /// Supply a response for a request.
     /// # Errors
-    /// `InvalidStreamId` if thee stream does not exist,
+    /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
     /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
@@ -102,7 +102,7 @@ impl Http3ServerHandler {
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
-        qinfo!([self], "reset_stream {} error={}.", stream_id, error);
+        qinfo!([self], "cancel_fetch {} error={}.", stream_id, error);
         self.needs_processing = true;
         self.base_handler.cancel_fetch(stream_id, error, conn)
     }

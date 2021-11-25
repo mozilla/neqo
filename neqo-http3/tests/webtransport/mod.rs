@@ -133,7 +133,7 @@ impl WtTest {
                     wt_server_session = Some(session);
                 }
                 Http3ServerEvent::Data { .. } => {
-                    panic!("There should not be ane data events!");
+                    panic!("There should not be any data events!");
                 }
                 _ => {}
             }
