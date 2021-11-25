@@ -42,7 +42,7 @@ impl ExtendedConnectType {
 
     #[must_use]
     #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
-    pub fn setting_type(&self) -> HSettingType {
+    pub fn setting_type(self) -> HSettingType {
         HSettingType::EnableWebTransport
     }
 }

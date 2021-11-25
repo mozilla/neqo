@@ -160,9 +160,9 @@ impl SendStreamEvents for Http3ClientEvents {
 impl ExtendedConnectEvents for Http3ClientEvents {
     fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId) {
         if connect_type == ExtendedConnectType::WebTransport {
-            self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::Session(stream_id),
-            ));
+            self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session(
+                stream_id,
+            )));
         }
     }
 
