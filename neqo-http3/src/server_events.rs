@@ -245,6 +245,7 @@ impl WebTransportRequest {
             )
     }
 
+    #[must_use]
     pub fn stream_id(&self) -> StreamId {
         self.stream_handler.stream_id
     }

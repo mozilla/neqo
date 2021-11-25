@@ -12,7 +12,7 @@ use test_fixture::*;
 
 fn check_wt_event(client: &mut Http3Client, wt_enable_client: bool, wt_enable_server: bool) {
     let wt_event = client.events().find_map(|e| {
-        if let Http3ClientEvent::WebTransport(WebTransportEvent::WebTransportNegotiated(neg)) = e {
+        if let Http3ClientEvent::WebTransport(WebTransportEvent::Negotiated(neg)) = e {
             Some(neg)
         } else {
             None

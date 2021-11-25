@@ -22,9 +22,9 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WebTransportEvent {
-    WebTransportNegotiated(bool),
-    WebTransportSession(StreamId),
-    WebTransportSessionClosed {
+    Negotiated(bool),
+    Session(StreamId),
+    SessionClosed {
         stream_id: StreamId,
         error: Option<AppError>,
     },
@@ -161,7 +161,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId) {
         if connect_type == ExtendedConnectType::WebTransport {
             self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::WebTransportSession(stream_id),
+                WebTransportEvent::Session(stream_id),
             ));
         }
     }
@@ -174,7 +174,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     ) {
         if connect_type == ExtendedConnectType::WebTransport {
             self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::WebTransportSessionClosed { stream_id, error },
+                WebTransportEvent::SessionClosed { stream_id, error },
             ));
         } else {
             unreachable!("There are no other types.");
@@ -301,7 +301,7 @@ impl Http3ClientEvents {
     pub fn negotiation_done(&self, feature_type: HSettingType, negotiated: bool) {
         if feature_type == HSettingType::EnableWebTransport {
             self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::WebTransportNegotiated(negotiated),
+                WebTransportEvent::Negotiated(negotiated),
             ));
         }
     }
