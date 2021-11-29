@@ -32,6 +32,9 @@ pub(crate) enum Http3ServerConnEvent {
     DataReadable {
         stream_info: Http3StreamInfo,
     },
+    DataWritable {
+        stream_info: Http3StreamInfo,
+    },
     StreamReset {
         stream_info: Http3StreamInfo,
         error: AppError,
@@ -67,6 +70,10 @@ impl SendStreamEvents for Http3ServerConnEvents {
                 error: close_type.error().unwrap(),
             });
         }
+    }
+
+    fn data_writable(&self, stream_info: Http3StreamInfo) {
+        self.insert(Http3ServerConnEvent::DataWritable { stream_info });
     }
 }
 

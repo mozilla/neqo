@@ -8,43 +8,11 @@ use neqo_common::event::Provider;
 
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
-    Http3State, Priority,
+    Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State, Priority,
 };
-use neqo_transport::ConnectionParameters;
-use std::cell::RefCell;
-
-use std::rc::Rc;
 
 use std::time::Instant;
 use test_fixture::*;
-
-pub fn default_http3_client() -> Http3Client {
-    fixture_init();
-    Http3Client::new(
-        DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
-        ConnectionParameters::default(),
-        Http3Parameters::default().max_concurrent_push_streams(5),
-        now(),
-    )
-    .expect("create a default client")
-}
-
-pub fn default_http3_server() -> Http3Server {
-    Http3Server::new(
-        now(),
-        DEFAULT_KEYS,
-        DEFAULT_ALPN_H3,
-        anti_replay(),
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        Http3Parameters::default(),
-        None,
-    )
-    .expect("create a server")
-}
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;

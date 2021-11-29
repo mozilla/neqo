@@ -609,7 +609,6 @@ fn test_h3_rz(
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        ConnectionParameters::default(),
         Http3Parameters::default()
             .max_table_size_encoder(16384)
             .max_table_size_decoder(16384)
