@@ -17,9 +17,7 @@ use crate::{Http3Parameters, Http3StreamInfo, Res};
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
-use neqo_transport::{
-    tparams::PreferredAddress, ConnectionIdGenerator, ConnectionParameters, Output,
-};
+use neqo_transport::{tparams::PreferredAddress, ConnectionIdGenerator, Output};
 use std::cell::RefCell;
 use std::cell::RefMut;
 use std::collections::HashMap;
@@ -66,7 +64,7 @@ impl Http3Server {
                 zero_rtt_checker
                     .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(http3_parameters))),
                 cid_manager,
-                ConnectionParameters::default(),
+                *http3_parameters.get_connection_parameters(),
             )?,
             http3_parameters,
             http3_handlers: HashMap::new(),
@@ -186,6 +184,9 @@ impl Http3Server {
                             &mut self.events,
                         );
                     }
+                    Http3ServerConnEvent::DataWritable { stream_info } => self
+                        .events
+                        .data_writable(conn.clone(), handler.clone(), stream_info),
                     Http3ServerConnEvent::StreamReset { stream_info, error } => {
                         self.events
                             .stream_reset(conn.clone(), handler.clone(), stream_info, error);
@@ -909,7 +910,8 @@ mod tests {
                     stream.send_data(RESPONSE_BODY).unwrap();
                     data_received += 1;
                 }
-                Http3ServerEvent::StreamReset { .. }
+                Http3ServerEvent::DataWritable { .. }
+                | Http3ServerEvent::StreamReset { .. }
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
@@ -959,7 +961,8 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StreamReset { .. }
+                Http3ServerEvent::DataWritable { .. }
+                | Http3ServerEvent::StreamReset { .. }
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
@@ -985,7 +988,8 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StreamReset { .. }
+                Http3ServerEvent::DataWritable { .. }
+                | Http3ServerEvent::StreamReset { .. }
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
@@ -1028,7 +1032,8 @@ mod tests {
                 Http3ServerEvent::Data { .. } => {
                     panic!("We should not have a Data event");
                 }
-                Http3ServerEvent::StreamReset { .. }
+                Http3ServerEvent::DataWritable { .. }
+                | Http3ServerEvent::StreamReset { .. }
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
@@ -1256,7 +1261,8 @@ mod tests {
                 Http3ServerEvent::Data { stream, .. } => {
                     assert!(requests.get(&stream).is_some());
                 }
-                Http3ServerEvent::StreamReset { .. }
+                Http3ServerEvent::DataWritable { .. }
+                | Http3ServerEvent::StreamReset { .. }
                 | Http3ServerEvent::StreamStopSending { .. }
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }

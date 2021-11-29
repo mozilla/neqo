@@ -245,12 +245,16 @@ impl Http3ServerHandler {
                             .connection_state_change(self.base_handler.state());
                     }
                 }
+                ConnectionEvent::SendStreamWritable { stream_id } => {
+                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
+                        s.stream_writable();
+                    }
+                }
                 ConnectionEvent::AuthenticationNeeded
                 | ConnectionEvent::EchFallbackAuthenticationNeeded { .. }
                 | ConnectionEvent::ZeroRttRejected
                 | ConnectionEvent::ResumptionToken(..) => return Err(Error::HttpInternal(4)),
-                ConnectionEvent::SendStreamWritable { .. }
-                | ConnectionEvent::SendStreamComplete { .. }
+                ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::SendStreamCreatable { .. }
                 | ConnectionEvent::Datagram { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }

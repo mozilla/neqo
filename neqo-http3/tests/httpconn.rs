@@ -9,9 +9,10 @@
 use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
-    Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
+    Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
 };
+use neqo_transport::{ConnectionParameters, StreamType};
 use std::mem;
 use test_fixture::*;
 
@@ -89,10 +90,7 @@ fn process_client_events(conn: &mut Http3Client) {
     assert!(response_data_found);
 }
 
-fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
-    let mut hconn_c = default_http3_client();
-    let mut hconn_s = default_http3_server();
-
+fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     let out = hconn_c.process(None, now()); // Initial
     let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
@@ -110,7 +108,26 @@ fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     let out = hconn_c.process(out.dgram(), now());
     // assert!(hconn_c.settings_received);
 
-    (hconn_c, hconn_s, out.dgram())
+    out.dgram()
+}
+
+fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
+    let mut hconn_c = default_http3_client();
+    let mut hconn_s = default_http3_server();
+
+    let out = connect_peers(&mut hconn_c, &mut hconn_s);
+    (hconn_c, hconn_s, out)
+}
+
+fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
+    let mut out = None;
+    loop {
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
+        if out.is_none() {
+            break;
+        }
+    }
 }
 
 #[test]
@@ -190,4 +207,59 @@ fn test_103_response() {
     let out = hconn_s.process(None, now());
     mem::drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c)
+}
+
+#[test]
+fn test_data_writable_events() {
+    const STREAM_LIMIT: u64 = 5000;
+    const DATA_AMOUNT: usize = 10000;
+
+    let mut hconn_c = http3_client_with_params(Http3Parameters::default().connection_parameters(
+        ConnectionParameters::default().max_stream_data(StreamType::BiDi, false, STREAM_LIMIT),
+    ));
+    let mut hconn_s = default_http3_server();
+
+    mem::drop(connect_peers(&mut hconn_c, &mut hconn_s));
+
+    let req = hconn_c
+        .fetch(
+            now(),
+            "GET",
+            &("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    hconn_c.stream_close_send(req).unwrap();
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+
+    let mut request = receive_request(&mut hconn_s).unwrap();
+
+    request
+        .send_headers(&[
+            Header::new(":status", "200"),
+            Header::new("content-length", DATA_AMOUNT.to_string()),
+        ])
+        .unwrap();
+
+    // Send a lot of data
+    let buf = &[1; DATA_AMOUNT];
+    let sent1 = request.send_data(buf).unwrap();
+    assert!(sent1 < DATA_AMOUNT);
+
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+
+    let data_writable = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::DataWritable {
+                stream
+            } if stream.stream_id() == request.stream_id()
+        )
+    };
+    assert!(hconn_s.events().any(data_writable));
+
+    // Data can be sent again.
+    let sent2 = request.send_data(&buf[sent1..]).unwrap();
+    assert!(sent2 > 0);
 }

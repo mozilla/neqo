@@ -14,7 +14,7 @@ use neqo_http3::{
     Error, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
 };
-use neqo_transport::{AppError, ConnectionParameters, StreamId, StreamType};
+use neqo_transport::{AppError, StreamId, StreamType};
 use std::cell::RefCell;
 use std::rc::Rc;
 use test_fixture::{
@@ -29,7 +29,6 @@ pub fn default_http3_client(webtransport: bool) -> Http3Client {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default(),
         Http3Parameters::default().webtransport(webtransport),
         now(),
     )
@@ -456,23 +455,29 @@ impl WtTest {
     }
 
     fn receive_reset_server(&mut self, expected_stream_id: StreamId, expected_error: u64) {
-        assert!(matches!(
-            self.server.next_event().unwrap(),
-            Http3ServerEvent::StreamReset {
-                stream,
-                error
-            } if stream.stream_id() == expected_stream_id && error == expected_error
-        ));
+        let stream_reset = |e| {
+            matches!(
+                e,
+                Http3ServerEvent::StreamReset {
+                    stream,
+                    error
+                } if stream.stream_id() == expected_stream_id && error == expected_error
+            )
+        };
+        assert!(self.server.events().any(stream_reset));
     }
 
     fn receive_stop_sending_server(&mut self, expected_stream_id: StreamId, expected_error: u64) {
-        assert!(matches!(
-            self.server.next_event().unwrap(),
-            Http3ServerEvent::StreamStopSending {
-                stream,
-                error
-            } if stream.stream_id() == expected_stream_id && error == expected_error
-        ));
+        let stop_sending = |e| {
+            matches!(
+                e,
+                Http3ServerEvent::StreamStopSending {
+                    stream,
+                    error
+                } if stream.stream_id() == expected_stream_id && error == expected_error
+            )
+        };
+        assert!(self.server.events().any(stop_sending));
     }
 
     fn check_events_after_closing_session_server(

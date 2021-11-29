@@ -235,7 +235,6 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default(),
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
@@ -244,6 +243,23 @@ pub fn default_http3_client() -> Http3Client {
         now(),
     )
     .expect("create a default client")
+}
+
+/// Create a http3 client.
+/// # Panics
+/// When the client can't be created.
+#[must_use]
+pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
+    fixture_init();
+    Http3Client::new(
+        DEFAULT_SERVER_NAME,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        addr(),
+        addr(),
+        params,
+        now(),
+    )
+    .expect("create a client")
 }
 
 /// Create a http3 server with default configuration.

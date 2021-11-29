@@ -333,6 +333,9 @@ pub enum Http3ServerEvent {
         data: Vec<u8>,
         fin: bool,
     },
+    DataWritable {
+        stream: Http3OrWebTransportStream,
+    },
     StreamReset {
         stream: Http3OrWebTransportStream,
         error: AppError,
@@ -410,6 +413,17 @@ impl Http3ServerEvents {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
             data,
             fin,
+        });
+    }
+
+    pub(crate) fn data_writable(
+        &self,
+        conn: ActiveConnectionRef,
+        handler: Rc<RefCell<Http3ServerHandler>>,
+        stream_info: Http3StreamInfo,
+    ) {
+        self.insert(Http3ServerEvent::DataWritable {
+            stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
         });
     }
 

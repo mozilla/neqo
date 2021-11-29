@@ -21,9 +21,8 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    ConnectionParameters, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType,
-    ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
+    QuicVersion, Stats as TransportStats, StreamId, StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -82,18 +81,21 @@ impl Http3Client {
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        conn_params: ConnectionParameters,
         http3_parameters: Http3Parameters,
         now: Instant,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(
                 server_name,
-                &[alpn_from_quic_version(conn_params.get_quic_version())],
+                &[alpn_from_quic_version(
+                    http3_parameters
+                        .get_connection_parameters()
+                        .get_quic_version(),
+                )],
                 cid_manager,
                 local_addr,
                 remote_addr,
-                conn_params,
+                *http3_parameters.get_connection_parameters(),
                 now,
             )?,
             http3_parameters,
@@ -839,7 +841,6 @@ mod tests {
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             addr(),
             addr(),
-            ConnectionParameters::default(),
             Http3Parameters::default()
                 .max_table_size_encoder(max_table_size)
                 .max_table_size_decoder(max_table_size)
