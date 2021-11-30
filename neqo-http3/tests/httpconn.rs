@@ -221,6 +221,7 @@ fn test_data_writable_events() {
 
     mem::drop(connect_peers(&mut hconn_c, &mut hconn_s));
 
+    // Create a request.
     let req = hconn_c
         .fetch(
             now(),
@@ -244,9 +245,15 @@ fn test_data_writable_events() {
 
     // Send a lot of data
     let buf = &[1; DATA_AMOUNT];
-    let sent1 = request.send_data(buf).unwrap();
-    assert!(sent1 < DATA_AMOUNT);
+    let mut sent = request.send_data(buf).unwrap();
+    assert!(sent < DATA_AMOUNT);
 
+    // Exchange packets and read the data on the client side.
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+    let stream_id = request.stream_id();
+    let mut recv_buf = [0_u8; DATA_AMOUNT];
+    let (mut recvd, _) = hconn_c.read_data(now(), stream_id, &mut recv_buf).unwrap();
+    assert_eq!(sent, recvd);
     exchange_packets(&mut hconn_c, &mut hconn_s);
 
     let data_writable = |e| {
@@ -254,12 +261,40 @@ fn test_data_writable_events() {
             e,
             Http3ServerEvent::DataWritable {
                 stream
-            } if stream.stream_id() == request.stream_id()
+            } if stream.stream_id() == stream_id
         )
     };
+    // Make sure we have a DataWritable event.
     assert!(hconn_s.events().any(data_writable));
-
     // Data can be sent again.
-    let sent2 = request.send_data(&buf[sent1..]).unwrap();
-    assert!(sent2 > 0);
+    let s = request.send_data(&buf[sent..]).unwrap();
+    assert!(s > 0);
+    sent += s;
+
+    // Exchange packets and read the data on the client side.
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+    let (r, _) = hconn_c
+        .read_data(now(), stream_id, &mut recv_buf[recvd..])
+        .unwrap();
+    recvd += r;
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+    assert_eq!(sent, recvd);
+
+    // One more DataWritable event.
+    assert!(hconn_s.events().any(data_writable));
+    // Send more data.
+    let s = request.send_data(&buf[sent..]).unwrap();
+    assert!(s > 0);
+    sent += s;
+    assert_eq!(sent, DATA_AMOUNT);
+
+    exchange_packets(&mut hconn_c, &mut hconn_s);
+    let (r, _) = hconn_c
+        .read_data(now(), stream_id, &mut recv_buf[recvd..])
+        .unwrap();
+    recvd += r;
+
+    // Make sure all data is received by the client.
+    assert_eq!(recvd, DATA_AMOUNT);
+    assert_eq!(&recv_buf, buf);
 }
