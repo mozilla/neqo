@@ -29,7 +29,7 @@ mod send_message;
 pub mod server;
 mod server_connection_events;
 mod server_events;
-mod settings;
+pub mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;

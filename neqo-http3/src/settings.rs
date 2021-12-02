@@ -120,9 +120,13 @@ impl HSettings {
                 (Some(SETTINGS_QPACK_BLOCKED_STREAMS), Some(value)) => self
                     .settings
                     .push(HSetting::new(HSettingType::BlockedStreams, value)),
-                (Some(SETTINGS_ENABLE_WEB_TRANSPORT), Some(value)) => self
-                    .settings
-                    .push(HSetting::new(HSettingType::EnableWebTransport, value)),
+                (Some(SETTINGS_ENABLE_WEB_TRANSPORT), Some(value)) => {
+                    if value > 1 {
+                        return Err(Error::HttpSettings);
+                    }
+                    self.settings
+                        .push(HSetting::new(HSettingType::EnableWebTransport, value));
+                }
                 // other supported settings here
                 (Some(_), Some(_)) => {} // ignore unknown setting, it is fine.
                 _ => return Err(Error::NotEnoughData),
