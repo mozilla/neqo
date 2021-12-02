@@ -48,6 +48,7 @@ pub struct HSetting {
 }
 
 impl HSetting {
+    #[must_use]
     pub fn new(setting_type: HSettingType, value: u64) -> Self {
         Self {
             setting_type,
@@ -62,12 +63,14 @@ pub struct HSettings {
 }
 
 impl HSettings {
+    #[must_use]
     pub fn new(settings: &[HSetting]) -> Self {
         Self {
             settings: settings.to_vec(),
         }
     }
 
+    #[must_use]
     pub fn get(&self, setting: HSettingType) -> u64 {
         match self.settings.iter().find(|s| s.setting_type == setting) {
             Some(v) => v.value,
@@ -100,6 +103,8 @@ impl HSettings {
         });
     }
 
+    /// # Errors
+    /// Returns an error if settings types are reserved of settings value are not permitted.
     pub fn decode_frame_contents(&mut self, dec: &mut Decoder) -> Res<()> {
         while dec.remaining() > 0 {
             let t = dec.decode_varint();
