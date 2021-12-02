@@ -867,7 +867,7 @@ impl Http3Connection {
             (Some(s), Some(_r), false) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "400")], conn)
+                    .send_headers(&[Header::new(":status", "404")], conn)
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
