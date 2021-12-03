@@ -29,7 +29,9 @@ use crate::{
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Header, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{AppError, Connection, ConnectionError, State, StreamId, StreamType};
+use neqo_transport::{
+    AppError, Connection, ConnectionError, State, StreamId, StreamType, ZeroRttState,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
@@ -352,6 +354,17 @@ impl Http3Connection {
     pub fn handle_state_change(&mut self, conn: &mut Connection, state: &State) -> Res<bool> {
         qdebug!([self], "Handle state change {:?}", state);
         match state {
+            State::Handshaking => {
+                if self.role == Role::Server
+                    && conn.zero_rtt_state() == &ZeroRttState::AcceptedServer
+                {
+                    self.state = Http3State::ZeroRtt;
+                    self.initialize_http3_connection(conn)?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
             State::Connected => {
                 debug_assert!(matches!(
                     self.state,
