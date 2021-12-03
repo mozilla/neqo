@@ -22,12 +22,13 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 pub trait ExtendedConnectEvents: Debug {
-    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId);
+    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u32);
     fn session_end(
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
         error: Option<AppError>,
+        status: Option<u32>,
     );
     fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo);
 }

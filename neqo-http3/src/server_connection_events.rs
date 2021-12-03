@@ -116,13 +116,20 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 }
 
 impl ExtendedConnectEvents for Http3ServerConnEvents {
-    fn session_start(&self, _connect_type: ExtendedConnectType, _stream_id: StreamId) {}
+    fn session_start(
+        &self,
+        _connect_type: ExtendedConnectType,
+        _stream_id: StreamId,
+        _status: u32,
+    ) {
+    }
 
     fn session_end(
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
         error: Option<AppError>,
+        _status: Option<u32>,
     ) {
         self.insert(Http3ServerConnEvent::ExtendedConnectClosed {
             connect_type,
