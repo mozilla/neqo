@@ -6,8 +6,8 @@
 
 #![allow(unused_assignments)]
 
-use neqo_common::{event::Provider, Datagram};
-use neqo_crypto::AuthenticationStatus;
+use neqo_common::{event::Provider, qtrace, Datagram};
+use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
@@ -119,8 +119,8 @@ fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
     (hconn_c, hconn_s, out)
 }
 
-fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
-    let mut out = None;
+fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server, out_ex: Option<Datagram>) {
+    let mut out = out_ex;
     loop {
         out = client.process(out, now()).dgram();
         out = server.process(out, now()).dgram();
@@ -232,7 +232,7 @@ fn test_data_writable_events() {
         )
         .unwrap();
     hconn_c.stream_close_send(req).unwrap();
-    exchange_packets(&mut hconn_c, &mut hconn_s);
+    exchange_packets(&mut hconn_c, &mut hconn_s, None);
 
     let mut request = receive_request(&mut hconn_s).unwrap();
 
@@ -249,12 +249,12 @@ fn test_data_writable_events() {
     assert!(sent < DATA_AMOUNT);
 
     // Exchange packets and read the data on the client side.
-    exchange_packets(&mut hconn_c, &mut hconn_s);
+    exchange_packets(&mut hconn_c, &mut hconn_s, None);
     let stream_id = request.stream_id();
     let mut recv_buf = [0_u8; DATA_AMOUNT];
     let (mut recvd, _) = hconn_c.read_data(now(), stream_id, &mut recv_buf).unwrap();
     assert_eq!(sent, recvd);
-    exchange_packets(&mut hconn_c, &mut hconn_s);
+    exchange_packets(&mut hconn_c, &mut hconn_s, None);
 
     let data_writable = |e| {
         matches!(
@@ -272,12 +272,12 @@ fn test_data_writable_events() {
     sent += s;
 
     // Exchange packets and read the data on the client side.
-    exchange_packets(&mut hconn_c, &mut hconn_s);
+    exchange_packets(&mut hconn_c, &mut hconn_s, None);
     let (r, _) = hconn_c
         .read_data(now(), stream_id, &mut recv_buf[recvd..])
         .unwrap();
     recvd += r;
-    exchange_packets(&mut hconn_c, &mut hconn_s);
+    exchange_packets(&mut hconn_c, &mut hconn_s, None);
     assert_eq!(sent, recvd);
 
     // One more DataWritable event.
@@ -288,7 +288,7 @@ fn test_data_writable_events() {
     sent += s;
     assert_eq!(sent, DATA_AMOUNT);
 
-    exchange_packets(&mut hconn_c, &mut hconn_s);
+    exchange_packets(&mut hconn_c, &mut hconn_s, None);
     let (r, _) = hconn_c
         .read_data(now(), stream_id, &mut recv_buf[recvd..])
         .unwrap();
@@ -297,4 +297,85 @@ fn test_data_writable_events() {
     // Make sure all data is received by the client.
     assert_eq!(recvd, DATA_AMOUNT);
     assert_eq!(&recv_buf, buf);
+}
+
+fn get_token(client: &mut Http3Client) -> ResumptionToken {
+    assert_eq!(client.state(), Http3State::Connected);
+    client
+        .events()
+        .find_map(|e| {
+            if let Http3ClientEvent::ResumptionToken(token) = e {
+                Some(token)
+            } else {
+                None
+            }
+        })
+        .unwrap()
+}
+
+#[test]
+fn zerortt() {
+    let (mut hconn_c, _, dgram) = connect();
+    let token = get_token(&mut hconn_c);
+
+    // Create a new connection with a resumption token.
+    let mut hconn_c = default_http3_client();
+    hconn_c
+        .enable_resumption(now(), &token)
+        .expect("Set resumption token.");
+    let mut hconn_s = default_http3_server();
+
+    // Create a request.
+    let req = hconn_c
+        .fetch(
+            now(),
+            "GET",
+            &("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    hconn_c.stream_close_send(req).unwrap();
+
+    let out = hconn_c.process(dgram, now());
+    let out = hconn_s.process(out.dgram(), now());
+
+    let mut request_stream = None;
+    let mut zerortt_state_change = false;
+    while let Some(event) = hconn_s.next_event() {
+        match event {
+            Http3ServerEvent::Headers {
+                stream,
+                headers,
+                fin,
+            } => {
+                assert_eq!(
+                    &headers,
+                    &[
+                        Header::new(":method", "GET"),
+                        Header::new(":scheme", "https"),
+                        Header::new(":authority", "something.com"),
+                        Header::new(":path", "/")
+                    ]
+                );
+                assert!(fin);
+
+                request_stream = Some(stream);
+            }
+            Http3ServerEvent::StateChange { state, .. } => {
+                assert_eq!(state, Http3State::ZeroRtt);
+                zerortt_state_change = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(zerortt_state_change);
+    let mut request_stream = request_stream.unwrap();
+
+    // Send a response
+    set_response(&mut request_stream);
+
+    // Receive the response
+    exchange_packets(&mut hconn_c, &mut hconn_s, out.dgram());
+    process_client_events(&mut hconn_c);
 }
