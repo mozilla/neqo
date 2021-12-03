@@ -23,10 +23,14 @@ use std::rc::Rc;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WebTransportEvent {
     Negotiated(bool),
-    Session(StreamId),
+    Session {
+        stream_id: StreamId,
+        status: u32,
+    },
     SessionClosed {
         stream_id: StreamId,
         error: Option<AppError>,
+        status: Option<u32>,
     },
     NewStream {
         stream_id: StreamId,
@@ -174,11 +178,12 @@ impl SendStreamEvents for Http3ClientEvents {
 }
 
 impl ExtendedConnectEvents for Http3ClientEvents {
-    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId) {
+    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u32) {
         if connect_type == ExtendedConnectType::WebTransport {
-            self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session(
+            self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session {
                 stream_id,
-            )));
+                status,
+            }));
         } else {
             unreachable!("There is only ExtendedConnectType::WebTransport.");
         }
@@ -189,10 +194,15 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
         error: Option<AppError>,
+        status: Option<u32>,
     ) {
         if connect_type == ExtendedConnectType::WebTransport {
             self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::SessionClosed { stream_id, error },
+                WebTransportEvent::SessionClosed {
+                    stream_id,
+                    error,
+                    status,
+                },
             ));
         } else {
             unreachable!("There are no other types.");
@@ -325,10 +335,10 @@ impl Http3ClientEvents {
         });
     }
 
-    pub fn negotiation_done(&self, feature_type: HSettingType, negotiated: bool) {
+    pub fn negotiation_done(&self, feature_type: HSettingType, succeeded: bool) {
         if feature_type == HSettingType::EnableWebTransport {
             self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::Negotiated(negotiated),
+                WebTransportEvent::Negotiated(succeeded),
             ));
         }
     }

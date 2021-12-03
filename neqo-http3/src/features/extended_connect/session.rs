@@ -71,18 +71,25 @@ impl ExtendedConnectSession {
             return;
         }
         self.events
-            .session_end(self.connect_type, stream_id, close_type.error());
+            .session_end(self.connect_type, stream_id, close_type.error(), None);
     }
 
-    pub fn negotiation_done(&mut self, stream_id: StreamId, succeeded: bool) {
+    pub fn negotiation_done(&mut self, stream_id: StreamId, status: Option<u32>) {
         if self.state == SessionState::Done {
             return;
         }
-        self.state = if succeeded {
-            self.events.session_start(self.connect_type, stream_id);
-            SessionState::Active(stream_id)
+        self.state = if let Some(s) = status {
+            if (200..300).contains(&s) {
+                self.events.session_start(self.connect_type, stream_id, s);
+                SessionState::Active(stream_id)
+            } else {
+                self.events
+                    .session_end(self.connect_type, stream_id, None, status);
+                SessionState::Done
+            }
         } else {
-            self.events.session_end(self.connect_type, stream_id, None);
+            self.events
+                .session_end(self.connect_type, stream_id, None, None);
             SessionState::Done
         };
     }
@@ -155,16 +162,13 @@ impl HttpRecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
         qtrace!("ExtendedConnect response headers {:?}", headers);
         self.borrow_mut().negotiation_done(
             stream_info.stream_id(),
-            headers
-                .iter()
-                .find_map(|h| {
-                    if h.name() == ":status" && h.value() == "200" {
-                        Some(())
-                    } else {
-                        None
-                    }
-                })
-                .is_some(),
+            headers.iter().find_map(|h| {
+                if h.name() == ":status" {
+                    h.value().parse::<u32>().ok()
+                } else {
+                    None
+                }
+            }),
         );
     }
 }

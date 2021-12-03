@@ -19,7 +19,7 @@ fn wt_session_reject() {
     let mut wt = WtTest::new();
     let (wt_session_id, _wt_session) = wt.negotiate_wt_session(false);
 
-    wt.check_session_closed_event_client(wt_session_id, Some(Error::HttpRequestRejected.code()));
+    wt.check_session_closed_event_client(wt_session_id, None);
 }
 
 #[test]

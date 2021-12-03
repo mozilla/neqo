@@ -147,7 +147,10 @@ impl WtTest {
         let wt_session_negotiated_event = |e| {
             matches!(
                 e,
-                Http3ClientEvent::WebTransport(WebTransportEvent::Session(stream_id)) if stream_id == wt_session_id
+                Http3ClientEvent::WebTransport(WebTransportEvent::Session{
+                    stream_id,
+                    status
+                }) if stream_id == wt_session_id && status == 200
             )
         };
         assert!(self.client.events().any(wt_session_negotiated_event));
@@ -183,9 +186,12 @@ impl WtTest {
         if let Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
             stream_id,
             error,
+            status,
         }) = e
         {
-            *stream_id == id && error == expected_error
+            *stream_id == id
+                && ((error.is_some() && error == expected_error)
+                    || (error.is_none() && status == &Some(404)))
         } else {
             false
         }
@@ -370,10 +376,12 @@ impl WtTest {
                 Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
                     stream_id,
                     error,
+                    status,
                 }) => {
                     close_event = true;
                     assert_eq!(stream_id, expected_session_close.unwrap().0);
                     assert_eq!(expected_session_close.unwrap().1, error);
+                    assert!(status.is_none());
                 }
                 _ => {}
             }

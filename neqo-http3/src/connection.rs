@@ -858,12 +858,7 @@ impl Http3Connection {
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
-
-                    mem::drop(self.stream_stop_sending(
-                        conn,
-                        stream_id,
-                        Error::HttpRequestRejected.code(),
-                    ));
+                    // TODO: add a timer to clean up the recv_srteam if the peer does not do that in a short time.
                     self.streams_with_pending_data.insert(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
@@ -887,7 +882,9 @@ impl Http3Connection {
                     r.http_stream()
                         .unwrap()
                         .set_new_listener(Box::new(extended_conn.clone()));
-                    extended_conn.borrow_mut().negotiation_done(stream_id, true);
+                    extended_conn
+                        .borrow_mut()
+                        .negotiation_done(stream_id, Some(200));
                     self.webtransport.insert(stream_id, extended_conn);
                     self.streams_with_pending_data.insert(stream_id);
                 } else {
