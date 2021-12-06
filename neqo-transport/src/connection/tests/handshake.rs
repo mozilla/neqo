@@ -722,7 +722,7 @@ fn connect_version(version: QuicVersion) {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default().quic_version(version),
+        ConnectionParameters::default().versions(version, vec![version]),
         now(),
     )
     .unwrap();
@@ -730,7 +730,7 @@ fn connect_version(version: QuicVersion) {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().quic_version(version),
+        ConnectionParameters::default().versions(version, vec![version]),
     )
     .unwrap();
     connect_force_idle(&mut client, &mut server);

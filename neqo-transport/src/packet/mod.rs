@@ -108,6 +108,28 @@ impl QuicVersion {
             Self::Draft32 => 0xff00_0000 + 32,
         }
     }
+
+    pub(crate) fn is_draft(self) -> bool {
+        matches!(
+            self,
+            Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32,
+        )
+    }
+
+    /// Determine if `self` can be upgraded to `other` compatibly.
+    pub fn compatible(self, other: Self) -> bool {
+        self == other
+    }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::Version1,
+            Self::Draft32,
+            Self::Draft31,
+            Self::Draft30,
+            Self::Draft29,
+        ]
+    }
 }
 
 impl Default for QuicVersion {
@@ -479,7 +501,7 @@ impl PacketBuilder {
     }
 
     /// Make a Version Negotiation packet.
-    pub fn version_negotiation(dcid: &[u8], scid: &[u8]) -> Vec<u8> {
+    pub fn version_negotiation(dcid: &[u8], scid: &[u8], versions: &[QuicVersion]) -> Vec<u8> {
         let mut encoder = Encoder::default();
         let mut grease = random(5);
         // This will not include the "QUIC bit" sometimes.  Intentionally.
@@ -487,17 +509,17 @@ impl PacketBuilder {
         encoder.encode(&[0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
-        encoder.encode_uint(4, QuicVersion::Version1.as_u32());
-        encoder.encode_uint(4, QuicVersion::Draft29.as_u32());
-        encoder.encode_uint(4, QuicVersion::Draft30.as_u32());
-        encoder.encode_uint(4, QuicVersion::Draft31.as_u32());
-        encoder.encode_uint(4, QuicVersion::Draft32.as_u32());
+
+        for v in versions {
+            encoder.encode_uint(4, v.as_u32());
+        }
         // Add a greased version, using the randomness already generated.
         for g in &mut grease[..4] {
             *g = *g & 0xf0 | 0x0a;
         }
-        encoder.encode(&grease[0..4]);
-        encoder.into()
+        encoder.encode(&grease[..4]);
+
+        Vec::from(encoder)
     }
 }
 
@@ -1353,14 +1375,15 @@ mod tests {
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
         0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00,
-        0x1d, 0xff, 0x00, 0x00, 0x1e, 0xff, 0x00, 0x00, 0x1f, 0xff, 0x00, 0x00, 0x20, 0x0a, 0x0a,
+        0x20, 0xff, 0x00, 0x00, 0x1f, 0xff, 0x00, 0x00, 0x1e, 0xff, 0x00, 0x00, 0x1d, 0x0a, 0x0a,
         0x0a, 0x0a,
     ];
 
     #[test]
     fn build_vn() {
         fixture_init();
-        let mut vn = PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID);
+        let mut vn =
+            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, &QuicVersion::all());
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;

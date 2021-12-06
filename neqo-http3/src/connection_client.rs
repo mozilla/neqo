@@ -90,12 +90,12 @@ impl Http3Client {
                 &[alpn_from_quic_version(
                     http3_parameters
                         .get_connection_parameters()
-                        .get_quic_version(),
+                        .get_initial_version(),
                 )],
                 cid_manager,
                 local_addr,
                 remote_addr,
-                *http3_parameters.get_connection_parameters(),
+                http3_parameters.get_connection_parameters().clone(),
                 now,
             )?,
             http3_parameters,
@@ -105,17 +105,16 @@ impl Http3Client {
     #[must_use]
     pub fn new_with_conn(c: Connection, http3_parameters: Http3Parameters) -> Self {
         let events = Http3ClientEvents::default();
+        let webtransport = http3_parameters.get_webtransport();
+        let push_streams = http3_parameters.get_max_concurrent_push_streams();
         let mut base_handler = Http3Connection::new(http3_parameters, Role::Client);
-        if http3_parameters.get_webtransport() {
+        if webtransport {
             base_handler.set_features_listener(events.clone());
         }
         Self {
             conn: c,
             events: events.clone(),
-            push_handler: Rc::new(RefCell::new(PushController::new(
-                http3_parameters.get_max_concurrent_push_streams(),
-                events,
-            ))),
+            push_handler: Rc::new(RefCell::new(PushController::new(push_streams, events))),
             base_handler,
         }
     }

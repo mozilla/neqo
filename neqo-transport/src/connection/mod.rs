@@ -218,6 +218,7 @@ impl AddressValidationInfo {
 /// remote) continue processing until `state()` returns `Closed`.
 pub struct Connection {
     role: Role,
+    version: QuicVersion,
     state: State,
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
@@ -360,7 +361,7 @@ impl Connection {
 
         let tphandler = Rc::new(RefCell::new(tps));
         let crypto = Crypto::new(
-            conn_params.get_quic_version(),
+            conn_params.get_initial_version(),
             agent,
             protocols,
             Rc::clone(&tphandler),
@@ -377,6 +378,7 @@ impl Connection {
 
         let c = Self {
             role,
+            version: conn_params.get_initial_version(),
             state: State::Init,
             paths: Paths::default(),
             cid_manager,
@@ -757,7 +759,7 @@ impl Connection {
 
     /// The QUIC version in use.
     pub fn version(&self) -> QuicVersion {
-        self.conn_params.get_quic_version()
+        self.version
     }
 
     /// Get the 0-RTT state of the connection.
@@ -2205,6 +2207,7 @@ impl Connection {
     /// Process the final set of transport parameters.
     fn process_tps(&mut self) -> Res<()> {
         self.validate_cids()?;
+        self.validate_versions()?;
         {
             let tps = self.tps.borrow();
             let remote = tps.remote.as_ref().unwrap();
@@ -2315,6 +2318,60 @@ impl Connection {
         Ok(())
     }
 
+    fn validate_versions(&mut self) -> Res<()> {
+        let tph = self.tps.borrow();
+        let remote_tps = tph.remote.as_ref().unwrap();
+        if let Some((current, other)) = remote_tps.get_versions() {
+            if self.version().as_u32() != current {
+                Err(Error::VersionNegotiation)
+            } else if self.role == Role::Server {
+                // A server doesn't validate further, it acts on this info.
+                Ok(())
+            } else if self
+                .conn_params
+                .get_initial_version()
+                .compatible(self.version())
+            {
+                // Compatible upgrade is OK.
+                Ok(())
+            } else if self
+                .conn_params
+                .get_preferred_version(other)
+                .ok_or(Error::VersionNegotiation)?
+                .compatible(self.version())
+            {
+                // Our preferred version is compatible with this one,
+                // so that's OK.
+                Ok(())
+            } else {
+                Err(Error::VersionNegotiation)
+            }
+        } else if self.version() != QuicVersion::Version1 && !self.version().is_draft() {
+            Err(Error::VersionNegotiation)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn maybe_compatible_upgrade(&mut self) {
+        if self.role == Role::Client {
+            return;
+        }
+        let v = self.tps.borrow().version();
+        if v == self.version() {
+            return;
+        }
+
+        debug_assert_eq!(self.state, State::WaitInitial);
+        // TODO(mt) keep the old read state around so that we don't drop incoming Initial packets.
+        self.crypto.states.init(
+            v,
+            self.role,
+            self.remote_initial_source_cid.as_ref().unwrap(),
+        );
+        self.version = v;
+    }
+
     fn handshake(
         &mut self,
         now: Instant,
@@ -2343,6 +2400,7 @@ impl Connection {
         // There is a chance that this could be called less often, but getting the
         // conditions right is a little tricky, so call it on every  CRYPTO frame.
         if try_update {
+            self.maybe_compatible_upgrade();
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote.is_some() {
                 self.set_initial_limits();

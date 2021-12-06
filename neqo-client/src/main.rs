@@ -596,7 +596,9 @@ fn client(
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         local_addr,
         remote_addr,
-        args.quic_parameters.get().quic_version(quic_protocol),
+        args.quic_parameters
+            .get()
+            .versions(quic_protocol, vec![quic_protocol]),
         Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
@@ -1102,7 +1104,9 @@ mod old {
             Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
             local_addr,
             remote_addr,
-            args.quic_parameters.get().quic_version(quic_protocol),
+            args.quic_parameters
+                .get()
+                .versions(quic_protocol, vec![quic_protocol]),
             Instant::now(),
         )?;
 

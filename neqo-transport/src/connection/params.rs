@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT};
+use crate::packet::Version;
 use crate::recv_stream::RECV_BUFFER_SIZE;
 use crate::rtt::GRANULARITY;
 use crate::stream_id::StreamType;
@@ -41,9 +42,12 @@ pub enum PreferredAddressConfig {
 /// ConnectionParameters use for setting intitial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ConnectionParameters {
-    quic_version: QuicVersion,
+    /// The version to try first.
+    initial_version: QuicVersion,
+    /// The set of versions that are enabled, in preference order.
+    versions: Vec<QuicVersion>,
     cc_algorithm: CongestionControlAlgorithm,
     /// Initial connection-level flow control limit.
     max_data: u64,
@@ -75,7 +79,8 @@ pub struct ConnectionParameters {
 impl Default for ConnectionParameters {
     fn default() -> Self {
         Self {
-            quic_version: QuicVersion::default(),
+            initial_version: QuicVersion::default(),
+            versions: QuicVersion::all(),
             cc_algorithm: CongestionControlAlgorithm::NewReno,
             max_data: LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
@@ -94,12 +99,52 @@ impl Default for ConnectionParameters {
 }
 
 impl ConnectionParameters {
-    pub fn get_quic_version(&self) -> QuicVersion {
-        self.quic_version
+    pub fn get_versions(&self) -> &[QuicVersion] {
+        &self.versions
     }
 
-    pub fn quic_version(mut self, v: QuicVersion) -> Self {
-        self.quic_version = v;
+    pub fn get_initial_version(&self) -> QuicVersion {
+        self.initial_version
+    }
+
+    pub fn get_compatible_versions(&self) -> impl Iterator<Item = &QuicVersion> {
+        self.versions
+            .iter()
+            .filter(move |&v| self.initial_version.compatible(*v))
+    }
+
+    pub(crate) fn preferred_version(
+        preferences: &[QuicVersion],
+        vn: &[Version],
+    ) -> Option<QuicVersion> {
+        for v in preferences {
+            if vn.contains(&v.as_u32()) {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Determine the preferred version based on a version negotiation packet.
+    pub(crate) fn get_preferred_version(&self, vn: &[Version]) -> Option<QuicVersion> {
+        Self::preferred_version(&self.versions, vn)
+    }
+
+    /// Just set the initial version for the connection.  Used by the server.
+    pub(crate) fn initial_version(mut self, i: QuicVersion) -> Self {
+        assert!(self.versions.contains(&i));
+        self.initial_version = i;
+        self
+    }
+
+    /// Describe the initial version that should be attempted and all the
+    /// versions that should be enabled.  This list should contain the initial
+    /// version and be in order  of preference, with more preferred versions
+    /// before less preferred.
+    pub fn versions(mut self, i: QuicVersion, v: Vec<QuicVersion>) -> Self {
+        assert!(v.contains(&i));
+        self.initial_version = i;
+        self.versions = v;
         self
     }
 
@@ -251,7 +296,8 @@ impl ConnectionParameters {
         role: Role,
         cid_manager: &mut ConnectionIdManager,
     ) -> Res<TransportParametersHandler> {
-        let mut tps = TransportParametersHandler::default();
+        let mut tps =
+            TransportParametersHandler::new(role, self.initial_version, self.versions.clone());
         // default parameters
         tps.local.set_integer(
             tparams::ACTIVE_CONNECTION_ID_LIMIT,

@@ -173,19 +173,19 @@ const INITIAL_PACKET_29: &[u8] = &[
     0x18, 0x02, 0x77, 0x1a, 0x44, 0x9b, 0x30, 0xf3, 0xfa, 0x22, 0x89, 0x85, 0x26, 0x07, 0xb6, 0x60,
 ];
 
-fn make_server(quic_version: QuicVersion) -> Connection {
+fn make_server(v: QuicVersion) -> Connection {
     test_fixture::fixture_init();
     Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(RandomConnectionIdGenerator::new(5))),
-        ConnectionParameters::default().quic_version(quic_version),
+        ConnectionParameters::default().versions(v, vec![v]),
     )
     .expect("create a default server")
 }
 
-fn process_client_initial(quic_version: QuicVersion, packet: &[u8]) {
-    let mut server = make_server(quic_version);
+fn process_client_initial(v: QuicVersion, packet: &[u8]) {
+    let mut server = make_server(v);
 
     let dgram = Datagram::new(addr(), addr(), packet);
     assert_eq!(*server.state(), State::Init);

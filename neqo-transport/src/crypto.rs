@@ -517,8 +517,7 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, prev.direction);
         let next = prev.next_pn();
         self.min_pn = next;
-        // TODO(mt) use Range::is_empty() when available
-        if self.used_pn.start == self.used_pn.end {
+        if self.used_pn.is_empty() {
             self.used_pn = next..next;
             Ok(())
         } else if prev.used_pn.end > self.used_pn.start {

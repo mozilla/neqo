@@ -9,13 +9,13 @@
 use crate::cid::{
     ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN,
 };
-use crate::packet::Version;
-use crate::{Error, Res};
+use crate::packet::{QuicVersion, Version};
+use crate::{ConnectionParameters, Error, Res};
 
-use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder};
+use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
 use neqo_crypto::constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::{HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker};
+use neqo_crypto::{random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -424,6 +424,47 @@ impl TransportParameters {
         }
     }
 
+    /// Set version information.
+    pub fn set_versions(
+        &mut self,
+        role: Role,
+        current: QuicVersion,
+        other_versions: &[QuicVersion],
+    ) {
+        // Don't add a transport parameter if we're using a draft version.
+        if current.is_draft() {
+            return;
+        }
+
+        let rbuf = random(4);
+        let mut other = Vec::with_capacity(other_versions.len() + 1);
+        let mut dec = Decoder::new(&rbuf);
+        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a0a0a;
+        other.push(grease);
+        for &v in other_versions {
+            if role == Role::Client && !current.compatible(v) {
+                continue;
+            }
+            other.push(v.as_u32());
+        }
+        let current = current.as_u32();
+        self.set(
+            VERSION_NEGOTIATION,
+            TransportParameter::Versions { current, other },
+        );
+    }
+
+    fn compatible_upgrade(&mut self, v: QuicVersion) {
+        if let Some(TransportParameter::Versions {
+            ref mut current, ..
+        }) = self.params.get_mut(&VERSION_NEGOTIATION)
+        {
+            *current = v.as_u32();
+        } else {
+            unreachable!("Compatible upgrade without transport parameters set!");
+        }
+    }
+
     pub fn get_empty(&self, tipe: TransportParameterId) -> bool {
         match self.params.get(&tipe) {
             None => false,
@@ -515,18 +556,57 @@ impl TransportParameters {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct TransportParametersHandler {
+    role: Role,
+    version: QuicVersion,
+    other_versions: Vec<QuicVersion>,
     pub(crate) local: TransportParameters,
     pub(crate) remote: Option<TransportParameters>,
     pub(crate) remote_0rtt: Option<TransportParameters>,
 }
 
 impl TransportParametersHandler {
+    pub fn new(role: Role, version: QuicVersion, other_versions: Vec<QuicVersion>) -> Self {
+        let mut local = TransportParameters::default();
+        local.set_versions(role, version, &other_versions);
+        Self {
+            role,
+            version,
+            other_versions,
+            local,
+            remote: None,
+            remote_0rtt: None,
+        }
+    }
+
     pub fn remote(&self) -> &TransportParameters {
         match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
             (Some(tp), _) | (_, Some(tp)) => tp,
             _ => panic!("no transport parameters from peer"),
+        }
+    }
+
+    /// Get the version as set (or as determined by a compatible upgrade).
+    pub fn version(&self) -> QuicVersion {
+        self.version
+    }
+
+    fn compatible_upgrade(&mut self, tp: &TransportParameters) {
+        if self.role == Role::Client {
+            return;
+        }
+
+        if let Some((_, other)) = tp.get_versions() {
+            if let Some(preferred) =
+                ConnectionParameters::preferred_version(&self.other_versions, other)
+            {
+                if preferred != self.version {
+                    qinfo!("Compatible upgrade: {:?} -> {:?}", self.version, preferred);
+                }
+                self.version = preferred;
+                self.local.compatible_upgrade(preferred);
+            }
         }
     }
 }
@@ -561,6 +641,7 @@ impl ExtensionHandler for TransportParametersHandler {
         let mut dec = Decoder::from(d);
         match TransportParameters::decode(&mut dec) {
             Ok(tp) => {
+                self.compatible_upgrade(&tp);
                 self.remote = Some(tp);
                 ExtensionHandlerResult::Ok
             }
@@ -628,7 +709,6 @@ where
 #[allow(unused_variables)]
 mod tests {
     use super::*;
-    use crate::packet::QuicVersion;
     use std::mem;
 
     #[test]

@@ -62,9 +62,9 @@ impl Http3Server {
                 protocols,
                 anti_replay,
                 zero_rtt_checker
-                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(http3_parameters))),
+                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(http3_parameters.clone()))),
                 cid_manager,
-                *http3_parameters.get_connection_parameters(),
+                http3_parameters.get_connection_parameters().clone(),
             )?,
             http3_parameters,
             http3_handlers: HashMap::new(),
@@ -154,10 +154,10 @@ impl Http3Server {
 
     fn process_events(&mut self, conn: &mut ActiveConnectionRef, now: Instant) {
         let mut remove = false;
-        let http3_parameters = self.http3_parameters;
+        let http3_parameters = &self.http3_parameters;
         {
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
-                Rc::new(RefCell::new(Http3ServerHandler::new(http3_parameters)))
+                Rc::new(RefCell::new(Http3ServerHandler::new(http3_parameters.clone())))
             });
             handler
                 .borrow_mut()

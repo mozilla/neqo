@@ -491,7 +491,9 @@ impl Server {
             &self.certs,
             &self.protocols,
             Rc::clone(&cid_mgr) as _,
-            self.conn_params.quic_version(initial.quic_version),
+            self.conn_params
+                .clone()
+                .initial_version(initial.quic_version),
         );
 
         if let Ok(mut c) = sconn {
@@ -563,6 +565,27 @@ impl Server {
             return None;
         }
 
+        if packet.packet_type() == PacketType::OtherVersion
+            || (packet.packet_type() == PacketType::Initial
+                && !self
+                    .conn_params
+                    .get_versions()
+                    .contains(&packet.version().unwrap()))
+        {
+            if dgram.len() < MIN_INITIAL_PACKET_SIZE {
+                qdebug!([self], "Unsupported version: too short");
+                return None;
+            }
+
+            qdebug!([self], "Unsupported version: {:?}", packet.version());
+            let vn = PacketBuilder::version_negotiation(
+                packet.scid(),
+                packet.dcid(),
+                self.conn_params.get_versions(),
+            );
+            return Some(Datagram::new(dgram.destination(), dgram.source(), vn));
+        }
+
         match packet.packet_type() {
             PacketType::Initial => {
                 if dgram.len() < MIN_INITIAL_PACKET_SIZE {
@@ -577,14 +600,7 @@ impl Server {
                 let dcid = ConnectionId::from(packet.dcid());
                 self.handle_0rtt(dgram, dcid, now)
             }
-            PacketType::OtherVersion => {
-                if dgram.len() < MIN_INITIAL_PACKET_SIZE {
-                    qdebug!([self], "Unsupported version: too short");
-                    return None;
-                }
-                let vn = PacketBuilder::version_negotiation(packet.scid(), packet.dcid());
-                Some(Datagram::new(dgram.destination(), dgram.source(), vn))
-            }
+            PacketType::OtherVersion => unreachable!(),
             _ => {
                 qtrace!([self], "Not an initial packet");
                 None
