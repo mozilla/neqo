@@ -40,7 +40,7 @@ const MAX_PACKET_NUMBER_LEN: usize = 4;
 mod retry;
 
 pub type PacketNumber = u64;
-type Version = u32;
+pub(crate) type Version = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketType {

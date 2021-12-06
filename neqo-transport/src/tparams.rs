@@ -9,6 +9,7 @@
 use crate::cid::{
     ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN,
 };
+use crate::packet::Version;
 use crate::{Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder};
@@ -49,6 +50,7 @@ tpids! {
     GREASE_QUIC_BIT = 0x2ab2,
     MIN_ACK_DELAY = 0xff02_de1a,
     MAX_DATAGRAM_FRAME_SIZE = 0x0020,
+    VERSION_NEGOTIATION = 0xff73db,
 }
 
 #[derive(Clone, Debug, Copy)]
@@ -105,6 +107,10 @@ pub enum TransportParameter {
         cid: ConnectionId,
         srt: [u8; 16],
     },
+    Versions {
+        current: Version,
+        other: Vec<Version>,
+    },
 }
 
 impl TransportParameter {
@@ -149,6 +155,14 @@ impl TransportParameter {
                     }
                     enc_inner.encode_vec(1, &cid[..]);
                     enc_inner.encode(&srt[..]);
+                });
+            }
+            Self::Versions { current, other } => {
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_uint(4, *current);
+                    for v in other {
+                        enc_inner.encode_uint(4, *v);
+                    }
                 });
             }
         };
@@ -197,6 +211,26 @@ impl TransportParameter {
         let srt = <[u8; 16]>::try_from(srtbuf).unwrap();
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
+    }
+
+    fn decode_versions(dec: &mut Decoder) -> Res<Self> {
+        fn dv(dec: &mut Decoder) -> Res<Version> {
+            let v = dec.decode_uint(4).ok_or(Error::NoMoreData)?;
+            if v == 0 {
+                Err(Error::TransportParameterError)
+            } else {
+                Ok(v as Version)
+            }
+        }
+
+        let current = dv(dec)?;
+        // This rounding down is OK because `decode` checks for left over data.
+        let count = dec.remaining() / 4;
+        let mut other = Vec::with_capacity(count);
+        for _ in 0..count {
+            other.push(dv(dec)?);
+        }
+        Ok(Self::Versions { current, other })
     }
 
     fn decode(dec: &mut Decoder) -> Res<Option<(TransportParameterId, Self)>> {
@@ -252,6 +286,8 @@ impl TransportParameter {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
+
+            VERSION_NEGOTIATION => Self::decode_versions(&mut d)?,
 
             // Skip.
             _ => return Ok(None),
@@ -416,23 +452,30 @@ impl TransportParameters {
             ) {
                 continue;
             }
-            if let Some(v_self) = self.params.get(k) {
+            let ok = if let Some(v_self) = self.params.get(k) {
                 match (v_self, v_rem) {
                     (TransportParameter::Integer(i_self), TransportParameter::Integer(i_rem)) => {
                         if *k == MIN_ACK_DELAY {
                             // MIN_ACK_DELAY is backwards:
                             // it can only be reduced safely.
-                            if *i_self > *i_rem {
-                                return false;
-                            }
-                        } else if *i_self < *i_rem {
-                            return false;
+                            *i_self <= *i_rem
+                        } else {
+                            *i_self >= *i_rem
                         }
                     }
-                    (TransportParameter::Empty, TransportParameter::Empty) => {}
-                    _ => return false,
+                    (TransportParameter::Empty, TransportParameter::Empty) => true,
+                    (
+                        TransportParameter::Versions {
+                            current: v_self, ..
+                        },
+                        TransportParameter::Versions { current: v_rem, .. },
+                    ) => v_self == v_rem,
+                    _ => false,
                 }
             } else {
+                false
+            };
+            if !ok {
                 return false;
             }
         }
@@ -449,6 +492,18 @@ impl TransportParameters {
                 PreferredAddress::new(*v4, *v6),
                 ConnectionIdEntry::new(CONNECTION_ID_SEQNO_PREFERRED, cid.clone(), *srt),
             ))
+        } else {
+            None
+        }
+    }
+
+    /// Get the version negotiation values for validation.
+    #[must_use]
+    pub fn get_versions(&self) -> Option<(Version, &[Version])> {
+        if let Some(TransportParameter::Versions { current, other }) =
+            self.params.get(&VERSION_NEGOTIATION)
+        {
+            Some((*current, other))
         } else {
             None
         }
@@ -569,11 +624,11 @@ where
     }
 }
 
-// TODO(ekr@rtfm.com): Need to write more TP unit tests.
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
     use super::*;
+    use crate::packet::QuicVersion;
     use std::mem;
 
     #[test]
@@ -910,5 +965,98 @@ mod tests {
         // the result should be an error.
         let invalid_decode_result = TransportParameters::decode(&mut enc.as_decoder());
         assert!(invalid_decode_result.is_err());
+    }
+
+    #[test]
+    fn versions_encode_decode() {
+        const ENCODED: &[u8] = &[
+            0x80, 0xff, 0x73, 0xdb, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x1a, 0x2a, 0x3a, 0x4a, 0x5a,
+            0x6a, 0x7a, 0x8a,
+        ];
+        let vn = TransportParameter::Versions {
+            current: QuicVersion::Version1.as_u32(),
+            other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
+        };
+
+        let mut enc = Encoder::new();
+        vn.encode(&mut enc, VERSION_NEGOTIATION);
+        assert_eq!(&enc[..], ENCODED);
+
+        let mut dec = enc.as_decoder();
+        let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
+        assert_eq!(id, VERSION_NEGOTIATION);
+        assert_eq!(decoded, vn);
+    }
+
+    #[test]
+    fn versions_truncated() {
+        const TRUNCATED: &[u8] = &[
+            0x80, 0xff, 0x73, 0xdb, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x1a, 0x2a, 0x3a, 0x4a, 0x5a,
+            0x6a, 0x7a,
+        ];
+        let mut dec = Decoder::from(&TRUNCATED);
+        assert_eq!(
+            TransportParameter::decode(&mut dec).unwrap_err(),
+            Error::NoMoreData
+        );
+    }
+
+    #[test]
+    fn versions_zero() {
+        const ZERO1: &[u8] = &[0x80, 0xff, 0x73, 0xdb, 0x04, 0x00, 0x00, 0x00, 0x00];
+        const ZERO2: &[u8] = &[
+            0x80, 0xff, 0x73, 0xdb, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let mut dec = Decoder::from(&ZERO1);
+        assert_eq!(
+            TransportParameter::decode(&mut dec).unwrap_err(),
+            Error::TransportParameterError
+        );
+        let mut dec = Decoder::from(&ZERO2);
+        assert_eq!(
+            TransportParameter::decode(&mut dec).unwrap_err(),
+            Error::TransportParameterError
+        );
+    }
+
+    #[test]
+    fn versions_equal_0rtt() {
+        let mut current = TransportParameters::default();
+        current.set(
+            VERSION_NEGOTIATION,
+            TransportParameter::Versions {
+                current: QuicVersion::Version1.as_u32(),
+                other: vec![0x1a2a_3a4a],
+            },
+        );
+
+        let mut remembered = TransportParameters::default();
+        // It's OK to not remember having versions.
+        assert!(current.ok_for_0rtt(&remembered));
+        // But it is bad in the opposite direction.
+        assert!(!remembered.ok_for_0rtt(&current));
+
+        // If the version matches, it's OK to use 0-RTT.
+        remembered.set(
+            VERSION_NEGOTIATION,
+            TransportParameter::Versions {
+                current: QuicVersion::Version1.as_u32(),
+                other: vec![0x5a6a_7a8a, 0x9aaa_baca],
+            },
+        );
+        assert!(current.ok_for_0rtt(&remembered));
+        assert!(remembered.ok_for_0rtt(&current));
+
+        // An apparent "upgrade" is still cause to reject 0-RTT.
+        remembered.set(
+            VERSION_NEGOTIATION,
+            TransportParameter::Versions {
+                current: QuicVersion::Version1.as_u32() + 1,
+                other: vec![],
+            },
+        );
+        assert!(!current.ok_for_0rtt(&remembered));
+        assert!(!remembered.ok_for_0rtt(&current));
     }
 }
