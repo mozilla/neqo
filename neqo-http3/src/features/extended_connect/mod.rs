@@ -47,6 +47,7 @@ pub trait ExtendedConnectEvents: Debug {
         reason: SessionCloseReason,
     );
     fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo);
+    fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>);
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]

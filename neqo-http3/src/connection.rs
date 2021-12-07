@@ -27,11 +27,12 @@ use crate::{
     HttpRecvStreamEvents, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStream,
     RecvStreamEvents, SendStream, SendStreamEvents,
 };
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Header, MessageType, Role};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{
-    AppError, Connection, ConnectionError, State, StreamId, StreamType, ZeroRttState,
+    AppError, Connection, ConnectionError, DatagramTracking, State, StreamId, StreamType,
+    ZeroRttState,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -416,6 +417,19 @@ impl Http3Connection {
         } else {
             debug_assert!(false, "Zero rtt rejected in the wrong state.");
             Err(Error::HttpInternal(3))
+        }
+    }
+
+    pub fn handle_datagram(&mut self, datagram: Vec<u8>) {
+        let mut decoder = Decoder::new(&datagram);
+        if let Some(session_id) = decoder.decode_varint() {
+            if let Some(stream) = self.recv_streams.get_mut(&StreamId::from(session_id)) {
+                if let Some(session) = stream.webtransport() {
+                    session
+                        .borrow_mut()
+                        .datagram(datagram[decoder.offset()..].to_vec());
+                }
+            }
         }
     }
 
@@ -1088,6 +1102,22 @@ impl Http3Connection {
                 )),
             );
         }
+    }
+
+    pub fn webtransport_send_datagram(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: impl Into<DatagramTracking>,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .webtransport()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .send_datagram(conn, buf, id)
     }
 
     // If the control stream has received frames MaxPushId or Goaway which handling is specific to

@@ -17,7 +17,7 @@ use crate::{
 };
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, DatagramTracking, StreamId};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -390,6 +390,28 @@ impl WebTransportSession {
 
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
         self.control_stream_send.send_data(conn, buf)
+    }
+
+    pub fn send_datagram(
+        &self,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: impl Into<DatagramTracking>,
+    ) -> Res<()> {
+        qtrace!([self], "send_datagram state={:?}", self.state);
+        if let SessionState::Active = self.state {
+            let mut dgram_data = Encoder::default();
+            dgram_data.encode_varint(self.session_id.as_u64() / 4);
+            dgram_data.encode(buf);
+            conn.send_datagram(&dgram_data, id)?;
+        }
+        Ok(())
+    }
+
+    pub fn datagram(&mut self, datagram: Vec<u8>) {
+        if let SessionState::Active = self.state {
+            self.events.new_datagram(self.session_id, datagram);
+        }
     }
 }
 

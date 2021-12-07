@@ -9,7 +9,8 @@ use neqo_common::{event::Provider, Encoder};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     settings::{HSetting, HSettingType, HSettings},
-    Error, HFrame, Http3Client, Http3ClientEvent, Http3State, WebTransportEvent,
+    Error, HFrame, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State,
+    WebTransportEvent,
 };
 use neqo_transport::{Connection, ConnectionError, StreamType};
 use std::time::Duration;
@@ -30,27 +31,34 @@ fn check_wt_event(client: &mut Http3Client, wt_enable_client: bool, wt_enable_se
     }
 }
 
+fn connect_wt(wt_enabled_client: bool, wt_enabled_server: bool) -> (Http3Client, Http3Server) {
+    connect(
+        Http3Parameters::default().webtransport(wt_enabled_client),
+        Http3Parameters::default().webtransport(wt_enabled_server),
+    )
+}
+
 #[test]
 fn negotiate_wt() {
-    let (mut client, _server) = connect(true, true);
+    let (mut client, _server) = connect_wt(true, true);
     assert!(client.webtransport_enabled());
     check_wt_event(&mut client, true, true);
 
-    let (mut client, _server) = connect(true, false);
+    let (mut client, _server) = connect_wt(true, false);
     assert!(!client.webtransport_enabled());
     check_wt_event(&mut client, true, false);
 
-    let (mut client, _server) = connect(false, true);
+    let (mut client, _server) = connect_wt(false, true);
     assert!(!client.webtransport_enabled());
     check_wt_event(&mut client, false, true);
 
-    let (mut client, _server) = connect(false, false);
+    let (mut client, _server) = connect_wt(false, false);
     assert!(!client.webtransport_enabled());
     check_wt_event(&mut client, false, false);
 }
 
 fn zero_rtt(client_org: bool, server_org: bool, client_resumed: bool, server_resumed: bool) {
-    let (mut client, mut server) = connect(client_org, server_org);
+    let (mut client, mut server) = connect_wt(client_org, server_org);
     assert_eq!(client.webtransport_enabled(), client_org && server_org);
 
     // exchane token
@@ -69,8 +77,8 @@ fn zero_rtt(client_org: bool, server_org: bool, client_resumed: bool, server_res
         })
         .unwrap();
 
-    let mut client = default_http3_client(client_resumed);
-    let mut server = default_http3_server(server_resumed);
+    let mut client = default_http3_client(Http3Parameters::default().webtransport(client_resumed));
+    let mut server = default_http3_server(Http3Parameters::default().webtransport(server_resumed));
     client
         .enable_resumption(now(), &token)
         .expect("Set resumption token.");
@@ -123,7 +131,7 @@ fn exchange_packets2(client: &mut Http3Client, server: &mut Connection) {
 #[test]
 fn wrong_setting_value() {
     const CONTROL_STREAM_TYPE: &[u8] = &[0x0];
-    let mut client = default_http3_client(false);
+    let mut client = default_http3_client(Http3Parameters::default());
     let mut server = default_server_h3();
 
     exchange_packets2(&mut client, &mut server);
