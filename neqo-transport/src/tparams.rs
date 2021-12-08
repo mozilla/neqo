@@ -592,12 +592,12 @@ impl TransportParametersHandler {
         self.version
     }
 
-    fn compatible_upgrade(&mut self, tp: &TransportParameters) {
+    fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) {
         if self.role == Role::Client {
             return;
         }
 
-        if let Some((_, other)) = tp.get_versions() {
+        if let Some((_, other)) = remote_tp.get_versions() {
             if let Some(preferred) =
                 ConnectionParameters::preferred_version(&self.other_versions, other)
             {

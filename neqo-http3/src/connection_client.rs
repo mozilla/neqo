@@ -51,7 +51,7 @@ where
 
 fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
     match version {
-        QuicVersion::Version1 => "h3",
+        QuicVersion::Version2 | QuicVersion::Version1 => "h3",
         QuicVersion::Draft29 => "h3-29",
         QuicVersion::Draft30 => "h3-30",
         QuicVersion::Draft31 => "h3-31",
@@ -77,7 +77,7 @@ impl Http3Client {
     /// Making a `neqo-transport::connection` may produce an error. This can only be a crypto error if
     /// the socket can't be created or configured.
     pub fn new(
-        server_name: &str,
+        server_name: impl Into<String>,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,

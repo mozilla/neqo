@@ -110,7 +110,8 @@ pub fn decode_initial_header(dgram: &Datagram) -> (&[u8], &[u8], &[u8], &[u8]) {
     )
 }
 
-// Generate an AEAD and header protection object for a client Initial.
+/// Generate an AEAD and header protection object for a client Initial.
+/// Note that this works for QUIC version 1 only.
 #[must_use]
 pub fn client_initial_aead_and_hp(dcid: &[u8]) -> (Aead, HpKey) {
     const INITIAL_SALT: &[u8] = &[

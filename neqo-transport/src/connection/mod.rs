@@ -42,7 +42,7 @@ use crate::frame::{
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
 use crate::packet::{
-    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion,
+    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion, Version,
 };
 use crate::path::{Path, PathRef, Paths};
 use crate::quic_datagrams::{DatagramTracking, QuicDatagrams};
@@ -294,7 +294,7 @@ impl Connection {
 
     /// Create a new QUIC connection with Client role.
     pub fn new_client(
-        server_name: &str,
+        server_name: impl Into<String>,
         protocols: &[impl AsRef<str>],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
@@ -305,7 +305,7 @@ impl Connection {
         let dcid = ConnectionId::generate_initial();
         let mut c = Self::new(
             Role::Client,
-            Client::new(server_name)?.into(),
+            Agent::from(Client::new(server_name.into())?),
             cid_generator,
             protocols,
             conn_params,
@@ -332,18 +332,18 @@ impl Connection {
     ) -> Res<Self> {
         Self::new(
             Role::Server,
-            Server::new(certs)?.into(),
+            Agent::from(Server::new(certs)?),
             cid_generator,
             protocols,
             conn_params,
         )
     }
 
-    fn new(
+    fn new<P: AsRef<str>>(
         role: Role,
         agent: Agent,
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        protocols: &[impl AsRef<str>],
+        protocols: &[P],
         conn_params: ConnectionParameters,
     ) -> Res<Self> {
         // Setup the local connection ID.
@@ -363,7 +363,7 @@ impl Connection {
         let crypto = Crypto::new(
             conn_params.get_initial_version(),
             agent,
-            protocols,
+            protocols.iter().map(P::as_ref).map(String::from).collect(),
             Rc::clone(&tphandler),
         )?;
 
@@ -1108,6 +1108,33 @@ impl Connection {
         self.stats.borrow_mut().saved_datagrams += 1;
     }
 
+    /// Perform version negotiation.
+    fn version_negotiation(&mut self, supported: &[Version]) -> Res<()> {
+        if let Some(v) = self.conn_params.get_preferred_version(supported) {
+            qdebug!([self], "Version negotiation: trying {:?}", v);
+            self.version = v;
+            let server_name = self.crypto.server_name().unwrap().to_owned();
+            let protocols = self.crypto.protocols().to_owned();
+            self.crypto = Crypto::new(
+                v,
+                Agent::from(Client::new(server_name)?),
+                protocols,
+                Rc::clone(&self.tps),
+            )?;
+            self.crypto.states.init(
+                v,
+                Role::Client,
+                self.original_destination_cid.as_ref().unwrap(),
+            );
+            Ok(())
+        } else {
+            self.set_state(State::Closed(ConnectionError::Transport(
+                Error::VersionNegotiation,
+            )));
+            Err(Error::VersionNegotiation)
+        }
+    }
+
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
     fn preprocess_packet(
@@ -1180,10 +1207,8 @@ impl Connection {
                             return Ok(PreprocessResult::End);
                         }
 
-                        self.set_state(State::Closed(ConnectionError::Transport(
-                            Error::VersionNegotiation,
-                        )));
-                        return Err(Error::VersionNegotiation);
+                        self.version_negotiation(&versions)?;
+                        return Ok(PreprocessResult::End);
                     }
                     Err(_) => {
                         self.stats.borrow_mut().pkt_dropped("Invalid VN");
@@ -1506,7 +1531,7 @@ impl Connection {
             // Make a path on which to run the handshake.
             self.setup_handshake_path(path, now);
 
-            self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
+            self.zero_rtt_state = match self.crypto.enable_0rtt(self.version, self.role) {
                 Ok(true) => {
                     qdebug!([self], "Accepted 0-RTT");
                     ZeroRttState::AcceptedServer
@@ -2154,7 +2179,7 @@ impl Connection {
 
         self.handshake(now, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
-        self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
+        self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
             qdebug!([self], "Enabled 0-RTT");
             ZeroRttState::Sending
         } else {
@@ -2324,23 +2349,20 @@ impl Connection {
         if let Some((current, other)) = remote_tps.get_versions() {
             if self.version().as_u32() != current {
                 Err(Error::VersionNegotiation)
-            } else if self.role == Role::Server {
-                // A server doesn't validate further, it acts on this info.
-                Ok(())
-            } else if self
-                .conn_params
-                .get_initial_version()
-                .compatible(self.version())
+            } else if self.role == Role::Server
+                || self
+                    .conn_params
+                    .get_initial_version()
+                    .compatible(self.version())
+                || self
+                    .conn_params
+                    .get_preferred_version(other)
+                    .ok_or(Error::VersionNegotiation)?
+                    .compatible(self.version())
             {
-                // Compatible upgrade is OK.
-                Ok(())
-            } else if self
-                .conn_params
-                .get_preferred_version(other)
-                .ok_or(Error::VersionNegotiation)?
-                .compatible(self.version())
-            {
-                // Our preferred version is compatible with this one,
+                // 1. A server doesn't validate further, it acts on this info.
+                // 2. Compatible upgrade is OK.
+                // 3. Our preferred version is compatible with this one,
                 // so that's OK.
                 Ok(())
             } else {
@@ -2355,15 +2377,20 @@ impl Connection {
 
     fn maybe_compatible_upgrade(&mut self) {
         if self.role == Role::Client {
+            debug_assert_eq!(self.version, self.tps.borrow().version());
             return;
         }
+
         let v = self.tps.borrow().version();
-        if v == self.version() {
+        if v == self.version {
             return;
         }
 
         debug_assert_eq!(self.state, State::WaitInitial);
-        // TODO(mt) keep the old read state around so that we don't drop incoming Initial packets.
+        // TODO(mt) Consider keeping the old read state around so that we can process
+        // any late arriving Initial packets from the old version.
+        // We don't *need* those because we already have all the CRYPTO frames, but it
+        // might be nice to acknowledge them properly.
         self.crypto.states.init(
             v,
             self.role,
@@ -2716,7 +2743,8 @@ impl Connection {
 
         // Setting application keys has to occur after 0-RTT rejection.
         let pto = self.pto();
-        self.crypto.install_application_keys(now + pto)?;
+        self.crypto
+            .install_application_keys(self.version, now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
         self.create_resumption_token(now);
