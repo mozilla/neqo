@@ -1109,7 +1109,7 @@ impl Connection {
     }
 
     /// Perform version negotiation.
-    fn version_negotiation(&mut self, supported: &[Version]) -> Res<()> {
+    fn version_negotiation(&mut self, supported: &[Version], dcid: &[u8]) -> Res<()> {
         if let Some(v) = self.conn_params.get_preferred_version(supported) {
             qdebug!([self], "Version negotiation: trying {:?}", v);
             self.version = v;
@@ -1121,11 +1121,7 @@ impl Connection {
                 protocols,
                 Rc::clone(&self.tps),
             )?;
-            self.crypto.states.init(
-                v,
-                Role::Client,
-                self.original_destination_cid.as_ref().unwrap(),
-            );
+            self.crypto.states.init(v, Role::Client, dcid);
             Ok(())
         } else {
             self.set_state(State::Closed(ConnectionError::Transport(
@@ -1174,10 +1170,12 @@ impl Connection {
                     packet.scid(),
                     packet.dcid()
                 );
+                // Record the client's selected CID so that it can be accepted until
+                // the client starts using a real connection ID.
+                let dcid = ConnectionId::from(packet.dcid());
+                self.crypto.states.init(self.version(), self.role, &dcid);
+                self.original_destination_cid = Some(dcid);
                 self.set_state(State::WaitInitial);
-                self.crypto
-                    .states
-                    .init(self.version(), self.role, packet.dcid());
 
                 // We need to make sure that we set this transport parameter.
                 // This has to happen prior to processing the packet so that
@@ -1194,6 +1192,7 @@ impl Connection {
                     Ok(versions) => {
                         if versions.is_empty()
                             || versions.contains(&self.version().as_u32())
+                            || versions.contains(&0)
                             || packet.dcid() != self.odcid().unwrap()
                             || matches!(
                                 self.address_validation,
@@ -1207,7 +1206,7 @@ impl Connection {
                             return Ok(PreprocessResult::End);
                         }
 
-                        self.version_negotiation(&versions)?;
+                        self.version_negotiation(&versions, packet.dcid())?;
                         return Ok(PreprocessResult::End);
                     }
                     Err(_) => {
@@ -1523,11 +1522,8 @@ impl Connection {
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
         if self.role == Role::Server {
-            // Record the client's selected CID so that it can be accepted until
-            // the client starts using a real connection ID.
-            let dcid = ConnectionId::from(packet.dcid());
-            self.original_destination_cid = Some(dcid.clone());
-            self.cid_manager.add_odcid(dcid);
+            self.cid_manager
+                .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
             // Make a path on which to run the handshake.
             self.setup_handshake_path(path, now);
 
@@ -2391,11 +2387,8 @@ impl Connection {
         // any late arriving Initial packets from the old version.
         // We don't *need* those because we already have all the CRYPTO frames, but it
         // might be nice to acknowledge them properly.
-        self.crypto.states.init(
-            v,
-            self.role,
-            self.remote_initial_source_cid.as_ref().unwrap(),
-        );
+        let dcid = self.original_destination_cid.as_ref().unwrap();
+        self.crypto.states.init(v, self.role, dcid);
         self.version = v;
     }
 

@@ -107,14 +107,21 @@ impl ConnectionParameters {
         self.initial_version
     }
 
-    pub fn get_compatible_versions(&self) -> impl Iterator<Item = &QuicVersion> {
-        self.versions
-            .iter()
-            .filter(move |&v| self.initial_version.compatible(*v))
+    pub fn compatible_versions<'a>(
+        base: QuicVersion,
+        all_versions: impl IntoIterator<Item = &'a QuicVersion>,
+    ) -> impl Iterator<Item = &'a QuicVersion> {
+        all_versions
+            .into_iter()
+            .filter(move |&v| base.compatible(*v))
     }
 
-    pub(crate) fn preferred_version(
-        preferences: &[QuicVersion],
+    pub fn get_compatible_versions(&self) -> impl Iterator<Item = &QuicVersion> {
+        Self::compatible_versions(self.initial_version, &self.versions)
+    }
+
+    pub(crate) fn preferred_version<'a>(
+        preferences: impl IntoIterator<Item = &'a QuicVersion>,
         vn: &[Version],
     ) -> Option<QuicVersion> {
         for v in preferences {

@@ -5,9 +5,9 @@
 // except according to those terms.
 
 use super::super::{ConnectionError, Output, State};
-use super::{default_client, default_server};
+use super::{connect, default_client, default_server, new_server};
 use crate::packet::PACKET_BIT_LONG;
-use crate::{Error, QuicVersion};
+use crate::{ConnectionParameters, Error, QuicVersion};
 
 use neqo_common::{Datagram, Decoder, Encoder};
 use std::mem;
@@ -81,6 +81,25 @@ fn version_negotiation_current_version() {
         &initial_pkt,
         &[0x1a1a_1a1a, QuicVersion::default().as_u32()],
     );
+
+    let dgram = Datagram::new(addr(), addr(), vn);
+    let delay = client.process(Some(dgram), now()).callback();
+    assert_eq!(delay, INITIAL_PTO);
+    assert_eq!(*client.state(), State::WaitInitial);
+    assert_eq!(1, client.stats().dropped_rx);
+}
+
+#[test]
+fn version_negotiation_version0() {
+    let mut client = default_client();
+    // Start the handshake.
+    let initial_pkt = client
+        .process(None, now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec();
+
+    let vn = create_vn(&initial_pkt, &[0, 0x1a1a_1a1a]);
 
     let dgram = Datagram::new(addr(), addr(), vn);
     let delay = client.process(Some(dgram), now()).callback();
@@ -191,4 +210,17 @@ fn version_negotiation_bad_cid() {
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
+}
+
+#[test]
+fn compatible_upgrade() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().versions(
+        QuicVersion::Version1,
+        vec![QuicVersion::Version2, QuicVersion::Version1],
+    ));
+
+    connect(&mut client, &mut server);
+    assert_eq!(client.version(), QuicVersion::Version2);
+    assert_eq!(server.version(), QuicVersion::Version2);
 }

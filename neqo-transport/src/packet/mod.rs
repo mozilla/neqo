@@ -181,6 +181,10 @@ impl QuicVersion {
     /// Determine if `self` can be upgraded to `other` compatibly.
     pub fn compatible(self, other: Self) -> bool {
         self == other
+            || matches!(
+                (self, other),
+                (Self::Version1, Self::Version2) | (Self::Version2, Self::Version1)
+            )
     }
 
     pub fn all() -> Vec<Self> {

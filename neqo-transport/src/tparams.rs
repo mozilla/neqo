@@ -560,20 +560,20 @@ impl TransportParameters {
 pub struct TransportParametersHandler {
     role: Role,
     version: QuicVersion,
-    other_versions: Vec<QuicVersion>,
+    all_versions: Vec<QuicVersion>,
     pub(crate) local: TransportParameters,
     pub(crate) remote: Option<TransportParameters>,
     pub(crate) remote_0rtt: Option<TransportParameters>,
 }
 
 impl TransportParametersHandler {
-    pub fn new(role: Role, version: QuicVersion, other_versions: Vec<QuicVersion>) -> Self {
+    pub fn new(role: Role, version: QuicVersion, all_versions: Vec<QuicVersion>) -> Self {
         let mut local = TransportParameters::default();
-        local.set_versions(role, version, &other_versions);
+        local.set_versions(role, version, &all_versions);
         Self {
             role,
             version,
-            other_versions,
+            all_versions,
             local,
             remote: None,
             remote_0rtt: None,
@@ -598,11 +598,20 @@ impl TransportParametersHandler {
         }
 
         if let Some((_, other)) = remote_tp.get_versions() {
-            if let Some(preferred) =
-                ConnectionParameters::preferred_version(&self.other_versions, other)
-            {
+            qtrace!(
+                "Compatible versions {:?}; enabled {:?}",
+                other,
+                self.all_versions
+            );
+            let compatible =
+                ConnectionParameters::compatible_versions(self.version, &self.all_versions);
+            if let Some(preferred) = ConnectionParameters::preferred_version(compatible, other) {
                 if preferred != self.version {
-                    qinfo!("Compatible upgrade: {:?} -> {:?}", self.version, preferred);
+                    qinfo!(
+                        "Compatible upgrade: {:?} -=-> {:?}",
+                        self.version,
+                        preferred
+                    );
                 }
                 self.version = preferred;
                 self.local.compatible_upgrade(preferred);
