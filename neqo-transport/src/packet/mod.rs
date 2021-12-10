@@ -89,7 +89,7 @@ impl From<CryptoSpace> for PacketType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuicVersion {
     Version2,
     Version1,
@@ -899,16 +899,20 @@ impl<'a> PublicPacket<'a> {
 
     pub fn decrypt(&self, crypto: &mut CryptoStates, release_at: Instant) -> Res<DecryptedPacket> {
         let cspace: CryptoSpace = self.packet_type.into();
+        // When we don't have a version, the crypto code doesn't need to
+        // know, so using the default is fine.
+        let version = self.quic_version.unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
-        if let Some(rx) = crypto.rx_hp(cspace) {
+        if let Some(rx) = crypto.rx_hp(version, cspace) {
             // Note that this will dump early, which creates a side-channel.
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
             qtrace!([rx], "decoded header: {:?}", header);
-            let rx = crypto.rx(cspace, key_phase).unwrap();
+            let rx = crypto.rx(version, cspace, key_phase).unwrap();
+            let version = rx.version();
             let d = rx.decrypt(pn, &header, body)?;
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
@@ -917,6 +921,7 @@ impl<'a> PublicPacket<'a> {
             }
             crypto.check_pn_overlap()?;
             Ok(DecryptedPacket {
+                version,
                 pt: self.packet_type,
                 pn,
                 data: d,
@@ -954,12 +959,17 @@ impl fmt::Debug for PublicPacket<'_> {
 }
 
 pub struct DecryptedPacket {
+    version: QuicVersion,
     pt: PacketType,
     pn: PacketNumber,
     data: Vec<u8>,
 }
 
 impl DecryptedPacket {
+    pub fn version(&self) -> QuicVersion {
+        self.version
+    }
+
     pub fn packet_type(&self) -> PacketType {
         self.pt
     }

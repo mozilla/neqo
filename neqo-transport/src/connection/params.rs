@@ -116,8 +116,12 @@ impl ConnectionParameters {
             .filter(move |&v| base.compatible(*v))
     }
 
+    pub fn get_compatible_with(&self, v: QuicVersion) -> impl Iterator<Item = &QuicVersion> {
+        Self::compatible_versions(v, &self.versions)
+    }
+
     pub fn get_compatible_versions(&self) -> impl Iterator<Item = &QuicVersion> {
-        Self::compatible_versions(self.initial_version, &self.versions)
+        self.get_compatible_with(self.initial_version)
     }
 
     pub(crate) fn preferred_version<'a>(

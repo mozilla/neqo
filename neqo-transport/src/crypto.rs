@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
@@ -22,6 +23,7 @@ use neqo_crypto::{
     TLS_VERSION_1_3,
 };
 
+use crate::cid::ConnectionIdRef;
 use crate::packet::{PacketBuilder, PacketNumber, QuicVersion};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
@@ -214,6 +216,12 @@ impl Crypto {
         self.states
             .set_0rtt_keys(version, dir, &secret, cipher.unwrap());
         Ok(true)
+    }
+
+    /// Lock in a compatible upgrade.
+    pub fn confirm_version(&mut self, confirmed: QuicVersion) {
+        self.states.confirm_version(self.version, confirmed);
+        self.version = confirmed;
     }
 
     /// Returns true if new handshake keys were installed.
@@ -416,10 +424,11 @@ impl CryptoDxState {
         cipher: Cipher,
     ) -> Self {
         qinfo!(
-            "Making {:?} {} CryptoDxState, cipher={}",
+            "Making {:?} {} CryptoDxState, v={:?} cipher={}",
             direction,
             epoch,
-            cipher
+            version,
+            cipher,
         );
         let hplabel = String::from(version.label_prefix()) + "hp";
         Self {
@@ -440,7 +449,7 @@ impl CryptoDxState {
         label: &str,
         dcid: &[u8],
     ) -> Self {
-        qtrace!("new_initial for {:?}", version);
+        qtrace!("new_initial {:?} {}", version, ConnectionIdRef::from(dcid));
         let salt = version.initial_salt();
         let cipher = TLS_AES_128_GCM_SHA256;
         let initial_secret = hkdf::extract(
@@ -525,6 +534,11 @@ impl CryptoDxState {
             min_pn: pn,
             invocations,
         }
+    }
+
+    #[must_use]
+    pub fn version(&self) -> QuicVersion {
+        self.version
     }
 
     #[must_use]
@@ -763,9 +777,14 @@ pub enum CryptoSpace {
     ApplicationData,
 }
 
+/// All of the keying material needed for a connection.
+///
+/// Note that the methods on this struct take a version but those are only ever
+/// used for Initial keys; a version has been selected at the time we need to
+/// get other keys, so those have fixed versions.
 #[derive(Debug, Default)]
 pub struct CryptoStates {
-    initial: Option<CryptoState>,
+    initials: HashMap<QuicVersion, CryptoState>,
     handshake: Option<CryptoState>,
     zero_rtt: Option<CryptoDxState>, // One direction only!
     cipher: Cipher,
@@ -783,14 +802,15 @@ impl CryptoStates {
     /// not yet available.
     pub fn select_tx_mut(
         &mut self,
+        version: QuicVersion,
         space: PacketNumberSpace,
     ) -> Option<(CryptoSpace, &mut CryptoDxState)> {
         match space {
             PacketNumberSpace::Initial => self
-                .tx_mut(CryptoSpace::Initial)
+                .tx_mut(version, CryptoSpace::Initial)
                 .map(|dx| (CryptoSpace::Initial, dx)),
             PacketNumberSpace::Handshake => self
-                .tx_mut(CryptoSpace::Handshake)
+                .tx_mut(version, CryptoSpace::Handshake)
                 .map(|dx| (CryptoSpace::Handshake, dx)),
             PacketNumberSpace::ApplicationData => {
                 if let Some(app) = self.app_write.as_mut() {
@@ -802,10 +822,14 @@ impl CryptoStates {
         }
     }
 
-    pub fn tx_mut<'a>(&'a mut self, cspace: CryptoSpace) -> Option<&'a mut CryptoDxState> {
+    pub fn tx_mut<'a>(
+        &'a mut self,
+        version: QuicVersion,
+        cspace: CryptoSpace,
+    ) -> Option<&'a mut CryptoDxState> {
         let tx = |k: Option<&'a mut CryptoState>| k.map(|dx| &mut dx.tx);
         match cspace {
-            CryptoSpace::Initial => tx(self.initial.as_mut()),
+            CryptoSpace::Initial => tx(self.initials.get_mut(&version)),
             CryptoSpace::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
@@ -815,10 +839,14 @@ impl CryptoStates {
         }
     }
 
-    pub fn tx<'a>(&'a self, cspace: CryptoSpace) -> Option<&'a CryptoDxState> {
+    pub fn tx<'a>(
+        &'a self,
+        version: QuicVersion,
+        cspace: CryptoSpace,
+    ) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
         match cspace {
-            CryptoSpace::Initial => tx(self.initial.as_ref()),
+            CryptoSpace::Initial => tx(self.initials.get(&version)),
             CryptoSpace::ZeroRtt => self
                 .zero_rtt
                 .as_ref()
@@ -828,13 +856,17 @@ impl CryptoStates {
         }
     }
 
-    pub fn select_tx(&self, space: PacketNumberSpace) -> Option<(CryptoSpace, &CryptoDxState)> {
+    pub fn select_tx(
+        &self,
+        version: QuicVersion,
+        space: PacketNumberSpace,
+    ) -> Option<(CryptoSpace, &CryptoDxState)> {
         match space {
             PacketNumberSpace::Initial => self
-                .tx(CryptoSpace::Initial)
+                .tx(version, CryptoSpace::Initial)
                 .map(|dx| (CryptoSpace::Initial, dx)),
             PacketNumberSpace::Handshake => self
-                .tx(CryptoSpace::Handshake)
+                .tx(version, CryptoSpace::Handshake)
                 .map(|dx| (CryptoSpace::Handshake, dx)),
             PacketNumberSpace::ApplicationData => {
                 if let Some(app) = self.app_write.as_ref() {
@@ -846,22 +878,27 @@ impl CryptoStates {
         }
     }
 
-    pub fn rx_hp(&mut self, cspace: CryptoSpace) -> Option<&mut CryptoDxState> {
+    pub fn rx_hp(
+        &mut self,
+        version: QuicVersion,
+        cspace: CryptoSpace,
+    ) -> Option<&mut CryptoDxState> {
         if let CryptoSpace::ApplicationData = cspace {
             self.app_read.as_mut().map(|ar| &mut ar.dx)
         } else {
-            self.rx(cspace, false)
+            self.rx(version, cspace, false)
         }
     }
 
     pub fn rx<'a>(
         &'a mut self,
+        version: QuicVersion,
         cspace: CryptoSpace,
         key_phase: bool,
     ) -> Option<&'a mut CryptoDxState> {
         let rx = |x: Option<&'a mut CryptoState>| x.map(|dx| &mut dx.rx);
         match cspace {
-            CryptoSpace::Initial => rx(self.initial.as_mut()),
+            CryptoSpace::Initial => rx(self.initials.get_mut(&version)),
             CryptoSpace::ZeroRtt => self
                 .zero_rtt
                 .as_mut()
@@ -890,42 +927,68 @@ impl CryptoStates {
     pub fn rx_pending(&self, space: CryptoSpace) -> bool {
         match space {
             CryptoSpace::Initial | CryptoSpace::ZeroRtt => false,
-            CryptoSpace::Handshake => self.handshake.is_none() && self.initial.is_some(),
+            CryptoSpace::Handshake => self.handshake.is_none() && !self.initials.is_empty(),
             CryptoSpace::ApplicationData => self.app_read.is_none(),
         }
     }
 
     /// Create the initial crypto state.
     /// Note that the version here can change and that's OK.
-    pub fn init(&mut self, version: QuicVersion, role: Role, dcid: &[u8]) {
+    pub fn init<'v, V>(&mut self, versions: V, role: Role, dcid: &[u8])
+    where
+        V: IntoIterator<Item = &'v QuicVersion>,
+    {
         const CLIENT_INITIAL_LABEL: &str = "client in";
         const SERVER_INITIAL_LABEL: &str = "server in";
-
-        qinfo!(
-            [self],
-            "Creating initial cipher state role={:?} dcid={}",
-            role,
-            hex(dcid)
-        );
 
         let (write, read) = match role {
             Role::Client => (CLIENT_INITIAL_LABEL, SERVER_INITIAL_LABEL),
             Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
         };
 
-        let mut initial = CryptoState {
-            tx: CryptoDxState::new_initial(version, CryptoDxDirection::Write, write, dcid),
-            rx: CryptoDxState::new_initial(version, CryptoDxDirection::Read, read, dcid),
-        };
-        if let Some(prev) = &self.initial {
+        for v in versions {
             qinfo!(
                 [self],
-                "Continue packet numbers for initial after retry (write is {:?})",
-                prev.rx.used_pn,
+                "Creating initial cipher state v={:?}, role={:?} dcid={}",
+                v,
+                role,
+                hex(dcid)
             );
-            initial.tx.continuation(&prev.tx).unwrap();
+
+            let mut initial = CryptoState {
+                tx: CryptoDxState::new_initial(*v, CryptoDxDirection::Write, write, dcid),
+                rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid),
+            };
+            if let Some(prev) = self.initials.get(v) {
+                qinfo!(
+                    [self],
+                    "Continue packet numbers for initial after retry (write is {:?})",
+                    prev.rx.used_pn,
+                );
+                initial.tx.continuation(&prev.tx).unwrap();
+            }
+            self.initials.insert(*v, initial);
         }
-        self.initial = Some(initial);
+    }
+
+    /// At a server, we can be more targeted in initializing.
+    /// Initialize on demand: either to decrypt Initial packets that we receive
+    /// or after a version has been selected.
+    /// This is maybe slightly inefficient in the first case, because we might
+    /// not need the send keys if the packet is subsequently discarded, but
+    /// the overall effort is small enough to write off.
+    pub fn init_server(&mut self, version: QuicVersion, dcid: &[u8]) {
+        if !self.initials.contains_key(&version) {
+            self.init(&[version], Role::Server, dcid);
+        }
+    }
+
+    pub fn confirm_version(&mut self, prev: QuicVersion, confirmed: QuicVersion) {
+        if prev != confirmed {
+            let prev = self.initials.remove(&prev).unwrap();
+            let next = self.initials.get_mut(&confirmed).unwrap();
+            next.tx.continuation(&prev.tx).unwrap();
+        }
     }
 
     pub fn set_0rtt_keys(
@@ -948,7 +1011,11 @@ impl CryptoStates {
     /// Discard keys and return true if that happened.
     pub fn discard(&mut self, space: PacketNumberSpace) -> bool {
         match space {
-            PacketNumberSpace::Initial => self.initial.take().is_some(),
+            PacketNumberSpace::Initial => {
+                let empty = self.initials.is_empty();
+                self.initials.clear();
+                !empty
+            }
             PacketNumberSpace::Handshake => self.handshake.take().is_some(),
             PacketNumberSpace::ApplicationData => panic!("Can't drop application data keys"),
         }
@@ -1167,11 +1234,16 @@ impl CryptoStates {
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
         };
-        Self {
-            initial: Some(CryptoState {
+        let mut initials = HashMap::new();
+        initials.insert(
+            QuicVersion::Version1,
+            CryptoState {
                 tx: CryptoDxState::test_default(),
                 rx: read(0),
-            }),
+            },
+        );
+        Self {
+            initials,
             handshake: None,
             zero_rtt: None,
             cipher: TLS_AES_128_GCM_SHA256,
@@ -1218,7 +1290,7 @@ impl CryptoStates {
             next_secret: secret.clone(),
         };
         Self {
-            initial: None,
+            initials: HashMap::new(),
             handshake: None,
             zero_rtt: None,
             cipher: TLS_CHACHA20_POLY1305_SHA256,

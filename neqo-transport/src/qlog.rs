@@ -110,7 +110,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
         Some(Event::connection_state_updated_min(match new {
             State::Init => qlog::ConnectionState::Attempted,
             State::WaitInitial => qlog::ConnectionState::Attempted,
-            State::Handshaking => qlog::ConnectionState::Handshake,
+            State::WaitVersion | State::Handshaking => qlog::ConnectionState::Handshake,
             State::Connected => qlog::ConnectionState::Active,
             State::Confirmed => qlog::ConnectionState::Active,
             State::Closing { .. } => qlog::ConnectionState::Draining,

@@ -592,31 +592,35 @@ impl TransportParametersHandler {
         self.version
     }
 
-    fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) {
-        if self.role == Role::Client {
-            return;
-        }
-
-        if let Some((_, other)) = remote_tp.get_versions() {
+    fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) -> Res<()> {
+        if let Some((current, other)) = remote_tp.get_versions() {
             qtrace!(
-                "Compatible versions {:?}; enabled {:?}",
+                "Compatible versions {:x} {:x?}; enabled {:?}",
+                current,
                 other,
                 self.all_versions
             );
-            let compatible =
+
+            let mut compatible =
                 ConnectionParameters::compatible_versions(self.version, &self.all_versions);
-            if let Some(preferred) = ConnectionParameters::preferred_version(compatible, other) {
-                if preferred != self.version {
-                    qinfo!(
-                        "Compatible upgrade: {:?} -=-> {:?}",
-                        self.version,
-                        preferred
-                    );
+            if self.role == Role::Client {
+                let chosen = QuicVersion::try_from(current)?;
+                if !compatible.any(|&v| v == chosen) {
+                    return Err(Error::TransportParameterError);
                 }
-                self.version = preferred;
-                self.local.compatible_upgrade(preferred);
+            } else if let Some(preferred) =
+                ConnectionParameters::preferred_version(compatible, other)
+            {
+                if preferred != self.version {
+                    qinfo!("Compatible upgrade {:?} ==> {:?}", self.version, preferred);
+                    self.version = preferred;
+                    self.local.compatible_upgrade(preferred);
+                }
+            } else {
+                return Err(Error::TransportParameterError);
             }
         }
+        Ok(())
     }
 }
 
@@ -650,9 +654,12 @@ impl ExtensionHandler for TransportParametersHandler {
         let mut dec = Decoder::from(d);
         match TransportParameters::decode(&mut dec) {
             Ok(tp) => {
-                self.compatible_upgrade(&tp);
-                self.remote = Some(tp);
-                ExtensionHandlerResult::Ok
+                if self.compatible_upgrade(&tp).is_ok() {
+                    self.remote = Some(tp);
+                    ExtensionHandlerResult::Ok
+                } else {
+                    ExtensionHandlerResult::Alert(47)
+                }
             }
             _ => ExtensionHandlerResult::Alert(47), // illegal_parameter
         }

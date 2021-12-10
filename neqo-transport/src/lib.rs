@@ -143,6 +143,7 @@ impl Error {
             // As we have a special error code for ECH fallbacks, we lose the alert.
             // Send the server "ech_required" directly.
             Self::EchRetry(_) => 0x100 + 121,
+            Self::VersionNegotiation => 0x53f8,
             // All the rest are internal errors.
             _ => 1,
         }

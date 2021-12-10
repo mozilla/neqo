@@ -310,7 +310,9 @@ impl Connection {
             protocols,
             conn_params,
         )?;
-        c.crypto.states.init(c.version(), Role::Client, &dcid);
+        c.crypto
+            .states
+            .init(c.conn_params.get_compatible_versions(), Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(
             local_addr,
@@ -742,7 +744,7 @@ impl Connection {
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         qinfo!([self], "Authenticated {:?}", status);
         self.crypto.tls.authenticated(status);
-        let res = self.handshake(now, PacketNumberSpace::Handshake, None);
+        let res = self.handshake(now, self.version, PacketNumberSpace::Handshake, None);
         self.absorb_error(now, res);
         self.process_saved(now);
     }
@@ -972,7 +974,7 @@ impl Connection {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
-            (State::Init, Role::Server) | (State::WaitInitial, Role::Server) => {
+            (State::Init | State::WaitInitial, Role::Server) => {
                 return Output::None;
             }
             _ => {
@@ -1034,9 +1036,11 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry(&path);
         self.handle_lost_packets(&lost_packets);
 
-        self.crypto
-            .states
-            .init(self.version(), self.role, &retry_scid);
+        self.crypto.states.init(
+            self.conn_params.get_compatible_versions(),
+            self.role,
+            &retry_scid,
+        );
         self.address_validation = AddressValidationInfo::Retry {
             token: packet.token().to_vec(),
             retry_source_cid: retry_scid,
@@ -1088,7 +1092,7 @@ impl Connection {
     fn process_saved(&mut self, now: Instant) {
         while let Some(cspace) = self.saved_datagrams.available() {
             qdebug!([self], "process saved for space {:?}", cspace);
-            debug_assert!(self.crypto.states.rx_hp(cspace).is_some());
+            debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
                 self.input(saved.d, saved.t, now);
@@ -1110,7 +1114,13 @@ impl Connection {
 
     /// Perform version negotiation.
     fn version_negotiation(&mut self, supported: &[Version], dcid: &[u8]) -> Res<()> {
+        debug_assert_eq!(self.role, Role::Client);
+
         if let Some(v) = self.conn_params.get_preferred_version(supported) {
+            if self.version == v {
+                return Ok(());
+            }
+
             qdebug!([self], "Version negotiation: trying {:?}", v);
             self.version = v;
             let server_name = self.crypto.server_name().unwrap().to_owned();
@@ -1121,9 +1131,12 @@ impl Connection {
                 protocols,
                 Rc::clone(&self.tps),
             )?;
-            self.crypto.states.init(v, Role::Client, dcid);
+            let compatible = self.conn_params.get_compatible_with(v);
+            self.crypto.states.init(compatible, Role::Client, dcid);
             Ok(())
         } else {
+            qinfo!([self], "Version negotiation: failed with {:?}", supported);
+            // This error goes straight to closed.
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::VersionNegotiation,
             )));
@@ -1160,7 +1173,9 @@ impl Connection {
 
         match (packet.packet_type(), &self.state, &self.role) {
             (PacketType::Initial, State::Init, Role::Server) => {
-                if !packet.is_valid_initial() {
+                let version = *packet.version().as_ref().unwrap();
+                if !packet.is_valid_initial() || !self.conn_params.get_versions().contains(&version)
+                {
                     self.stats.borrow_mut().pkt_dropped("Invalid Initial");
                     return Ok(PreprocessResult::Next);
                 }
@@ -1173,7 +1188,7 @@ impl Connection {
                 // Record the client's selected CID so that it can be accepted until
                 // the client starts using a real connection ID.
                 let dcid = ConnectionId::from(packet.dcid());
-                self.crypto.states.init(self.version(), self.role, &dcid);
+                self.crypto.states.init_server(version, &dcid);
                 self.original_destination_cid = Some(dcid);
                 self.set_state(State::WaitInitial);
 
@@ -1252,7 +1267,7 @@ impl Connection {
                 PreprocessResult::Next
             }
             State::WaitInitial => PreprocessResult::Continue,
-            State::Handshaking | State::Connected | State::Confirmed => {
+            State::WaitVersion | State::Handshaking | State::Connected | State::Confirmed => {
                 if !self.cid_manager.is_valid(packet.dcid()) {
                     self.stats
                         .borrow_mut()
@@ -1295,6 +1310,7 @@ impl Connection {
         if self.state == State::WaitInitial {
             self.start_handshake(path, packet, now);
         }
+
         if self.state.connected() {
             self.handle_migration(path, d, migrate, now);
         } else if self.role != Role::Client
@@ -1444,7 +1460,7 @@ impl Connection {
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
-            if let Err(e) = self.input_frame(path, packet.packet_type(), f, now) {
+            if let Err(e) = self.input_frame(path, packet.version(), packet.packet_type(), f, now) {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
             }
         }
@@ -1521,7 +1537,7 @@ impl Connection {
         debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
-        if self.role == Role::Server {
+        let got_version = if self.role == Role::Server {
             self.cid_manager
                 .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
             // Make a path on which to run the handshake.
@@ -1534,13 +1550,22 @@ impl Connection {
                 }
                 _ => ZeroRttState::Rejected,
             };
+
+            // The server knows the final version if it has remote transport parameters.
+            self.tps.borrow().remote.is_some()
         } else {
             qdebug!([self], "Changing to use Server CID={}", packet.scid());
             debug_assert!(path.borrow().is_primary());
             path.borrow_mut().set_remote_cid(packet.scid());
-        }
 
-        self.set_state(State::Handshaking);
+            // The client knows the final version if it processed a CRYPTO frame.
+            self.stats.borrow().frame_rx.crypto > 0
+        };
+        if got_version {
+            self.set_state(State::Handshaking);
+        } else {
+            self.set_state(State::WaitVersion);
+        }
     }
 
     /// Migrate to the provided path.
@@ -1670,6 +1695,7 @@ impl Connection {
         let res = match &self.state {
             State::Init
             | State::WaitInitial
+            | State::WaitVersion
             | State::Handshaking
             | State::Connected
             | State::Confirmed => {
@@ -1771,11 +1797,12 @@ impl Connection {
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
         for space in PacketNumberSpace::iter() {
-            let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx_mut(*space) {
-                crypto
-            } else {
-                continue;
-            };
+            let (cspace, tx) =
+                if let Some(crypto) = self.crypto.states.select_tx_mut(self.version, *space) {
+                    crypto
+                } else {
+                    continue;
+                };
 
             let path = close.path().borrow();
             let (_, mut builder) = Self::build_packet_header(
@@ -2035,11 +2062,12 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx_mut(*space) {
-                crypto
-            } else {
-                continue;
-            };
+            let (cspace, tx) =
+                if let Some(crypto) = self.crypto.states.select_tx_mut(self.version, *space) {
+                    crypto
+                } else {
+                    continue;
+                };
 
             let header_start = encoder.len();
             let (pt, mut builder) = Self::build_packet_header(
@@ -2092,7 +2120,8 @@ impl Connection {
             );
 
             self.stats.borrow_mut().packets_tx += 1;
-            encoder = builder.build(self.crypto.states.tx_mut(cspace).unwrap())?;
+            let tx = self.crypto.states.tx_mut(self.version, cspace).unwrap();
+            encoder = builder.build(tx)?;
             debug_assert!(encoder.len() <= mtu);
             self.crypto.states.auto_update()?;
 
@@ -2173,7 +2202,7 @@ impl Connection {
         debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, &self.paths.primary());
 
-        self.handshake(now, PacketNumberSpace::Initial, None)?;
+        self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
             qdebug!([self], "Enabled 0-RTT");
@@ -2343,7 +2372,15 @@ impl Connection {
         let tph = self.tps.borrow();
         let remote_tps = tph.remote.as_ref().unwrap();
         if let Some((current, other)) = remote_tps.get_versions() {
-            if self.version().as_u32() != current {
+            qtrace!(
+                [self],
+                "validate_versions: current={:x} chosen={:x} other={:x?}",
+                self.version.as_u32(),
+                current,
+                other,
+            );
+            if self.role == Role::Client && self.version().as_u32() != current {
+                qinfo!([self], "validate_versions: current version mismatch");
                 Err(Error::VersionNegotiation)
             } else if self.role == Role::Server
                 || self
@@ -2362,39 +2399,44 @@ impl Connection {
                 // so that's OK.
                 Ok(())
             } else {
+                qinfo!([self], "validate_versions: failed");
                 Err(Error::VersionNegotiation)
             }
         } else if self.version() != QuicVersion::Version1 && !self.version().is_draft() {
+            qinfo!([self], "validate_versions: missing extension");
             Err(Error::VersionNegotiation)
         } else {
             Ok(())
         }
     }
 
-    fn maybe_compatible_upgrade(&mut self) {
-        if self.role == Role::Client {
-            debug_assert_eq!(self.version, self.tps.borrow().version());
-            return;
+    fn confirm_version(&mut self, v: QuicVersion) {
+        if self.version != v {
+            qinfo!([self], "Compatible upgrade {:?} ==> {:?}", self.version, v);
         }
-
-        let v = self.tps.borrow().version();
-        if v == self.version {
-            return;
-        }
-
-        debug_assert_eq!(self.state, State::WaitInitial);
-        // TODO(mt) Consider keeping the old read state around so that we can process
-        // any late arriving Initial packets from the old version.
-        // We don't *need* those because we already have all the CRYPTO frames, but it
-        // might be nice to acknowledge them properly.
-        let dcid = self.original_destination_cid.as_ref().unwrap();
-        self.crypto.states.init(v, self.role, dcid);
+        self.crypto.confirm_version(v);
         self.version = v;
+    }
+
+    fn compatible_upgrade(&mut self, packet_version: QuicVersion) {
+        if !matches!(self.state, State::WaitInitial | State::WaitVersion) {
+            return;
+        }
+
+        if self.role == Role::Client {
+            self.confirm_version(packet_version);
+        } else if self.tps.borrow().remote.is_some() {
+            let version = self.tps.borrow().version();
+            let dcid = self.original_destination_cid.as_ref().unwrap();
+            self.crypto.states.init_server(version, dcid);
+            self.confirm_version(version);
+        }
     }
 
     fn handshake(
         &mut self,
         now: Instant,
+        packet_version: QuicVersion,
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
@@ -2420,7 +2462,7 @@ impl Connection {
         // There is a chance that this could be called less often, but getting the
         // conditions right is a little tricky, so call it on every  CRYPTO frame.
         if try_update {
-            self.maybe_compatible_upgrade();
+            self.compatible_upgrade(packet_version);
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote.is_some() {
                 self.set_initial_limits();
@@ -2436,16 +2478,17 @@ impl Connection {
     fn input_frame(
         &mut self,
         path: &PathRef,
-        ptype: PacketType,
+        packet_version: QuicVersion,
+        packet_type: PacketType,
         frame: Frame,
         now: Instant,
     ) -> Res<()> {
-        if !frame.is_allowed(ptype) {
-            qinfo!("frame not allowed: {:?} {:?}", frame, ptype);
+        if !frame.is_allowed(packet_type) {
+            qinfo!("frame not allowed: {:?} {:?}", frame, packet_type);
             return Err(Error::ProtocolViolation);
         }
         self.stats.borrow_mut().frame_rx.all += 1;
-        let space = PacketNumberSpace::from(ptype);
+        let space = PacketNumberSpace::from(packet_type);
         if frame.is_stream() {
             return self
                 .streams
@@ -2490,7 +2533,7 @@ impl Connection {
                     let mut buf = Vec::new();
                     let read = self.crypto.streams.read_to_end(space, &mut buf);
                     qdebug!("Read {} bytes", read);
-                    self.handshake(now, space, Some(&buf))?;
+                    self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
                 } else {
                     // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
@@ -2923,7 +2966,7 @@ impl Connection {
         let (cspace, tx) = if let Some(crypto) = self
             .crypto
             .states
-            .select_tx(PacketNumberSpace::ApplicationData)
+            .select_tx(self.version, PacketNumberSpace::ApplicationData)
         {
             crypto
         } else {
