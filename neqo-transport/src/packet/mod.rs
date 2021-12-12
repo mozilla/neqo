@@ -1294,6 +1294,12 @@ mod tests {
         assert_eq!(builder.abort(), encoder_copy);
     }
 
+    const SAMPLE_RETRY_V2: &[u8] = &[
+        0xff, 0xff, 0x02, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x13, 0x7e, 0x5b, 0x54, 0x36, 0xb8, 0x8e, 0x7a, 0x8e, 0xb9,
+        0x24, 0x42, 0x4d, 0x37, 0xa9, 0xee,
+    ];
+
     const SAMPLE_RETRY_V1: &[u8] = &[
         0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
         0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x04, 0xa2, 0x65, 0xba, 0x2e, 0xff, 0x4d, 0x82, 0x90, 0x58,
@@ -1348,6 +1354,11 @@ mod tests {
     }
 
     #[test]
+    fn build_retry_v2() {
+        build_retry_single(QuicVersion::Version2, SAMPLE_RETRY_V2);
+    }
+
+    #[test]
     fn build_retry_v1() {
         build_retry_single(QuicVersion::Version1, SAMPLE_RETRY_V1);
     }
@@ -1378,6 +1389,7 @@ mod tests {
         // Odds are approximately 1 in 8 that the full comparison doesn't happen
         // for a given version.
         for _ in 0..32 {
+            build_retry_v2();
             build_retry_v1();
             build_retry_29();
             build_retry_30();
@@ -1396,6 +1408,16 @@ mod tests {
         assert_eq!(&packet.scid()[..], SERVER_CID);
         assert_eq!(packet.token(), RETRY_TOKEN);
         assert!(remainder.is_empty());
+    }
+
+    #[test]
+    fn decode_retry_v2() {
+        decode_retry(QuicVersion::Version2, SAMPLE_RETRY_V2);
+    }
+
+    #[test]
+    fn decode_retry_v1() {
+        decode_retry(QuicVersion::Version1, SAMPLE_RETRY_V1);
     }
 
     #[test]
@@ -1427,11 +1449,11 @@ mod tests {
 
         assert!(PublicPacket::decode(&[], &cid_mgr).is_err());
 
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_RETRY_29, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(SAMPLE_RETRY_V1, &cid_mgr).unwrap();
         assert!(remainder.is_empty());
         assert!(packet.is_valid_retry(&odcid));
 
-        let mut damaged_retry = SAMPLE_RETRY_29.to_vec();
+        let mut damaged_retry = SAMPLE_RETRY_V1.to_vec();
         let last = damaged_retry.len() - 1;
         damaged_retry[last] ^= 66;
         let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
