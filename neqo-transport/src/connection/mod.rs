@@ -542,6 +542,7 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("should have transport parameters"),
+                self.version,
                 u64::try_from(rtt.as_millis()).unwrap_or(0),
             )
             .unwrap()
@@ -642,6 +643,8 @@ impl Connection {
         );
         let mut dec = Decoder::from(token.as_ref());
 
+        let version =
+            QuicVersion::try_from(dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)? as u32)?;
         let rtt = Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
         qtrace!([self], "  RTT {:?}", rtt);
 
@@ -667,6 +670,8 @@ impl Connection {
             Agent::Server(_) => return Err(Error::WrongRole),
         }
 
+        self.version = version;
+        self.tps.borrow_mut().set_version(version);
         self.tps.borrow_mut().remote_0rtt = Some(tp);
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());

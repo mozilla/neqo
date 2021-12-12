@@ -17,7 +17,7 @@ fn assert_default_version(dec: &mut Decoder) {
         .unwrap()
         .try_into()
         .unwrap();
-    assert_eq!(version, QuicVersion::default());
+    assert!(version == QuicVersion::Version1 || version == QuicVersion::Version2);
 }
 
 /// Do a simple decode of the datagram to verify that it is coalesced.

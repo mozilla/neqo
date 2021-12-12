@@ -580,6 +580,15 @@ impl TransportParametersHandler {
         }
     }
 
+    /// When resuming, the version is set based on the ticket.
+    /// That needs to be done to override the default choice from configuration.
+    pub fn set_version(&mut self, version: QuicVersion) {
+        debug_assert_eq!(self.role, Role::Client);
+        self.version = version;
+        self.local
+            .set_versions(self.role, version, &self.all_versions)
+    }
+
     pub fn remote(&self) -> &TransportParameters {
         match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
             (Some(tp), _) | (_, Some(tp)) => tp,

@@ -347,12 +347,14 @@ impl Crypto {
         &mut self,
         new_token: Option<&[u8]>,
         tps: &TransportParameters,
+        version: QuicVersion,
         rtt: u64,
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             if let Some(ref t) = c.resumption_token() {
                 qtrace!("TLS token {}", hex(t.as_ref()));
                 let mut enc = Encoder::default();
+                enc.encode_uint(4, version.as_u32());
                 enc.encode_varint(rtt);
                 enc.encode_vvec_with(|enc_inner| {
                     tps.encode(enc_inner);
@@ -983,11 +985,14 @@ impl CryptoStates {
         }
     }
 
-    pub fn confirm_version(&mut self, prev: QuicVersion, confirmed: QuicVersion) {
-        if prev != confirmed {
-            let prev = self.initials.remove(&prev).unwrap();
-            let next = self.initials.get_mut(&confirmed).unwrap();
-            next.tx.continuation(&prev.tx).unwrap();
+    pub fn confirm_version(&mut self, orig: QuicVersion, confirmed: QuicVersion) {
+        if orig != confirmed {
+            // On the server, we might not have initials for prev.
+            if let Some(prev) = self.initials.remove(&orig) {
+                let next = self.initials.get_mut(&confirmed).unwrap();
+                next.tx.continuation(&prev.tx).unwrap();
+                self.initials.insert(orig, prev);
+            }
         }
     }
 
