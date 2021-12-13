@@ -987,7 +987,10 @@ impl CryptoStates {
 
     pub fn confirm_version(&mut self, orig: QuicVersion, confirmed: QuicVersion) {
         if orig != confirmed {
-            // On the server, we might not have initials for prev.
+            // This part where the old data is removed and then re-added is to
+            // appease the borrow checker.
+            // Note that on the server, we might not have initials for |orig| if it
+            // was configured for |orig| and only |confirmed| Initial packets arrived.
             if let Some(prev) = self.initials.remove(&orig) {
                 let next = self.initials.get_mut(&confirmed).unwrap();
                 next.tx.continuation(&prev.tx).unwrap();

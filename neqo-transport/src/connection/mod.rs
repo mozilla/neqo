@@ -1121,22 +1121,21 @@ impl Connection {
     fn version_negotiation(&mut self, supported: &[Version], dcid: &[u8]) -> Res<()> {
         debug_assert_eq!(self.role, Role::Client);
 
-        if let Some(v) = self.conn_params.get_preferred_version(supported) {
-            if self.version == v {
-                return Ok(());
-            }
+        if let Some(version) = self.conn_params.get_preferred_version(supported) {
+            assert_ne!(self.version, version);
 
-            qdebug!([self], "Version negotiation: trying {:?}", v);
-            self.version = v;
+            qdebug!([self], "Version negotiation: trying {:?}", version);
+            self.version = version;
             let server_name = self.crypto.server_name().unwrap().to_owned();
             let protocols = self.crypto.protocols().to_owned();
             self.crypto = Crypto::new(
-                v,
+                version,
                 Agent::from(Client::new(server_name)?),
                 protocols,
                 Rc::clone(&self.tps),
             )?;
-            let compatible = self.conn_params.get_compatible_with(v);
+            self.tps.borrow_mut().set_version(version);
+            let compatible = self.conn_params.get_compatible_with(version);
             self.crypto.states.init(compatible, Role::Client, dcid);
             Ok(())
         } else {
@@ -2391,23 +2390,29 @@ impl Connection {
                 || self
                     .conn_params
                     .get_initial_version()
-                    .compatible(self.version())
-                || self
-                    .conn_params
-                    .get_preferred_version(other)
-                    .ok_or(Error::VersionNegotiation)?
-                    .compatible(self.version())
+                    .compatible(self.version)
             {
                 // 1. A server doesn't validate further, it acts on this info.
                 // 2. Compatible upgrade is OK.
-                // 3. Our preferred version is compatible with this one,
-                // so that's OK.
                 Ok(())
             } else {
-                qinfo!([self], "validate_versions: failed");
-                Err(Error::VersionNegotiation)
+                // 3. Of those on offer, we selected a version that is compatible
+                // with this one, which is also OK.
+                let mut all_versions = other.to_owned();
+                all_versions.push(current);
+                if self
+                    .conn_params
+                    .get_preferred_version(&all_versions)
+                    .ok_or(Error::VersionNegotiation)?
+                    .compatible(self.version)
+                {
+                    Ok(())
+                } else {
+                    qinfo!([self], "validate_versions: failed");
+                    Err(Error::VersionNegotiation)
+                }
             }
-        } else if self.version() != QuicVersion::Version1 && !self.version().is_draft() {
+        } else if self.version != QuicVersion::Version1 && !self.version.is_draft() {
             qinfo!([self], "validate_versions: missing extension");
             Err(Error::VersionNegotiation)
         } else {
@@ -2465,7 +2470,7 @@ impl Connection {
         }
 
         // There is a chance that this could be called less often, but getting the
-        // conditions right is a little tricky, so call it on every  CRYPTO frame.
+        // conditions right is a little tricky, so call whenever CRYPTO data is used.
         if try_update {
             self.compatible_upgrade(packet_version);
             // We have transport parameters, it's go time.
