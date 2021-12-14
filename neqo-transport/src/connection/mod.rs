@@ -1222,12 +1222,6 @@ impl Connection {
                                 AddressValidationInfo::Retry { .. }
                             )
                         {
-                            qtrace!(
-                                "XXX {:x?} {} {}",
-                                versions,
-                                packet.scid(),
-                                self.odcid().unwrap()
-                            );
                             // Ignore VersionNegotiation packets that contain the current version.
                             // Or don't have the right connection ID.
                             // Or are received after a Retry.
@@ -1239,7 +1233,7 @@ impl Connection {
                         return Ok(PreprocessResult::End);
                     }
                     Err(_) => {
-                        self.stats.borrow_mut().pkt_dropped("Invalid VN");
+                        self.stats.borrow_mut().pkt_dropped("VN with no versions");
                         return Ok(PreprocessResult::End);
                     }
                 }

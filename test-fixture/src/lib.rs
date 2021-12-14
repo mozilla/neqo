@@ -122,9 +122,8 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     }
 }
 
-/// Create a transport client with default configuration.
 #[must_use]
-pub fn default_client() -> Connection {
+pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
     Connection::new_client(
         DEFAULT_SERVER_NAME,
@@ -132,10 +131,16 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default().ack_ratio(255), // Tests work better with this set this way.
+        params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
-    .expect("create a default client")
+    .expect("create a client")
+}
+
+/// Create a transport client with default configuration.
+#[must_use]
+pub fn default_client() -> Connection {
+    new_client(ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.

@@ -15,14 +15,17 @@ use common::{
 };
 
 use neqo_common::{qtrace, Datagram, Decoder, Encoder};
-use neqo_crypto::{generate_ech_keys, AllowZeroRtt, ZeroRttCheckResult, ZeroRttChecker};
+use neqo_crypto::{
+    generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
+};
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     Connection, ConnectionError, ConnectionParameters, Error, Output, QuicVersion, State,
     StreamType,
 };
 use test_fixture::{
-    self, assertions, default_client, now, split_datagram, CountingConnectionIdGenerator,
+    self, assertions, default_client, new_client, now, split_datagram,
+    CountingConnectionIdGenerator,
 };
 
 use std::cell::RefCell;
@@ -458,6 +461,54 @@ fn version_negotiation() {
     let sconn = connect(&mut client, &mut server);
     assert_eq!(client.version(), VN_VERSION);
     assert_eq!(sconn.borrow().version(), VN_VERSION);
+}
+
+#[test]
+fn version_negotiation_and_compatible() {
+    const ORIG_VERSION: QuicVersion = QuicVersion::Draft29;
+    const VN_VERSION: QuicVersion = QuicVersion::Version1;
+    const COMPAT_VERSION: QuicVersion = QuicVersion::Version2;
+    assert!(!ORIG_VERSION.compatible(VN_VERSION));
+    assert!(!ORIG_VERSION.compatible(COMPAT_VERSION));
+    assert!(VN_VERSION.compatible(COMPAT_VERSION));
+
+    let mut server = new_server(
+        ConnectionParameters::default().versions(VN_VERSION, vec![COMPAT_VERSION, VN_VERSION]),
+    );
+    // Note that the order of versions at the client only determines what it tries first.
+    // The server will pick between VN_VERSION and COMPAT_VERSION.
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .versions(ORIG_VERSION, vec![ORIG_VERSION, VN_VERSION, COMPAT_VERSION]),
+    );
+
+    // Run the full exchange so that we can observe the versions in use.
+
+    // Version Negotiation
+    let dgram = client.process_output(now()).dgram();
+    assert!(dgram.is_some());
+    assertions::assert_version(&dgram.as_ref().unwrap(), ORIG_VERSION.as_u32());
+    let dgram = server.process(dgram, now()).dgram();
+    assertions::assert_vn(&dgram.as_ref().unwrap());
+    client.process_input(dgram.unwrap(), now());
+
+    let dgram = client.process(None, now()).dgram(); // ClientHello
+    assertions::assert_version(&dgram.as_ref().unwrap(), VN_VERSION.as_u32());
+    let dgram = server.process(dgram, now()).dgram(); // ServerHello...
+    assertions::assert_version(&dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    client.process_input(dgram.unwrap(), now());
+
+    client.authenticated(AuthenticationStatus::Ok, now());
+    let dgram = client.process_output(now()).dgram();
+    assertions::assert_version(&dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    assert_eq!(*client.state(), State::Connected);
+    let dgram = server.process(dgram, now()).dgram(); // ACK + HANDSHAKE_DONE + NST
+    client.process_input(dgram.unwrap(), now());
+    assert_eq!(*client.state(), State::Confirmed);
+
+    let sconn = connected_server(&mut server);
+    assert_eq!(client.version(), COMPAT_VERSION);
+    assert_eq!(sconn.borrow().version(), COMPAT_VERSION);
 }
 
 #[test]

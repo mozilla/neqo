@@ -100,7 +100,7 @@ pub enum QuicVersion {
 }
 
 impl QuicVersion {
-    pub fn as_u32(self) -> Version {
+    pub const fn as_u32(self) -> Version {
         match self {
             Self::Version2 => 0xff020000,
             Self::Version1 => 1,
