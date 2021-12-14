@@ -107,6 +107,10 @@ impl ConnectionParameters {
         self.initial_version
     }
 
+    pub(crate) fn override_initial_version(&mut self, version: QuicVersion) {
+        self.initial_version = version;
+    }
+
     pub fn compatible_versions<'a>(
         base: QuicVersion,
         all_versions: impl IntoIterator<Item = &'a QuicVersion>,

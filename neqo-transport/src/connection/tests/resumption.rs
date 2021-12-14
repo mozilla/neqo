@@ -6,7 +6,7 @@
 
 use super::{
     connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
-    send_something, AT_LEAST_PTO,
+    resumed_server, send_something, AT_LEAST_PTO,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 
@@ -27,7 +27,7 @@ fn resume() {
     client
         .enable_resumption(now(), token)
         .expect("should set token");
-    let mut server = default_server();
+    let mut server = resumed_server(&client);
     connect(&mut client, &mut server);
     assert!(client.tls_info().unwrap().resumed());
     assert!(server.tls_info().unwrap().resumed());
@@ -58,13 +58,13 @@ fn remember_smoothed_rtt() {
     let token = get_tokens(&mut client).pop().unwrap();
 
     let mut client = default_client();
-    let mut server = default_server();
     client.enable_resumption(now, token).unwrap();
     assert_eq!(
         client.paths.rtt(),
         RTT1,
         "client should remember previous RTT"
     );
+    let mut server = resumed_server(&client);
 
     connect_with_rtt(&mut client, &mut server, now, RTT2);
     assert_eq!(
@@ -89,7 +89,7 @@ fn address_validation_token_resume() {
     let token = exchange_ticket(&mut client, &mut server, now);
     let mut client = default_client();
     client.enable_resumption(now, token).unwrap();
-    let mut server = default_server();
+    let mut server = resumed_server(&client);
 
     // Grab an Initial packet from the client.
     let dgram = client.process(None, now).dgram();

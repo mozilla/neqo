@@ -1140,6 +1140,8 @@ impl Connection {
                 conn_params,
                 now,
             )?;
+            c.conn_params
+                .override_initial_version(self.conn_params.get_initial_version());
             mem::swap(self, &mut c);
             Ok(())
         } else {
@@ -2387,16 +2389,17 @@ impl Connection {
                 current,
                 other,
             );
-            if self.role == Role::Client && self.version().as_u32() != current {
+            if self.role == Role::Server {
+                // 1. A server doesn't validate further, it acts on this info.
+                Ok(())
+            } else if self.version().as_u32() != current {
                 qinfo!([self], "validate_versions: current version mismatch");
                 Err(Error::VersionNegotiation)
-            } else if self.role == Role::Server
-                || self
-                    .conn_params
-                    .get_initial_version()
-                    .compatible(self.version)
+            } else if self
+                .conn_params
+                .get_initial_version()
+                .compatible(self.version)
             {
-                // 1. A server doesn't validate further, it acts on this info.
                 // 2. Compatible upgrade is OK.
                 Ok(())
             } else {

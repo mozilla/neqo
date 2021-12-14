@@ -7,8 +7,8 @@
 use super::super::{Connection, Output, State};
 use super::{
     assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    get_tokens, handshake, maybe_authenticate, send_something, CountingConnectionIdGenerator,
-    AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    get_tokens, handshake, maybe_authenticate, resumed_server, send_something,
+    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
 };
 use crate::connection::AddressValidation;
 use crate::events::ConnectionEvent;
@@ -356,7 +356,7 @@ fn reorder_05rtt_with_0rtt() {
     let token = get_tokens(&mut client).pop().unwrap();
     let mut client = default_client();
     client.enable_resumption(now, token).unwrap();
-    let mut server = default_server();
+    let mut server = resumed_server(&client);
 
     // Send ClientHello and some 0-RTT.
     let c1 = send_something(&mut client, now);

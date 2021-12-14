@@ -455,7 +455,7 @@ fn version_negotiation() {
     let dgram = client.process_output(now()).dgram();
     assert!(dgram.is_some());
     let dgram = server.process(dgram, now()).dgram();
-    assertions::assert_vn(&dgram.as_ref().unwrap());
+    assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(dgram.unwrap(), now());
 
     let sconn = connect(&mut client, &mut server);
@@ -463,6 +463,8 @@ fn version_negotiation() {
     assert_eq!(sconn.borrow().version(), VN_VERSION);
 }
 
+/// Test that the client can pick a version from a Version Negotiation packet,
+/// which is then subsequently upgraded to a compatible version by the server.
 #[test]
 fn version_negotiation_and_compatible() {
     const ORIG_VERSION: QuicVersion = QuicVersion::Draft29;
@@ -487,20 +489,20 @@ fn version_negotiation_and_compatible() {
     // Version Negotiation
     let dgram = client.process_output(now()).dgram();
     assert!(dgram.is_some());
-    assertions::assert_version(&dgram.as_ref().unwrap(), ORIG_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), ORIG_VERSION.as_u32());
     let dgram = server.process(dgram, now()).dgram();
-    assertions::assert_vn(&dgram.as_ref().unwrap());
+    assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(dgram.unwrap(), now());
 
     let dgram = client.process(None, now()).dgram(); // ClientHello
-    assertions::assert_version(&dgram.as_ref().unwrap(), VN_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), VN_VERSION.as_u32());
     let dgram = server.process(dgram, now()).dgram(); // ServerHello...
-    assertions::assert_version(&dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
     client.process_input(dgram.unwrap(), now());
 
     client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process_output(now()).dgram();
-    assertions::assert_version(&dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram(); // ACK + HANDSHAKE_DONE + NST
     client.process_input(dgram.unwrap(), now());

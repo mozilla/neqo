@@ -431,11 +431,6 @@ impl TransportParameters {
         current: QuicVersion,
         other_versions: &[QuicVersion],
     ) {
-        // Don't add a transport parameter if we're using a draft version.
-        if current.is_draft() {
-            return;
-        }
-
         let rbuf = random(4);
         let mut other = Vec::with_capacity(other_versions.len() + 1);
         let mut dec = Decoder::new(&rbuf);
@@ -604,32 +599,52 @@ impl TransportParametersHandler {
     fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) -> Res<()> {
         if let Some((current, other)) = remote_tp.get_versions() {
             qtrace!(
-                "Compatible versions {:x} {:x?}; enabled {:?}",
+                "Peer versions: {:x} {:x?}; enabled {:?}",
                 current,
                 other,
-                self.all_versions
+                self.all_versions,
             );
 
             let mut compatible =
                 ConnectionParameters::compatible_versions(self.version, &self.all_versions);
             if self.role == Role::Client {
                 let chosen = QuicVersion::try_from(current)?;
-                if !compatible.any(|&v| v == chosen) {
-                    return Err(Error::TransportParameterError);
-                }
-            } else if let Some(preferred) =
-                ConnectionParameters::preferred_version(compatible, other)
-            {
-                if preferred != self.version {
-                    qinfo!("Compatible upgrade {:?} ==> {:?}", self.version, preferred);
-                    self.version = preferred;
-                    self.local.compatible_upgrade(preferred);
+                if compatible.any(|&v| v == chosen) {
+                    Ok(())
+                } else {
+                    qinfo!(
+                        "Chosen version {:x} is not compatible with initial version {:x}",
+                        current,
+                        self.version.as_u32(),
+                    );
+                    Err(Error::TransportParameterError)
                 }
             } else {
-                return Err(Error::TransportParameterError);
+                if current != self.version.as_u32() {
+                    qinfo!(
+                        "Current version {:x} != own version {:x}",
+                        current,
+                        self.version.as_u32(),
+                    );
+                    return Err(Error::TransportParameterError);
+                }
+
+                if let Some(preferred) = ConnectionParameters::preferred_version(compatible, other)
+                {
+                    if preferred != self.version {
+                        qinfo!("Compatible upgrade {:?} ==> {:?}", self.version, preferred);
+                        self.version = preferred;
+                        self.local.compatible_upgrade(preferred);
+                    }
+                    Ok(())
+                } else {
+                    qinfo!("Unable to find any compatible version");
+                    Err(Error::TransportParameterError)
+                }
             }
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 

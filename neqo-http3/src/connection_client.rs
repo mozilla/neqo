@@ -823,8 +823,8 @@ mod tests {
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
-        ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, StreamId,
-        StreamType, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        ConnectionError, ConnectionEvent, ConnectionParameters, Output, QuicVersion, State,
+        StreamId, StreamType, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::mem;
@@ -856,6 +856,10 @@ mod tests {
             addr(),
             addr(),
             Http3Parameters::default()
+                .connection_parameters(
+                    ConnectionParameters::default()
+                        .versions(QuicVersion::default(), vec![QuicVersion::default()]),
+                )
                 .max_table_size_encoder(max_table_size)
                 .max_table_size_decoder(max_table_size)
                 .max_blocked_streams(100)
