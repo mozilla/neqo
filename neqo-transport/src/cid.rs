@@ -333,7 +333,6 @@ pub type RemoteConnectionIdEntry = ConnectionIdEntry<[u8; 16]>;
 #[derive(Debug, Default)]
 pub struct ConnectionIdStore<SRT: Clone + PartialEq> {
     cids: SmallVec<[ConnectionIdEntry<SRT>; 8]>,
-    retired: Vec<[ConnectionIdEntry<SRT>; 8]>,
 }
 
 impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {

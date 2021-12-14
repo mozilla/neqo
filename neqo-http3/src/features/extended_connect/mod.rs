@@ -66,7 +66,6 @@ impl From<ExtendedConnectType> for HSettingType {
 
 #[derive(Debug)]
 pub struct ExtendedConnectFeature {
-    connect_type: ExtendedConnectType,
     feature_negotiation: NegotiationState,
     sessions: HashMap<StreamId, Rc<RefCell<ExtendedConnectSession>>>,
 }
@@ -76,7 +75,6 @@ impl ExtendedConnectFeature {
     pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
         Self {
             feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
-            connect_type,
             sessions: HashMap::new(),
         }
     }
