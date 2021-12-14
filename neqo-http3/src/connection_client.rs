@@ -289,8 +289,8 @@ impl Http3Client {
         output
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [Http3Client::process_output()]-call,
-    /// returns if the priority got changed
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next `Http3Client::process_output()` call.
+    /// Returns if the priority got changed.
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist
     ///

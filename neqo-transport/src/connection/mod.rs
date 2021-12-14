@@ -691,8 +691,8 @@ impl Connection {
         let tps = &self.tps;
         if let Agent::Server(ref mut s) = self.crypto.tls {
             let mut enc = Encoder::default();
-            enc.encode_vvec_with(|mut enc_inner| {
-                tps.borrow().local.encode(&mut enc_inner);
+            enc.encode_vvec_with(|enc_inner| {
+                tps.borrow().local.encode(enc_inner);
             });
             enc.encode(extra);
             let records = s.send_ticket(now, &enc)?;
