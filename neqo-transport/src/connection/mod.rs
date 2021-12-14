@@ -1118,25 +1118,29 @@ impl Connection {
     }
 
     /// Perform version negotiation.
-    fn version_negotiation(&mut self, supported: &[Version], dcid: &[u8]) -> Res<()> {
+    fn version_negotiation(&mut self, supported: &[Version], now: Instant) -> Res<()> {
         debug_assert_eq!(self.role, Role::Client);
 
         if let Some(version) = self.conn_params.get_preferred_version(supported) {
             assert_ne!(self.version, version);
 
-            qdebug!([self], "Version negotiation: trying {:?}", version);
-            self.version = version;
-            let server_name = self.crypto.server_name().unwrap().to_owned();
-            let protocols = self.crypto.protocols().to_owned();
-            self.crypto = Crypto::new(
-                version,
-                Agent::from(Client::new(server_name)?),
-                protocols,
-                Rc::clone(&self.tps),
+            qinfo!([self], "Version negotiation: trying {:?}", version);
+            let local_addr = self.paths.primary().borrow().local_address();
+            let remote_addr = self.paths.primary().borrow().remote_address();
+            let conn_params = self
+                .conn_params
+                .clone()
+                .versions(version, self.conn_params.get_versions().to_vec());
+            let mut c = Self::new_client(
+                self.crypto.server_name().unwrap(),
+                self.crypto.protocols(),
+                self.cid_manager.generator(),
+                local_addr,
+                remote_addr,
+                conn_params,
+                now,
             )?;
-            self.tps.borrow_mut().set_version(version);
-            let compatible = self.conn_params.get_compatible_with(version);
-            self.crypto.states.init(compatible, Role::Client, dcid);
+            mem::swap(self, &mut c);
             Ok(())
         } else {
             qinfo!([self], "Version negotiation: failed with {:?}", supported);
@@ -1212,12 +1216,18 @@ impl Connection {
                         if versions.is_empty()
                             || versions.contains(&self.version().as_u32())
                             || versions.contains(&0)
-                            || packet.dcid() != self.odcid().unwrap()
+                            || packet.scid() != self.odcid().unwrap()
                             || matches!(
                                 self.address_validation,
                                 AddressValidationInfo::Retry { .. }
                             )
                         {
+                            qtrace!(
+                                "XXX {:x?} {} {}",
+                                versions,
+                                packet.scid(),
+                                self.odcid().unwrap()
+                            );
                             // Ignore VersionNegotiation packets that contain the current version.
                             // Or don't have the right connection ID.
                             // Or are received after a Retry.
@@ -1225,7 +1235,7 @@ impl Connection {
                             return Ok(PreprocessResult::End);
                         }
 
-                        self.version_negotiation(&versions, packet.dcid())?;
+                        self.version_negotiation(&versions, now)?;
                         return Ok(PreprocessResult::End);
                     }
                     Err(_) => {

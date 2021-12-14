@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use super::super::{ConnectionError, Output, State};
-use super::{connect, default_client, default_server, new_server};
+use super::{connect, default_client, default_server, new_client};
 use crate::packet::PACKET_BIT_LONG;
 use crate::{ConnectionParameters, Error, QuicVersion};
 
@@ -58,8 +58,8 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     let mut encoder = Encoder::default();
     encoder.encode_byte(PACKET_BIT_LONG);
     encoder.encode(&[0; 4]); // Zero version == VN.
-    encoder.encode_vec(1, dst_cid);
     encoder.encode_vec(1, src_cid);
+    encoder.encode_vec(1, dst_cid);
 
     for v in versions {
         encoder.encode_uint(4, *v);
@@ -179,11 +179,8 @@ fn version_negotiation_not_supported() {
         .to_vec();
 
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
-
-    assert_eq!(
-        client.process(Some(Datagram::new(addr(), addr(), vn)), now(),),
-        Output::None
-    );
+    let dgram = Datagram::new(addr(), addr(), vn);
+    assert_eq!(client.process(Some(dgram), now()), Output::None);
     match client.state() {
         State::Closed(err) => {
             assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation));
@@ -196,14 +193,14 @@ fn version_negotiation_not_supported() {
 fn version_negotiation_bad_cid() {
     let mut client = default_client();
     // Start the handshake.
-    let initial_pkt = client
+    let mut initial_pkt = client
         .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
 
-    let mut vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
-    vn[6] ^= 0xc4;
+    initial_pkt[6] ^= 0xc4;
+    let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
 
     let dgram = Datagram::new(addr(), addr(), vn);
     let delay = client.process(Some(dgram), now()).callback();
@@ -215,12 +212,31 @@ fn version_negotiation_bad_cid() {
 #[test]
 fn compatible_upgrade() {
     let mut client = default_client();
-    let mut server = new_server(ConnectionParameters::default().versions(
-        QuicVersion::Version1,
-        vec![QuicVersion::Version2, QuicVersion::Version1],
-    ));
+    let mut server = default_server();
 
     connect(&mut client, &mut server);
     assert_eq!(client.version(), QuicVersion::Version2);
     assert_eq!(server.version(), QuicVersion::Version2);
+}
+
+/// Test that connecting with only one version works.
+/// This only works at the client end as our Connection doesn't generate
+/// a Version Negotiation packet.
+fn one_version_only(version: QuicVersion) {
+    let mut client = new_client(ConnectionParameters::default().versions(version, vec![version]));
+    let mut server = default_server();
+
+    connect(&mut client, &mut server);
+    assert_eq!(client.version(), version);
+    assert_eq!(server.version(), version);
+}
+
+#[test]
+fn just_v1_client() {
+    one_version_only(QuicVersion::Version1);
+}
+
+#[test]
+fn just_v2_client() {
+    one_version_only(QuicVersion::Version2);
 }

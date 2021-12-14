@@ -20,6 +20,20 @@ fn assert_default_version(dec: &mut Decoder) {
     assert!(version == QuicVersion::Version1 || version == QuicVersion::Version2);
 }
 
+/// Simple checks for a Version Negotiation packet.
+/// # Panics
+/// If this is clearly not a Version Negotiation packet.
+pub fn assert_vn(payload: &[u8]) {
+    let mut dec = Decoder::from(payload);
+    let first = dec.decode_byte().unwrap();
+    assert!(first & 0x80 == 0x80, "is long header");
+    let v = dec.decode_uint(4).unwrap();
+    assert_eq!(v, 0);
+    dec.skip_vec(1); // DCID
+    dec.skip_vec(1); // SCID
+    assert_eq!(dec.remaining() % 4, 0);
+}
+
 /// Do a simple decode of the datagram to verify that it is coalesced.
 /// # Panics
 /// If the tests fail.

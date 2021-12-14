@@ -26,8 +26,8 @@ use std::mem;
 use std::ops::Range;
 use std::rc::Rc;
 
-// Different than the one in the fixture, which is a single connection.
-pub fn default_server() -> Server {
+/// Create a server.  This is different than the one in the fixture, which is a single connection.
+pub fn new_server(params: ConnectionParameters) -> Server {
     Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
@@ -35,9 +35,14 @@ pub fn default_server() -> Server {
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
+        params,
     )
     .expect("should create a server")
+}
+
+/// Create a server.  This is different than the one in the fixture, which is a single connection.
+pub fn default_server() -> Server {
+    new_server(ConnectionParameters::default())
 }
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.

@@ -450,6 +450,10 @@ impl ConnectionIdManager {
         }
     }
 
+    pub fn generator(&self) -> Rc<RefCell<dyn ConnectionIdGenerator>> {
+        Rc::clone(&self.generator)
+    }
+
     pub fn decoder(&self) -> ConnectionIdDecoderRef {
         ConnectionIdDecoderRef {
             generator: self.generator.deref().borrow(),

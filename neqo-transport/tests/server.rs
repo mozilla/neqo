@@ -11,7 +11,7 @@ mod common;
 
 use common::{
     apply_header_protection, client_initial_aead_and_hp, connect, connected_server,
-    decode_initial_header, default_server, get_ticket, remove_header_protection,
+    decode_initial_header, default_server, get_ticket, new_server, remove_header_protection,
 };
 
 use neqo_common::{qtrace, Datagram, Decoder, Encoder};
@@ -401,7 +401,7 @@ fn bad_client_initial() {
 }
 
 #[test]
-fn version_negotiation() {
+fn version_negotiation_ignored() {
     let mut server = default_server();
     let mut client = default_client();
 
@@ -434,6 +434,30 @@ fn version_negotiation() {
     let res = client.process(Some(vn), now());
     assert!(res.callback() > Duration::new(0, 120));
     assert_eq!(client.state(), &State::WaitInitial);
+}
+
+/// Test that if the server doesn't support a version it will signal with a
+/// Version Negotiation packet and the client will use that version.
+#[test]
+fn version_negotiation() {
+    const VN_VERSION: QuicVersion = QuicVersion::Draft29;
+    assert_ne!(VN_VERSION, QuicVersion::default());
+    assert!(!QuicVersion::default().compatible(VN_VERSION));
+
+    let mut server =
+        new_server(ConnectionParameters::default().versions(VN_VERSION, vec![VN_VERSION]));
+    let mut client = default_client();
+
+    // `connect()` runs a fixed exchange, so manually run the Version Negotiation.
+    let dgram = client.process_output(now()).dgram();
+    assert!(dgram.is_some());
+    let dgram = server.process(dgram, now()).dgram();
+    assertions::assert_vn(&dgram.as_ref().unwrap());
+    client.process_input(dgram.unwrap(), now());
+
+    let sconn = connect(&mut client, &mut server);
+    assert_eq!(client.version(), VN_VERSION);
+    assert_eq!(sconn.borrow().version(), VN_VERSION);
 }
 
 #[test]
