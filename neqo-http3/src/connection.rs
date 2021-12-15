@@ -605,14 +605,7 @@ impl Http3Connection {
             request.target,
         );
         let id = self.create_bidi_transport_stream(conn)?;
-        self.fetch_with_stream(
-            id,
-            conn,
-            send_events,
-            recv_events,
-            push_handler,
-            request,
-        )?;
+        self.fetch_with_stream(id, conn, send_events, recv_events, push_handler, request)?;
         Ok(id)
     }
 
@@ -647,7 +640,11 @@ impl Http3Connection {
     {
         let final_headers = Http3Connection::create_fetch_headers(request)?;
 
-        let stream_type = if request.connect_type.is_some() { Http3StreamType::ExtendedConnect } else { Http3StreamType::Http };
+        let stream_type = if request.connect_type.is_some() {
+            Http3StreamType::ExtendedConnect
+        } else {
+            Http3StreamType::Http
+        };
 
         let mut send_message = SendMessage::new(
             MessageType::Request,
