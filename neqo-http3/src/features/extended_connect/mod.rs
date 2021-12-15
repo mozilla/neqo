@@ -12,7 +12,7 @@ pub mod webtransport;
 use crate::client_events::Http3ClientEvents;
 use crate::features::NegotiationState;
 use crate::settings::{HSettingType, HSettings};
-use crate::{Http3StreamInfo, Http3StreamType};
+use crate::{CloseType, Http3StreamInfo, Http3StreamType};
 use neqo_transport::{AppError, StreamId};
 pub use session::ExtendedConnectSession;
 use std::cell::RefCell;
@@ -21,14 +21,31 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum SessionCloseReason {
+    Error(AppError),
+    Status(u16),
+    Clean,
+}
+
+impl From<CloseType> for SessionCloseReason {
+    fn from(close_type: CloseType) -> SessionCloseReason {
+        match close_type {
+            CloseType::ResetApp(e) | CloseType::ResetRemote(e) | CloseType::LocalError(e) => {
+                SessionCloseReason::Error(e)
+            }
+            CloseType::Done => SessionCloseReason::Clean,
+        }
+    }
+}
+
 pub trait ExtendedConnectEvents: Debug {
-    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u32);
+    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u16);
     fn session_end(
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
-        error: Option<AppError>,
-        status: Option<u32>,
+        reason: SessionCloseReason,
     );
     fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo);
 }

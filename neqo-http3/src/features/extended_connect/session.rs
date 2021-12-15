@@ -6,7 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use super::{ExtendedConnectEvents, ExtendedConnectType};
+use super::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason};
 use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
 };
@@ -20,13 +20,14 @@ use std::rc::Rc;
 #[derive(Debug, PartialEq)]
 enum SessionState {
     Negotiating,
-    Active(StreamId),
+    Active,
     Done,
 }
 
 #[derive(Debug)]
 pub struct ExtendedConnectSession {
     connect_type: ExtendedConnectType,
+    session_id: StreamId,
     state: SessionState,
     events: Box<dyn ExtendedConnectEvents>,
     send_streams: BTreeSet<StreamId>,
@@ -48,12 +49,18 @@ impl ExtendedConnectSession {
     #[must_use]
     pub fn new(
         connect_type: ExtendedConnectType,
+        session_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
         role: Role,
     ) -> Self {
         Self {
             connect_type,
-            state: SessionState::Negotiating,
+            session_id,
+            state: if role == Role::Client {
+                SessionState::Negotiating
+            } else {
+                SessionState::Active
+            },
             events,
             send_streams: BTreeSet::new(),
             recv_streams: BTreeSet::new(),
@@ -70,32 +77,75 @@ impl ExtendedConnectSession {
         if let CloseType::ResetApp(_) = close_type {
             return;
         }
-        self.events
-            .session_end(self.connect_type, stream_id, close_type.error(), None);
+        self.events.session_end(
+            self.connect_type,
+            stream_id,
+            SessionCloseReason::from(close_type),
+        );
     }
 
-    pub fn negotiation_done(&mut self, stream_id: StreamId, status: Option<u32>) {
+    /// # Panics
+    /// This cannot panic because headers are checked before this function called.
+    pub fn headers_ready(
+        &mut self,
+        stream_id: StreamId,
+        headers: &[Header],
+        interim: bool,
+        fin: bool,
+    ) {
         if self.state == SessionState::Done {
             return;
         }
-        self.state = if let Some(s) = status {
-            if (200..300).contains(&s) {
-                self.events.session_start(self.connect_type, stream_id, s);
-                SessionState::Active(stream_id)
-            } else {
+        qtrace!(
+            "ExtendedConnect response headers {:?}, fin={}",
+            headers,
+            fin
+        );
+
+        if interim {
+            if fin {
                 self.events
-                    .session_end(self.connect_type, stream_id, None, status);
-                SessionState::Done
+                    .session_end(self.connect_type, stream_id, SessionCloseReason::Clean);
+                self.state = SessionState::Done;
             }
         } else {
-            self.events
-                .session_end(self.connect_type, stream_id, None, None);
-            SessionState::Done
-        };
+            let status = headers
+                .iter()
+                .find_map(|h| {
+                    if h.name() == ":status" {
+                        h.value().parse::<u16>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+
+            self.state = if (200..300).contains(&status) {
+                if fin {
+                    self.events.session_end(
+                        self.connect_type,
+                        stream_id,
+                        SessionCloseReason::Clean,
+                    );
+                    SessionState::Done
+                } else {
+                    self.events
+                        .session_start(self.connect_type, stream_id, status);
+                    SessionState::Active
+                }
+            } else {
+                self.events.session_end(
+                    self.connect_type,
+                    stream_id,
+                    SessionCloseReason::Status(status),
+                );
+                SessionState::Done
+            };
+        }
     }
 
     pub fn add_stream(&mut self, stream_id: StreamId) {
-        if let SessionState::Active(session_id) = self.state {
+        if let SessionState::Active = self.state {
             if stream_id.is_bidi() {
                 self.send_streams.insert(stream_id);
                 self.recv_streams.insert(stream_id);
@@ -109,7 +159,7 @@ impl ExtendedConnectSession {
                 self.events
                     .extended_connect_new_stream(Http3StreamInfo::new(
                         stream_id,
-                        self.connect_type.get_stream_type(session_id),
+                        self.connect_type.get_stream_type(self.session_id),
                     ));
             }
         }
@@ -125,7 +175,7 @@ impl ExtendedConnectSession {
 
     #[must_use]
     pub fn is_active(&self) -> bool {
-        matches!(self.state, SessionState::Active(_))
+        matches!(self.state, SessionState::Active)
     }
 
     pub fn take_sub_streams(&mut self) -> Option<(BTreeSet<StreamId>, BTreeSet<StreamId>)> {
@@ -156,20 +206,11 @@ impl HttpRecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
         &self,
         stream_info: Http3StreamInfo,
         headers: Vec<Header>,
-        _interim: bool,
-        _fin: bool,
+        interim: bool,
+        fin: bool,
     ) {
-        qtrace!("ExtendedConnect response headers {:?}", headers);
-        self.borrow_mut().negotiation_done(
-            stream_info.stream_id(),
-            headers.iter().find_map(|h| {
-                if h.name() == ":status" {
-                    h.value().parse::<u32>().ok()
-                } else {
-                    None
-                }
-            }),
-        );
+        self.borrow_mut()
+            .headers_ready(stream_info.stream_id(), &headers, interim, fin);
     }
 }
 

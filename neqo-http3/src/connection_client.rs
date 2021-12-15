@@ -269,7 +269,6 @@ impl Http3Client {
     {
         let output = self.base_handler.fetch(
             &mut self.conn,
-            Http3StreamType::Http,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
             Some(Rc::clone(&self.push_handler)),

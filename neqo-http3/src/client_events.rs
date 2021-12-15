@@ -9,7 +9,7 @@
 use crate::connection::Http3State;
 use crate::settings::HSettingType;
 use crate::{
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType},
+    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason},
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
 };
 use neqo_common::{event::Provider as EventProvider, Header};
@@ -25,12 +25,11 @@ pub enum WebTransportEvent {
     Negotiated(bool),
     Session {
         stream_id: StreamId,
-        status: u32,
+        status: u16,
     },
     SessionClosed {
         stream_id: StreamId,
-        error: Option<AppError>,
-        status: Option<u32>,
+        reason: SessionCloseReason,
     },
     NewStream {
         stream_id: StreamId,
@@ -178,7 +177,7 @@ impl SendStreamEvents for Http3ClientEvents {
 }
 
 impl ExtendedConnectEvents for Http3ClientEvents {
-    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u32) {
+    fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u16) {
         if connect_type == ExtendedConnectType::WebTransport {
             self.insert(Http3ClientEvent::WebTransport(WebTransportEvent::Session {
                 stream_id,
@@ -193,16 +192,11 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         &self,
         connect_type: ExtendedConnectType,
         stream_id: StreamId,
-        error: Option<AppError>,
-        status: Option<u32>,
+        reason: SessionCloseReason,
     ) {
         if connect_type == ExtendedConnectType::WebTransport {
             self.insert(Http3ClientEvent::WebTransport(
-                WebTransportEvent::SessionClosed {
-                    stream_id,
-                    error,
-                    status,
-                },
+                WebTransportEvent::SessionClosed { stream_id, reason },
             ));
         } else {
             unreachable!("There are no other types.");
