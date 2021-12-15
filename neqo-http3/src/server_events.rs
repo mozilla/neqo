@@ -8,7 +8,9 @@
 
 use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
-use crate::{Http3StreamInfo, Http3StreamType, Priority, Res};
+use crate::{
+    features::extended_connect::SessionCloseReason, Http3StreamInfo, Http3StreamType, Priority, Res,
+};
 use neqo_common::{qdebug, qinfo, Header};
 use neqo_transport::server::ActiveConnectionRef;
 use neqo_transport::{AppError, Connection, StreamId, StreamType};
@@ -314,7 +316,7 @@ pub enum WebTransportServerEvent {
     },
     SessionClosed {
         session: WebTransportRequest,
-        error: Option<AppError>,
+        reason: SessionCloseReason,
     },
     NewStream(Http3OrWebTransportStream),
 }
@@ -473,10 +475,10 @@ impl Http3ServerEvents {
     pub(crate) fn webtransport_session_closed(
         &self,
         session: WebTransportRequest,
-        error: Option<AppError>,
+        reason: SessionCloseReason,
     ) {
         self.insert(Http3ServerEvent::WebTransport(
-            WebTransportServerEvent::SessionClosed { session, error },
+            WebTransportServerEvent::SessionClosed { session, reason },
         ));
     }
 

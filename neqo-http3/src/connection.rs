@@ -590,7 +590,6 @@ impl Http3Connection {
     pub fn fetch<'b, 't, T>(
         &mut self,
         conn: &mut Connection,
-        stream_type: Http3StreamType,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
         push_handler: Option<Rc<RefCell<PushController>>>,
@@ -605,6 +604,19 @@ impl Http3Connection {
             request.method,
             request.target,
         );
+        let id = self.create_bidi_transport_stream(conn)?;
+        self.fetch_with_stream(
+            id,
+            conn,
+            send_events,
+            recv_events,
+            push_handler,
+            request,
+        )?;
+        Ok(id)
+    }
+
+    fn create_bidi_transport_stream(&self, conn: &mut Connection) -> Res<StreamId> {
         // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
         match self.state() {
             Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
@@ -618,13 +630,29 @@ impl Http3Connection {
             .stream_create(StreamType::BiDi)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         conn.stream_keep_alive(id, true)?;
+        Ok(id)
+    }
 
+    fn fetch_with_stream<'b, 't, T>(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut Connection,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn HttpRecvStreamEvents>,
+        push_handler: Option<Rc<RefCell<PushController>>>,
+        request: &RequestDescription<'b, 't, T>,
+    ) -> Res<()>
+    where
+        T: AsRequestTarget<'t> + ?Sized + Debug,
+    {
         let final_headers = Http3Connection::create_fetch_headers(request)?;
+
+        let stream_type = if request.connect_type.is_some() { Http3StreamType::ExtendedConnect } else { Http3StreamType::Http };
 
         let mut send_message = SendMessage::new(
             MessageType::Request,
             stream_type,
-            id,
+            stream_id,
             self.qpack_encoder.clone(),
             send_events,
         );
@@ -635,13 +663,13 @@ impl Http3Connection {
             .send_headers(&final_headers, conn)?;
 
         self.add_streams(
-            id,
+            stream_id,
             Box::new(send_message),
             Box::new(RecvMessage::new(
                 &RecvMessageInfo {
                     message_type: MessageType::Response,
                     stream_type,
-                    stream_id: id,
+                    stream_id,
                     header_frame_type_read: false,
                 },
                 Rc::clone(&self.qpack_decoder),
@@ -654,10 +682,10 @@ impl Http3Connection {
         // Call immediately send so that at least headers get sent. This will make Firefox faster, since
         // it can send request body immediatly in most cases and does not need to do a complete process loop.
         self.send_streams
-            .get_mut(&id)
+            .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .send(conn)?;
-        Ok(id)
+        Ok(())
     }
 
     /// Stream data are read directly into a buffer supplied as a parameter of this function to avoid copying
@@ -810,14 +838,17 @@ impl Http3Connection {
             return Err(Error::Unavailable);
         }
 
+        let id = self.create_bidi_transport_stream(conn)?;
+
         let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(
             ExtendedConnectType::WebTransport,
+            id,
             events,
             self.role,
         )));
-        let id = self.fetch(
+        self.fetch_with_stream(
+            id,
             conn,
-            Http3StreamType::ExtendedConnect,
             Box::new(extended_conn.clone()),
             Box::new(extended_conn.clone()),
             None,
@@ -871,7 +902,7 @@ impl Http3Connection {
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
-                    // TODO: add a timer to clean up the recv_srteam if the peer does not do that in a short time.
+                    // TODO issue 1294: add a timer to clean up the recv_stream if the peer does not do that in a short time.
                     self.streams_with_pending_data.insert(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
@@ -886,6 +917,7 @@ impl Http3Connection {
                 {
                     let extended_conn = Rc::new(RefCell::new(ExtendedConnectSession::new(
                         ExtendedConnectType::WebTransport,
+                        stream_id,
                         events,
                         self.role,
                     )));
@@ -895,13 +927,11 @@ impl Http3Connection {
                     r.http_stream()
                         .unwrap()
                         .set_new_listener(Box::new(extended_conn.clone()));
-                    extended_conn
-                        .borrow_mut()
-                        .negotiation_done(stream_id, Some(200));
                     self.webtransport.insert(stream_id, extended_conn);
                     self.streams_with_pending_data.insert(stream_id);
                 } else {
                     self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
+                    return Err(Error::InvalidStreamId);
                 }
                 Ok(())
             }
