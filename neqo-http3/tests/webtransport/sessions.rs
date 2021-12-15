@@ -106,22 +106,20 @@ fn wt_session_respone_with_1xx() {
 
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        match event {
-            Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                session,
-                headers,
-            }) => {
-                assert!(
-                    headers
+        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+            session,
+            headers,
+        }) = event
+        {
+            assert!(
+                headers
+                    .iter()
+                    .any(|h| h.name() == ":method" && h.value() == "CONNECT")
+                    && headers
                         .iter()
-                        .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                        && headers
-                            .iter()
-                            .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-                );
-                wt_server_session = Some(session);
-            }
-            _ => {}
+                        .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
+            );
+            wt_server_session = Some(session);
         }
     }
 
@@ -160,22 +158,20 @@ fn wt_session_respone_200_with_fin() {
     wt.exchange_packets();
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        match event {
-            Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                session,
-                headers,
-            }) => {
-                assert!(
-                    headers
+        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+            session,
+            headers,
+        }) = event
+        {
+            assert!(
+                headers
+                    .iter()
+                    .any(|h| h.name() == ":method" && h.value() == "CONNECT")
+                    && headers
                         .iter()
-                        .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                        && headers
-                            .iter()
-                            .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-                );
-                wt_server_session = Some(session);
-            }
-            _ => {}
+                        .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
+            );
+            wt_server_session = Some(session);
         }
     }
 
