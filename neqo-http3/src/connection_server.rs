@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::connection::{Http3Connection, Http3State};
-use crate::hframe::HFrame;
+use crate::frames::HFrame;
 use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};

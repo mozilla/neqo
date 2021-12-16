@@ -12,7 +12,7 @@ use crate::features::extended_connect::{
     webtransport::{WebTransportRecvStream, WebTransportSendStream},
     ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectSession, ExtendedConnectType,
 };
-use crate::hframe::HFrame;
+use crate::frames::HFrame;
 use crate::push_controller::PushController;
 use crate::qpack_decoder_receiver::DecoderRecvStream;
 use crate::qpack_encoder_receiver::EncoderRecvStream;

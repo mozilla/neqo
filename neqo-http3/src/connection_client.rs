@@ -6,7 +6,7 @@
 
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{Http3Connection, Http3State, RequestDescription};
-use crate::hframe::HFrame;
+use crate::frames::HFrame;
 use crate::push_controller::{PushController, RecvPushEvents};
 use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::request_target::AsRequestTarget;
@@ -799,7 +799,7 @@ mod tests {
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
         Http3Parameters, Http3State, Rc, RefCell,
     };
-    use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
+    use crate::frames::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::qpack_encoder_receiver::EncoderRecvStream;
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
     use crate::{Http3Server, Priority, RecvStream};

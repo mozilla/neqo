@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hframe::HFrame;
+use crate::frames::HFrame;
 use crate::{
     headers_checks::{headers_valid, is_interim, trailers_valid},
     qlog, BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
