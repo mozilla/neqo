@@ -4,24 +4,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::hframe::{
-    HFrame, H3_FRAME_TYPE_CANCEL_PUSH, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_GOAWAY,
-    H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_MAX_PUSH_ID, H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH,
-    H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST, H3_FRAME_TYPE_PUSH_PROMISE, H3_FRAME_TYPE_SETTINGS,
-    H3_RESERVED_FRAME_TYPES,
-};
-use crate::settings::HSettings;
+use crate::{Error, Res};
 use neqo_common::{
     hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
     IncrementalDecoderUint,
 };
 use neqo_transport::{Connection, StreamId};
 use std::convert::TryFrom;
-use std::mem;
-
-use crate::{Error, Priority, Res};
+use std::fmt::Debug;
 
 const MAX_READ_SIZE: usize = 4096;
+
+pub trait FrameDecoder<T> {
+    fn is_known_type(frame_type: u64) -> bool;
+    /// # Errors
+    /// Returns `HttpFrameUnexpected` if frames is not alowed, i.e. is a `H3_RESERVED_FRAME_TYPES`.
+    fn frame_type_allowed(frame_type: u64) -> Res<()>;
+    /// # Errors
+    /// If a frame cannot be properly decoded.
+    fn decode(frame_type: u64, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;
+}
 
 #[derive(Clone, Debug)]
 enum FrameReaderState {
@@ -31,12 +33,12 @@ enum FrameReaderState {
     UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct FrameReader {
     state: FrameReaderState,
-    hframe_type: u64,
-    hframe_len: u64,
-    payload: Vec<u8>,
+    frame_type: u64,
+    frame_len: u64,
 }
 
 impl Default for FrameReader {
@@ -52,21 +54,19 @@ impl FrameReader {
             state: FrameReaderState::GetType {
                 decoder: IncrementalDecoderUint::default(),
             },
-            hframe_type: 0,
-            hframe_len: 0,
-            payload: Vec::new(),
+            frame_type: 0,
+            frame_len: 0,
         }
     }
 
     #[must_use]
-    pub fn new_with_type(hframe_type: u64) -> Self {
+    pub fn new_with_type(frame_type: u64) -> Self {
         Self {
             state: FrameReaderState::GetLength {
                 decoder: IncrementalDecoderUint::default(),
             },
-            hframe_type,
-            hframe_len: 0,
-            payload: Vec::new(),
+            frame_type,
+            frame_len: 0,
         }
     }
 
@@ -98,11 +98,11 @@ impl FrameReader {
     /// # Errors
     /// May return `HttpFrame` if a frame cannot be decoded.
     /// and `TransportStreamDoesNotExist` if `stream_recv` fails.
-    pub fn receive(
+    pub fn receive<T: FrameDecoder<T>>(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-    ) -> Res<(Option<HFrame>, bool)> {
+    ) -> Res<(Option<T>, bool)> {
         loop {
             let to_read = std::cmp::min(self.min_remaining(), MAX_READ_SIZE);
             let mut buf = vec![0; to_read];
@@ -118,7 +118,7 @@ impl FrameReader {
                         amount,
                         f
                     );
-                    (self.consume(Decoder::from(&buf[..amount]))?, true, f)
+                    (self.consume::<T>(Decoder::from(&buf[..amount]))?, true, f)
                 }
             };
 
@@ -142,78 +142,32 @@ impl FrameReader {
 
     /// # Errors
     /// May return `HttpFrame` if a frame cannot be decoded.
-    fn consume(&mut self, mut input: Decoder) -> Res<Option<HFrame>> {
+    fn consume<T: FrameDecoder<T>>(&mut self, mut input: Decoder) -> Res<Option<T>> {
         match &mut self.state {
             FrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {
                     qtrace!("FrameReader::receive: read frame type {}", v);
-                    self.hframe_type = v;
-                    if H3_RESERVED_FRAME_TYPES.contains(&self.hframe_type) {
-                        return Err(Error::HttpFrameUnexpected);
-                    }
-                    self.state = FrameReaderState::GetLength {
-                        decoder: IncrementalDecoderUint::default(),
-                    };
+                    self.frame_type_decoded::<T>(v)?;
                 }
             }
-
             FrameReaderState::GetLength { decoder } => {
                 if let Some(len) = decoder.consume(&mut input) {
                     qtrace!(
                         "FrameReader::receive: frame type {} length {}",
-                        self.hframe_type,
+                        self.frame_type,
                         len
                     );
-                    self.hframe_len = len;
-                    self.state = match self.hframe_type {
-                        // DATA payload are left on the quic stream and picked up separately
-                        H3_FRAME_TYPE_DATA => {
-                            return Ok(Some(self.get_frame()?));
-                        }
-
-                        // for other frames get all data before decoding.
-                        H3_FRAME_TYPE_CANCEL_PUSH
-                        | H3_FRAME_TYPE_SETTINGS
-                        | H3_FRAME_TYPE_GOAWAY
-                        | H3_FRAME_TYPE_MAX_PUSH_ID
-                        | H3_FRAME_TYPE_PUSH_PROMISE
-                        | H3_FRAME_TYPE_HEADERS
-                        | H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST
-                        | H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH => {
-                            if len == 0 {
-                                return Ok(Some(self.get_frame()?));
-                            }
-                            FrameReaderState::GetData {
-                                decoder: IncrementalDecoderBuffer::new(
-                                    usize::try_from(len).or(Err(Error::HttpFrame))?,
-                                ),
-                            }
-                        }
-                        _ => {
-                            if len == 0 {
-                                FrameReaderState::GetType {
-                                    decoder: IncrementalDecoderUint::default(),
-                                }
-                            } else {
-                                FrameReaderState::UnknownFrameDischargeData {
-                                    decoder: IncrementalDecoderIgnore::new(
-                                        usize::try_from(len).or(Err(Error::HttpFrame))?,
-                                    ),
-                                }
-                            }
-                        }
-                    };
+                    return self.frame_length_decoded::<T>(len);
                 }
             }
             FrameReaderState::GetData { decoder } => {
                 if let Some(data) = decoder.consume(&mut input) {
                     qtrace!(
                         "received frame {}: {}",
-                        self.hframe_type,
+                        self.frame_type,
                         hex_with_len(&data[..])
                     );
-                    self.payload = data;
-                    return Ok(Some(self.get_frame()?));
+                    return self.frame_data_decoded::<T>(&data);
                 }
             }
             FrameReaderState::UnknownFrameDischargeData { decoder } => {
@@ -224,62 +178,46 @@ impl FrameReader {
         }
         Ok(None)
     }
+}
 
-    /// # Errors
-    /// May return `HttpFrame` if a frame cannot be decoded.
-    fn get_frame(&mut self) -> Res<HFrame> {
-        let payload = mem::take(&mut self.payload);
-        let mut dec = Decoder::from(&payload[..]);
-        let f = match self.hframe_type {
-            H3_FRAME_TYPE_DATA => HFrame::Data {
-                len: self.hframe_len,
-            },
-            H3_FRAME_TYPE_HEADERS => HFrame::Headers {
-                header_block: dec.decode_remainder().to_vec(),
-            },
-            H3_FRAME_TYPE_CANCEL_PUSH => HFrame::CancelPush {
-                push_id: dec.decode_varint().ok_or(Error::HttpFrame)?,
-            },
-            H3_FRAME_TYPE_SETTINGS => {
-                let mut settings = HSettings::default();
-                settings.decode_frame_contents(&mut dec).map_err(|e| {
-                    if e == Error::HttpSettings {
-                        e
-                    } else {
-                        Error::HttpFrame
-                    }
-                })?;
-                HFrame::Settings { settings }
-            }
-            H3_FRAME_TYPE_PUSH_PROMISE => HFrame::PushPromise {
-                push_id: dec.decode_varint().ok_or(Error::HttpFrame)?,
-                header_block: dec.decode_remainder().to_vec(),
-            },
-            H3_FRAME_TYPE_GOAWAY => HFrame::Goaway {
-                stream_id: StreamId::new(dec.decode_varint().ok_or(Error::HttpFrame)?),
-            },
-            H3_FRAME_TYPE_MAX_PUSH_ID => HFrame::MaxPushId {
-                push_id: dec.decode_varint().ok_or(Error::HttpFrame)?,
-            },
-            H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST | H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH => {
-                let element_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
-                let priority = dec.decode_remainder();
-                let priority = Priority::from_bytes(priority)?;
-                if self.hframe_type == H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST {
-                    HFrame::PriorityUpdateRequest {
-                        element_id,
-                        priority,
-                    }
-                } else {
-                    HFrame::PriorityUpdatePush {
-                        element_id,
-                        priority,
-                    }
-                }
-            }
-            _ => panic!("We should not be calling this function with unknown frame type!"),
+impl FrameReader {
+    fn frame_type_decoded<T: FrameDecoder<T>>(&mut self, frame_type: u64) -> Res<()> {
+        T::frame_type_allowed(frame_type)?;
+        self.frame_type = frame_type;
+        self.state = FrameReaderState::GetLength {
+            decoder: IncrementalDecoderUint::default(),
         };
+        Ok(())
+    }
+
+    fn frame_length_decoded<T: FrameDecoder<T>>(&mut self, len: u64) -> Res<Option<T>> {
+        self.frame_len = len;
+        if let Some(f) = T::decode(
+            self.frame_type,
+            self.frame_len,
+            if len > 0 { None } else { Some(&[]) },
+        )? {
+            self.reset();
+            return Ok(Some(f));
+        } else if T::is_known_type(self.frame_type) {
+            self.state = FrameReaderState::GetData {
+                decoder: IncrementalDecoderBuffer::new(
+                    usize::try_from(len).or(Err(Error::HttpFrame))?,
+                ),
+            };
+        } else {
+            self.state = FrameReaderState::UnknownFrameDischargeData {
+                decoder: IncrementalDecoderIgnore::new(
+                    usize::try_from(len).or(Err(Error::HttpFrame))?,
+                ),
+            };
+        }
+        Ok(None)
+    }
+
+    fn frame_data_decoded<T: FrameDecoder<T>>(&mut self, data: &[u8]) -> Res<Option<T>> {
+        let res = T::decode(self.frame_type, self.frame_len, Some(data))?;
         self.reset();
-        Ok(f)
+        Ok(res)
     }
 }
