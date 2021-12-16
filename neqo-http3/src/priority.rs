@@ -1,4 +1,4 @@
-use crate::{Error, HFrame, Header, Res};
+use crate::{frames::HFrame, Error, Header, Res};
 use neqo_transport::StreamId;
 use sfv::{BareItem, Item, ListEntry, Parser};
 use std::convert::TryFrom;

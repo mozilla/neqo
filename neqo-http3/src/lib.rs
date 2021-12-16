@@ -16,8 +16,8 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod features;
+pub mod frames;
 mod headers_checks;
-pub mod hframe;
 mod priority;
 mod push_controller;
 mod qlog;
@@ -43,7 +43,6 @@ pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
-pub use hframe::{HFrame, HFrameReader};
 pub use neqo_common::{Header, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
@@ -52,6 +51,8 @@ pub use server_events::{
 };
 pub use settings::HttpZeroRttChecker;
 pub use stream_type_reader::NewStreamType;
+
+use frames::HFrame;
 
 type Res<T> = Result<T, Error>;
 

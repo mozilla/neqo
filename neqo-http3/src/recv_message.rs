@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_HEADERS};
+use crate::frames::{FrameReader, HFrame, H3_FRAME_TYPE_HEADERS};
 use crate::push_controller::PushController;
 use crate::{
     headers_checks::{headers_valid, is_interim},
@@ -52,11 +52,11 @@ pub struct RecvMessageInfo {
  */
 #[derive(Debug)]
 enum RecvMessageState {
-    WaitingForResponseHeaders { frame_reader: HFrameReader },
+    WaitingForResponseHeaders { frame_reader: FrameReader },
     DecodingHeaders { header_block: Vec<u8>, fin: bool },
-    WaitingForData { frame_reader: HFrameReader },
+    WaitingForData { frame_reader: FrameReader },
     ReadingData { remaining_data_len: usize },
-    WaitingForFinAfterTrailers { frame_reader: HFrameReader },
+    WaitingForFinAfterTrailers { frame_reader: FrameReader },
     ClosePending, // Close must first be read by application
     Closed,
     ExtendedConnect,
@@ -98,9 +98,9 @@ impl RecvMessage {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders {
                 frame_reader: if message_info.header_frame_type_read {
-                    HFrameReader::new_with_type(H3_FRAME_TYPE_HEADERS)
+                    FrameReader::new_with_type(H3_FRAME_TYPE_HEADERS)
                 } else {
-                    HFrameReader::new()
+                    FrameReader::new()
                 },
             },
             message_type: message_info.message_type,
@@ -124,7 +124,7 @@ impl RecvMessage {
              }
             RecvMessageState::WaitingForData { ..} => {
                 // TODO implement trailers, for now just ignore them.
-                self.state = RecvMessageState::WaitingForFinAfterTrailers{frame_reader: HFrameReader::new()};
+                self.state = RecvMessageState::WaitingForFinAfterTrailers{frame_reader: FrameReader::new()};
             }
             RecvMessageState::WaitingForFinAfterTrailers {..} => {
                 return Err(Error::HttpFrameUnexpected);
@@ -191,11 +191,11 @@ impl RecvMessage {
                 RecvMessageState::ExtendedConnect
             } else if interim {
                 RecvMessageState::WaitingForResponseHeaders {
-                    frame_reader: HFrameReader::new(),
+                    frame_reader: FrameReader::new(),
                 }
             } else {
                 RecvMessageState::WaitingForData {
-                    frame_reader: HFrameReader::new(),
+                    frame_reader: FrameReader::new(),
                 }
             };
         }
@@ -425,7 +425,7 @@ impl RecvStream for RecvMessage {
                         break Ok((written, fin));
                     } else if *remaining_data_len == 0 {
                         self.state = RecvMessageState::WaitingForData {
-                            frame_reader: HFrameReader::new(),
+                            frame_reader: FrameReader::new(),
                         };
                         self.receive_internal(conn, false)?;
                     } else {
