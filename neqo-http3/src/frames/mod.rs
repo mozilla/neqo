@@ -9,7 +9,7 @@ pub mod reader;
 pub mod wtframe;
 
 pub use hframe::{HFrame, H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
-pub use reader::FrameReader;
+pub use reader::{FrameReader, StreamReaderConnectionWrapper};
 pub use wtframe::WebTransportFrame;
 
 #[cfg(test)]

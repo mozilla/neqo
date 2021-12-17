@@ -194,15 +194,15 @@ impl Error {
     /// # Panics
     /// On unexpected errors, in debug mode.
     #[must_use]
-    pub fn map_stream_recv_errors(err: &TransportError) -> Self {
+    pub fn map_stream_recv_errors(err: &Error) -> Self {
         match err {
-            TransportError::NoMoreData => {
+            Self::TransportError(TransportError::NoMoreData) => {
                 debug_assert!(
                     false,
                     "Do not call stream_recv if FIN has been previously read"
                 );
             }
-            TransportError::InvalidStreamId => {}
+            Self::TransportError(TransportError::InvalidStreamId) => {}
             _ => {
                 debug_assert!(false, "Unexpected error");
             }
