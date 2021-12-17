@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{Error, Res};
+use crate::{Error, Res, RecvStream};
 use neqo_common::{
     hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
     IncrementalDecoderUint,
@@ -25,6 +25,47 @@ pub trait FrameDecoder<T> {
     /// # Errors
     /// If a frame cannot be properly decoded.
     fn decode(frame_type: u64, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;
+}
+
+pub trait StreamReader {
+    fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)>;
+}
+
+pub struct StreamReaderConnectionWrapper<'a> {
+    conn: &'a mut Connection,
+    stream_id: StreamId,
+}
+
+impl<'a> StreamReaderConnectionWrapper<'a> {
+    pub fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+        Self {
+            conn, stream_id }
+    }
+}
+
+impl<'a> StreamReader for StreamReaderConnectionWrapper<'a> {
+    fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
+        let res = self.conn.stream_recv(self.stream_id, buf)?;
+        Ok(res)
+    }
+}
+
+pub struct StreamReaderRecvStreamWrapper<'a> {
+    recv_stream: &'a mut dyn RecvStream,
+    conn: &'a mut Connection,
+}
+
+impl<'a> StreamReaderRecvStreamWrapper<'a> {
+    pub fn new(conn: &'a mut Connection, recv_stream: &'a mut dyn RecvStream) -> Self {
+        Self {
+            recv_stream, conn }
+    }
+}
+
+impl<'a> StreamReader for StreamReaderRecvStreamWrapper<'a> {
+    fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
+        self.recv_stream.read_data(self.conn, buf)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -102,20 +143,18 @@ impl FrameReader {
     /// and `TransportStreamDoesNotExist` if `stream_recv` fails.
     pub fn receive<T: FrameDecoder<T>>(
         &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
+        stream_reader: &mut dyn StreamReader,
     ) -> Res<(Option<T>, bool)> {
         loop {
             let to_read = std::cmp::min(self.min_remaining(), MAX_READ_SIZE);
             let mut buf = vec![0; to_read];
-            let (output, read, fin) = match conn
-                .stream_recv(stream_id, &mut buf)
+            let (output, read, fin) = match stream_reader
+                .read_data(&mut buf)
                 .map_err(|e| Error::map_stream_recv_errors(&e))?
             {
                 (0, f) => (None, false, f),
                 (amount, f) => {
                     qtrace!(
-                        [conn],
                         "FrameReader::receive: reading {} byte, fin={}",
                         amount,
                         f

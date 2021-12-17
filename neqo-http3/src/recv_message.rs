@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::{FrameReader, HFrame, H3_FRAME_TYPE_HEADERS};
+use crate::frames::{FrameReader, HFrame, H3_FRAME_TYPE_HEADERS, StreamReaderConnectionWrapper};
 use crate::push_controller::PushController;
 use crate::{
     headers_checks::{headers_valid, is_interim},
@@ -264,7 +264,7 @@ impl RecvMessage {
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
                 | RecvMessageState::WaitingForData { frame_reader }
                 | RecvMessageState::WaitingForFinAfterTrailers { frame_reader } => {
-                    match frame_reader.receive(conn, self.stream_id)? {
+                    match frame_reader.receive(&mut StreamReaderConnectionWrapper::new(conn, self.stream_id))? {
                         (None, true) => {
                             break self.set_state_to_close_pending(post_readable_event);
                         }
@@ -410,7 +410,7 @@ impl RecvStream for RecvMessage {
                     let to_read = min(*remaining_data_len, buf.len() - written);
                     let (amount, fin) = conn
                         .stream_recv(self.stream_id, &mut buf[written..written + to_read])
-                        .map_err(|e| Error::map_stream_recv_errors(&e))?;
+                        .map_err(|e| Error::map_stream_recv_errors(&Error::from(e)))?;
                     qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount);
 
                     debug_assert!(amount <= to_read);
