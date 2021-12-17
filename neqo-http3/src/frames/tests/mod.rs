@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::{FrameReader, HFrame};
+use crate::frames::{reader::FrameDecoder, FrameReader, HFrame, WebTransportFrame};
 use neqo_common::Encoder;
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::StreamType;
@@ -12,11 +12,7 @@ use std::mem;
 use test_fixture::{default_client, default_server, now};
 
 #[allow(clippy::many_single_char_names)]
-pub fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
-    let mut d = Encoder::default();
-
-    f.encode(&mut d);
-
+pub fn enc_dec<T: FrameDecoder<T>>(d: Encoder, st: &str, remaining: usize) -> T {
     // For data, headers and push_promise we do not read all bytes from the buffer
     let d2 = Encoder::from_hex(st);
     assert_eq!(&d[..], &d2[..d.len()]);
@@ -42,16 +38,38 @@ pub fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
     let out = conn_s.process(None, now());
     mem::drop(conn_c.process(out.dgram(), now()));
 
-    let (frame, fin) = fr.receive(&mut conn_c, stream_id).unwrap();
+    let (frame, fin) = fr.receive::<T>(&mut conn_c, stream_id).unwrap();
     assert!(!fin);
     assert!(frame.is_some());
-    assert_eq!(*f, frame.unwrap());
 
     // Check remaining data.
     let mut buf = [0_u8; 100];
     let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
     assert_eq!(amount, remaining);
+
+    frame.unwrap()
+}
+
+pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
+    let mut d = Encoder::default();
+
+    f.encode(&mut d);
+
+    let frame = enc_dec::<HFrame>(d, st, remaining);
+
+    assert_eq!(*f, frame);
+}
+
+pub fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
+    let mut d = Encoder::default();
+
+    f.encode(&mut d);
+
+    let frame = enc_dec::<WebTransportFrame>(d, st, remaining);
+
+    assert_eq!(*f, frame);
 }
 
 mod hframe;
 mod reader;
+mod wtframe;

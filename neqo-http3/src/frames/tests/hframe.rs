@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::enc_dec;
+use super::enc_dec_hframe;
 use crate::{
     frames::HFrame,
     settings::{HSetting, HSettingType, HSettings},
@@ -17,7 +17,7 @@ use test_fixture::fixture_init;
 #[test]
 fn test_data_frame() {
     let f = HFrame::Data { len: 3 };
-    enc_dec(&f, "0003010203", 3);
+    enc_dec_hframe(&f, "0003010203", 3);
 }
 
 #[test]
@@ -25,13 +25,13 @@ fn test_headers_frame() {
     let f = HFrame::Headers {
         header_block: vec![0x01, 0x02, 0x03],
     };
-    enc_dec(&f, "0103010203", 0);
+    enc_dec_hframe(&f, "0103010203", 0);
 }
 
 #[test]
 fn test_cancel_push_frame4() {
     let f = HFrame::CancelPush { push_id: 5 };
-    enc_dec(&f, "030105", 0);
+    enc_dec_hframe(&f, "030105", 0);
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn test_settings_frame4() {
     let f = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::MaxHeaderListSize, 4)]),
     };
-    enc_dec(&f, "04020604", 0);
+    enc_dec_hframe(&f, "04020604", 0);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_push_promise_frame4() {
         push_id: 4,
         header_block: vec![0x61, 0x62, 0x63, 0x64],
     };
-    enc_dec(&f, "05050461626364", 0);
+    enc_dec_hframe(&f, "05050461626364", 0);
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_goaway_frame4() {
     let f = HFrame::Goaway {
         stream_id: StreamId::new(5),
     };
-    enc_dec(&f, "070105", 0);
+    enc_dec_hframe(&f, "070105", 0);
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn test_priority_update_request_default() {
         element_id: 6,
         priority: Priority::default(),
     };
-    enc_dec(&f, "800f07000106", 0);
+    enc_dec_hframe(&f, "800f07000106", 0);
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn test_priority_update_request_incremental_default() {
         element_id: 7,
         priority: Priority::new(6, false),
     };
-    enc_dec(&f, "800f07000407753d36", 0); // "u=6"
+    enc_dec_hframe(&f, "800f07000407753d36", 0); // "u=6"
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn test_priority_update_request_urgency_default() {
         element_id: 8,
         priority: Priority::new(3, true),
     };
-    enc_dec(&f, "800f0700020869", 0); // "i"
+    enc_dec_hframe(&f, "800f0700020869", 0); // "i"
 }
 
 #[test]
@@ -111,5 +111,5 @@ fn test_priority_update_push_default() {
         element_id: 10,
         priority: Priority::default(),
     };
-    enc_dec(&f, "800f0701010a", 0);
+    enc_dec_hframe(&f, "800f0701010a", 0);
 }
