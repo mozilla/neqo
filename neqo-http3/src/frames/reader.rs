@@ -19,7 +19,9 @@ pub trait FrameDecoder<T> {
     fn is_known_type(frame_type: u64) -> bool;
     /// # Errors
     /// Returns `HttpFrameUnexpected` if frames is not alowed, i.e. is a `H3_RESERVED_FRAME_TYPES`.
-    fn frame_type_allowed(frame_type: u64) -> Res<()>;
+    fn frame_type_allowed(_frame_type: u64) -> Res<()> {
+        Ok(())
+    }
     /// # Errors
     /// If a frame cannot be properly decoded.
     fn decode(frame_type: u64, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;

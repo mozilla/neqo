@@ -4,13 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-pub mod hframe;
-pub mod reader;
-pub mod wtframe;
+use super::enc_dec_wtframe;
+use crate::frames::WebTransportFrame;
 
-pub use hframe::{HFrame, H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
-pub use reader::FrameReader;
-pub use wtframe::WebTransportFrame;
-
-#[cfg(test)]
-mod tests;
+#[test]
+fn test_wt_close_session() {
+    let f = WebTransportFrame::CloseSession {
+        error: 5,
+        message: "Hello".to_string(),
+    };
+    enc_dec_wtframe(&f, "6843090000000548656c6c6f", 0);
+}

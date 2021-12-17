@@ -82,6 +82,7 @@ pub enum Error {
     HttpRequestIncomplete,
     HttpConnect,
     HttpVersionFallback,
+    HttpMessageError,
     QpackError(neqo_qpack::Error),
 
     // Internal errors from here.
@@ -126,6 +127,7 @@ impl Error {
             Self::HttpRequestRejected => 0x10b,
             Self::HttpRequestCancelled => 0x10c,
             Self::HttpRequestIncomplete => 0x10d,
+            Self::HttpMessageError => 0x10e,
             Self::HttpConnect => 0x10f,
             Self::HttpVersionFallback => 0x110,
             Self::QpackError(e) => e.code(),
