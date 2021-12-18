@@ -188,6 +188,7 @@ impl RecvMessage {
             self.set_closed();
         } else {
             self.state = if is_web_transport {
+                self.stream_type = Http3StreamType::ExtendedConnect;
                 RecvMessageState::ExtendedConnect
             } else if interim {
                 RecvMessageState::WaitingForResponseHeaders {
@@ -476,6 +477,9 @@ impl HttpRecvStream for RecvMessage {
     }
 
     fn set_new_listener(&mut self, conn_events: Box<dyn HttpRecvStreamEvents>) {
+        self.state = RecvMessageState::WaitingForData {
+            frame_reader: FrameReader::new(),
+        };
         self.conn_events = conn_events;
     }
 

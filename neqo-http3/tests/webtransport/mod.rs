@@ -525,4 +525,19 @@ impl WtTest {
         assert_eq!(stop_sending_ids_count, expected_stop_sending_ids.len());
         assert_eq!(close_event, expected_session_close.is_some());
     }
+
+    pub fn session_close_frame_client(&mut self, session_id: StreamId, error: u32, message: &str) {
+        self.client
+            .webtransport_close_session(session_id, error, message)
+            .unwrap();
+    }
+
+    pub fn session_close_frame_server(
+        &mut self,
+        wt_session: &mut WebTransportRequest,
+        error: u32,
+        message: &str,
+    ) {
+        wt_session.close_session(error, message).unwrap();
+    }
 }

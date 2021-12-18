@@ -8,10 +8,12 @@
 
 use super::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason};
 use crate::{
-    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
+    frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
+    CloseType, Http3StreamInfo, HttpRecvStreamEvents, RecvStream, RecvStreamEvents, Res,
+    SendStream, SendStreamEvents,
 };
-use neqo_common::{qtrace, Header, Role};
-use neqo_transport::StreamId;
+use neqo_common::{qtrace, Encoder, Header, Role};
+use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::mem;
@@ -21,7 +23,14 @@ use std::rc::Rc;
 enum SessionState {
     Negotiating,
     Active,
+    FinPending,
     Done,
+}
+
+impl SessionState {
+    pub fn closing_state(&self) -> bool {
+        matches!(self, Self::FinPending | Self::Done)
+    }
 }
 
 #[derive(Debug)]
@@ -29,6 +38,7 @@ pub struct ExtendedConnectSession {
     connect_type: ExtendedConnectType,
     session_id: StreamId,
     state: SessionState,
+    frame_reader: FrameReader,
     events: Box<dyn ExtendedConnectEvents>,
     send_streams: BTreeSet<StreamId>,
     recv_streams: BTreeSet<StreamId>,
@@ -61,6 +71,7 @@ impl ExtendedConnectSession {
             } else {
                 SessionState::Active
             },
+            frame_reader: FrameReader::new(),
             events,
             send_streams: BTreeSet::new(),
             recv_streams: BTreeSet::new(),
@@ -69,7 +80,7 @@ impl ExtendedConnectSession {
     }
 
     fn close(&mut self, stream_id: StreamId, close_type: CloseType) {
-        if self.state == SessionState::Done {
+        if self.state.closing_state() {
             return;
         }
         qtrace!("ExtendedConnect close the session");
@@ -93,7 +104,7 @@ impl ExtendedConnectSession {
         interim: bool,
         fin: bool,
     ) {
-        if self.state == SessionState::Done {
+        if self.state.closing_state() {
             return;
         }
         qtrace!(
@@ -104,8 +115,14 @@ impl ExtendedConnectSession {
 
         if interim {
             if fin {
-                self.events
-                    .session_end(self.connect_type, stream_id, SessionCloseReason::Clean);
+                self.events.session_end(
+                    self.connect_type,
+                    stream_id,
+                    SessionCloseReason::Clean {
+                        error: 0,
+                        message: "".to_string(),
+                    },
+                );
                 self.state = SessionState::Done;
             }
         } else {
@@ -125,7 +142,10 @@ impl ExtendedConnectSession {
                     self.events.session_end(
                         self.connect_type,
                         stream_id,
-                        SessionCloseReason::Clean,
+                        SessionCloseReason::Clean {
+                            error: 0,
+                            message: "".to_string(),
+                        },
                     );
                     SessionState::Done
                 } else {
@@ -184,20 +204,72 @@ impl ExtendedConnectSession {
             mem::take(&mut self.send_streams),
         ))
     }
+
+    /// # Errors
+    /// It may return an error if the frame is not correctly decoded.
+    pub fn read_control_stream(
+        &mut self,
+        recv_stream: &mut Box<dyn RecvStream>,
+        conn: &mut Connection,
+    ) -> Res<bool> {
+        let (f, fin) = self.frame_reader.receive::<WebTransportFrame>(
+            &mut StreamReaderRecvStreamWrapper::new(conn, recv_stream),
+        )?;
+        if let Some(WebTransportFrame::CloseSession { error, message }) = f {
+            self.events.session_end(
+                self.connect_type,
+                self.session_id,
+                SessionCloseReason::Clean { error, message },
+            );
+            self.state = if fin {
+                SessionState::Done
+            } else {
+                SessionState::FinPending
+            };
+        } else if fin {
+            self.events.session_end(
+                self.connect_type,
+                self.session_id,
+                SessionCloseReason::Clean {
+                    error: 0,
+                    message: "".to_string(),
+                },
+            );
+            self.state = SessionState::Done;
+        }
+        Ok(fin)
+    }
+
+    /// # Errors
+    /// Return an error if the stream was closed on the transport layer, but that information is not yet
+    /// consumed on the http/3 layer.
+    pub fn close_session(
+        &mut self,
+        send_stream: &mut Box<dyn SendStream>,
+        conn: &mut Connection,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+self.state = SessionState::Done;
+        let close_frame = WebTransportFrame::CloseSession {
+            error,
+            message: message.to_string(),
+        };
+        let mut encoder = Encoder::default();
+        close_frame.encode(&mut encoder);
+        send_stream.send_data(conn, &encoder)?;
+        send_stream.close(conn)?;
+        Ok(())
+    }
 }
 
 impl RecvStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
-    fn data_readable(&self, stream_info: Http3StreamInfo) {
-        // A session request is not expected to receive any data. This may change in
-        // the future.
-        self.borrow_mut().close(
-            stream_info.stream_id(),
-            CloseType::LocalError(Error::HttpGeneralProtocolStream.code()),
-        );
-    }
+    fn data_readable(&self, _stream_info: Http3StreamInfo) {}
 
     fn recv_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
-        self.borrow_mut().close(stream_info.stream_id(), close_type);
+        if CloseType::Done != close_type {
+            self.borrow_mut().close(stream_info.stream_id(), close_type);
+        }
     }
 }
 
@@ -219,6 +291,8 @@ impl SendStreamEvents for Rc<RefCell<ExtendedConnectSession>> {
 
     /// Add a new `StopSending` event
     fn send_closed(&self, stream_info: Http3StreamInfo, close_type: CloseType) {
-        self.borrow_mut().close(stream_info.stream_id(), close_type);
+        if CloseType::Done != close_type {
+            self.borrow_mut().close(stream_info.stream_id(), close_type);
+        }
     }
 }

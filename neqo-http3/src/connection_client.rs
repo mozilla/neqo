@@ -435,6 +435,22 @@ impl Http3Client {
         output
     }
 
+    /// Close `WebTransport` cleanly
+    /// # Errors
+    /// `InvalidStreamId` if thee stream does not exist,
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
+    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
+    /// `InvalidInput` if an empty buffer has been supplied.
+    pub fn webtransport_close_session(
+        &mut self,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_close_session(&mut self.conn, session_id, error, message)
+    }
+
     /// # Errors
     /// This may return an error if the particular session does not exist
     /// or the connection is not in the active state.
