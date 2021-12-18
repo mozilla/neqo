@@ -235,17 +235,47 @@ impl Http3Connection {
         );
     }
 
+    fn read_webtransport_control_stream(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+    ) -> Res<()> {
+        if let Some(mut recv_stream) = self.recv_streams.get_mut(&stream_id) {
+            let res = self
+                .webtransport
+                .read_control_stream(stream_id, &mut recv_stream, conn);
+            // We need to call handle_stream_manipulation_output to handle errors, but we do not care
+            // about the return value. The first part will be () because it is set when calling the
+            // function and the second value is fin, but this is already handled in the function.
+            self.handle_stream_manipulation_output(
+                res.map(|out| ((), out)),
+                stream_id,
+                conn,
+            )?;
+        }
+        Ok(())
+    }
+
     #[allow(clippy::option_if_let_else)] // False positive as borrow scope isn't lexical here.
     fn stream_receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<ReceiveOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
-        if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
-            let res = recv_stream.receive(conn);
-            self.handle_stream_manipulation_output(res, stream_id, conn)
-                .map(|(output, _)| output)
-        } else {
-            Ok(ReceiveOutput::NoOutput)
+        let (output, extended_conn) =
+            if let Some(recv_stream) = self.recv_streams.get_mut(&stream_id) {
+                let res = recv_stream.receive(conn);
+                let extended_conn = recv_stream.stream_type() == Http3StreamType::ExtendedConnect;
+                (
+                    self.handle_stream_manipulation_output(res, stream_id, conn)
+                        .map(|(output, _)| output)?,
+                    extended_conn,
+                )
+            } else {
+                (ReceiveOutput::NoOutput, false)
+            };
+        if extended_conn {
+            self.read_webtransport_control_stream(conn, stream_id)?;
         }
+        Ok(output)
     }
 
     fn handle_unblocked_streams(
@@ -255,15 +285,20 @@ impl Http3Connection {
     ) -> Res<()> {
         for stream_id in unblocked_streams {
             qdebug!([self], "Stream {} is unblocked", stream_id);
-            if let Some(r) = self.recv_streams.get_mut(&stream_id) {
+            let extended_conn = if let Some(r) = self.recv_streams.get_mut(&stream_id) {
                 let res = r
                     .http_stream()
                     .ok_or(Error::HttpInternal(10))?
                     .header_unblocked(conn);
-                debug_assert!(matches!(
-                    self.handle_stream_manipulation_output(res, stream_id, conn)?,
-                    (ReceiveOutput::NoOutput, _)
-                ));
+                let extended_conn = r.stream_type() == Http3StreamType::ExtendedConnect;
+                let res = self.handle_stream_manipulation_output(res, stream_id, conn)?;
+                debug_assert!(matches!(res, (ReceiveOutput::NoOutput, _)));
+                extended_conn
+            } else {
+                false
+            };
+            if extended_conn {
+                self.read_webtransport_control_stream(conn, stream_id)?;
             }
         }
         Ok(())
@@ -933,6 +968,43 @@ impl Http3Connection {
                 Ok(())
             }
         }
+    }
+
+    pub(crate) fn webtransport_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) -> Res<()> {
+        let mut send_stream = self
+            .send_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?;
+
+        let recv_stream = self
+            .recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?;
+        if recv_stream.stream_type() != Http3StreamType::ExtendedConnect {
+            return Err(Error::InvalidStreamId);
+        }
+        if recv_stream
+            .http_stream()
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_wait_for_response()
+        {
+            return Err(Error::InvalidStreamId);
+        }
+
+        self.webtransport
+            .close_session(session_id, &mut send_stream, conn, error, message)?;
+        if send_stream.done() {
+            self.remove_send_stream(session_id, conn);
+        } else if send_stream.has_data_to_send() {
+            self.streams_with_pending_data.insert(session_id);
+        }
+        Ok(())
     }
 
     pub fn webtransport_create_stream_local(

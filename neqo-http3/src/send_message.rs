@@ -306,6 +306,7 @@ impl HttpSendStream for SendMessage {
     }
 
     fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
+        self.stream_type = Http3StreamType::ExtendedConnect;
         self.conn_events = conn_events;
     }
 }

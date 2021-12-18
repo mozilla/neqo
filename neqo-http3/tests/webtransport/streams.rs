@@ -1041,3 +1041,41 @@ fn wt_client_session_server_close_11() {
         None,
     );
 }
+
+#[test]
+fn wt_session_close_frame_and_streams_client() {
+    const BUF: &[u8] = &[0; 10];
+    const ERROR_NUM: u32 = 23;
+    const ERROR_MESSAGE: &str = "Something went wrong";
+    let mut wt = WtTest::new();
+    let mut wt_session = wt.create_wt_session();
+
+    let mut unidi_server = wt.create_wt_stream_server(&mut wt_session, StreamType::UniDi);
+    wt.send_data_server(&mut unidi_server, BUF);
+    wt.exchange_packets();
+
+    wt.session_close_frame_client(wt_session.stream_id(), ERROR_NUM, ERROR_MESSAGE);
+    wt.check_events_after_closing_session_client(
+        &[unidi_server.stream_id()],
+        Some(Error::HttpRequestCancelled.code()),
+        &[],
+        None,
+        false,
+        None,
+    );
+    wt.exchange_packets();
+
+    wt.check_events_after_closing_session_server(
+        &[],
+        None,
+        &[unidi_server.stream_id()],
+        Some(Error::HttpRequestCancelled.code()),
+        Some((
+            wt_session.stream_id(),
+            SessionCloseReason::Clean {
+                error: ERROR_NUM,
+                message: ERROR_MESSAGE.to_string(),
+            },
+        )),
+    );
+}

@@ -251,6 +251,22 @@ impl WebTransportRequest {
             )
     }
 
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// Also return an error if the stream was closed on the transport layer,
+    /// but that information is not yet consumed on the  http/3 layer.
+    pub fn close_session(&mut self, error: u32, message: &str) -> Res<()> {
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .webtransport_close_session(
+                &mut self.stream_handler.conn.borrow_mut(),
+                self.stream_handler.stream_info.stream_id(),
+                error,
+                message,
+            )
+    }
+
     #[must_use]
     pub fn stream_id(&self) -> StreamId {
         self.stream_handler.stream_id()

@@ -60,7 +60,10 @@ fn wt_session_close_server_close_send() {
     wt.exchange_packets();
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        SessionCloseReason::Error(Error::HttpGeneralProtocolStream.code()),
+        SessionCloseReason::Clean {
+            error: 0,
+            message: "".to_string(),
+        },
     );
 }
 
@@ -187,10 +190,48 @@ fn wt_session_respone_200_with_fin() {
             Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed{
                 stream_id,
                 reason
-            }) if stream_id == wt_session_id && reason == SessionCloseReason::Clean
+            }) if stream_id == wt_session_id && reason == SessionCloseReason::Clean{ error: 0, message: "".to_string()}
         )
     };
     assert!(wt.client.events().any(wt_session_close_event));
 
     assert_eq!(wt_session_id, wt_server_session.stream_id());
+}
+
+#[test]
+fn wt_session_close_frame_client() {
+    const ERROR_NUM: u32 = 23;
+    const ERROR_MESSAGE: &str = "Something went wrong";
+    let mut wt = WtTest::new();
+    let mut wt_session = wt.create_wt_session();
+
+    wt.session_close_frame_client(wt_session.stream_id(), ERROR_NUM, ERROR_MESSAGE);
+    wt.exchange_packets();
+
+    wt.check_session_closed_event_server(
+        &mut wt_session,
+        SessionCloseReason::Clean {
+            error: ERROR_NUM,
+            message: ERROR_MESSAGE.to_string(),
+        },
+    );
+}
+
+#[test]
+fn wt_session_close_frame_server() {
+    const ERROR_NUM: u32 = 23;
+    const ERROR_MESSAGE: &str = "Something went wrong";
+    let mut wt = WtTest::new();
+    let mut wt_session = wt.create_wt_session();
+
+    wt.session_close_frame_server(&mut wt_session, ERROR_NUM, ERROR_MESSAGE);
+    wt.exchange_packets();
+
+    wt.check_session_closed_event_client(
+        wt_session.stream_id(),
+        SessionCloseReason::Clean {
+            error: ERROR_NUM,
+            message: ERROR_MESSAGE.to_string(),
+        },
+    );
 }

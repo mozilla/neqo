@@ -32,6 +32,8 @@ pub trait FrameDecoder<T> {
 pub trait StreamReader {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    /// Return an error if the stream was closed on the transport layer, but that information is not yet
+    /// consumed on the  http/3 layer.
     fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)>;
 }
 
@@ -56,12 +58,12 @@ impl<'a> StreamReader for StreamReaderConnectionWrapper<'a> {
 }
 
 pub struct StreamReaderRecvStreamWrapper<'a> {
-    recv_stream: &'a mut dyn RecvStream,
+    recv_stream: &'a mut Box<dyn RecvStream>,
     conn: &'a mut Connection,
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
-    pub fn new(conn: &'a mut Connection, recv_stream: &'a mut dyn RecvStream) -> Self {
+    pub fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
         Self { recv_stream, conn }
     }
 }
