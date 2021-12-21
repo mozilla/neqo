@@ -74,14 +74,14 @@ impl ControlStreamLocal {
                 update_stream.stream_type(),
                 Http3StreamType::Http | Http3StreamType::Push
             ));
-            let priority_handler = update_stream.http_stream().unwrap().priority_handler_mut();
+            let stream = update_stream.http_stream().unwrap();
 
             // in case multiple priority_updates were issued, ignore now irrelevant
-            if let Some(hframe) = priority_handler.maybe_encode_frame(update_id) {
+            if let Some(hframe) = stream.priority_update_frame() {
                 let mut enc = Encoder::new();
                 hframe.encode(&mut enc);
                 if self.stream.send_atomic(conn, &enc)? {
-                    priority_handler.priority_update_sent();
+                    stream.priority_update_sent();
                 } else {
                     self.outstanding_priority_update.push_front(update_id);
                     break;

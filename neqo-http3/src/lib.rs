@@ -43,6 +43,7 @@ pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
+use features::extended_connect::WebTransportSession;
 pub use neqo_common::{Header, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
@@ -50,8 +51,10 @@ pub use server_events::{
     Http3OrWebTransportStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
 };
 pub use settings::HttpZeroRttChecker;
+use std::any::Any;
+use std::cell::RefCell;
+use std::rc::Rc;
 pub use stream_type_reader::NewStreamType;
-
 pub use frames::HFrame;
 
 type Res<T> = Result<T, Error>;
@@ -343,6 +346,10 @@ pub trait RecvStream: Stream {
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         None
     }
+
+    fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
+        None
+    }
 }
 
 pub trait HttpRecvStream: RecvStream {
@@ -353,12 +360,16 @@ pub trait HttpRecvStream: RecvStream {
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
 
-    fn priority_handler_mut(&mut self) -> &mut PriorityHandler;
+    fn maybe_update_priority(&mut self, priority: Priority) -> bool;
+    fn priority_update_frame(&mut self) -> Option<HFrame>;
+    fn priority_update_sent(&mut self);
 
     fn set_new_listener(&mut self, _conn_events: Box<dyn HttpRecvStreamEvents>) {}
     fn extended_connect_wait_for_response(&self) -> bool {
         false
     }
+
+    fn any(&self) -> &dyn Any;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -397,7 +408,7 @@ impl Http3StreamInfo {
 }
 
 pub trait RecvStreamEvents: Debug {
-    fn data_readable(&self, stream_info: Http3StreamInfo);
+    fn data_readable(&self, _stream_info: Http3StreamInfo) {}
     fn recv_closed(&self, _stream_info: Http3StreamInfo, _close_type: CloseType) {}
 }
 
@@ -421,10 +432,22 @@ pub trait SendStream: Stream {
     fn done(&self) -> bool;
     /// # Errors
     /// Error my occure during sending data, e.g. protocol error, etc.
-    fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
+    fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize> {
+        Err(Error::InvalidStreamId)
+    }
     /// # Errors
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
+    /// # Errors
+    /// It may happen that the transport stream is already close. This is unlikely.
+    fn close_with_message(
+        &mut self,
+        _conn: &mut Connection,
+        _error: u32,
+        _message: &str,
+    ) -> Res<()> {
+        Err(Error::InvalidStreamId)
+    }
     /// This function is called when sending side is closed abruptly by the peer or
     /// the application.
     fn handle_stop_sending(&mut self, close_type: CloseType);
@@ -441,6 +464,7 @@ pub trait HttpSendStream: SendStream {
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()>;
     fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}
+    fn any(&self) -> &dyn Any;
 }
 
 pub trait SendStreamEvents: Debug {

@@ -10,11 +10,12 @@ use crate::{
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
     qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    MessageType, ReceiveOutput, RecvStream, Res, Stream,
+    MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
 };
 use neqo_common::{qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
+use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::VecDeque;
@@ -472,8 +473,16 @@ impl HttpRecvStream for RecvMessage {
         self.receive(conn)
     }
 
-    fn priority_handler_mut(&mut self) -> &mut PriorityHandler {
-        &mut self.priority_handler
+    fn maybe_update_priority(&mut self, priority: Priority) -> bool {
+        self.priority_handler.maybe_update_priority(priority)
+    }
+
+    fn priority_update_frame(&mut self) -> Option<HFrame> {
+        self.priority_handler.maybe_encode_frame(self.stream_id)
+    }
+
+    fn priority_update_sent(&mut self) {
+        self.priority_handler.priority_update_sent();
     }
 
     fn set_new_listener(&mut self, conn_events: Box<dyn HttpRecvStreamEvents>) {
@@ -485,5 +494,9 @@ impl HttpRecvStream for RecvMessage {
 
     fn extended_connect_wait_for_response(&self) -> bool {
         matches!(self.state, RecvMessageState::ExtendedConnect)
+    }
+
+    fn any(&self) -> &dyn Any {
+        self
     }
 }

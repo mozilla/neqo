@@ -14,6 +14,7 @@ use crate::{
 use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{Connection, StreamId};
+use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fmt::Debug;
@@ -308,6 +309,10 @@ impl HttpSendStream for SendMessage {
     fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
         self.stream_type = Http3StreamType::ExtendedConnect;
         self.conn_events = conn_events;
+    }
+
+    fn any(&self) -> &dyn Any {
+        self
     }
 }
 

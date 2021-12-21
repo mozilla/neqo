@@ -111,9 +111,9 @@ impl PriorityHandler {
         }
     }
 
-    pub fn priority(&self) -> Priority {
+    /*pub fn priority(&self) -> Priority {
         self.priority
-    }
+    }*/
 
     /// Returns if an priority update will be issued
     pub fn maybe_update_priority(&mut self, priority: Priority) -> bool {
