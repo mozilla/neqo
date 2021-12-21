@@ -40,6 +40,11 @@ impl Http3ServerHandler {
         }
     }
 
+    #[must_use]
+    pub fn state(&self) -> Http3State {
+        self.base_handler.state()
+    }
+
     /// Supply a response for a request.
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist,

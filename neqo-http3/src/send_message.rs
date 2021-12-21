@@ -18,6 +18,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fmt::Debug;
+use std::mem;
 use std::rc::Rc;
 
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
@@ -290,6 +291,18 @@ impl SendStream for SendMessage {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
         Some(self)
+    }
+
+    fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<()> {
+        let data_frame = HFrame::Data {
+            len: buf.len() as u64,
+        };
+        let mut enc = Encoder::default();
+        data_frame.encode(&mut enc);
+        self.stream.buffer(&enc);
+        self.stream.buffer(buf);
+        mem::drop(self.stream.send_buffer(conn)?);
+        Ok(())
     }
 }
 

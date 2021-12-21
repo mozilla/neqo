@@ -236,6 +236,11 @@ impl WebTransportRequest {
         }
     }
 
+    #[must_use]
+    pub fn state(&self) -> Http3State {
+        self.stream_handler.handler.borrow().state()
+    }
+
     /// Respond to a `WebTransport` session request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.

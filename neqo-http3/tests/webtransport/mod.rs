@@ -107,6 +107,10 @@ impl WtTest {
         Self { client, server }
     }
 
+    pub fn new_with(mut client: Http3Client, mut server: Http3Server) -> Self {
+        connect_with(&mut client, &mut server);
+        Self { client, server }
+    }
     fn negotiate_wt_session(&mut self, accept: bool) -> (StreamId, Option<WebTransportRequest>) {
         let wt_session_id = self
             .client
