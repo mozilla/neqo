@@ -432,9 +432,8 @@ pub trait SendStream: Stream {
     fn done(&self) -> bool;
     /// # Errors
     /// Error my occure during sending data, e.g. protocol error, etc.
-    fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize> {
-        Err(Error::InvalidStreamId)
-    }
+    fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
+
     /// # Errors
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
@@ -453,6 +452,12 @@ pub trait SendStream: Stream {
     fn handle_stop_sending(&mut self, close_type: CloseType);
     fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
         None
+    }
+
+    /// # Errors
+    /// It may happen that the transport stream is already close. This is unlikely.
+    fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
+        Err(Error::InvalidStreamId)
     }
 }
 

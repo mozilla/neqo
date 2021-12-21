@@ -11,9 +11,9 @@ use crate::{
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
-    CloseType, HFrame, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
-    SendStreamEvents, Stream,
+    CloseType, Error, HFrame, Http3StreamInfo, Http3StreamType, HttpRecvStream,
+    HttpRecvStreamEvents, Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents,
+    Res, SendStream, SendStreamEvents, Stream,
 };
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
@@ -146,6 +146,7 @@ impl WebTransportSession {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+        qtrace!([self], "receive control data");
         let (out, _) = self.control_stream_recv.receive(conn)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers();
@@ -191,7 +192,11 @@ impl WebTransportSession {
     }
 
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.control_stream_send.send(conn)
+        self.control_stream_send.send(conn)?;
+        if self.control_stream_send.done() {
+            self.state = SessionState::Done
+        }
+        Ok(())
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -336,9 +341,14 @@ impl WebTransportSession {
     /// # Errors
     /// It may return an error if the frame is not correctly decoded.
     pub fn read_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
-        let (f, fin) = self.frame_reader.receive::<WebTransportFrame>(
-            &mut StreamReaderRecvStreamWrapper::new(conn, &mut self.control_stream_recv),
-        )?;
+        let (f, fin) = self
+            .frame_reader
+            .receive::<WebTransportFrame>(&mut StreamReaderRecvStreamWrapper::new(
+                conn,
+                &mut self.control_stream_recv,
+            ))
+            .map_err(|_| Error::HttpGeneralProtocolStream)?;
+        qtrace!([self], "Received frame: {:?} fin={}", f, fin);
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
             self.events.session_end(
                 ExtendedConnectType::WebTransport,
@@ -375,9 +385,18 @@ impl WebTransportSession {
         };
         let mut encoder = Encoder::default();
         close_frame.encode(&mut encoder);
-        self.control_stream_send.send_data(conn, &encoder)?;
+        self.control_stream_send.send_data_atomic(conn, &encoder)?;
         self.control_stream_send.close(conn)?;
+        self.state = if self.control_stream_send.done() {
+            SessionState::Done
+        } else {
+            SessionState::FinPending
+        };
         Ok(())
+    }
+
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
+        self.control_stream_send.send_data(conn, buf)
     }
 }
 
@@ -431,6 +450,10 @@ impl HttpRecvStream for Rc<RefCell<WebTransportSession>> {
 impl SendStream for Rc<RefCell<WebTransportSession>> {
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         self.borrow_mut().send(conn)
+    }
+
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
+        self.borrow_mut().send_data(conn, buf)
     }
 
     fn has_data_to_send(&self) -> bool {

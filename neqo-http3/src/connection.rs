@@ -817,6 +817,8 @@ impl Http3Connection {
         mem::drop(send_stream.close(conn));
         if send_stream.done() {
             self.remove_send_stream(stream_id, conn);
+        } else if send_stream.has_data_to_send() {
+            self.streams_with_pending_data.insert(stream_id);
         }
         Ok(())
     }
