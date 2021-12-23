@@ -52,7 +52,7 @@ pub use server_events::{
 pub use settings::HttpZeroRttChecker;
 pub use stream_type_reader::NewStreamType;
 
-use frames::HFrame;
+pub use frames::HFrame;
 
 type Res<T> = Result<T, Error>;
 
