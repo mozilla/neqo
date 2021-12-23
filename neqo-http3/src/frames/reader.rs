@@ -30,6 +30,8 @@ pub trait FrameDecoder<T> {
 }
 
 pub trait StreamReader {
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)>;
 }
 
@@ -46,6 +48,8 @@ impl<'a> StreamReaderConnectionWrapper<'a> {
 }
 
 impl<'a> StreamReader for StreamReaderConnectionWrapper<'a> {
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let res = self.conn.stream_recv(self.stream_id, buf)?;
         Ok(res)
@@ -65,6 +69,8 @@ impl<'a> StreamReaderRecvStreamWrapper<'a> {
 }
 
 impl<'a> StreamReader for StreamReaderRecvStreamWrapper<'a> {
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         self.recv_stream.read_data(self.conn, buf)
     }
