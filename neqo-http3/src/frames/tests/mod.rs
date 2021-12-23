@@ -12,7 +12,7 @@ use std::mem;
 use test_fixture::{default_client, default_server, now};
 
 #[allow(clippy::many_single_char_names)]
-pub fn enc_dec<T: FrameDecoder<T>>(d: Encoder, st: &str, remaining: usize) -> T {
+pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {
     // For data, headers and push_promise we do not read all bytes from the buffer
     let d2 = Encoder::from_hex(st);
     assert_eq!(&d[..], &d2[..d.len()]);
@@ -55,7 +55,7 @@ pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
 
     f.encode(&mut d);
 
-    let frame = enc_dec::<HFrame>(d, st, remaining);
+    let frame = enc_dec::<HFrame>(&d, st, remaining);
 
     assert_eq!(*f, frame);
 }
@@ -65,7 +65,7 @@ pub fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
 
     f.encode(&mut d);
 
-    let frame = enc_dec::<WebTransportFrame>(d, st, remaining);
+    let frame = enc_dec::<WebTransportFrame>(&d, st, remaining);
 
     assert_eq!(*f, frame);
 }
