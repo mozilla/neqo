@@ -5,7 +5,9 @@
 // except according to those terms.
 
 use crate::{
-    frames::{reader::FrameDecoder, FrameReader, HFrame, WebTransportFrame, StreamReaderConnectionWrapper},
+    frames::{
+        reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
+    },
     settings::{HSetting, HSettingType, HSettings},
     Error,
 };
@@ -40,7 +42,10 @@ impl FrameReaderTest {
         mem::drop(self.conn_c.process(out.dgram(), now()));
         let (frame, fin) = self
             .fr
-            .receive::<T>(&mut StreamReaderConnectionWrapper::new(&mut self.conn_c, self.stream_id))
+            .receive::<T>(&mut StreamReaderConnectionWrapper::new(
+                &mut self.conn_c,
+                self.stream_id,
+            ))
             .unwrap();
         assert!(!fin);
         frame
@@ -233,7 +238,10 @@ fn test_reading_frame<T: FrameDecoder<T> + PartialEq + Debug>(
         mem::drop(fr.conn_c.process(out.dgram(), now()));
     }
 
-    let rv = fr.fr.receive::<T>(&mut StreamReaderConnectionWrapper::new(&mut fr.conn_c, fr.stream_id));
+    let rv = fr.fr.receive::<T>(&mut StreamReaderConnectionWrapper::new(
+        &mut fr.conn_c,
+        fr.stream_id,
+    ));
 
     match expected_result {
         FrameReadingTestExpect::Error => assert_eq!(Err(Error::HttpFrame), rv),
@@ -477,7 +485,11 @@ fn test_frame_reading_when_stream_is_closed_before_sending_data() {
     mem::drop(fr.conn_s.process(out.dgram(), now()));
     assert_eq!(
         Ok((None, true)),
-        fr.fr.receive::<HFrame>(&mut StreamReaderConnectionWrapper::new(&mut fr.conn_s, fr.stream_id))
+        fr.fr
+            .receive::<HFrame>(&mut StreamReaderConnectionWrapper::new(
+                &mut fr.conn_s,
+                fr.stream_id
+            ))
     );
 }
 
@@ -497,6 +509,9 @@ fn test_wt_frame_reading_when_stream_is_closed_before_sending_data() {
     assert_eq!(
         Ok((None, true)),
         fr.fr
-            .receive::<WebTransportFrame>(&mut StreamReaderConnectionWrapper::new(&mut fr.conn_s, fr.stream_id))
+            .receive::<WebTransportFrame>(&mut StreamReaderConnectionWrapper::new(
+                &mut fr.conn_s,
+                fr.stream_id
+            ))
     );
 }

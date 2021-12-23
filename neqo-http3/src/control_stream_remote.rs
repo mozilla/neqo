@@ -33,7 +33,12 @@ impl ControlStreamRemote {
     /// Check if a stream is the control stream and read received data.
     pub fn receive_single(&mut self, conn: &mut Connection) -> Res<Option<HFrame>> {
         qdebug!([self], "Receiving data.");
-        match self.frame_reader.receive(&mut StreamReaderConnectionWrapper::new(conn, self.stream_id))? {
+        match self
+            .frame_reader
+            .receive(&mut StreamReaderConnectionWrapper::new(
+                conn,
+                self.stream_id,
+            ))? {
             (_, true) => Err(Error::HttpClosedCriticalStream),
             (s, false) => Ok(s),
         }

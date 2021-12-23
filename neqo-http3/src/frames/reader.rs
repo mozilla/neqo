@@ -6,7 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{Error, Res, RecvStream};
+use crate::{Error, RecvStream, Res};
 use neqo_common::{
     hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
     IncrementalDecoderUint,
@@ -42,8 +42,7 @@ pub struct StreamReaderConnectionWrapper<'a> {
 
 impl<'a> StreamReaderConnectionWrapper<'a> {
     pub fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
-        Self {
-            conn, stream_id }
+        Self { conn, stream_id }
     }
 }
 
@@ -63,8 +62,7 @@ pub struct StreamReaderRecvStreamWrapper<'a> {
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
     pub fn new(conn: &'a mut Connection, recv_stream: &'a mut dyn RecvStream) -> Self {
-        Self {
-            recv_stream, conn }
+        Self { recv_stream, conn }
     }
 }
 
@@ -162,11 +160,7 @@ impl FrameReader {
             {
                 (0, f) => (None, false, f),
                 (amount, f) => {
-                    qtrace!(
-                        "FrameReader::receive: reading {} byte, fin={}",
-                        amount,
-                        f
-                    );
+                    qtrace!("FrameReader::receive: reading {} byte, fin={}", amount, f);
                     (self.consume::<T>(Decoder::from(&buf[..amount]))?, true, f)
                 }
             };
