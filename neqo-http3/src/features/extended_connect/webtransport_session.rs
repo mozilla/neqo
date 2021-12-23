@@ -134,7 +134,7 @@ impl WebTransportSession {
     }
 
     /// # Errors
-    /// The above function can only fail if supplied headers are not valid http headers.
+    /// The function can only fail if supplied headers are not valid http headers.
     /// # Panics
     /// `control_stream_send` implements the  http specific functions and `http_stream()`
     /// will never return `None`.
@@ -152,10 +152,6 @@ impl WebTransportSession {
         self.maybe_check_headers();
         self.read_control_stream(conn)?;
         Ok((ReceiveOutput::NoOutput, self.state == SessionState::Done))
-    }
-
-    fn reset(&mut self, close_type: CloseType) {
-        self.close(close_type);
     }
 
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
@@ -194,7 +190,7 @@ impl WebTransportSession {
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         self.control_stream_send.send(conn)?;
         if self.control_stream_send.done() {
-            self.state = SessionState::Done
+            self.state = SessionState::Done;
         }
         Ok(())
     }
@@ -205,10 +201,6 @@ impl WebTransportSession {
 
     fn done(&self) -> bool {
         self.state == SessionState::Done
-    }
-
-    fn handle_stop_sending(&mut self, close_type: CloseType) {
-        self.close(close_type);
     }
 
     fn close(&mut self, close_type: CloseType) {
@@ -412,7 +404,7 @@ impl RecvStream for Rc<RefCell<WebTransportSession>> {
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
-        self.borrow_mut().reset(close_type);
+        self.borrow_mut().close(close_type);
         Ok(())
     }
 
@@ -475,7 +467,7 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {
-        self.borrow_mut().handle_stop_sending(close_type);
+        self.borrow_mut().close(close_type);
     }
 }
 

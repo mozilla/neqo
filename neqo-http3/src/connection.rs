@@ -759,7 +759,7 @@ impl Http3Connection {
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
-        qinfo!([self], "reset_stream {} error={}.", stream_id, error);
+        qinfo!([self], "cancel_fetch {} error={}.", stream_id, error);
         let send_stream = self.send_streams.get(&stream_id);
         let recv_stream = self.recv_streams.get(&stream_id);
         match (send_stream, recv_stream) {
