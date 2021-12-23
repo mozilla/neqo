@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::{FrameReader, HFrame, H3_FRAME_TYPE_HEADERS, StreamReaderConnectionWrapper};
+use crate::frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, H3_FRAME_TYPE_HEADERS};
 use crate::push_controller::PushController;
 use crate::{
     headers_checks::{headers_valid, is_interim},
@@ -264,7 +264,10 @@ impl RecvMessage {
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
                 | RecvMessageState::WaitingForData { frame_reader }
                 | RecvMessageState::WaitingForFinAfterTrailers { frame_reader } => {
-                    match frame_reader.receive(&mut StreamReaderConnectionWrapper::new(conn, self.stream_id))? {
+                    match frame_reader.receive(&mut StreamReaderConnectionWrapper::new(
+                        conn,
+                        self.stream_id,
+                    ))? {
                         (None, true) => {
                             break self.set_state_to_close_pending(post_readable_event);
                         }

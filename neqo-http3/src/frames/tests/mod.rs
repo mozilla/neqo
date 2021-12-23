@@ -4,7 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::{reader::FrameDecoder, FrameReader, HFrame, WebTransportFrame, StreamReaderConnectionWrapper};
+use crate::frames::{
+    reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
+};
 use neqo_common::Encoder;
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::StreamType;
@@ -38,7 +40,12 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     let out = conn_s.process(None, now());
     mem::drop(conn_c.process(out.dgram(), now()));
 
-    let (frame, fin) = fr.receive::<T>(&mut StreamReaderConnectionWrapper::new(&mut conn_c, stream_id)).unwrap();
+    let (frame, fin) = fr
+        .receive::<T>(&mut StreamReaderConnectionWrapper::new(
+            &mut conn_c,
+            stream_id,
+        ))
+        .unwrap();
     assert!(!fin);
     assert!(frame.is_some());
 
