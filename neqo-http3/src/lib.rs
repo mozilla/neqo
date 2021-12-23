@@ -44,6 +44,7 @@ pub use conn_params::Http3Parameters;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
 use features::extended_connect::WebTransportSession;
+pub use frames::HFrame;
 pub use neqo_common::{Header, MessageType};
 pub use priority::Priority;
 pub use server::Http3Server;
@@ -55,7 +56,6 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 pub use stream_type_reader::NewStreamType;
-pub use frames::HFrame;
 
 type Res<T> = Result<T, Error>;
 

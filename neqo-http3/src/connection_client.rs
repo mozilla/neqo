@@ -335,7 +335,7 @@ impl Http3Client {
 
     /// To supply a request body this function is called (headers are supplied through the `fetch` function.)
     /// # Errors
-    /// `InvalidStreamId` if thee stream does not exist,
+    /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
     /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
@@ -437,7 +437,7 @@ impl Http3Client {
 
     /// Close `WebTransport` cleanly
     /// # Errors
-    /// `InvalidStreamId` if thee stream does not exist,
+    /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
     /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
     /// `InvalidInput` if an empty buffer has been supplied.
