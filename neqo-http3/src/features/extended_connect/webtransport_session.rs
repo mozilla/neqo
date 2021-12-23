@@ -392,6 +392,8 @@ impl WebTransportSession {
         self.control_stream_send.send_data(conn, buf)
     }
 
+    /// # Errors
+    /// Returns an error if the datagram exceeds the remote datagram size limit.
     pub fn send_datagram(
         &self,
         conn: &mut Connection,
@@ -403,7 +405,7 @@ impl WebTransportSession {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
             dgram_data.encode(buf);
-            conn.send_datagram(&dgram_data, id)?;
+            conn.send_datagram(dgram_data.as_ref(), id)?;
         }
         Ok(())
     }

@@ -22,7 +22,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
-    Output, Stats as TransportStats, StreamId, StreamType, ZeroRttState,
+    Output, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::convert::TryFrom;
@@ -479,7 +479,7 @@ impl Http3Client {
         )
     }
 
-    /// Send WebTransport datagram.
+    /// Send `WebTransport` datagram.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
@@ -495,15 +495,18 @@ impl Http3Client {
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id)
     }
 
+    #[must_use]
     pub fn webtransport_remote_datagram_size(&self) -> u64 {
         self.conn.remote_datagram_size()
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
-    /// packet number, ack frames, etc.
-    /// # Error
+    ///  packet number, ack frames, etc.
+    /// # Errors
     /// The function returns `NotAvailable` if datagrams are not enabled.
+    /// # Panics
+    /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         Ok(self.conn.max_datagram_size()?
             - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
@@ -649,7 +652,7 @@ impl Http3Client {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => {
-                    self.base_handler.handle_datagram(dgram);
+                    self.base_handler.handle_datagram(&dgram);
                 }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }

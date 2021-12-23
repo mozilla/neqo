@@ -300,7 +300,7 @@ impl WebTransportRequest {
         ))
     }
 
-    /// Send WebTransport datagram.
+    /// Send `WebTransport` datagram.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
@@ -318,6 +318,7 @@ impl WebTransportRequest {
             )
     }
 
+    #[must_use]
     pub fn remote_datagram_size(&self) -> u64 {
         self.stream_handler.conn.borrow().remote_datagram_size()
     }
@@ -325,8 +326,10 @@ impl WebTransportRequest {
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
-    /// # Error
+    /// # Errors
     /// The function returns `NotAvailable` if datagrams are not enabled.
+    /// # Panics
+    /// This cannot panic. The max varint length is 8.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
         Ok(max_size

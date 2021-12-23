@@ -420,8 +420,8 @@ impl Http3Connection {
         }
     }
 
-    pub fn handle_datagram(&mut self, datagram: Vec<u8>) {
-        let mut decoder = Decoder::new(&datagram);
+    pub fn handle_datagram(&mut self, datagram: &[u8]) {
+        let mut decoder = Decoder::new(datagram);
         if let Some(session_id) = decoder.decode_varint() {
             if let Some(stream) = self.recv_streams.get_mut(&StreamId::from(session_id)) {
                 if let Some(session) = stream.webtransport() {

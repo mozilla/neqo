@@ -581,7 +581,7 @@ impl WtTest {
                 Http3ClientEvent::WebTransport(WebTransportEvent::Datagram {
                     session_id,
                     datagram
-                }) if session_id == expected_stream_id && &datagram == expected_dgram
+                }) if session_id == expected_stream_id && datagram == expected_dgram
             )
         };
         assert!(self.client.events().any(wt_datagram_event));
@@ -598,7 +598,7 @@ impl WtTest {
                 Http3ServerEvent::WebTransport(WebTransportServerEvent::Datagram {
                     session,
                     datagram
-                }) if session.stream_id() == expected_session.stream_id() && &datagram == expected_dgram
+                }) if session.stream_id() == expected_session.stream_id() && datagram == expected_dgram
             )
         };
         assert!(self.server.events().any(wt_datagram_event));
