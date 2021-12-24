@@ -7,7 +7,8 @@
 use super::super::{ConnectionError, Output, State};
 use super::{connect, connect_fail, default_client, default_server, new_client, new_server};
 use crate::packet::PACKET_BIT_LONG;
-use crate::{tparams::TransportParameter, ConnectionParameters, Error, Version};
+use crate::tparams::{self, TransportParameter};
+use crate::{ConnectionParameters, Error, Version};
 
 use neqo_common::{Datagram, Decoder, Encoder};
 use std::mem;
@@ -361,4 +362,92 @@ fn invalid_server_version() {
         }
         _ => panic!("invalid server state"),
     }
+}
+
+#[test]
+fn invalid_current_version_client() {
+    const OTHER_VERSION: Version = Version::Draft29;
+
+    let mut client = default_client();
+    let mut server = default_server();
+
+    assert_ne!(OTHER_VERSION, client.version());
+    client
+        .set_local_tparam(
+            tparams::VERSION_NEGOTIATION,
+            TransportParameter::Versions {
+                current: OTHER_VERSION.as_u32(),
+                other: Version::all()
+                    .iter()
+                    .copied()
+                    .map(Version::as_u32)
+                    .collect(),
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::PeerError(Error::CryptoAlert(47).code()),
+        Error::CryptoAlert(47),
+    );
+}
+
+/// To test this, we need to disable compatible upgrade so that the server doesn't update
+/// its transport parameters.  Then, we can overwrite its transport parameters without
+/// them being overwritten.  Otherwise, it would be hard to find a window during which
+/// the transport parameter can be modified.
+#[test]
+fn invalid_current_version_server() {
+    const OTHER_VERSION: Version = Version::Draft29;
+
+    let mut client = default_client();
+    let mut server = new_server(
+        ConnectionParameters::default().versions(Version::default(), vec![Version::default()]),
+    );
+
+    assert!(!Version::default().is_compatible(OTHER_VERSION));
+    server
+        .set_local_tparam(
+            tparams::VERSION_NEGOTIATION,
+            TransportParameter::Versions {
+                current: OTHER_VERSION.as_u32(),
+                other: vec![OTHER_VERSION.as_u32()],
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::CryptoAlert(47),
+        Error::PeerError(Error::CryptoAlert(47).code()),
+    );
+}
+
+#[test]
+fn no_compatible_version() {
+    const OTHER_VERSION: Version = Version::Draft29;
+
+    let mut client = default_client();
+    let mut server = default_server();
+
+    assert_ne!(OTHER_VERSION, client.version());
+    client
+        .set_local_tparam(
+            tparams::VERSION_NEGOTIATION,
+            TransportParameter::Versions {
+                current: Version::default().as_u32(),
+                other: vec![OTHER_VERSION.as_u32()],
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::PeerError(Error::CryptoAlert(47).code()),
+        Error::CryptoAlert(47),
+    );
 }

@@ -146,7 +146,7 @@ pub fn default_client() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    make_default_server(DEFAULT_ALPN)
+    make_default_server(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with a configuration.
@@ -169,17 +169,22 @@ pub fn configure_server(conn_param: ConnectionParameters) -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    make_default_server(DEFAULT_ALPN_H3)
+    make_default_server(DEFAULT_ALPN_H3, ConnectionParameters::default())
 }
 
-fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
+#[must_use]
+pub fn new_server_h3(params: ConnectionParameters) -> Connection {
+    make_default_server(DEFAULT_ALPN_H3, params)
+}
+
+fn make_default_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
     fixture_init();
 
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().ack_ratio(255),
+        params.ack_ratio(255),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})

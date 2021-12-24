@@ -50,7 +50,9 @@ pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::stats::{Stats, StatsCell};
 use crate::stream_id::StreamType;
 use crate::streams::Streams;
-use crate::tparams::{self, TransportParameter, TransportParameters, TransportParametersHandler};
+use crate::tparams::{
+    self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
+};
 use crate::tracking::{AckTracker, PacketNumberSpace, SentPacket};
 use crate::version::{Version, WireVersion};
 use crate::{qlog, AppError, ConnectionError, Error, Res, StreamId};
@@ -461,13 +463,14 @@ impl Connection {
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
-    /// In general, this method should not be used.  This only sets transport parameters
-    /// without dealing with other aspects of setting the value.
-    pub fn set_local_tparam(
-        &self,
-        tp: crate::tparams::TransportParameterId,
-        value: TransportParameter,
-    ) -> Res<()> {
+    /// This only sets transport parameters without dealing with other aspects of
+    /// setting the value.  This asserts if the transport parameter is known to
+    /// this crate.
+    pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
+        #[cfg(not(test))]
+        {
+            assert!(!tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
+        }
         if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())

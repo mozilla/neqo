@@ -215,10 +215,10 @@ fn connect(client: &mut Connection, server: &mut Connection) {
     connect_with_rtt(client, server, now(), Duration::new(0, 0));
 }
 
-fn assert_error(c: &Connection, err: &ConnectionError) {
+fn assert_error(c: &Connection, expected: &ConnectionError) {
     match c.state() {
         State::Closing { error, .. } | State::Draining { error, .. } | State::Closed(error) => {
-            assert_eq!(*error, *err);
+            assert_eq!(*error, *expected, "{} error mismatch", c);
         }
         _ => panic!("bad state {:?}", c.state()),
     }

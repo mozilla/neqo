@@ -822,7 +822,6 @@ mod tests {
     use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
-    use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
         ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, StreamId,
         StreamType, Version, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
@@ -831,8 +830,8 @@ mod tests {
     use std::mem;
     use std::time::Duration;
     use test_fixture::{
-        addr, anti_replay, default_server_h3, fixture_init, now, CountingConnectionIdGenerator,
-        DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+        addr, anti_replay, default_server_h3, fixture_init, new_server_h3, now,
+        CountingConnectionIdGenerator, DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1154,15 +1153,6 @@ mod tests {
                 header_block: header_block.to_vec(),
             };
             hframe.encode(encoder);
-        }
-
-        pub fn set_max_uni_stream(&mut self, max_stream: u64) {
-            self.conn
-                .set_local_tparam(
-                    tparams::INITIAL_MAX_STREAMS_UNI,
-                    TransportParameter::Integer(max_stream),
-                )
-                .unwrap();
         }
     }
 
@@ -6360,8 +6350,9 @@ mod tests {
     #[test]
     fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new();
-        server.set_max_uni_stream(0);
+        let mut server = TestServer::new_with_conn(new_server_h3(
+            ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
+        ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
 
@@ -6369,8 +6360,9 @@ mod tests {
     #[test]
     fn client_qpack_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new();
-        server.set_max_uni_stream(2);
+        let mut server = TestServer::new_with_conn(new_server_h3(
+            ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
+        ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
 
