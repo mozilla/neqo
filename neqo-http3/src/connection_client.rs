@@ -830,7 +830,7 @@ mod tests {
     use std::mem;
     use std::time::Duration;
     use test_fixture::{
-        addr, anti_replay, default_server_h3, fixture_init, new_server_h3, now,
+        addr, anti_replay, default_server_h3, fixture_init, new_server, now,
         CountingConnectionIdGenerator, DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
     };
 
@@ -6351,7 +6351,8 @@ mod tests {
     #[test]
     fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server_h3(
+        let mut server = TestServer::new_with_conn(new_server(
+            DEFAULT_ALPN_H3,
             ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
         ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
@@ -6361,7 +6362,8 @@ mod tests {
     #[test]
     fn client_qpack_stream_create_failed() {
         let mut client = default_http3_client();
-        let mut server = TestServer::new_with_conn(new_server_h3(
+        let mut server = TestServer::new_with_conn(new_server(
+            DEFAULT_ALPN_H3,
             ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
         ));
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);

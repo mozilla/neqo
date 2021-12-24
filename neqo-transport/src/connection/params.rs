@@ -107,8 +107,8 @@ impl ConnectionParameters {
     /// versions that should be enabled.  This list should contain the initial
     /// version and be in order  of preference, with more preferred versions
     /// before less preferred.
-    pub fn versions(mut self, i: Version, v: Vec<Version>) -> Self {
-        self.versions = VersionConfig::new(i, v);
+    pub fn versions(mut self, initial: Version, all: Vec<Version>) -> Self {
+        self.versions = VersionConfig::new(initial, all);
         self
     }
 
@@ -260,7 +260,7 @@ impl ConnectionParameters {
         role: Role,
         cid_manager: &mut ConnectionIdManager,
     ) -> Res<TransportParametersHandler> {
-        let mut tps = TransportParametersHandler::new(role, self.get_versions().clone());
+        let mut tps = TransportParametersHandler::new(role, self.versions.clone());
         // default parameters
         tps.local.set_integer(
             tparams::ACTIVE_CONNECTION_ID_LIMIT,

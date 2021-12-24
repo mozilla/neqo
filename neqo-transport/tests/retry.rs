@@ -12,7 +12,7 @@ mod common;
 
 use common::{
     apply_header_protection, client_initial_aead_and_hp, connected_server, decode_initial_header,
-    default_server, get_ticket, remove_header_protection,
+    default_server, generate_ticket, remove_header_protection,
 };
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder};
 use neqo_crypto::AuthenticationStatus;
@@ -76,7 +76,7 @@ fn retry_expired() {
 #[test]
 fn retry_0rtt() {
     let mut server = default_server();
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::Always);
 
     let mut client = default_client();
@@ -138,7 +138,7 @@ fn retry_different_ip() {
 #[test]
 fn new_token_different_ip() {
     let mut server = default_server();
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -160,7 +160,7 @@ fn new_token_different_ip() {
 #[test]
 fn new_token_expired() {
     let mut server = default_server();
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();

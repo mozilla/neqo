@@ -713,51 +713,36 @@ fn extra_initial_invalid_cid() {
     assert!(nothing.is_none());
 }
 
-fn connect_version(version: Version) {
-    fixture_init();
-    let mut client = Connection::new_client(
-        test_fixture::DEFAULT_SERVER_NAME,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
-        ConnectionParameters::default().versions(version, vec![version]),
-        now(),
-    )
-    .unwrap();
-    let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().versions(version, vec![version]),
-    )
-    .unwrap();
-    connect_force_idle(&mut client, &mut server);
-}
-
 #[test]
-fn connect_v1() {
-    connect_version(Version::Version1);
-}
+fn connect_one_version() {
+    fn connect_one_version(version: Version) {
+        fixture_init();
+        let mut client = Connection::new_client(
+            test_fixture::DEFAULT_SERVER_NAME,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            addr(),
+            addr(),
+            ConnectionParameters::default().versions(version, vec![version]),
+            now(),
+        )
+        .unwrap();
+        let mut server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            ConnectionParameters::default().versions(version, vec![version]),
+        )
+        .unwrap();
+        connect_force_idle(&mut client, &mut server);
+        assert_eq!(client.version(), version);
+        assert_eq!(server.version(), version);
+    }
 
-#[test]
-fn connect_29() {
-    connect_version(Version::Draft29);
-}
-
-#[test]
-fn connect_30() {
-    connect_version(Version::Draft30);
-}
-
-#[test]
-fn connect_31() {
-    connect_version(Version::Draft31);
-}
-
-#[test]
-fn connect_32() {
-    connect_version(Version::Draft32);
+    for v in Version::all() {
+        println!("Connecting with {:?}", v);
+        connect_one_version(v);
+    }
 }
 
 #[test]

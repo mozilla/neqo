@@ -70,6 +70,70 @@ fn single_client() {
 }
 
 #[test]
+fn connect_single_version_both() {
+    fn connect_one_version(version: Version) {
+        let params = ConnectionParameters::default().versions(version, vec![version]);
+        let mut server = new_server(params.clone());
+
+        let mut client = new_client(params);
+        let server_conn = connect(&mut client, &mut server);
+        assert_eq!(client.version(), version);
+        assert_eq!(server_conn.borrow().version(), version);
+    }
+
+    for v in Version::all() {
+        println!("Connecting with {:?}", v);
+        connect_one_version(v);
+    }
+}
+
+#[test]
+fn connect_single_version_client() {
+    fn connect_one_version(version: Version) {
+        let mut server = default_server();
+
+        let mut client =
+            new_client(ConnectionParameters::default().versions(version, vec![version]));
+        let server_conn = connect(&mut client, &mut server);
+        assert_eq!(client.version(), version);
+        assert_eq!(server_conn.borrow().version(), version);
+    }
+
+    for v in Version::all() {
+        println!("Connecting with {:?}", v);
+        connect_one_version(v);
+    }
+}
+
+#[test]
+fn connect_single_version_server() {
+    fn connect_one_version(version: Version) {
+        let mut server =
+            new_server(ConnectionParameters::default().versions(version, vec![version]));
+
+        let mut client = default_client();
+
+        if client.version() != version {
+            // Run the version negotiation exchange if necessary.
+            let dgram = client.process_output(now()).dgram();
+            assert!(dgram.is_some());
+            let dgram = server.process(dgram, now()).dgram();
+            assertions::assert_vn(dgram.as_ref().unwrap());
+            client.process_input(dgram.unwrap(), now());
+        }
+
+        let server_conn = connect(&mut client, &mut server);
+        assert_eq!(client.version(), version);
+        assert_eq!(server_conn.borrow().version(), version);
+    }
+
+    for v in Version::all() {
+        println!("Connecting with {:?}", v);
+        connect_one_version(v);
+    }
+}
+
+#[test]
 fn duplicate_initial() {
     let mut server = default_server();
     let mut client = default_client();
