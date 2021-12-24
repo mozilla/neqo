@@ -990,7 +990,7 @@ impl Connection {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
-            (State::Init | State::WaitInitial, Role::Server) => {
+            (State::Init, Role::Server) | (State::WaitInitial, Role::Server) => {
                 return Output::None;
             }
             _ => {
