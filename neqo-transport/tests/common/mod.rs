@@ -190,15 +190,9 @@ pub fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<us
     }
 }
 
-pub fn get_ticket(server: &mut Server) -> ResumptionToken {
-    let mut client = default_client();
-    let mut server_conn = connect(&mut client, server);
-
-    server_conn.borrow_mut().send_ticket(now(), &[]).unwrap();
-    let dgram = server.process(None, now()).dgram();
-    client.process_input(dgram.unwrap(), now()); // Consume ticket, ignore output.
-
-    let ticket = client
+/// Scrub through client events to find a resumption token.
+pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
+    client
         .events()
         .find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
@@ -207,7 +201,18 @@ pub fn get_ticket(server: &mut Server) -> ResumptionToken {
                 None
             }
         })
-        .unwrap();
+        .unwrap()
+}
+
+/// Connect to the server and have it generate a ticket.
+pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
+    let mut client = default_client();
+    let mut server_conn = connect(&mut client, server);
+
+    server_conn.borrow_mut().send_ticket(now(), &[]).unwrap();
+    let dgram = server.process(None, now()).dgram();
+    client.process_input(dgram.unwrap(), now()); // Consume ticket, ignore output.
+    let ticket = find_ticket(&mut client);
 
     // Have the client close the connection and then let the server clean up.
     client.close(now(), 0, "got a ticket");

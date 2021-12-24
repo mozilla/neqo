@@ -11,7 +11,8 @@ mod common;
 
 use common::{
     apply_header_protection, client_initial_aead_and_hp, connect, connected_server,
-    decode_initial_header, default_server, get_ticket, new_server, remove_header_protection,
+    decode_initial_header, default_server, find_ticket, generate_ticket, new_server,
+    remove_header_protection,
 };
 
 use neqo_common::{qtrace, Datagram, Decoder, Encoder};
@@ -202,7 +203,7 @@ fn drop_short_initial() {
 #[test]
 fn zero_rtt() {
     let mut server = default_server();
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
 
     // Discharge the old connection so that we don't have to worry about it.
     let mut now = now();
@@ -264,7 +265,7 @@ fn zero_rtt() {
 #[test]
 fn new_token_0rtt() {
     let mut server = default_server();
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -295,7 +296,7 @@ fn new_token_0rtt() {
 #[test]
 fn new_token_different_port() {
     let mut server = default_server();
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -512,6 +513,54 @@ fn version_negotiation_and_compatible() {
     assert_eq!(sconn.borrow().version(), COMPAT_VERSION);
 }
 
+/// When a client resumes it remembers the version that the connection last used.
+/// A subsequent connection will use that version, but if it then receives
+/// a version negotiation packet, it should validate based on what it attempted
+/// not what it was originally configured for.
+#[test]
+fn compatible_upgrade_resumption_and_vn() {
+    // Start at v1, compatible upgrade to v2.
+    const ORIG_VERSION: Version = Version::Version1;
+    const COMPAT_VERSION: Version = Version::Version2;
+    const RESUMPTION_VERSION: Version = Version::Draft29;
+
+    let client_params = ConnectionParameters::default().versions(
+        ORIG_VERSION,
+        vec![COMPAT_VERSION, ORIG_VERSION, RESUMPTION_VERSION],
+    );
+    let mut client = new_client(client_params.clone());
+    assert_eq!(client.version(), ORIG_VERSION);
+
+    let mut server = default_server();
+    let mut server_conn = connect(&mut client, &mut server);
+    assert_eq!(client.version(), COMPAT_VERSION);
+    assert_eq!(server_conn.borrow().version(), COMPAT_VERSION);
+
+    server_conn.borrow_mut().send_ticket(now(), &[]).unwrap();
+    let dgram = server.process(None, now()).dgram();
+    client.process_input(dgram.unwrap(), now()); // Consume ticket, ignore output.
+    let ticket = find_ticket(&mut client);
+
+    // This new server will reject the ticket, but it will also generate a VN packet.
+    let mut client = new_client(client_params);
+    let mut server = new_server(
+        ConnectionParameters::default().versions(RESUMPTION_VERSION, vec![RESUMPTION_VERSION]),
+    );
+    client.enable_resumption(now(), ticket).unwrap();
+
+    // The version negotiation exchange.
+    let dgram = client.process_output(now()).dgram();
+    assert!(dgram.is_some());
+    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    let dgram = server.process(dgram, now()).dgram();
+    assertions::assert_vn(dgram.as_ref().unwrap());
+    client.process_input(dgram.unwrap(), now());
+
+    let server_conn = connect(&mut client, &mut server);
+    assert_eq!(client.version(), RESUMPTION_VERSION);
+    assert_eq!(server_conn.borrow().version(), RESUMPTION_VERSION);
+}
+
 #[test]
 fn closed() {
     // Let a server connection idle and it should be removed.
@@ -609,7 +658,7 @@ fn max_streams_after_0rtt_rejection() {
             .max_streams(StreamType::UniDi, MAX_STREAMS_UNIDI),
     )
     .expect("should create a server");
-    let token = get_ticket(&mut server);
+    let token = generate_ticket(&mut server);
 
     let mut client = default_client();
     client.enable_resumption(now(), &token).unwrap();
