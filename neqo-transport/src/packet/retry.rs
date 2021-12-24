@@ -33,11 +33,11 @@ thread_local!(static RETRY_AEAD_V1: RefCell<Aead> = RefCell::new(make_aead(Versi
 thread_local!(static RETRY_AEAD_V2: RefCell<Aead> = RefCell::new(make_aead(Version::Version2)));
 
 /// Run a function with the appropriate Retry AEAD.
-pub fn use_aead<F, T>(quic_version: Version, f: F) -> Res<T>
+pub fn use_aead<F, T>(version: Version, f: F) -> Res<T>
 where
     F: FnOnce(&Aead) -> Res<T>,
 {
-    match quic_version {
+    match version {
         Version::Version2 => &RETRY_AEAD_V2,
         Version::Version1 => &RETRY_AEAD_V1,
         Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => &RETRY_AEAD_29,

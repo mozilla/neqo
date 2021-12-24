@@ -110,7 +110,7 @@ struct InitialDetails {
     src_cid: ConnectionId,
     dst_cid: ConnectionId,
     token: Vec<u8>,
-    quic_version: Version,
+    version: Version,
 }
 
 impl InitialDetails {
@@ -119,7 +119,7 @@ impl InitialDetails {
             src_cid: ConnectionId::from(packet.scid()),
             dst_cid: ConnectionId::from(packet.dcid()),
             token: packet.token().to_vec(),
-            quic_version: packet.version().unwrap(),
+            version: packet.version().unwrap(),
         }
     }
 }
@@ -348,7 +348,7 @@ impl Server {
                 };
                 if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
                     let packet = PacketBuilder::retry(
-                        initial.quic_version,
+                        initial.version,
                         &initial.src_cid,
                         &new_dcid,
                         &token,
@@ -487,13 +487,13 @@ impl Server {
             saved_cids: Vec::new(),
         }));
 
+        let mut params = self.conn_params.clone();
+        params.get_versions_mut().set_initial(initial.version);
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             Rc::clone(&cid_mgr) as _,
-            self.conn_params
-                .clone()
-                .initial_version(initial.quic_version),
+            params,
         );
 
         if let Ok(mut c) = sconn {
@@ -570,6 +570,7 @@ impl Server {
                 && !self
                     .conn_params
                     .get_versions()
+                    .all()
                     .contains(&packet.version().unwrap()))
         {
             if dgram.len() < MIN_INITIAL_PACKET_SIZE {
@@ -581,7 +582,7 @@ impl Server {
             let vn = PacketBuilder::version_negotiation(
                 packet.scid(),
                 packet.dcid(),
-                self.conn_params.get_versions(),
+                self.conn_params.get_versions().all(),
             );
             return Some(Datagram::new(dgram.destination(), dgram.source(), vn));
         }

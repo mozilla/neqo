@@ -90,7 +90,8 @@ impl Http3Client {
                 &[alpn_from_quic_version(
                     http3_parameters
                         .get_connection_parameters()
-                        .get_initial_version(),
+                        .get_versions()
+                        .initial(),
                 )],
                 cid_manager,
                 local_addr,

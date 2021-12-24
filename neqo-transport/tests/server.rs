@@ -444,7 +444,7 @@ fn version_negotiation_ignored() {
 fn version_negotiation() {
     const VN_VERSION: Version = Version::Draft29;
     assert_ne!(VN_VERSION, Version::default());
-    assert!(!Version::default().compatible(VN_VERSION));
+    assert!(!Version::default().is_compatible(VN_VERSION));
 
     let mut server =
         new_server(ConnectionParameters::default().versions(VN_VERSION, vec![VN_VERSION]));
@@ -469,9 +469,9 @@ fn version_negotiation_and_compatible() {
     const ORIG_VERSION: Version = Version::Draft29;
     const VN_VERSION: Version = Version::Version1;
     const COMPAT_VERSION: Version = Version::Version2;
-    assert!(!ORIG_VERSION.compatible(VN_VERSION));
-    assert!(!ORIG_VERSION.compatible(COMPAT_VERSION));
-    assert!(VN_VERSION.compatible(COMPAT_VERSION));
+    assert!(!ORIG_VERSION.is_compatible(VN_VERSION));
+    assert!(!ORIG_VERSION.is_compatible(COMPAT_VERSION));
+    assert!(VN_VERSION.is_compatible(COMPAT_VERSION));
 
     let mut server = new_server(
         ConnectionParameters::default().versions(VN_VERSION, vec![COMPAT_VERSION, VN_VERSION]),

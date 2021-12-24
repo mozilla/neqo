@@ -9,8 +9,8 @@
 use crate::cid::{
     ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN,
 };
-use crate::version::{Version, WireVersion};
-use crate::{ConnectionParameters, Error, Res};
+use crate::version::{Version, VersionConfig, WireVersion};
+use crate::{Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
 use neqo_crypto::constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
@@ -425,19 +425,19 @@ impl TransportParameters {
     }
 
     /// Set version information.
-    pub fn set_versions(&mut self, role: Role, current: Version, other_versions: &[Version]) {
+    pub fn set_versions(&mut self, role: Role, versions: &VersionConfig) {
         let rbuf = random(4);
-        let mut other = Vec::with_capacity(other_versions.len() + 1);
+        let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
         let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a0a0a;
         other.push(grease);
-        for &v in other_versions {
-            if role == Role::Client && !current.compatible(v) {
+        for &v in versions.all() {
+            if role == Role::Client && !versions.initial().is_compatible(v) {
                 continue;
             }
             other.push(v.as_u32());
         }
-        let current = current.as_u32();
+        let current = versions.initial().as_u32();
         self.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions { current, other },
@@ -549,21 +549,19 @@ impl TransportParameters {
 #[derive(Debug)]
 pub struct TransportParametersHandler {
     role: Role,
-    version: Version,
-    all_versions: Vec<Version>,
+    versions: VersionConfig,
     pub(crate) local: TransportParameters,
     pub(crate) remote: Option<TransportParameters>,
     pub(crate) remote_0rtt: Option<TransportParameters>,
 }
 
 impl TransportParametersHandler {
-    pub fn new(role: Role, version: Version, all_versions: Vec<Version>) -> Self {
+    pub fn new(role: Role, versions: VersionConfig) -> Self {
         let mut local = TransportParameters::default();
-        local.set_versions(role, version, &all_versions);
+        local.set_versions(role, &versions);
         Self {
             role,
-            version,
-            all_versions,
+            versions,
             local,
             remote: None,
             remote_0rtt: None,
@@ -574,9 +572,8 @@ impl TransportParametersHandler {
     /// That needs to be done to override the default choice from configuration.
     pub fn set_version(&mut self, version: Version) {
         debug_assert_eq!(self.role, Role::Client);
-        self.version = version;
-        self.local
-            .set_versions(self.role, version, &self.all_versions)
+        self.versions.set_initial(version);
+        self.local.set_versions(self.role, &self.versions)
     }
 
     pub fn remote(&self) -> &TransportParameters {
@@ -588,47 +585,48 @@ impl TransportParametersHandler {
 
     /// Get the version as set (or as determined by a compatible upgrade).
     pub fn version(&self) -> Version {
-        self.version
+        self.versions.initial()
     }
 
     fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) -> Res<()> {
         if let Some((current, other)) = remote_tp.get_versions() {
             qtrace!(
-                "Peer versions: {:x} {:x?}; enabled {:?}",
+                "Peer versions: {:x} {:x?}; config {:?}",
                 current,
                 other,
-                self.all_versions,
+                self.versions,
             );
 
-            let mut compatible =
-                ConnectionParameters::compatible_versions(self.version, &self.all_versions);
             if self.role == Role::Client {
                 let chosen = Version::try_from(current)?;
-                if compatible.any(|&v| v == chosen) {
+                if self.versions.compatible().any(|&v| v == chosen) {
                     Ok(())
                 } else {
                     qinfo!(
                         "Chosen version {:x} is not compatible with initial version {:x}",
                         current,
-                        self.version.as_u32(),
+                        self.versions.initial().as_u32(),
                     );
                     Err(Error::TransportParameterError)
                 }
             } else {
-                if current != self.version.as_u32() {
+                if current != self.versions.initial().as_u32() {
                     qinfo!(
                         "Current version {:x} != own version {:x}",
                         current,
-                        self.version.as_u32(),
+                        self.versions.initial().as_u32(),
                     );
                     return Err(Error::TransportParameterError);
                 }
 
-                if let Some(preferred) = ConnectionParameters::preferred_version(compatible, other)
-                {
-                    if preferred != self.version {
-                        qinfo!("Compatible upgrade {:?} ==> {:?}", self.version, preferred);
-                        self.version = preferred;
+                if let Some(preferred) = self.versions.preferred_compatible(other) {
+                    if preferred != self.versions.initial() {
+                        qinfo!(
+                            "Compatible upgrade {:?} ==> {:?}",
+                            self.versions.initial(),
+                            preferred
+                        );
+                        self.versions.set_initial(preferred);
                         self.local.compatible_upgrade(preferred);
                     }
                     Ok(())

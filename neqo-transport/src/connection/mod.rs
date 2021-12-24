@@ -308,9 +308,11 @@ impl Connection {
             protocols,
             conn_params,
         )?;
-        c.crypto
-            .states
-            .init(c.conn_params.get_compatible_versions(), Role::Client, &dcid);
+        c.crypto.states.init(
+            c.conn_params.get_versions().compatible(),
+            Role::Client,
+            &dcid,
+        );
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(
             local_addr,
@@ -361,7 +363,7 @@ impl Connection {
 
         let tphandler = Rc::new(RefCell::new(tps));
         let crypto = Crypto::new(
-            conn_params.get_initial_version(),
+            conn_params.get_versions().initial(),
             agent,
             protocols.iter().map(P::as_ref).map(String::from).collect(),
             Rc::clone(&tphandler),
@@ -378,7 +380,7 @@ impl Connection {
 
         let c = Self {
             role,
-            version: conn_params.get_initial_version(),
+            version: conn_params.get_versions().initial(),
             state: State::Init,
             paths: Paths::default(),
             cid_manager,
@@ -1040,7 +1042,7 @@ impl Connection {
         self.handle_lost_packets(&lost_packets);
 
         self.crypto.states.init(
-            self.conn_params.get_compatible_versions(),
+            self.conn_params.get_versions().compatible(),
             self.role,
             &retry_scid,
         );
@@ -1119,7 +1121,7 @@ impl Connection {
     fn version_negotiation(&mut self, supported: &[WireVersion], now: Instant) -> Res<()> {
         debug_assert_eq!(self.role, Role::Client);
 
-        if let Some(version) = self.conn_params.get_preferred_version(supported) {
+        if let Some(version) = self.conn_params.get_versions().preferred(supported) {
             assert_ne!(self.version, version);
 
             qinfo!([self], "Version negotiation: trying {:?}", version);
@@ -1128,7 +1130,7 @@ impl Connection {
             let conn_params = self
                 .conn_params
                 .clone()
-                .versions(version, self.conn_params.get_versions().to_vec());
+                .versions(version, self.conn_params.get_versions().all().to_vec());
             let mut c = Self::new_client(
                 self.crypto.server_name().unwrap(),
                 self.crypto.protocols(),
@@ -1139,7 +1141,8 @@ impl Connection {
                 now,
             )?;
             c.conn_params
-                .override_initial_version(self.conn_params.get_initial_version());
+                .get_versions_mut()
+                .set_initial(self.conn_params.get_versions().initial());
             mem::swap(self, &mut c);
             Ok(())
         } else {
@@ -1182,7 +1185,8 @@ impl Connection {
         match (packet.packet_type(), &self.state, &self.role) {
             (PacketType::Initial, State::Init, Role::Server) => {
                 let version = *packet.version().as_ref().unwrap();
-                if !packet.is_valid_initial() || !self.conn_params.get_versions().contains(&version)
+                if !packet.is_valid_initial()
+                    || !self.conn_params.get_versions().all().contains(&version)
                 {
                     self.stats.borrow_mut().pkt_dropped("Invalid Initial");
                     return Ok(PreprocessResult::Next);
@@ -2389,8 +2393,9 @@ impl Connection {
                 Err(Error::VersionNegotiation)
             } else if self
                 .conn_params
-                .get_initial_version()
-                .compatible(self.version)
+                .get_versions()
+                .initial()
+                .is_compatible(self.version)
             {
                 // 2. Compatible upgrade is OK.
                 Ok(())
@@ -2401,9 +2406,10 @@ impl Connection {
                 all_versions.push(current);
                 if self
                     .conn_params
-                    .get_preferred_version(&all_versions)
+                    .get_versions()
+                    .preferred(&all_versions)
                     .ok_or(Error::VersionNegotiation)?
-                    .compatible(self.version)
+                    .is_compatible(self.version)
                 {
                     Ok(())
                 } else {

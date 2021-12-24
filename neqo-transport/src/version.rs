@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::{Error, Res};
+use neqo_common::qdebug;
 use std::convert::TryFrom;
 
 pub type WireVersion = u32;
@@ -97,7 +98,7 @@ impl Version {
     }
 
     /// Determine if `self` can be upgraded to `other` compatibly.
-    pub fn compatible(self, other: Self) -> bool {
+    pub fn is_compatible(self, other: Self) -> bool {
         self == other
             || matches!(
                 (self, other),
@@ -114,6 +115,13 @@ impl Version {
             Self::Draft30,
             Self::Draft29,
         ]
+    }
+
+    pub fn compatible<'a>(
+        self,
+        all: impl IntoIterator<Item = &'a Self>,
+    ) -> impl Iterator<Item = &'a Self> {
+        all.into_iter().filter(move |&v| self.is_compatible(*v))
     }
 }
 
@@ -142,5 +150,90 @@ impl TryFrom<WireVersion> for Version {
         } else {
             Err(Error::VersionNegotiation)
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VersionConfig {
+    /// The version that a client uses to establish a connection.
+    ///
+    /// For a client, this is the version that is sent out in an Initial packet.
+    /// A client that resumes will set this to the version from the original
+    /// connection.
+    /// A client that handles a Version Negotiation packet will be initialized with
+    /// a version chosen from the packet, but it will then have this value overridden
+    /// to match the original configuration so that the version negotiation can be
+    /// authenticated.
+    ///
+    /// For a server `Connection`, this is the only type of Initial packet that
+    /// can be accepted; the correct value is set by `Server`, see below.
+    ///
+    /// For a `Server`, this value is not used; if an Initial packet is received
+    /// in a supported version (as listed in `versions`), new instances of
+    /// `Connection` will be created with this value set to match what was received.
+    ///
+    /// An invariant here is that this version is always listed in `all`.
+    initial: Version,
+    /// The set of versions that are enabled, in preference order.  For a server,
+    /// only the relative order of compatible versions matters.
+    all: Vec<Version>,
+}
+
+impl VersionConfig {
+    pub fn new(initial: Version, all: Vec<Version>) -> Self {
+        assert!(all.contains(&initial));
+        Self { initial, all }
+    }
+
+    pub fn initial(&self) -> Version {
+        self.initial
+    }
+
+    pub fn all(&self) -> &[Version] {
+        &self.all
+    }
+
+    /// Overwrite the initial value; used by the `Server` when handling new connections
+    /// and by the client on resumption.
+    pub(crate) fn set_initial(&mut self, initial: Version) {
+        qdebug!(
+            "Overwrite initial version {:?} ==> {:?}",
+            self.initial,
+            initial
+        );
+        assert!(self.all.contains(&initial));
+        self.initial = initial;
+    }
+
+    pub fn compatible(&self) -> impl Iterator<Item = &Version> {
+        self.initial.compatible(&self.all)
+    }
+
+    fn find_preferred<'a>(
+        preferences: impl IntoIterator<Item = &'a Version>,
+        vn: &[WireVersion],
+    ) -> Option<Version> {
+        for v in preferences {
+            if vn.contains(&v.as_u32()) {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Determine the preferred version based on a version negotiation packet.
+    pub(crate) fn preferred(&self, vn: &[WireVersion]) -> Option<Version> {
+        Self::find_preferred(&self.all, vn)
+    }
+
+    /// Determine the preferred version based on a set of compatible versions.
+    pub(crate) fn preferred_compatible(&self, vn: &[WireVersion]) -> Option<Version> {
+        Self::find_preferred(self.compatible(), vn)
+    }
+}
+
+impl Default for VersionConfig {
+    fn default() -> Self {
+        Self::new(Version::default(), Version::all())
     }
 }
