@@ -464,8 +464,9 @@ impl Connection {
 
     /// Set a local transport parameter, possibly overriding a default value.
     /// This only sets transport parameters without dealing with other aspects of
-    /// setting the value.  This asserts if the transport parameter is known to
-    /// this crate.
+    /// setting the value.
+    /// # Panics
+    /// This panics if the transport parameter is known to this crate.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
         #[cfg(not(test))]
         {
@@ -648,6 +649,11 @@ impl Connection {
 
         let version =
             Version::try_from(dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)? as u32)?;
+        qtrace!([self], "  version {:?}", version);
+        if !self.conn_params.get_versions().all().contains(&version) {
+            return Err(Error::DisabledVersion);
+        }
+
         let rtt = Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
         qtrace!([self], "  RTT {:?}", rtt);
 
@@ -662,6 +668,7 @@ impl Connection {
 
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
+
         match self.crypto.tls {
             Agent::Client(ref mut c) => {
                 let res = c.enable_resumption(&tok);
@@ -674,6 +681,7 @@ impl Connection {
         }
 
         self.version = version;
+        self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
         self.tps.borrow_mut().remote_0rtt = Some(tp);
         if !init_token.is_empty() {

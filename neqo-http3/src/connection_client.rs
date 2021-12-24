@@ -857,6 +857,7 @@ mod tests {
             addr(),
             Http3Parameters::default()
                 .connection_parameters(
+                    // Disable compatible upgrade, which complicates tests.
                     ConnectionParameters::default()
                         .versions(Version::default(), vec![Version::default()]),
                 )

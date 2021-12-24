@@ -87,6 +87,7 @@ pub enum Error {
     ConnectionState,
     DecodingFrame,
     DecryptError,
+    DisabledVersion,
     HandshakeFailed,
     IdleTimeout,
     IntegerOverflow,

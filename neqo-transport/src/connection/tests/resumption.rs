@@ -6,9 +6,10 @@
 
 use super::{
     connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
-    resumed_server, send_something, AT_LEAST_PTO,
+    new_client, resumed_server, send_something, AT_LEAST_PTO,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
+use crate::{ConnectionParameters, Error, Version};
 
 use std::cell::RefCell;
 use std::mem;
@@ -192,4 +193,54 @@ fn take_token() {
     // But we should be able to get the token directly, and use it.
     let token = client.take_resumption_token(now()).unwrap();
     can_resume(&token, false);
+}
+
+/// If a version is selected and subsequently disabled, resumption fails.
+#[test]
+fn resume_disabled_version() {
+    let mut client = new_client(
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+    );
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = new_client(
+        ConnectionParameters::default().versions(Version::Version2, vec![Version::Version2]),
+    );
+    assert_eq!(
+        client.enable_resumption(now(), token).unwrap_err(),
+        Error::DisabledVersion
+    );
+}
+
+/// It's not possible to resume once a packet has been sent.
+#[test]
+fn resume_after_packet() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    let _ = client.process_output(now()).dgram().unwrap();
+    assert_eq!(
+        client.enable_resumption(now(), token).unwrap_err(),
+        Error::ConnectionState
+    );
+}
+
+/// It's not possible to resume at the server.
+#[test]
+fn resume_server() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut server = default_server();
+    assert_eq!(
+        server.enable_resumption(now(), token).unwrap_err(),
+        Error::ConnectionState
+    );
 }
