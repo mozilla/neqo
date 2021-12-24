@@ -2385,9 +2385,12 @@ impl Connection {
         Ok(())
     }
 
+    /// Validate the `version_negotiation` transport parameter from the peer.
     fn validate_versions(&mut self) -> Res<()> {
         let tph = self.tps.borrow();
         let remote_tps = tph.remote.as_ref().unwrap();
+        // `current` and `other` are the value from the peer's transport parameters.
+        // We're checking that these match our expectations.
         if let Some((current, other)) = remote_tps.get_versions() {
             qtrace!(
                 [self],
@@ -2397,7 +2400,10 @@ impl Connection {
                 other,
             );
             if self.role == Role::Server {
-                // 1. A server doesn't validate further, it acts on this info.
+                // 1. A server acts on transport parameters, with validation
+                // of `current` happening in the transport parameter handler.
+                // All we need to do is confirm that the transport parameter
+                // was provided.
                 Ok(())
             } else if self.version().as_u32() != current {
                 qinfo!([self], "validate_versions: current version mismatch");
@@ -2408,11 +2414,12 @@ impl Connection {
                 .initial()
                 .is_compatible(self.version)
             {
-                // 2. Compatible upgrade is OK.
+                // 2. The current version is compatible with what we attempted.
+                // That's a compatible upgrade and that's OK.
                 Ok(())
             } else {
-                // 3. Of those on offer, we selected a version that is compatible
-                // with this one, which is also OK.
+                // 3. The initial version we attempted isn't compatible.  Check that
+                // the one we would have chosen is compatible with this one.
                 let mut all_versions = other.to_owned();
                 all_versions.push(current);
                 if self
