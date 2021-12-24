@@ -22,7 +22,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
-    QuicVersion, Stats as TransportStats, StreamId, StreamType, ZeroRttState,
+    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -49,13 +49,13 @@ where
     }
 }
 
-fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
+fn alpn_from_quic_version(version: Version) -> &'static str {
     match version {
-        QuicVersion::Version2 | QuicVersion::Version1 => "h3",
-        QuicVersion::Draft29 => "h3-29",
-        QuicVersion::Draft30 => "h3-30",
-        QuicVersion::Draft31 => "h3-31",
-        QuicVersion::Draft32 => "h3-32",
+        Version::Version2 | Version::Version1 => "h3",
+        Version::Draft29 => "h3-29",
+        Version::Draft30 => "h3-30",
+        Version::Draft31 => "h3-31",
+        Version::Draft32 => "h3-32",
     }
 }
 
@@ -823,8 +823,8 @@ mod tests {
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
-        ConnectionError, ConnectionEvent, ConnectionParameters, Output, QuicVersion, State,
-        StreamId, StreamType, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, StreamId,
+        StreamType, Version, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::mem;
@@ -858,7 +858,7 @@ mod tests {
             Http3Parameters::default()
                 .connection_parameters(
                     ConnectionParameters::default()
-                        .versions(QuicVersion::default(), vec![QuicVersion::default()]),
+                        .versions(Version::default(), vec![Version::default()]),
                 )
                 .max_table_size_encoder(max_table_size)
                 .max_table_size_decoder(max_table_size)

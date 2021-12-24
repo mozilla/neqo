@@ -36,6 +36,7 @@ pub mod stream_id;
 pub mod streams;
 pub mod tparams;
 mod tracking;
+pub mod version;
 
 pub use self::cc::CongestionControlAlgorithm;
 pub use self::cid::{
@@ -47,9 +48,9 @@ pub use self::connection::{
 };
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
-pub use self::packet::QuicVersion;
 pub use self::stats::Stats;
 pub use self::stream_id::{StreamId, StreamType};
+pub use self::version::Version;
 
 pub use self::recv_stream::RECV_BUFFER_SIZE;
 pub use self::send_stream::SEND_BUFFER_SIZE;

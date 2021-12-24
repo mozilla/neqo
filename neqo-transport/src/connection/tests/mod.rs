@@ -15,8 +15,8 @@ use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
 use crate::stats::{FrameStats, Stats, MAX_PTO_COUNTS};
 use crate::{
-    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, QuicVersion, StreamId,
-    StreamType,
+    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
+    Version,
 };
 
 use std::cell::RefCell;
@@ -130,7 +130,7 @@ pub fn default_server() -> Connection {
     new_server(ConnectionParameters::default())
 }
 pub fn resumed_server(client: &Connection) -> Connection {
-    new_server(ConnectionParameters::default().versions(client.version(), QuicVersion::all()))
+    new_server(ConnectionParameters::default().versions(client.version(), Version::all()))
 }
 
 /// If state is `AuthenticationNeeded` call `authenticated()`. This function will

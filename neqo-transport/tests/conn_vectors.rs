@@ -10,7 +10,7 @@
 
 use neqo_common::Datagram;
 use neqo_transport::{
-    Connection, ConnectionParameters, QuicVersion, RandomConnectionIdGenerator, State,
+    Connection, ConnectionParameters, RandomConnectionIdGenerator, State, Version,
 };
 use test_fixture::{self, addr, now};
 
@@ -251,7 +251,7 @@ const INITIAL_PACKET_29: &[u8] = &[
     0x18, 0x02, 0x77, 0x1a, 0x44, 0x9b, 0x30, 0xf3, 0xfa, 0x22, 0x89, 0x85, 0x26, 0x07, 0xb6, 0x60,
 ];
 
-fn make_server(v: QuicVersion) -> Connection {
+fn make_server(v: Version) -> Connection {
     test_fixture::fixture_init();
     Connection::new_server(
         test_fixture::DEFAULT_KEYS,
@@ -262,7 +262,7 @@ fn make_server(v: QuicVersion) -> Connection {
     .expect("create a default server")
 }
 
-fn process_client_initial(v: QuicVersion, packet: &[u8]) {
+fn process_client_initial(v: Version, packet: &[u8]) {
     let mut server = make_server(v);
 
     let dgram = Datagram::new(addr(), addr(), packet);
@@ -274,15 +274,15 @@ fn process_client_initial(v: QuicVersion, packet: &[u8]) {
 
 #[test]
 fn process_client_initial_v2() {
-    process_client_initial(QuicVersion::Version2, INITIAL_PACKET_V2);
+    process_client_initial(Version::Version2, INITIAL_PACKET_V2);
 }
 
 #[test]
 fn process_client_initial_v1() {
-    process_client_initial(QuicVersion::Version1, INITIAL_PACKET_V1);
+    process_client_initial(Version::Version1, INITIAL_PACKET_V1);
 }
 
 #[test]
 fn process_client_initial_29() {
-    process_client_initial(QuicVersion::Draft29, INITIAL_PACKET_29);
+    process_client_initial(Version::Draft29, INITIAL_PACKET_29);
 }

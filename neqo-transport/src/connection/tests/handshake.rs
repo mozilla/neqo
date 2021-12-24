@@ -17,8 +17,7 @@ use crate::server::ValidateAddress;
 use crate::tparams::{TransportParameter, MIN_ACK_DELAY};
 use crate::tracking::DEFAULT_ACK_DELAY;
 use crate::{
-    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, QuicVersion,
-    StreamType,
+    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
 };
 
 use neqo_common::{event::Provider, qdebug, Datagram};
@@ -714,7 +713,7 @@ fn extra_initial_invalid_cid() {
     assert!(nothing.is_none());
 }
 
-fn connect_version(version: QuicVersion) {
+fn connect_version(version: Version) {
     fixture_init();
     let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
@@ -738,27 +737,27 @@ fn connect_version(version: QuicVersion) {
 
 #[test]
 fn connect_v1() {
-    connect_version(QuicVersion::Version1);
+    connect_version(Version::Version1);
 }
 
 #[test]
 fn connect_29() {
-    connect_version(QuicVersion::Draft29);
+    connect_version(Version::Draft29);
 }
 
 #[test]
 fn connect_30() {
-    connect_version(QuicVersion::Draft30);
+    connect_version(Version::Draft30);
 }
 
 #[test]
 fn connect_31() {
-    connect_version(QuicVersion::Draft31);
+    connect_version(Version::Draft31);
 }
 
 #[test]
 fn connect_32() {
-    connect_version(QuicVersion::Draft32);
+    connect_version(Version::Draft32);
 }
 
 #[test]

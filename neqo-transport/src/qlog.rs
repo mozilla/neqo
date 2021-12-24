@@ -22,7 +22,7 @@ use crate::path::PathRef;
 use crate::stream_id::StreamType as NeqoStreamType;
 use crate::tparams::{self, TransportParametersHandler};
 use crate::tracking::SentPacket;
-use crate::QuicVersion;
+use crate::Version;
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
     qlog.add_event(|| {
@@ -98,7 +98,7 @@ fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
             Some("QUIC".into()),
             p.local_address().port().into(),
             p.remote_address().port().into(),
-            Some(format!("{:x}", QuicVersion::default().as_u32())),
+            Some(format!("{:x}", Version::default().as_u32())),
             Some(format!("{}", p.local_cid())),
             Some(format!("{}", p.remote_cid())),
         ))

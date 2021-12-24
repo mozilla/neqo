@@ -20,7 +20,7 @@ use neqo_http3::{
 };
 use neqo_transport::{
     CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamId, StreamType,
+    EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
 };
 
 use std::cell::RefCell;
@@ -582,12 +582,12 @@ fn client(
     urls: &[Url],
 ) -> Res<()> {
     let quic_protocol = match args.alpn.as_str() {
-        "h3" => QuicVersion::Version1,
-        "h3-29" => QuicVersion::Draft29,
-        "h3-30" => QuicVersion::Draft30,
-        "h3-31" => QuicVersion::Draft31,
-        "h3-32" => QuicVersion::Draft32,
-        _ => QuicVersion::default(),
+        "h3" => Version::Version1,
+        "h3-29" => Version::Draft29,
+        "h3-30" => Version::Draft30,
+        "h3-31" => Version::Draft31,
+        "h3-32" => Version::Draft32,
+        _ => Version::default(),
     };
 
     let mut transport = Connection::new_client(
@@ -830,8 +830,8 @@ mod old {
     use neqo_common::{event::Provider, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
-        Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, QuicVersion, State,
-        StreamId, StreamType,
+        Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
+        StreamType, Version,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -1091,11 +1091,11 @@ mod old {
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
-            "hq-29" => (QuicVersion::Draft29, "hq-29"),
-            "hq-30" => (QuicVersion::Draft30, "hq-30"),
-            "hq-31" => (QuicVersion::Draft31, "hq-31"),
-            "hq-32" => (QuicVersion::Draft32, "hq-32"),
-            _ => (QuicVersion::Version1, "hq-interop"),
+            "hq-29" => (Version::Draft29, "hq-29"),
+            "hq-30" => (Version::Draft30, "hq-30"),
+            "hq-31" => (Version::Draft31, "hq-31"),
+            "hq-32" => (Version::Draft32, "hq-32"),
+            _ => (Version::Version1, "hq-interop"),
         };
 
         let mut client = Connection::new_client(

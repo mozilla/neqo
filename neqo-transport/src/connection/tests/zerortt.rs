@@ -10,7 +10,7 @@ use super::{
     CountingConnectionIdGenerator,
 };
 use crate::events::ConnectionEvent;
-use crate::{ConnectionParameters, Error, QuicVersion, StreamType};
+use crate::{ConnectionParameters, Error, StreamType, Version};
 
 use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
@@ -140,7 +140,7 @@ fn zero_rtt_send_reject() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().versions(client.version(), QuicVersion::all()),
+        ConnectionParameters::default().versions(client.version(), Version::all()),
     )
     .unwrap();
     // Using a freshly initialized anti-replay context
@@ -222,7 +222,7 @@ fn zero_rtt_update_flow_control() {
         ConnectionParameters::default()
             .max_stream_data(StreamType::UniDi, true, HIGH)
             .max_stream_data(StreamType::BiDi, true, HIGH)
-            .versions(client.version, QuicVersion::all()),
+            .versions(client.version, Version::all()),
     );
 
     // Stream limits should be low for 0-RTT.

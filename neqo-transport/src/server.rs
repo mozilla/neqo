@@ -21,7 +21,7 @@ use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, Conne
 use crate::connection::{Connection, Output, State};
 use crate::packet::{PacketBuilder, PacketType, PublicPacket};
 use crate::tparams::PreferredAddress;
-use crate::{ConnectionParameters, QuicVersion, Res};
+use crate::{ConnectionParameters, Res, Version};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -110,7 +110,7 @@ struct InitialDetails {
     src_cid: ConnectionId,
     dst_cid: ConnectionId,
     token: Vec<u8>,
-    quic_version: QuicVersion,
+    quic_version: Version,
 }
 
 impl InitialDetails {

@@ -6,18 +6,18 @@
 
 use crate::{addr, addr_v4};
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::QuicVersion;
+use neqo_transport::Version;
 use std::convert::{TryFrom, TryInto};
 use std::net::SocketAddr;
 
 const PACKET_TYPE_MASK: u8 = 0b1011_0000;
 
 fn assert_default_version(dec: &mut Decoder) {
-    let version: QuicVersion = u32::try_from(dec.decode_uint(4).unwrap())
+    let version: Version = u32::try_from(dec.decode_uint(4).unwrap())
         .unwrap()
         .try_into()
         .unwrap();
-    assert!(version == QuicVersion::Version1 || version == QuicVersion::Version2);
+    assert!(version == Version::Version1 || version == Version::Version2);
 }
 
 /// Simple checks for the version being correct.

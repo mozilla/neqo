@@ -41,9 +41,7 @@ use crate::frame::{
     CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
-use crate::packet::{
-    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion, Version,
-};
+use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::path::{Path, PathRef, Paths};
 use crate::quic_datagrams::{DatagramTracking, QuicDatagrams};
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
@@ -54,8 +52,8 @@ use crate::stream_id::StreamType;
 use crate::streams::Streams;
 use crate::tparams::{self, TransportParameter, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckTracker, PacketNumberSpace, SentPacket};
-use crate::{qlog, StreamId};
-use crate::{AppError, ConnectionError, Error, Res};
+use crate::version::{Version, WireVersion};
+use crate::{qlog, AppError, ConnectionError, Error, Res, StreamId};
 
 mod idle;
 pub mod params;
@@ -218,7 +216,7 @@ impl AddressValidationInfo {
 /// remote) continue processing until `state()` returns `Closed`.
 pub struct Connection {
     role: Role,
-    version: QuicVersion,
+    version: Version,
     state: State,
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
@@ -644,7 +642,7 @@ impl Connection {
         let mut dec = Decoder::from(token.as_ref());
 
         let version =
-            QuicVersion::try_from(dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)? as u32)?;
+            Version::try_from(dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)? as u32)?;
         let rtt = Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
         qtrace!([self], "  RTT {:?}", rtt);
 
@@ -765,7 +763,7 @@ impl Connection {
     }
 
     /// The QUIC version in use.
-    pub fn version(&self) -> QuicVersion {
+    pub fn version(&self) -> Version {
         self.version
     }
 
@@ -1118,7 +1116,7 @@ impl Connection {
     }
 
     /// Perform version negotiation.
-    fn version_negotiation(&mut self, supported: &[Version], now: Instant) -> Res<()> {
+    fn version_negotiation(&mut self, supported: &[WireVersion], now: Instant) -> Res<()> {
         debug_assert_eq!(self.role, Role::Client);
 
         if let Some(version) = self.conn_params.get_preferred_version(supported) {
@@ -1735,7 +1733,7 @@ impl Connection {
         encoder: Encoder,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
-        quic_version: QuicVersion,
+        version: Version,
         grease_quic_bit: bool,
     ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(cspace);
@@ -1750,13 +1748,7 @@ impl Connection {
                 path.local_cid(),
             );
 
-            PacketBuilder::long(
-                encoder,
-                pt,
-                quic_version,
-                path.remote_cid(),
-                path.local_cid(),
-            )
+            PacketBuilder::long(encoder, pt, version, path.remote_cid(), path.local_cid())
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);
@@ -2419,7 +2411,7 @@ impl Connection {
                     Err(Error::VersionNegotiation)
                 }
             }
-        } else if self.version != QuicVersion::Version1 && !self.version.is_draft() {
+        } else if self.version != Version::Version1 && !self.version.is_draft() {
             qinfo!([self], "validate_versions: missing extension");
             Err(Error::VersionNegotiation)
         } else {
@@ -2427,7 +2419,7 @@ impl Connection {
         }
     }
 
-    fn confirm_version(&mut self, v: QuicVersion) {
+    fn confirm_version(&mut self, v: Version) {
         if self.version != v {
             qinfo!([self], "Compatible upgrade {:?} ==> {:?}", self.version, v);
         }
@@ -2435,7 +2427,7 @@ impl Connection {
         self.version = v;
     }
 
-    fn compatible_upgrade(&mut self, packet_version: QuicVersion) {
+    fn compatible_upgrade(&mut self, packet_version: Version) {
         if !matches!(self.state, State::WaitInitial | State::WaitVersion) {
             return;
         }
@@ -2453,7 +2445,7 @@ impl Connection {
     fn handshake(
         &mut self,
         now: Instant,
-        packet_version: QuicVersion,
+        packet_version: Version,
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
@@ -2495,7 +2487,7 @@ impl Connection {
     fn input_frame(
         &mut self,
         path: &PathRef,
-        packet_version: QuicVersion,
+        packet_version: Version,
         packet_type: PacketType,
         frame: Frame,
         now: Instant,

@@ -157,7 +157,9 @@ impl Http3Server {
         let http3_parameters = &self.http3_parameters;
         {
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
-                Rc::new(RefCell::new(Http3ServerHandler::new(http3_parameters.clone())))
+                Rc::new(RefCell::new(Http3ServerHandler::new(
+                    http3_parameters.clone(),
+                )))
             });
             handler
                 .borrow_mut()

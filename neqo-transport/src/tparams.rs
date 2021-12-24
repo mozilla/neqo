@@ -9,7 +9,7 @@
 use crate::cid::{
     ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN,
 };
-use crate::packet::{QuicVersion, Version};
+use crate::version::{Version, WireVersion};
 use crate::{ConnectionParameters, Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
@@ -108,8 +108,8 @@ pub enum TransportParameter {
         srt: [u8; 16],
     },
     Versions {
-        current: Version,
-        other: Vec<Version>,
+        current: WireVersion,
+        other: Vec<WireVersion>,
     },
 }
 
@@ -214,12 +214,12 @@ impl TransportParameter {
     }
 
     fn decode_versions(dec: &mut Decoder) -> Res<Self> {
-        fn dv(dec: &mut Decoder) -> Res<Version> {
+        fn dv(dec: &mut Decoder) -> Res<WireVersion> {
             let v = dec.decode_uint(4).ok_or(Error::NoMoreData)?;
             if v == 0 {
                 Err(Error::TransportParameterError)
             } else {
-                Ok(v as Version)
+                Ok(v as WireVersion)
             }
         }
 
@@ -425,12 +425,7 @@ impl TransportParameters {
     }
 
     /// Set version information.
-    pub fn set_versions(
-        &mut self,
-        role: Role,
-        current: QuicVersion,
-        other_versions: &[QuicVersion],
-    ) {
+    pub fn set_versions(&mut self, role: Role, current: Version, other_versions: &[Version]) {
         let rbuf = random(4);
         let mut other = Vec::with_capacity(other_versions.len() + 1);
         let mut dec = Decoder::new(&rbuf);
@@ -449,7 +444,7 @@ impl TransportParameters {
         );
     }
 
-    fn compatible_upgrade(&mut self, v: QuicVersion) {
+    fn compatible_upgrade(&mut self, v: Version) {
         if let Some(TransportParameter::Versions {
             ref mut current, ..
         }) = self.params.get_mut(&VERSION_NEGOTIATION)
@@ -535,7 +530,7 @@ impl TransportParameters {
 
     /// Get the version negotiation values for validation.
     #[must_use]
-    pub fn get_versions(&self) -> Option<(Version, &[Version])> {
+    pub fn get_versions(&self) -> Option<(WireVersion, &[WireVersion])> {
         if let Some(TransportParameter::Versions { current, other }) =
             self.params.get(&VERSION_NEGOTIATION)
         {
@@ -554,15 +549,15 @@ impl TransportParameters {
 #[derive(Debug)]
 pub struct TransportParametersHandler {
     role: Role,
-    version: QuicVersion,
-    all_versions: Vec<QuicVersion>,
+    version: Version,
+    all_versions: Vec<Version>,
     pub(crate) local: TransportParameters,
     pub(crate) remote: Option<TransportParameters>,
     pub(crate) remote_0rtt: Option<TransportParameters>,
 }
 
 impl TransportParametersHandler {
-    pub fn new(role: Role, version: QuicVersion, all_versions: Vec<QuicVersion>) -> Self {
+    pub fn new(role: Role, version: Version, all_versions: Vec<Version>) -> Self {
         let mut local = TransportParameters::default();
         local.set_versions(role, version, &all_versions);
         Self {
@@ -577,7 +572,7 @@ impl TransportParametersHandler {
 
     /// When resuming, the version is set based on the ticket.
     /// That needs to be done to override the default choice from configuration.
-    pub fn set_version(&mut self, version: QuicVersion) {
+    pub fn set_version(&mut self, version: Version) {
         debug_assert_eq!(self.role, Role::Client);
         self.version = version;
         self.local
@@ -592,7 +587,7 @@ impl TransportParametersHandler {
     }
 
     /// Get the version as set (or as determined by a compatible upgrade).
-    pub fn version(&self) -> QuicVersion {
+    pub fn version(&self) -> Version {
         self.version
     }
 
@@ -608,7 +603,7 @@ impl TransportParametersHandler {
             let mut compatible =
                 ConnectionParameters::compatible_versions(self.version, &self.all_versions);
             if self.role == Role::Client {
-                let chosen = QuicVersion::try_from(current)?;
+                let chosen = Version::try_from(current)?;
                 if compatible.any(|&v| v == chosen) {
                     Ok(())
                 } else {
@@ -1094,7 +1089,7 @@ mod tests {
             0x6a, 0x7a, 0x8a,
         ];
         let vn = TransportParameter::Versions {
-            current: QuicVersion::Version1.as_u32(),
+            current: Version::Version1.as_u32(),
             other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
         };
 
@@ -1146,7 +1141,7 @@ mod tests {
         current.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: QuicVersion::Version1.as_u32(),
+                current: Version::Version1.as_u32(),
                 other: vec![0x1a2a_3a4a],
             },
         );
@@ -1161,7 +1156,7 @@ mod tests {
         remembered.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: QuicVersion::Version1.as_u32(),
+                current: Version::Version1.as_u32(),
                 other: vec![0x5a6a_7a8a, 0x9aaa_baca],
             },
         );
@@ -1172,7 +1167,7 @@ mod tests {
         remembered.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: QuicVersion::Version1.as_u32() + 1,
+                current: Version::Version1.as_u32() + 1,
                 other: vec![],
             },
         );

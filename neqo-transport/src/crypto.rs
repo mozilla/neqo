@@ -24,13 +24,14 @@ use neqo_crypto::{
 };
 
 use crate::cid::ConnectionIdRef;
-use crate::packet::{PacketBuilder, PacketNumber, QuicVersion};
+use crate::packet::{PacketBuilder, PacketNumber};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
 use crate::stats::FrameStats;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::PacketNumberSpace;
+use crate::version::Version;
 use crate::{Error, Res};
 
 const MAX_AUTH_TAG: usize = 32;
@@ -50,7 +51,7 @@ thread_local!(pub(crate) static OVERWRITE_INVOCATIONS: RefCell<Option<PacketNumb
 
 #[derive(Debug)]
 pub struct Crypto {
-    version: QuicVersion,
+    version: Version,
     protocols: Vec<String>,
     pub(crate) tls: Agent,
     pub(crate) streams: CryptoStreams,
@@ -61,7 +62,7 @@ type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 
 impl Crypto {
     pub fn new(
-        version: QuicVersion,
+        version: Version,
         mut agent: Agent,
         protocols: Vec<String>,
         tphandler: TpHandler,
@@ -80,11 +81,8 @@ impl Crypto {
             c.enable_0rtt()?;
         }
         let extension = match version {
-            QuicVersion::Version2 | QuicVersion::Version1 => 0x39,
-            QuicVersion::Draft29
-            | QuicVersion::Draft30
-            | QuicVersion::Draft31
-            | QuicVersion::Draft32 => 0xffa5,
+            Version::Version2 | Version::Version1 => 0x39,
+            Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => 0xffa5,
         };
         agent.extension_handler(extension, tphandler)?;
         Ok(Self {
@@ -194,7 +192,7 @@ impl Crypto {
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
-    pub fn enable_0rtt(&mut self, version: QuicVersion, role: Role) -> Res<bool> {
+    pub fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
@@ -219,7 +217,7 @@ impl Crypto {
     }
 
     /// Lock in a compatible upgrade.
-    pub fn confirm_version(&mut self, confirmed: QuicVersion) {
+    pub fn confirm_version(&mut self, confirmed: Version) {
         self.states.confirm_version(self.version, confirmed);
         self.version = confirmed;
     }
@@ -260,7 +258,7 @@ impl Crypto {
         Ok(true)
     }
 
-    fn maybe_install_application_write_key(&mut self, version: QuicVersion) -> Res<()> {
+    fn maybe_install_application_write_key(&mut self, version: Version) -> Res<()> {
         qtrace!([self], "Attempt to install application write key");
         if let Some(secret) = self.tls.write_secret(TLS_EPOCH_APPLICATION_DATA) {
             self.states.set_application_write_key(version, secret)?;
@@ -269,11 +267,7 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn install_application_keys(
-        &mut self,
-        version: QuicVersion,
-        expire_0rtt: Instant,
-    ) -> Res<()> {
+    pub fn install_application_keys(&mut self, version: Version, expire_0rtt: Instant) -> Res<()> {
         self.maybe_install_application_write_key(version)?;
         // The write key might have been installed earlier, but it should
         // always be installed now.
@@ -347,7 +341,7 @@ impl Crypto {
         &mut self,
         new_token: Option<&[u8]>,
         tps: &TransportParameters,
-        version: QuicVersion,
+        version: Version,
         rtt: u64,
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
@@ -395,7 +389,7 @@ pub enum CryptoDxDirection {
 #[derive(Debug)]
 pub struct CryptoDxState {
     /// The QUIC version.
-    version: QuicVersion,
+    version: Version,
     /// Whether packets protected with this state will be read or written.
     direction: CryptoDxDirection,
     /// The epoch of this crypto state.  This initially tracks TLS epochs
@@ -419,7 +413,7 @@ pub struct CryptoDxState {
 impl CryptoDxState {
     #[allow(clippy::reversed_empty_ranges)] // To initialize an empty range.
     pub fn new(
-        version: QuicVersion,
+        version: Version,
         direction: CryptoDxDirection,
         epoch: Epoch,
         secret: &SymKey,
@@ -446,7 +440,7 @@ impl CryptoDxState {
     }
 
     pub fn new_initial(
-        version: QuicVersion,
+        version: Version,
         direction: CryptoDxDirection,
         label: &str,
         dcid: &[u8],
@@ -539,7 +533,7 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    pub fn version(&self) -> QuicVersion {
+    pub fn version(&self) -> Version {
         self.version
     }
 
@@ -675,7 +669,7 @@ impl CryptoDxState {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
         Self::new_initial(
-            QuicVersion::default(),
+            Version::default(),
             CryptoDxDirection::Write,
             "server in",
             CLIENT_CID,
@@ -736,7 +730,7 @@ pub(crate) struct CryptoDxAppData {
 
 impl CryptoDxAppData {
     pub fn new(
-        version: QuicVersion,
+        version: Version,
         dir: CryptoDxDirection,
         secret: SymKey,
         cipher: Cipher,
@@ -786,7 +780,7 @@ pub enum CryptoSpace {
 /// get other keys, so those have fixed versions.
 #[derive(Debug, Default)]
 pub struct CryptoStates {
-    initials: HashMap<QuicVersion, CryptoState>,
+    initials: HashMap<Version, CryptoState>,
     handshake: Option<CryptoState>,
     zero_rtt: Option<CryptoDxState>, // One direction only!
     cipher: Cipher,
@@ -804,7 +798,7 @@ impl CryptoStates {
     /// not yet available.
     pub fn select_tx_mut(
         &mut self,
-        version: QuicVersion,
+        version: Version,
         space: PacketNumberSpace,
     ) -> Option<(CryptoSpace, &mut CryptoDxState)> {
         match space {
@@ -826,7 +820,7 @@ impl CryptoStates {
 
     pub fn tx_mut<'a>(
         &'a mut self,
-        version: QuicVersion,
+        version: Version,
         cspace: CryptoSpace,
     ) -> Option<&'a mut CryptoDxState> {
         let tx = |k: Option<&'a mut CryptoState>| k.map(|dx| &mut dx.tx);
@@ -841,11 +835,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn tx<'a>(
-        &'a self,
-        version: QuicVersion,
-        cspace: CryptoSpace,
-    ) -> Option<&'a CryptoDxState> {
+    pub fn tx<'a>(&'a self, version: Version, cspace: CryptoSpace) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
         match cspace {
             CryptoSpace::Initial => tx(self.initials.get(&version)),
@@ -860,7 +850,7 @@ impl CryptoStates {
 
     pub fn select_tx(
         &self,
-        version: QuicVersion,
+        version: Version,
         space: PacketNumberSpace,
     ) -> Option<(CryptoSpace, &CryptoDxState)> {
         match space {
@@ -880,11 +870,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn rx_hp(
-        &mut self,
-        version: QuicVersion,
-        cspace: CryptoSpace,
-    ) -> Option<&mut CryptoDxState> {
+    pub fn rx_hp(&mut self, version: Version, cspace: CryptoSpace) -> Option<&mut CryptoDxState> {
         if let CryptoSpace::ApplicationData = cspace {
             self.app_read.as_mut().map(|ar| &mut ar.dx)
         } else {
@@ -894,7 +880,7 @@ impl CryptoStates {
 
     pub fn rx<'a>(
         &'a mut self,
-        version: QuicVersion,
+        version: Version,
         cspace: CryptoSpace,
         key_phase: bool,
     ) -> Option<&'a mut CryptoDxState> {
@@ -938,7 +924,7 @@ impl CryptoStates {
     /// Note that the version here can change and that's OK.
     pub fn init<'v, V>(&mut self, versions: V, role: Role, dcid: &[u8])
     where
-        V: IntoIterator<Item = &'v QuicVersion>,
+        V: IntoIterator<Item = &'v Version>,
     {
         const CLIENT_INITIAL_LABEL: &str = "client in";
         const SERVER_INITIAL_LABEL: &str = "server in";
@@ -979,13 +965,13 @@ impl CryptoStates {
     /// This is maybe slightly inefficient in the first case, because we might
     /// not need the send keys if the packet is subsequently discarded, but
     /// the overall effort is small enough to write off.
-    pub fn init_server(&mut self, version: QuicVersion, dcid: &[u8]) {
+    pub fn init_server(&mut self, version: Version, dcid: &[u8]) {
         if !self.initials.contains_key(&version) {
             self.init(&[version], Role::Server, dcid);
         }
     }
 
-    pub fn confirm_version(&mut self, orig: QuicVersion, confirmed: QuicVersion) {
+    pub fn confirm_version(&mut self, orig: Version, confirmed: Version) {
         if orig != confirmed {
             // This part where the old data is removed and then re-added is to
             // appease the borrow checker.
@@ -1001,7 +987,7 @@ impl CryptoStates {
 
     pub fn set_0rtt_keys(
         &mut self,
-        version: QuicVersion,
+        version: Version,
         dir: CryptoDxDirection,
         secret: &SymKey,
         cipher: Cipher,
@@ -1040,7 +1026,7 @@ impl CryptoStates {
 
     pub fn set_handshake_keys(
         &mut self,
-        version: QuicVersion,
+        version: Version,
         write_secret: &SymKey,
         read_secret: &SymKey,
         cipher: Cipher,
@@ -1064,7 +1050,7 @@ impl CryptoStates {
         });
     }
 
-    pub fn set_application_write_key(&mut self, version: QuicVersion, secret: SymKey) -> Res<()> {
+    pub fn set_application_write_key(&mut self, version: Version, secret: SymKey) -> Res<()> {
         debug_assert!(self.app_write.is_none());
         debug_assert_ne!(self.cipher, 0);
         let mut app = CryptoDxAppData::new(version, CryptoDxDirection::Write, secret, self.cipher)?;
@@ -1080,7 +1066,7 @@ impl CryptoStates {
 
     pub fn set_application_read_key(
         &mut self,
-        version: QuicVersion,
+        version: Version,
         secret: SymKey,
         expire_0rtt: Instant,
     ) -> Res<()> {
@@ -1244,7 +1230,7 @@ impl CryptoStates {
         };
         let mut initials = HashMap::new();
         initials.insert(
-            QuicVersion::Version1,
+            Version::Version1,
             CryptoState {
                 tx: CryptoDxState::test_default(),
                 rx: read(0),
@@ -1273,7 +1259,7 @@ impl CryptoStates {
         let secret = hkdf::import_key(TLS_VERSION_1_3, SECRET).unwrap();
         let app_read = |epoch| CryptoDxAppData {
             dx: CryptoDxState {
-                version: QuicVersion::Version1,
+                version: Version::Version1,
                 direction: CryptoDxDirection::Read,
                 epoch,
                 aead: Aead::new(

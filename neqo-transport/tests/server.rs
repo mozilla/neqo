@@ -20,8 +20,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionParameters, Error, Output, QuicVersion, State,
-    StreamType,
+    Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
     self, assertions, default_client, new_client, now, split_datagram,
@@ -167,7 +166,7 @@ fn drop_non_initial() {
     let mut header = neqo_common::Encoder::with_capacity(1200);
     header
         .encode_byte(0xfa)
-        .encode_uint(4, QuicVersion::default().as_u32())
+        .encode_uint(4, Version::default().as_u32())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
     let mut bogus_data: Vec<u8> = header.into();
@@ -186,7 +185,7 @@ fn drop_short_initial() {
     let mut header = neqo_common::Encoder::with_capacity(1199);
     header
         .encode_byte(0xca)
-        .encode_uint(4, QuicVersion::default().as_u32())
+        .encode_uint(4, Version::default().as_u32())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
     let mut bogus_data: Vec<u8> = header.into();
@@ -338,7 +337,7 @@ fn bad_client_initial() {
     let mut header_enc = Encoder::new();
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
-        .encode_uint(4, QuicVersion::default().as_u32())
+        .encode_uint(4, Version::default().as_u32())
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
@@ -429,7 +428,7 @@ fn version_negotiation_ignored() {
     let mut found = false;
     while dec.remaining() > 0 {
         let v = dec.decode_uint(4).expect("supported version");
-        found |= v == u64::from(QuicVersion::default().as_u32());
+        found |= v == u64::from(Version::default().as_u32());
     }
     assert!(found, "valid version not found");
 
@@ -443,9 +442,9 @@ fn version_negotiation_ignored() {
 /// Version Negotiation packet and the client will use that version.
 #[test]
 fn version_negotiation() {
-    const VN_VERSION: QuicVersion = QuicVersion::Draft29;
-    assert_ne!(VN_VERSION, QuicVersion::default());
-    assert!(!QuicVersion::default().compatible(VN_VERSION));
+    const VN_VERSION: Version = Version::Draft29;
+    assert_ne!(VN_VERSION, Version::default());
+    assert!(!Version::default().compatible(VN_VERSION));
 
     let mut server =
         new_server(ConnectionParameters::default().versions(VN_VERSION, vec![VN_VERSION]));
@@ -467,9 +466,9 @@ fn version_negotiation() {
 /// which is then subsequently upgraded to a compatible version by the server.
 #[test]
 fn version_negotiation_and_compatible() {
-    const ORIG_VERSION: QuicVersion = QuicVersion::Draft29;
-    const VN_VERSION: QuicVersion = QuicVersion::Version1;
-    const COMPAT_VERSION: QuicVersion = QuicVersion::Version2;
+    const ORIG_VERSION: Version = Version::Draft29;
+    const VN_VERSION: Version = Version::Version1;
+    const COMPAT_VERSION: Version = Version::Version2;
     assert!(!ORIG_VERSION.compatible(VN_VERSION));
     assert!(!ORIG_VERSION.compatible(COMPAT_VERSION));
     assert!(VN_VERSION.compatible(COMPAT_VERSION));
