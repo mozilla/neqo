@@ -46,22 +46,18 @@ impl Version {
             0x11, 0xe0, 0x43, 0x90, 0xa8, 0x99,
         ];
         match self {
-            Version::Version2 => INITIAL_SALT_V2,
-            Version::Version1 => INITIAL_SALT_V1,
-            Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => {
-                INITIAL_SALT_29_32
-            }
+            Self::Version2 => INITIAL_SALT_V2,
+            Self::Version1 => INITIAL_SALT_V1,
+            Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => INITIAL_SALT_29_32,
         }
     }
 
     pub fn label_prefix(self) -> &'static str {
         match self {
             Self::Version2 => "quicv2 ",
-            Version::Version1
-            | Version::Draft29
-            | Version::Draft30
-            | Version::Draft31
-            | Version::Draft32 => "quic ",
+            Self::Version1 | Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => {
+                "quic "
+            }
         }
     }
 
@@ -82,11 +78,9 @@ impl Version {
             0x48, 0xc0, 0x60, 0xe2,
         ];
         match self {
-            Version::Version2 => RETRY_SECRET_V2,
-            Version::Version1 => RETRY_SECRET_V1,
-            Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => {
-                RETRY_SECRET_29
-            }
+            Self::Version2 => RETRY_SECRET_V2,
+            Self::Version1 => RETRY_SECRET_V1,
+            Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => RETRY_SECRET_29,
         }
     }
 
