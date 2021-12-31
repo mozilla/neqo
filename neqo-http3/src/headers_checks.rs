@@ -5,15 +5,19 @@
 // except according to those terms.
 
 use crate::{Error, MessageType, Res};
+use enumset::{enum_set, EnumSet, EnumSetType};
 use neqo_common::Header;
 
-const PSEUDO_HEADER_STATUS: u8 = 0x1;
-const PSEUDO_HEADER_METHOD: u8 = 0x2;
-const PSEUDO_HEADER_SCHEME: u8 = 0x4;
-const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
-const PSEUDO_HEADER_PATH: u8 = 0x10;
-const PSEUDO_HEADER_PROTOCOL: u8 = 0x20;
-const REGULAR_HEADER: u8 = 0x80;
+#[derive(EnumSetType, Debug)]
+enum PseudoHeaderState {
+    Status,
+    Method,
+    Scheme,
+    Authority,
+    Path,
+    Protocol,
+    None,
+}
 
 /// Check whether the response is informational(1xx).
 /// # Errors
@@ -30,27 +34,31 @@ pub fn is_interim(headers: &[Header]) -> Res<bool> {
     }
 }
 
-fn track_pseudo(name: &str, state: &mut u8, message_type: MessageType) -> Res<bool> {
+fn track_pseudo(
+    name: &str,
+    state: &mut EnumSet<PseudoHeaderState>,
+    message_type: MessageType,
+) -> Res<bool> {
     let (pseudo, bit) = if name.starts_with(':') {
-        if *state & REGULAR_HEADER != 0 {
+        if state.contains(PseudoHeaderState::None) {
             return Err(Error::InvalidHeader);
         }
         let bit = match (message_type, name) {
-            (MessageType::Response, ":status") => PSEUDO_HEADER_STATUS,
-            (MessageType::Request, ":method") => PSEUDO_HEADER_METHOD,
-            (MessageType::Request, ":scheme") => PSEUDO_HEADER_SCHEME,
-            (MessageType::Request, ":authority") => PSEUDO_HEADER_AUTHORITY,
-            (MessageType::Request, ":path") => PSEUDO_HEADER_PATH,
-            (MessageType::Request, ":protocol") => PSEUDO_HEADER_PROTOCOL,
+            (MessageType::Response, ":status") => PseudoHeaderState::Status,
+            (MessageType::Request, ":method") => PseudoHeaderState::Method,
+            (MessageType::Request, ":scheme") => PseudoHeaderState::Scheme,
+            (MessageType::Request, ":authority") => PseudoHeaderState::Authority,
+            (MessageType::Request, ":path") => PseudoHeaderState::Path,
+            (MessageType::Request, ":protocol") => PseudoHeaderState::Protocol,
             (_, _) => return Err(Error::InvalidHeader),
         };
         (true, bit)
     } else {
-        (false, REGULAR_HEADER)
+        (false, PseudoHeaderState::None)
     };
 
-    if *state & bit == 0 || !pseudo {
-        *state |= bit;
+    if !state.contains(bit) || !pseudo {
+        state.insert(bit);
         Ok(pseudo)
     } else {
         Err(Error::InvalidHeader)
@@ -63,7 +71,7 @@ fn track_pseudo(name: &str, state: &mut u8, message_type: MessageType) -> Res<bo
 /// Returns an error if headers are not well formed.
 pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     let mut method_value: Option<&str> = None;
-    let mut pseudo_state = 0;
+    let mut pseudo_state = EnumSet::new();
     for header in headers {
         let is_pseudo = track_pseudo(header.name(), &mut pseudo_state, message_type)?;
 
@@ -80,20 +88,20 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         }
     }
     // Clear the regular header bit, since we only check pseudo headers below.
-    pseudo_state &= !REGULAR_HEADER;
+    pseudo_state.remove(PseudoHeaderState::None);
     let pseudo_header_mask = match message_type {
-        MessageType::Response => PSEUDO_HEADER_STATUS,
+        MessageType::Response => enum_set!(PseudoHeaderState::Status),
         MessageType::Request => {
             if method_value == Some(&"CONNECT".to_string()) {
-                PSEUDO_HEADER_METHOD | PSEUDO_HEADER_AUTHORITY
+                PseudoHeaderState::Method | PseudoHeaderState::Authority
             } else {
-                PSEUDO_HEADER_METHOD | PSEUDO_HEADER_SCHEME | PSEUDO_HEADER_PATH
+                PseudoHeaderState::Method | PseudoHeaderState::Scheme | PseudoHeaderState::Path
             }
         }
     };
 
     if (MessageType::Request == message_type)
-        && ((pseudo_state & PSEUDO_HEADER_PROTOCOL) > 0)
+        && pseudo_state.contains(PseudoHeaderState::Protocol)
         && method_value != Some(&"CONNECT".to_string())
     {
         return Err(Error::InvalidHeader);
