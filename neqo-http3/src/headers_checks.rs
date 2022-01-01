@@ -7,6 +7,7 @@
 use crate::{Error, MessageType, Res};
 use enumset::{enum_set, EnumSet, EnumSetType};
 use neqo_common::Header;
+use std::convert::TryFrom;
 
 #[derive(EnumSetType, Debug)]
 enum PseudoHeaderState {
@@ -16,7 +17,29 @@ enum PseudoHeaderState {
     Authority,
     Path,
     Protocol,
-    None,
+    Regular,
+}
+
+impl PseudoHeaderState {
+    fn is_pseudo(self) -> bool {
+        self != Self::Regular
+    }
+}
+
+impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
+    type Error = Error;
+
+    fn try_from(v: (MessageType, &str)) -> Res<Self> {
+        match v {
+            (MessageType::Response, ":status") => Ok(Self::Status),
+            (MessageType::Request, ":method") => Ok(Self::Method),
+            (MessageType::Request, ":scheme") => Ok(Self::Scheme),
+            (MessageType::Request, ":authority") => Ok(Self::Authority),
+            (MessageType::Request, ":path") => Ok(Self::Path),
+            (MessageType::Request, ":protocol") => Ok(Self::Protocol),
+            (_, _) => return Err(Error::InvalidHeader),
+        }
+    }
 }
 
 /// Check whether the response is informational(1xx).
@@ -36,29 +59,21 @@ pub fn is_interim(headers: &[Header]) -> Res<bool> {
 
 fn track_pseudo(
     name: &str,
-    state: &mut EnumSet<PseudoHeaderState>,
+    result_state: &mut EnumSet<PseudoHeaderState>,
     message_type: MessageType,
 ) -> Res<bool> {
-    let (pseudo, bit) = if name.starts_with(':') {
-        if state.contains(PseudoHeaderState::None) {
+    let new_state = if name.starts_with(':') {
+        if result_state.contains(PseudoHeaderState::Regular) {
             return Err(Error::InvalidHeader);
         }
-        let bit = match (message_type, name) {
-            (MessageType::Response, ":status") => PseudoHeaderState::Status,
-            (MessageType::Request, ":method") => PseudoHeaderState::Method,
-            (MessageType::Request, ":scheme") => PseudoHeaderState::Scheme,
-            (MessageType::Request, ":authority") => PseudoHeaderState::Authority,
-            (MessageType::Request, ":path") => PseudoHeaderState::Path,
-            (MessageType::Request, ":protocol") => PseudoHeaderState::Protocol,
-            (_, _) => return Err(Error::InvalidHeader),
-        };
-        (true, bit)
+        PseudoHeaderState::try_from((message_type, name))?
     } else {
-        (false, PseudoHeaderState::None)
+        PseudoHeaderState::Regular
     };
 
-    if !state.contains(bit) || !pseudo {
-        state.insert(bit);
+    let pseudo = new_state.is_pseudo();
+    if *result_state & new_state == EnumSet::empty() || !pseudo {
+        *result_state |= new_state;
         Ok(pseudo)
     } else {
         Err(Error::InvalidHeader)
@@ -88,7 +103,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         }
     }
     // Clear the regular header bit, since we only check pseudo headers below.
-    pseudo_state.remove(PseudoHeaderState::None);
+    pseudo_state.remove(PseudoHeaderState::Regular);
     let pseudo_header_mask = match message_type {
         MessageType::Response => enum_set!(PseudoHeaderState::Status),
         MessageType::Request => {
