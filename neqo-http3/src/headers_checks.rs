@@ -10,6 +10,7 @@ use neqo_common::Header;
 use std::convert::TryFrom;
 
 #[derive(EnumSetType, Debug)]
+#[allow(clippy::expl_impl_clone_on_copy)]
 enum PseudoHeaderState {
     Status,
     Method,
@@ -37,7 +38,7 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
             (MessageType::Request, ":authority") => Ok(Self::Authority),
             (MessageType::Request, ":path") => Ok(Self::Path),
             (MessageType::Request, ":protocol") => Ok(Self::Protocol),
-            (_, _) => return Err(Error::InvalidHeader),
+            (_, _) => Err(Error::InvalidHeader),
         }
     }
 }
