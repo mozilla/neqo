@@ -9,8 +9,8 @@ use enumset::{enum_set, EnumSet, EnumSetType};
 use neqo_common::Header;
 use std::convert::TryFrom;
 
-#[derive(EnumSetType, Debug)]
 #[allow(clippy::expl_impl_clone_on_copy)]
+#[derive(EnumSetType, Debug)]
 enum PseudoHeaderState {
     Status,
     Method,
