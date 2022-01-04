@@ -2,7 +2,8 @@
 #![warn(clippy::pedantic)]
 
 use neqo_crypto::constants::{
-    Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
+    Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+    TLS_VERSION_1_3,
 };
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::HpKey;
@@ -14,6 +15,20 @@ fn make_hp(cipher: Cipher) -> HpKey {
     HpKey::extract(TLS_VERSION_1_3, cipher, &prk, "hp").expect("extract label works")
 }
 
+fn hp_test(cipher: Cipher, expected: &[u8]) {
+    fixture_init();
+    let hp = make_hp(cipher);
+    let mask = hp.mask(&[0; 16]).expect("should produce a mask");
+    assert_eq!(mask, expected, "first invocation should be correct");
+
+    let hp2 = hp.clone();
+    let mask = hp2.mask(&[0; 16]).expect("clone produces mask");
+    assert_eq!(mask, expected, "clone should produce the same mask");
+
+    let mask = hp.mask(&[0; 16]).expect("should produce a mask again");
+    assert_eq!(mask, expected, "second invocation should be the same");
+}
+
 #[test]
 fn aes128() {
     const EXPECTED: &[u8] = &[
@@ -21,11 +36,7 @@ fn aes128() {
         0x14,
     ];
 
-    fixture_init();
-    let mask = make_hp(TLS_AES_128_GCM_SHA256)
-        .mask(&[0; 16])
-        .expect("should produce a mask");
-    assert_eq!(mask, EXPECTED);
+    hp_test(TLS_AES_128_GCM_SHA256, EXPECTED);
 }
 
 #[test]
@@ -35,14 +46,9 @@ fn aes256() {
         0x2b,
     ];
 
-    fixture_init();
-    let mask = make_hp(TLS_AES_256_GCM_SHA384)
-        .mask(&[0; 16])
-        .expect("should produce a mask");
-    assert_eq!(mask, EXPECTED);
+    hp_test(TLS_AES_256_GCM_SHA384, EXPECTED);
 }
 
-#[cfg(feature = "chacha")]
 #[test]
 fn chacha20_ctr() {
     const EXPECTED: &[u8] = &[
@@ -53,9 +59,5 @@ fn chacha20_ctr() {
         0x2f, 0x52, 0x46, 0x89,
     ];
 
-    fixture_init();
-    let mask = make_hp(TLS_CHACHA20_POLY1305_SHA256)
-        .mask(&[0; 16])
-        .expect("should produce a mask");
-    assert_eq!(mask, EXPECTED);
+    hp_test(TLS_CHACHA20_POLY1305_SHA256, EXPECTED);
 }

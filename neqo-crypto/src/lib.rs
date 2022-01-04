@@ -73,7 +73,7 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
-const MINIMUM_NSS_VERSION: &str = "3.66";
+const MINIMUM_NSS_VERSION: &str = "3.74";
 
 #[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
 #[allow(clippy::upper_case_acronyms)]
