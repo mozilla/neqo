@@ -7,16 +7,17 @@ use neqo_crypto::constants::{
 };
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::HpKey;
+use std::mem;
 use test_fixture::fixture_init;
 
 fn make_hp(cipher: Cipher) -> HpKey {
+    fixture_init();
     let ikm = hkdf::import_key(TLS_VERSION_1_3, &[0; 16]).expect("import IKM");
     let prk = hkdf::extract(TLS_VERSION_1_3, cipher, None, &ikm).expect("extract works");
     HpKey::extract(TLS_VERSION_1_3, cipher, &prk, "hp").expect("extract label works")
 }
 
 fn hp_test(cipher: Cipher, expected: &[u8]) {
-    fixture_init();
     let hp = make_hp(cipher);
     let mask = hp.mask(&[0; 16]).expect("should produce a mask");
     assert_eq!(mask, expected, "first invocation should be correct");
@@ -60,4 +61,18 @@ fn chacha20_ctr() {
     ];
 
     hp_test(TLS_CHACHA20_POLY1305_SHA256, EXPECTED);
+}
+
+#[test]
+#[should_panic]
+fn aes_short() {
+    let hp = make_hp(TLS_AES_128_GCM_SHA256);
+    mem::drop(hp.mask(&[0; 15]));
+}
+
+#[test]
+#[should_panic]
+fn chacha20_short() {
+    let hp = make_hp(TLS_CHACHA20_POLY1305_SHA256);
+    mem::drop(hp.mask(&[0; 15]));
 }

@@ -150,8 +150,8 @@ impl HpKey {
                         output.as_mut_ptr(),
                         &mut output_len,
                         c_int::try_from(output.len())?,
-                        sample.as_ptr().cast(),
-                        c_int::try_from(sample.len())?,
+                        (&sample[..Self::SAMPLE_SIZE]).as_ptr().cast(),
+                        c_int::try_from(Self::SAMPLE_SIZE).unwrap(),
                     )
                 })?;
                 assert_eq!(usize::try_from(output_len).unwrap(), output.len());
@@ -162,7 +162,7 @@ impl HpKey {
                 let params: CK_CHACHA20_PARAMS = CK_CHACHA20_PARAMS {
                     pBlockCounter: sample.as_ptr() as *mut u8,
                     blockCounterBits: 32,
-                    pNonce: (&sample[4..Self::SAMPLE_SIZE]).as_ptr() as *mut u8,
+                    pNonce: (&sample[4..Self::SAMPLE_SIZE]).as_ptr() as *mut _,
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;
