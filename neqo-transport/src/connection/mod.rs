@@ -79,7 +79,7 @@ struct Packet(Vec<u8>);
 /// handshake.  This is a hack, but a useful one.
 const EXTRA_INITIALS: usize = 4;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ZeroRttState {
     Init,
     Sending,
@@ -781,8 +781,8 @@ impl Connection {
     }
 
     /// Get the 0-RTT state of the connection.
-    pub fn zero_rtt_state(&self) -> &ZeroRttState {
-        &self.zero_rtt_state
+    pub fn zero_rtt_state(&self) -> ZeroRttState {
+        self.zero_rtt_state
     }
 
     /// Get a snapshot of collected statistics.

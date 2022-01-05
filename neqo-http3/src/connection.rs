@@ -355,7 +355,7 @@ impl Http3Connection {
         match state {
             State::Handshaking => {
                 if self.role == Role::Server
-                    && conn.zero_rtt_state() == &ZeroRttState::AcceptedServer
+                    && conn.zero_rtt_state() == ZeroRttState::AcceptedServer
                 {
                     self.state = Http3State::ZeroRtt;
                     self.initialize_http3_connection(conn)?;

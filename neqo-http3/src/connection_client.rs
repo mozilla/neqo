@@ -209,7 +209,7 @@ impl Http3Client {
             debug_assert_eq!(Ok(true), res);
             return Err(Error::FatalError);
         }
-        if *self.conn.zero_rtt_state() == ZeroRttState::Sending {
+        if self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler
                 .set_0rtt_settings(&mut self.conn, settings)?;
             self.events

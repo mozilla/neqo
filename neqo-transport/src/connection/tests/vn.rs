@@ -4,13 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{ConnectionError, Output, State};
-use super::{connect, connect_fail, default_client, default_server, new_client, new_server};
+use super::super::{ConnectionError, ConnectionEvent, Output, State, ZeroRttState};
+use super::{
+    connect, connect_fail, default_client, default_server, exchange_ticket, new_client, new_server,
+    send_something,
+};
 use crate::packet::PACKET_BIT_LONG;
 use crate::tparams::{self, TransportParameter};
 use crate::{ConnectionParameters, Error, Version};
 
-use neqo_common::{Datagram, Decoder, Encoder};
+use neqo_common::{event::Provider, Datagram, Decoder, Encoder};
 use std::mem;
 use std::time::Duration;
 use test_fixture::{self, addr, assertions, now};
@@ -428,4 +431,53 @@ fn no_compatible_version() {
         Error::PeerError(Error::CryptoAlert(47).code()),
         Error::CryptoAlert(47),
     );
+}
+
+/// When a compatible upgrade chooses a different version, 0-RTT is rejected.
+#[test]
+fn compatible_upgrade_0rtt_rejected() {
+    // This is the baseline configuration where v1 is attempted and v2 preferred.
+    let prefer_v2 = ConnectionParameters::default().versions(
+        Version::Version1,
+        vec![Version::Version2, Version::Version1],
+    );
+    let mut client = new_client(prefer_v2.clone());
+    // The server will start with this so that the client resumes with v1.
+    let just_v1 =
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]);
+    let mut server = new_server(just_v1);
+
+    connect(&mut client, &mut server);
+    assert_eq!(client.version(), Version::Version1);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    // Now upgrade the server to the preferred configuration.
+    let mut client = new_client(prefer_v2.clone());
+    let mut server = new_server(prefer_v2);
+    client.enable_resumption(now(), token).unwrap();
+
+    // Create a packet with 0-RTT from the client.
+    let initial = send_something(&mut client, now());
+    assertions::assert_version(&initial, Version::Version1.as_u32());
+    assertions::assert_coalesced_0rtt(&initial);
+    server.process_input(initial, now());
+    assert!(!server
+        .events()
+        .any(|e| matches!(e, ConnectionEvent::NewStream { .. })));
+
+    // Finalize the connection.  Don't use connect() because it uses
+    // maybe_authenticate() too liberally and that eats the events we want to check.
+    let dgram = server.process_output(now()).dgram(); // ServerHello flight
+    let dgram = client.process(dgram, now()).dgram(); // Client Finished (note: no authentication)
+    let dgram = server.process(dgram, now()).dgram(); // HANDSHAKE_DONE
+    client.process_input(dgram.unwrap(), now());
+
+    assert!(matches!(client.state(), State::Confirmed));
+    assert!(matches!(server.state(), State::Confirmed));
+
+    assert!(client.events().any(|e| {
+        println!(" client event: {:?}", e);
+        matches!(e, ConnectionEvent::ZeroRttRejected)
+    }));
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
 }
