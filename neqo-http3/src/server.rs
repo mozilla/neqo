@@ -1149,7 +1149,7 @@ mod tests {
 
     /// Perform a handshake, then another with the token from the first.
     /// The second should always resume, but it might not always accept early data.
-    fn zero_rtt_with_settings(conn_params: Http3Parameters, zero_rtt: &ZeroRttState) {
+    fn zero_rtt_with_settings(conn_params: Http3Parameters, zero_rtt: ZeroRttState) {
         let (_, mut client) = connect();
         let token = client.events().find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[test]
     fn zero_rtt() {
-        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), &ZeroRttState::AcceptedClient);
+        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), ZeroRttState::AcceptedClient);
     }
 
     /// A larger QPACK decoder table size isn't an impediment to 0-RTT.
@@ -1182,7 +1182,7 @@ mod tests {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::AcceptedClient,
+            ZeroRttState::AcceptedClient,
         );
     }
 
@@ -1194,7 +1194,7 @@ mod tests {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::Rejected,
+            ZeroRttState::Rejected,
         );
     }
 
@@ -1206,7 +1206,7 @@ mod tests {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::AcceptedClient,
+            ZeroRttState::AcceptedClient,
         );
     }
 
@@ -1218,7 +1218,7 @@ mod tests {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::Rejected,
+            ZeroRttState::Rejected,
         );
     }
 
@@ -1230,7 +1230,7 @@ mod tests {
                 max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::AcceptedClient,
+            ZeroRttState::AcceptedClient,
         );
     }
 
@@ -1310,6 +1310,6 @@ mod tests {
 
         connect_transport(&mut server, &mut client, true);
         assert!(client.tls_info().unwrap().resumed());
-        assert_eq!(client.zero_rtt_state(), &ZeroRttState::Rejected);
+        assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
     }
 }
