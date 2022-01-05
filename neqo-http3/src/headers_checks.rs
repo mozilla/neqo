@@ -4,12 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::expl_impl_clone_on_copy)] // see https://github.com/Lymia/enumset/issues/28
+
 use crate::{Error, MessageType, Res};
 use enumset::{enum_set, EnumSet, EnumSetType};
 use neqo_common::Header;
 use std::convert::TryFrom;
 
-#[allow(clippy::expl_impl_clone_on_copy)]
 #[derive(EnumSetType, Debug)]
 enum PseudoHeaderState {
     Status,
