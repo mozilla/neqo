@@ -47,13 +47,18 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// Check whether the response is informational(1xx).
 /// # Errors
 /// Returns an error if response headers do not contain
-/// a status header or if the value of the header cannot be parsed.
+/// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
     let status = headers.iter().take(1).find(|h| h.name() == ":status");
     if let Some(h) = status {
         #[allow(clippy::map_err_ignore)]
         let status_code = h.value().parse::<i32>().map_err(|_| Error::InvalidHeader)?;
-        Ok((100..200).contains(&status_code))
+        if status_code == 101 {
+            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
+            Err(Error::InvalidHeader)
+        } else {
+            Ok((100..200).contains(&status_code))
+        }
     } else {
         Err(Error::InvalidHeader)
     }

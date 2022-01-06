@@ -6233,7 +6233,7 @@ mod tests {
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
         let mut d = Encoder::default();
-        let headers1xx: &[Header] = &[Header::new(":status", "101")];
+        let headers1xx: &[Header] = &[Header::new(":status", "100")];
         server.encode_headers(push_stream_id, headers1xx, &mut d);
 
         let headers200: &[Header] = &[
@@ -6727,5 +6727,36 @@ mod tests {
 
         let reset_event = |e| matches!(e, Http3ClientEvent::Reset { stream_id, .. } if stream_id == request_stream_id);
         assert!(client.events().any(reset_event));
+    }
+
+    #[test]
+    fn response_w_101() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers1xx = &[Header::new(":status", "101")];
+        server.encode_headers(request_stream_id, headers1xx, &mut d);
+
+        // Send 101 response.
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the 101 response.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::InvalidHeader.code(),
+                local: true,
+            }
+        );
     }
 }
