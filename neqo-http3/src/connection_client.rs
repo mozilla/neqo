@@ -1082,7 +1082,8 @@ mod tests {
                         }
                     }
                     ConnectionEvent::StateChange(State::Connected) => connected = true,
-                    ConnectionEvent::StateChange(_) => {}
+                    ConnectionEvent::StateChange(_)
+                    | ConnectionEvent::SendStreamCreatable { .. } => {}
                     _ => panic!("unexpected event"),
                 }
             }
