@@ -932,19 +932,27 @@ fn connect_w_different_limit(bidi_limit: u64, unidi_limit: u64) {
 
     assert!(maybe_authenticate(&mut client));
 
-    if bidi_limit > 0 {
-        assert!(
-            matches!(client.events().nth(0).unwrap(), ConnectionEvent::SendStreamCreatable{stream_type: x} if x == StreamType::BiDi)
-        );
+    let mut bidi_events = 0;
+    let mut unidi_events = 0;
+    let mut connected_events = 0;
+    for e in client.events() {
+        match e {
+            ConnectionEvent::SendStreamCreatable { stream_type } => {
+                if stream_type == StreamType::BiDi {
+                    bidi_events += 1;
+                } else {
+                    unidi_events += 1;
+                }
+            }
+            ConnectionEvent::StateChange(state) if state == State::Connected => {
+                connected_events += 1;
+            }
+            _ => {}
+        }
     }
-    if unidi_limit > 0 {
-        assert!(
-            matches!(client.events().nth(0).unwrap(), ConnectionEvent::SendStreamCreatable{stream_type: x} if x == StreamType::UniDi)
-        );
-    }
-    assert!(
-        matches!(client.events().nth(0).unwrap(), ConnectionEvent::StateChange(state) if state == State::Connected)
-    );
+    assert_eq!(bidi_events, usize::from(bidi_limit > 0));
+    assert_eq!(unidi_events, usize::from(unidi_limit > 0));
+    assert_eq!(connected_events, 1);
 }
 
 #[test]
