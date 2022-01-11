@@ -16,12 +16,11 @@ use test_fixture::*;
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
-    let mut client_data;
     loop {
         out = client.process(out, now()).dgram();
-        client_data = out.is_none();
+        let client_done = out.is_none();
         out = server.process(out, now()).dgram();
-        if out.is_none() && client_data {
+        if out.is_none() && client_done {
             break;
         }
     }
