@@ -250,6 +250,8 @@ impl FrameReader {
                     usize::try_from(len).or(Err(Error::HttpFrame))?,
                 ),
             };
+        } else if self.frame_len == 0 {
+            self.reset();
         } else {
             self.state = FrameReaderState::UnknownFrameDischargeData {
                 decoder: IncrementalDecoderIgnore::new(
