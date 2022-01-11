@@ -636,7 +636,7 @@ fn client(
         token: None,
     };
 
-    process_loop(&local_addr, &socket, &mut client, &mut h)?;
+    process_loop(&local_addr, socket, &mut client, &mut h)?;
 
     let token = if args.resume {
         // If we haven't received an event, take a token if there is one.
