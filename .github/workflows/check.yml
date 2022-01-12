@@ -91,6 +91,7 @@ jobs:
         run: cargo +${{ matrix.rust-toolchain }} test -v
         env:
            LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
+           RUST_BACKTRACE: 1
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check

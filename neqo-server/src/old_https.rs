@@ -21,7 +21,6 @@ use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    tparams::PreferredAddress,
     ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State, StreamId,
 };
 
@@ -46,23 +45,18 @@ impl Http09Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        preferred_address: Option<PreferredAddress>,
         conn_params: ConnectionParameters,
     ) -> Result<Self, Error> {
-        let mut server = Server::new(
-            now,
-            certs,
-            protocols,
-            anti_replay,
-            Box::new(AllowZeroRtt {}),
-            cid_manager,
-            conn_params,
-        )?;
-        if let Some(spa) = preferred_address {
-            server.set_preferred_address(spa);
-        }
         Ok(Self {
-            server,
+            server: Server::new(
+                now,
+                certs,
+                protocols,
+                anti_replay,
+                Box::new(AllowZeroRtt {}),
+                cid_manager,
+                conn_params,
+            )?,
             write_state: HashMap::new(),
             read_state: HashMap::new(),
         })

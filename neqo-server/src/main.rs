@@ -102,14 +102,6 @@ struct Args {
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
 
-    #[structopt(name = "preferred-address-v4", long)]
-    /// An IPv4 address for the server preferred address.
-    preferred_address_v4: Option<String>,
-
-    #[structopt(name = "preferred-address-v6", long)]
-    /// An IPv6 address for the server preferred address.
-    preferred_address_v6: Option<String>,
-
     #[structopt(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
     /// This generates a new set of ECH keys when it is invoked.
@@ -130,6 +122,60 @@ impl Args {
             .collect::<Vec<_>>()
     }
 
+    fn listen_addresses(&self) -> Vec<SocketAddr> {
+        self.hosts
+            .iter()
+            .filter_map(|host| host.to_socket_addrs().ok())
+            .flatten()
+            .chain(self.quic_parameters.preferred_address_v4())
+            .chain(self.quic_parameters.preferred_address_v6())
+            .collect()
+    }
+
+    fn now(&self) -> Instant {
+        if self.qns_test.is_some() {
+            // When NSS starts its anti-replay it blocks any acceptance of 0-RTT for a
+            // single period.  This ensures that an attacker that is able to force a
+            // server to reboot is unable to use that to flush the anti-replay buffers
+            // and have something replayed.
+            //
+            // However, this is a massive inconvenience for us when we are testing.
+            // As we can't initialize `AntiReplay` in the past (see `neqo_common::time`
+            // for why), fast forward time here so that the connections get times from
+            // in the future.
+            //
+            // This is NOT SAFE.  Don't do this.
+            Instant::now() + ANTI_REPLAY_WINDOW
+        } else {
+            Instant::now()
+        }
+    }
+}
+
+#[derive(Debug, StructOpt)]
+struct QuicParameters {
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_BIDI limit.
+    max_streams_bidi: u64,
+
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_UNI limit.
+    max_streams_uni: u64,
+
+    #[structopt(long = "cc", default_value = "newreno")]
+    /// The congestion controller to use.
+    congestion_control: CongestionControlAlgorithm,
+
+    #[structopt(name = "preferred-address-v4", long)]
+    /// An IPv4 address for the server preferred address.
+    preferred_address_v4: Option<String>,
+
+    #[structopt(name = "preferred-address-v6", long)]
+    /// An IPv6 address for the server preferred address.
+    preferred_address_v6: Option<String>,
+}
+
+impl QuicParameters {
     fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
     where
         F: FnMut(&SocketAddr) -> bool,
@@ -167,57 +213,15 @@ impl Args {
         }
     }
 
-    fn listen_addresses(&self) -> Vec<SocketAddr> {
-        self.hosts
-            .iter()
-            .filter_map(|host| host.to_socket_addrs().ok())
-            .flatten()
-            .chain(self.preferred_address_v4())
-            .chain(self.preferred_address_v6())
-            .collect()
-    }
-
-    fn now(&self) -> Instant {
-        if self.qns_test.is_some() {
-            // When NSS starts its anti-replay it blocks any acceptance of 0-RTT for a
-            // single period.  This ensures that an attacker that is able to force a
-            // server to reboot is unable to use that to flush the anti-replay buffers
-            // and have something replayed.
-            //
-            // However, this is a massive inconvenience for us when we are testing.
-            // As we can't initialize `AntiReplay` in the past (see `neqo_common::time`
-            // for why), fast forward time here so that the connections get times from
-            // in the future.
-            //
-            // This is NOT SAFE.  Don't do this.
-            Instant::now() + ANTI_REPLAY_WINDOW
-        } else {
-            Instant::now()
-        }
-    }
-}
-
-#[derive(Debug, StructOpt)]
-struct QuicParameters {
-    #[structopt(long, default_value = "16")]
-    /// Set the MAX_STREAMS_BIDI limit.
-    max_streams_bidi: u64,
-
-    #[structopt(long, default_value = "16")]
-    /// Set the MAX_STREAMS_UNI limit.
-    max_streams_uni: u64,
-
-    #[structopt(long = "cc", default_value = "newreno")]
-    /// The congestion controller to use.
-    congestion_control: CongestionControlAlgorithm,
-}
-
-impl QuicParameters {
     fn get(&self) -> ConnectionParameters {
-        ConnectionParameters::default()
+        let mut params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
-            .cc_algorithm(self.congestion_control)
+            .cc_algorithm(self.congestion_control);
+        if let Some(pa) = self.preferred_address() {
+            params = params.preferred_address(pa);
+        }
+        params
     }
 }
 
@@ -458,29 +462,26 @@ impl ServersRunner {
                     &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
-                    args.preferred_address(),
                     args.quic_parameters.get(),
                 )
                 .expect("We cannot make a server!"),
             )
         } else {
-            let mut server = Http3Server::new(
-                args.now(),
-                &[args.key.clone()],
-                &[args.alpn.clone()],
-                anti_replay,
-                cid_mgr,
-                Http3Parameters::default()
-                    .max_table_size_encoder(args.max_table_size_encoder)
-                    .max_table_size_decoder(args.max_table_size_decoder)
-                    .max_blocked_streams(args.max_blocked_streams),
-                None,
+            Box::new(
+                Http3Server::new(
+                    args.now(),
+                    &[args.key.clone()],
+                    &[args.alpn.clone()],
+                    anti_replay,
+                    cid_mgr,
+                    Http3Parameters::default()
+                        .max_table_size_encoder(args.max_table_size_encoder)
+                        .max_table_size_decoder(args.max_table_size_decoder)
+                        .max_blocked_streams(args.max_blocked_streams),
+                    None,
+                )
+                .expect("We cannot make a server!"),
             )
-            .expect("We cannot make a server!");
-            if let Some(spa) = args.preferred_address() {
-                server.set_preferred_address(spa);
-            }
-            Box::new(server)
         };
         svr.set_ciphers(&args.get_ciphers());
         svr.set_qlog_dir(args.qlog_dir.clone());
