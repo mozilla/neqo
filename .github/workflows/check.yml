@@ -92,6 +92,7 @@ jobs:
         env:
            LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
            RUST_BACKTRACE: 1
+           RUST_LOG: neqo=debug
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check

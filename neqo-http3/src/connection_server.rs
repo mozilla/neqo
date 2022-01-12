@@ -210,7 +210,7 @@ impl Http3ServerHandler {
             self.needs_processing = false;
             return true;
         }
-        self.base_handler.has_data_to_send() | self.events.has_events()
+        self.base_handler.has_data_to_send() || self.events.has_events()
     }
 
     // This function takes the provided result and check for an error.
