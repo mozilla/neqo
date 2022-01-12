@@ -154,6 +154,10 @@ impl Args {
 
 #[derive(Debug, StructOpt)]
 struct QuicParameters {
+    #[structopt(short = "V", long, number_of_values = 1)]
+    /// A list of versions to support in order of preference.
+    quic_version: Vec<VersionArg>,
+
     #[structopt(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
     max_streams_bidi: u64,
@@ -220,6 +224,10 @@ impl QuicParameters {
             .cc_algorithm(self.congestion_control);
         if let Some(pa) = self.preferred_address() {
             params = params.preferred_address(pa);
+        }
+
+        if let Some(first) = self.quic_version.first() {
+            params = params.versions(first.0, self.quic_version.iter().map(|&v| v.0).collect());
         }
         params
     }
