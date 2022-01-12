@@ -167,14 +167,12 @@ impl Http3Client {
     }
 
     fn encode_resumption_token(&self, token: &ResumptionToken) -> Option<ResumptionToken> {
-        if let Some(settings) = self.base_handler.get_settings() {
+        self.base_handler.get_settings().map(|settings| {
             let mut enc = Encoder::default();
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            Some(ResumptionToken::new(enc.into(), token.expiration_time()))
-        } else {
-            None
-        }
+            ResumptionToken::new(enc.into(), token.expiration_time())
+        })
     }
 
     /// Get a resumption token.  The correct way to obtain a resumption token is
