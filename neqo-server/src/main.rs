@@ -210,9 +210,9 @@ impl FromStr for VersionArg {
 
 #[derive(Debug, StructOpt)]
 struct QuicParameters {
-    #[structopt(long, number_of_values = 1)]
+    #[structopt(short = "V", long, number_of_values = 1)]
     /// A list of versions to support in order of preference.
-    versions: Vec<VersionArg>,
+    quic_version: Vec<VersionArg>,
 
     #[structopt(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
@@ -282,8 +282,8 @@ impl QuicParameters {
             params = params.preferred_address(pa);
         }
 
-        if let Some(first) = self.versions.first() {
-            params = params.versions(first.0, self.versions.iter().map(|&v| v.0).collect());
+        if let Some(first) = self.quic_version.first() {
+            params = params.versions(first.0, self.quic_version.iter().map(|&v| v.0).collect());
         }
         params
     }
