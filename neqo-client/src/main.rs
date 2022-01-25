@@ -25,6 +25,7 @@ use neqo_transport::{
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -251,6 +252,20 @@ impl Args {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VersionArg(Version);
+impl FromStr for VersionArg {
+    type Err = ClientError;
+
+    fn from_str(s: &str) -> Res<Self> {
+        let v = u32::from_str_radix(s, 16)
+            .map_err(|_| ClientError::ArgumentError("versions need to be specified in hex"))?;
+        Ok(Self(Version::try_from(v).map_err(|_| {
+            ClientError::ArgumentError("unknown version")
+        })?))
+    }
+}
+
 #[derive(Debug, StructOpt)]
 struct QuicParameters {
     #[structopt(short = "V", long, number_of_values = 1)]
@@ -274,8 +289,8 @@ struct QuicParameters {
 }
 
 impl QuicParameters {
-    fn get(&self) -> ConnectionParameters {
-        ConnectionParameters::default()
+    fn get(&self, alpn: &str) -> ConnectionParameters {
+        let params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .cc_algorithm(self.congestion_control);
@@ -610,24 +625,13 @@ fn client(
     urls: &[Url],
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
-    let quic_protocol = match args.alpn.as_str() {
-        "h3" => Version::Version1,
-        "h3-29" => Version::Draft29,
-        "h3-30" => Version::Draft30,
-        "h3-31" => Version::Draft31,
-        "h3-32" => Version::Draft32,
-        _ => Version::default(),
-    };
-
     let mut transport = Connection::new_client(
         hostname,
         &[&args.alpn],
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         local_addr,
         remote_addr,
-        args.quic_parameters
-            .get()
-            .versions(quic_protocol, vec![quic_protocol]),
+        args.quic_parameters.get(args.alpn.as_str()),
         Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
@@ -864,7 +868,7 @@ mod old {
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
-        StreamType, Version,
+        StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -1123,12 +1127,9 @@ mod old {
         urls: &[Url],
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
-        let (quic_protocol, alpn) = match args.alpn.as_str() {
-            "hq-29" => (Version::Draft29, "hq-29"),
-            "hq-30" => (Version::Draft30, "hq-30"),
-            "hq-31" => (Version::Draft31, "hq-31"),
-            "hq-32" => (Version::Draft32, "hq-32"),
-            _ => (Version::Version1, "hq-interop"),
+        let alpn = match args.alpn.as_str() {
+            "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.alpn.as_str(),
+            _ => "hq-interop",
         };
 
         let mut client = Connection::new_client(
@@ -1137,9 +1138,7 @@ mod old {
             Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
             local_addr,
             remote_addr,
-            args.quic_parameters
-                .get()
-                .versions(quic_protocol, vec![quic_protocol]),
+            args.quic_parameters.get(alpn),
             Instant::now(),
         )?;
 
