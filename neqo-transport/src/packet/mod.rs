@@ -20,11 +20,6 @@ use std::iter::ExactSizeIterator;
 use std::ops::{Deref, DerefMut, Range};
 use std::time::Instant;
 
-const PACKET_TYPE_INITIAL: u8 = 0x0;
-const PACKET_TYPE_0RTT: u8 = 0x01;
-const PACKET_TYPE_HANDSHAKE: u8 = 0x2;
-const PACKET_TYPE_RETRY: u8 = 0x03;
-
 pub const PACKET_BIT_LONG: u8 = 0x80;
 const PACKET_BIT_SHORT: u8 = 0x00;
 const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
@@ -55,14 +50,28 @@ pub enum PacketType {
 
 impl PacketType {
     #[must_use]
-    fn code(self) -> u8 {
-        match self {
-            Self::Initial => PACKET_TYPE_INITIAL,
-            Self::ZeroRtt => PACKET_TYPE_0RTT,
-            Self::Handshake => PACKET_TYPE_HANDSHAKE,
-            Self::Retry => PACKET_TYPE_RETRY,
-            _ => panic!("shouldn't be here"),
+    fn from_byte(t: u8, v: Version) -> Self {
+        // Version2 adds one to the type, modulo 4
+        match t.wrapping_sub(u8::from(v == Version::Version2)) & 3 {
+            0 => Self::Initial,
+            1 => Self::ZeroRtt,
+            2 => Self::Handshake,
+            3 => Self::Retry,
+            _ => panic!("packet type out of range"),
         }
+    }
+
+    #[must_use]
+    fn to_byte(self, v: Version) -> u8 {
+        let t = match self {
+            Self::Initial => 0,
+            Self::ZeroRtt => 1,
+            Self::Handshake => 2,
+            Self::Retry => 3,
+            _ => panic!("not a long header packet type"),
+        };
+        // Version2 adds one to the type, modulo 4
+        (t + u8::from(v == Version::Version2)) & 3
     }
 }
 
@@ -178,7 +187,7 @@ impl PacketBuilder {
         if limit > encoder.len()
             && 11 + dcid.as_ref().len() + scid.as_ref().len() < limit - encoder.len()
         {
-            encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.code() << 4);
+            encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.to_byte(version) << 4);
             encoder.encode_uint(4, version.as_u32());
             encoder.encode_vec(1, dcid.as_ref());
             encoder.encode_vec(1, scid.as_ref());
@@ -264,10 +273,6 @@ impl PacketBuilder {
     /// For an Initial packet, encode the token.
     /// If you fail to do this, then you will not get a valid packet.
     pub fn initial_token(&mut self, token: &[u8]) {
-        debug_assert_eq!(
-            self.encoder[self.header.start] & 0xb0,
-            PACKET_BIT_LONG | PACKET_TYPE_INITIAL << 4
-        );
         if Encoder::vvec_len(token.len()) < self.remaining() {
             self.encoder.encode_vvec(token);
         } else {
@@ -414,7 +419,7 @@ impl PacketBuilder {
         encoder.encode_byte(
             PACKET_BIT_LONG
                 | PACKET_BIT_FIXED_QUIC
-                | (PACKET_TYPE_RETRY << 4)
+                | (PacketType::Retry.to_byte(version) << 4)
                 | (random(1)[0] & 0xf),
         );
         encoder.encode_uint(4, version.as_u32());
@@ -605,13 +610,7 @@ impl<'a> PublicPacket<'a> {
         if dcid.len() > MAX_CONNECTION_ID_LEN || scid.len() > MAX_CONNECTION_ID_LEN {
             return Err(Error::InvalidPacket);
         }
-        let packet_type = match (first >> 4) & 3 {
-            PACKET_TYPE_INITIAL => PacketType::Initial,
-            PACKET_TYPE_0RTT => PacketType::ZeroRtt,
-            PACKET_TYPE_HANDSHAKE => PacketType::Handshake,
-            PACKET_TYPE_RETRY => PacketType::Retry,
-            _ => unreachable!(),
-        };
+        let packet_type = PacketType::from_byte((first >> 4) & 3, version);
 
         // The type-specific code includes a token.  This consumes the remainder of the packet.
         let (token, header_len) = Self::decode_long(&mut decoder, packet_type, version)?;
@@ -1157,9 +1156,9 @@ mod tests {
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[
-        0xff, 0xff, 0x02, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
-        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x13, 0x7e, 0x5b, 0x54, 0x36, 0xb8, 0x8e, 0x7a, 0x8e, 0xb9,
-        0x24, 0x42, 0x4d, 0x37, 0xa9, 0xee,
+        0xcf, 0x70, 0x9a, 0x50, 0xc4, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x1d, 0xc7, 0x11, 0x30, 0xcd, 0x1e, 0xd3, 0x9d, 0x6e, 0xfc,
+        0xee, 0x5c, 0x85, 0x80, 0x65, 0x01,
     ];
 
     const SAMPLE_RETRY_V1: &[u8] = &[
@@ -1209,7 +1208,10 @@ mod tests {
             assert_eq!(&retry, &sample_retry);
         } else {
             // Otherwise, just check that the header is OK.
-            assert_eq!(retry[0] & 0xf0, 0xf0);
+            assert_eq!(
+                retry[0] & 0xf0,
+                0xc0 | (PacketType::Retry.to_byte(version) << 4)
+            );
             let header_range = 1..retry.len() - 16;
             assert_eq!(&retry[header_range.clone()], &sample_retry[header_range]);
         }
@@ -1337,7 +1339,7 @@ mod tests {
 
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
-        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0x70, 0x9a, 0x50, 0xc4, 0x00, 0x00, 0x00,
         0x01, 0xff, 0x00, 0x00, 0x20, 0xff, 0x00, 0x00, 0x1f, 0xff, 0x00, 0x00, 0x1e, 0xff, 0x00,
         0x00, 0x1d, 0x0a, 0x0a, 0x0a, 0x0a,
     ];

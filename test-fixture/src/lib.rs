@@ -12,8 +12,8 @@ use neqo_common::{event::Provider, Datagram, Decoder};
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_transport::{
-    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State,
+    version::WireVersion, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
+    ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
 };
 
 use std::cell::RefCell;
@@ -276,17 +276,24 @@ pub fn default_http3_server() -> Http3Server {
 
 /// Split the first packet off a coalesced packet.
 fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
+    const TYPE_MASK: u8 = 0b1011_0000;
+
     if buf[0] & 0x80 == 0 {
         // Short header: easy.
         return (buf, None);
     }
     let mut dec = Decoder::from(buf);
     let first = dec.decode_byte().unwrap();
-    assert_ne!(first & 0b0011_0000, 0b0011_0000, "retry not supported");
-    dec.skip(4); // Version.
+    let v = Version::try_from(WireVersion::try_from(dec.decode_uint(4).unwrap()).unwrap()).unwrap(); // Version.
+    let (initial_type, retry_type) = if v == Version::Version2 {
+        (0b1001_0000, 0b1000_0000)
+    } else {
+        (0b1000_0000, 0b1011_0000)
+    };
+    assert_ne!(first & TYPE_MASK, retry_type, "retry not supported");
     dec.skip_vec(1); // DCID
     dec.skip_vec(1); // SCID
-    if first & 0b0011_0000 == 0 {
+    if first & TYPE_MASK == initial_type {
         dec.skip_vvec(); // Initial token
     }
     dec.skip_vvec(); // The rest of the packet.

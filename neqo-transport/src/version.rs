@@ -23,7 +23,7 @@ pub enum Version {
 impl Version {
     pub const fn as_u32(self) -> WireVersion {
         match self {
-            Self::Version2 => 0xff020000,
+            Self::Version2 => 0x709a50c4,
             Self::Version1 => 1,
             Self::Draft29 => 0xff00_0000 + 29,
             Self::Draft30 => 0xff00_0000 + 30,
@@ -32,7 +32,7 @@ impl Version {
         }
     }
 
-    pub fn initial_salt(self) -> &'static [u8] {
+    pub(crate) fn initial_salt(self) -> &'static [u8] {
         const INITIAL_SALT_V2: &[u8] = &[
             0xa7, 0x07, 0xc2, 0x03, 0xa5, 0x9b, 0x47, 0x18, 0x4a, 0x1d, 0x62, 0xca, 0x57, 0x04,
             0x06, 0xea, 0x7a, 0xe3, 0xe5, 0xd3,
@@ -52,7 +52,7 @@ impl Version {
         }
     }
 
-    pub fn label_prefix(self) -> &'static str {
+    pub(crate) fn label_prefix(self) -> &'static str {
         match self {
             Self::Version2 => "quicv2 ",
             Self::Version1 | Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => {
@@ -61,7 +61,7 @@ impl Version {
         }
     }
 
-    pub fn retry_secret(self) -> &'static [u8] {
+    pub(crate) fn retry_secret(self) -> &'static [u8] {
         const RETRY_SECRET_29: &[u8] = &[
             0x8b, 0x0d, 0x37, 0xeb, 0x85, 0x35, 0x02, 0x2e, 0xbc, 0x8d, 0x76, 0xa2, 0x07, 0xd8,
             0x0d, 0xf2, 0x26, 0x46, 0xec, 0x06, 0xdc, 0x80, 0x96, 0x42, 0xc3, 0x0a, 0x8b, 0xaa,
@@ -131,7 +131,7 @@ impl TryFrom<WireVersion> for Version {
     fn try_from(wire: WireVersion) -> Res<Self> {
         if wire == 1 {
             Ok(Self::Version1)
-        } else if wire == 0xff020000 {
+        } else if wire == 0x709a50c4 {
             Ok(Self::Version2)
         } else if wire == 0xff00_0000 + 29 {
             Ok(Self::Draft29)
