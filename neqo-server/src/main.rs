@@ -210,8 +210,14 @@ impl FromStr for VersionArg {
 
 #[derive(Debug, StructOpt)]
 struct QuicParameters {
-    #[structopt(short = "V", long, number_of_values = 1)]
-    /// A list of versions to support in order of preference.
+    #[structopt(
+        short = "V",
+        long,
+        multiple = true,
+        use_delimiter = true,
+        number_of_values = 1
+    )]
+    /// A list of versions to support in order of preference, in hex.
     quic_version: Vec<VersionArg>,
 
     #[structopt(long, default_value = "16")]
