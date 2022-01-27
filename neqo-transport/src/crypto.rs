@@ -1543,9 +1543,6 @@ impl CryptoStreams {
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
             builder.encode_varint(offset);
             builder.encode_vvec(&data[..length]);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(15));
-            }
 
             cs.tx.mark_as_sent(offset, length);
 

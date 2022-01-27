@@ -423,9 +423,6 @@ impl Paths {
             }
             builder.encode_varint(FRAME_TYPE_RETIRE_CONNECTION_ID);
             builder.encode_varint(seqno);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(20));
-            }
             tokens.push(RecoveryToken::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
@@ -784,9 +781,6 @@ impl Path {
             qtrace!([self], "Responding to path challenge {}", hex(challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(21));
-            }
 
             // These frames are not retransmitted in the usual fashion.
             // There is no token, therefore we need to count `all` specially.
@@ -807,9 +801,6 @@ impl Path {
             let data = <[u8; 8]>::try_from(&random(8)[..]).unwrap();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(22));
-            }
 
             // As above, no recovery token.
             stats.path_challenge += 1;

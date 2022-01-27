@@ -433,9 +433,6 @@ impl NewTokenSender {
 
                 builder.encode_varint(crate::frame::FRAME_TYPE_NEW_TOKEN);
                 builder.encode_vvec(&t.token);
-                if builder.len() > builder.limit() {
-                    return Err(Error::InternalError(7));
-                }
 
                 tokens.push(RecoveryToken::NewToken(t.seqno));
                 stats.new_token += 1;

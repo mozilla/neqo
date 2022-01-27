@@ -728,9 +728,6 @@ impl AckTracker {
     ) -> Res<()> {
         if let Some(space) = self.get_mut(pn_space) {
             space.write_frame(now, rtt, builder, tokens, stats);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(24));
-            }
         }
         Ok(())
     }
