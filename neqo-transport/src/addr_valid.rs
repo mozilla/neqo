@@ -16,7 +16,7 @@ use crate::cid::ConnectionId;
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
-use crate::{Error, Res};
+use crate::{Res};
 
 use smallvec::SmallVec;
 use std::convert::TryFrom;
