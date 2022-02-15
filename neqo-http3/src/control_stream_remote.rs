@@ -40,7 +40,10 @@ impl ControlStreamRemote {
                 self.stream_id,
             ))? {
             (_, true) => Err(Error::HttpClosedCriticalStream),
-            (s, false) => Ok(s),
+            (s, false) => {
+                qdebug!([self], "received {:?}", s);
+                Ok(s)
+            }
         }
     }
 }

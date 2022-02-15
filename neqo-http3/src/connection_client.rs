@@ -166,15 +166,25 @@ impl Http3Client {
         self.conn.odcid().expect("Client always has odcid")
     }
 
-    /// A resumption token encodes transport and settings parameter as well.
-    fn create_resumption_token(&mut self, token: &ResumptionToken) {
-        if let Some(settings) = self.base_handler.get_settings() {
+    fn encode_resumption_token(&self, token: &ResumptionToken) -> Option<ResumptionToken> {
+        self.base_handler.get_settings().map(|settings| {
             let mut enc = Encoder::default();
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            self.events
-                .resumption_token(ResumptionToken::new(enc.into(), token.expiration_time()));
-        }
+            ResumptionToken::new(enc.into(), token.expiration_time())
+        })
+    }
+
+    /// Get a resumption token.  The correct way to obtain a resumption token is
+    /// waiting for the `Http3ClientEvent::ResumptionToken` event.  However, some
+    /// servers don't send `NEW_TOKEN` frames and so that event might be slow in
+    /// arriving.  This is especially a problem for short-lived connections, where
+    /// the connection is closed before any events are released.  This retrieves
+    /// the token, without waiting for the `NEW_TOKEN` frame to arrive.
+    pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
+        self.conn
+            .take_resumption_token(now)
+            .and_then(|t| self.encode_resumption_token(&t))
     }
 
     /// This may be call if an application has a resumption token. This must be called before connection starts.
@@ -603,7 +613,9 @@ impl Http3Client {
                     self.push_handler.borrow_mut().handle_zero_rtt_rejected();
                 }
                 ConnectionEvent::ResumptionToken(token) => {
-                    self.create_resumption_token(&token);
+                    if let Some(t) = self.encode_resumption_token(&token) {
+                        self.events.resumption_token(t);
+                    }
                 }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::Datagram { .. }
@@ -1082,7 +1094,8 @@ mod tests {
                         }
                     }
                     ConnectionEvent::StateChange(State::Connected) => connected = true,
-                    ConnectionEvent::StateChange(_) => {}
+                    ConnectionEvent::StateChange(_)
+                    | ConnectionEvent::SendStreamCreatable { .. } => {}
                     _ => panic!("unexpected event"),
                 }
             }
@@ -6233,7 +6246,7 @@ mod tests {
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
         let mut d = Encoder::default();
-        let headers1xx: &[Header] = &[Header::new(":status", "101")];
+        let headers1xx: &[Header] = &[Header::new(":status", "100")];
         server.encode_headers(push_stream_id, headers1xx, &mut d);
 
         let headers200: &[Header] = &[
@@ -6727,5 +6740,36 @@ mod tests {
 
         let reset_event = |e| matches!(e, Http3ClientEvent::Reset { stream_id, .. } if stream_id == request_stream_id);
         assert!(client.events().any(reset_event));
+    }
+
+    #[test]
+    fn response_w_101() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers1xx = &[Header::new(":status", "101")];
+        server.encode_headers(request_stream_id, headers1xx, &mut d);
+
+        // Send 101 response.
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the 101 response.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::InvalidHeader.code(),
+                local: true,
+            }
+        );
     }
 }

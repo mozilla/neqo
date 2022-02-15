@@ -183,7 +183,6 @@ pub struct Args {
 
     #[structopt(name = "download-in-series", long)]
     /// Download resources in series using separate connections.
-    /// Only works with old HTTP (that is, `-o`).
     download_in_series: bool,
 
     #[structopt(name = "concurrency", long, default_value = "100")]
@@ -207,7 +206,8 @@ pub struct Args {
     qns_test: Option<String>,
 
     #[structopt(short = "r", long)]
-    /// Client attemps to resume connections when there are multiple connections made.
+    /// Client attempts to resume by making multiple connections to servers.
+    /// Requires that 2 or more URLs are listed for each server.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
     resume: bool,
 
@@ -394,6 +394,7 @@ struct Handler<'a> {
     all_paths: Vec<PathBuf>,
     args: &'a Args,
     key_update: KeyUpdateState,
+    token: Option<ResumptionToken>,
 }
 
 impl<'a> Handler<'a> {
@@ -548,6 +549,7 @@ impl<'a> Handler<'a> {
                 | Http3ClientEvent::RequestsCreatable => {
                     self.download_urls(client);
                 }
+                Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
                 _ => {
                     println!("Unhandled event {:?}", event);
                 }
@@ -575,12 +577,13 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 
 fn client(
     args: &Args,
-    socket: UdpSocket,
+    socket: &UdpSocket,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
     urls: &[Url],
-) -> Res<()> {
+    resumption_token: Option<ResumptionToken>,
+) -> Res<Option<ResumptionToken>> {
     let quic_protocol = match args.alpn.as_str() {
         "h3" => QuicVersion::Version1,
         "h3-29" => QuicVersion::Draft29,
@@ -617,6 +620,11 @@ fn client(
     if let Some(ech) = &args.ech {
         client.enable_ech(ech).expect("enable ECH");
     }
+    if let Some(token) = resumption_token {
+        client
+            .enable_resumption(Instant::now(), token)
+            .expect("enable resumption");
+    }
 
     let key_update = KeyUpdateState(args.key_update);
     let mut h = Handler {
@@ -625,11 +633,21 @@ fn client(
         all_paths: Vec::new(),
         args,
         key_update,
+        token: None,
     };
 
-    process_loop(&local_addr, &socket, &mut client, &mut h)?;
+    process_loop(&local_addr, socket, &mut client, &mut h)?;
 
-    Ok(())
+    let token = if args.resume {
+        // If we haven't received an event, take a token if there is one.
+        // Lots of servers don't provide NEW_TOKEN, but a session ticket
+        // without NEW_TOKEN is better than nothing.
+        h.token
+            .or_else(|| client.take_resumption_token(Instant::now()))
+    } else {
+        None
+    };
+    Ok(token)
 }
 
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
@@ -703,8 +721,7 @@ fn main() -> Res<()> {
         entry.push(url.clone());
     }
 
-    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
-    {
+    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {:?}", x);
@@ -748,62 +765,52 @@ fn main() -> Res<()> {
             remote_addr,
         );
 
-        if !args.use_old_http {
-            client(
-                &args,
-                socket,
-                real_local,
-                remote_addr,
-                &format!("{}", host),
-                &urls,
-            )?;
-        } else if !args.download_in_series {
-            let token = if args.resume {
-                // Download first URL using a separate connection, save the token and use it for
-                // the remaining URLs
-                if urls.len() < 2 {
-                    eprintln!("Warning: resumption tests won't work without >1 URL");
-                    exit(127)
+        let hostname = format!("{}", host);
+        let mut token: Option<ResumptionToken> = None;
+        let mut remaining = &urls[..];
+        let mut first = true;
+        loop {
+            let to_request;
+            if (args.resume && first) || args.download_in_series {
+                to_request = &remaining[..1];
+                remaining = &remaining[1..];
+                if args.resume && first && remaining.is_empty() {
+                    println!(
+                        "Error: resumption to {} cannot work without at least 2 URLs.",
+                        hostname
+                    );
+                    exit(127);
                 }
+            } else {
+                to_request = remaining;
+                remaining = &[][..];
+            }
+            if to_request.is_empty() {
+                break;
+            }
 
-                let first_url = urls.remove(0);
-
+            first = false;
+            token = if args.use_old_http {
                 old::old_client(
                     &args,
                     &socket,
                     real_local,
                     remote_addr,
-                    &format!("{}", host),
-                    &[first_url],
-                    None,
+                    &hostname,
+                    to_request,
+                    token,
                 )?
             } else {
-                None
-            };
-
-            old::old_client(
-                &args,
-                &socket,
-                real_local,
-                remote_addr,
-                &format!("{}", host),
-                &urls,
-                token,
-            )?;
-        } else {
-            let mut token: Option<ResumptionToken> = None;
-
-            for url in urls {
-                token = old::old_client(
+                client(
                     &args,
                     &socket,
                     real_local,
                     remote_addr,
-                    &format!("{}", host),
-                    &[url],
+                    &hostname,
+                    to_request,
                     token,
-                )?;
-            }
+                )?
+            };
         }
     }
 

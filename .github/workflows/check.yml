@@ -91,11 +91,13 @@ jobs:
         run: cargo +${{ matrix.rust-toolchain }} test -v
         env:
            LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
+           RUST_BACKTRACE: 1
+           RUST_LOG: neqo=debug
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
         if: ${{ success() || failure() }}
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings $([ $(cargo version | cut -f2 -d" " -) = "1.58.0" ] && echo -A clippy::question_mark)
         if: ${{ success() || failure() }}
