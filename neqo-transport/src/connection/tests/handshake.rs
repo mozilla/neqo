@@ -715,7 +715,7 @@ fn extra_initial_invalid_cid() {
 
 #[test]
 fn connect_one_version() {
-    fn connect_one_version(version: Version) {
+    fn connect_v(version: Version) {
         fixture_init();
         let mut client = Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
@@ -741,7 +741,7 @@ fn connect_one_version() {
 
     for v in Version::all() {
         println!("Connecting with {:?}", v);
-        connect_one_version(v);
+        connect_v(v);
     }
 }
 

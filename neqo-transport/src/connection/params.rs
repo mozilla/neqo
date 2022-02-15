@@ -108,7 +108,7 @@ impl ConnectionParameters {
 
     /// Describe the initial version that should be attempted and all the
     /// versions that should be enabled.  This list should contain the initial
-    /// version and be in order  of preference, with more preferred versions
+    /// version and be in order of preference, with more preferred versions
     /// before less preferred.
     pub fn versions(mut self, initial: Version, all: Vec<Version>) -> Self {
         self.versions = VersionConfig::new(initial, all);

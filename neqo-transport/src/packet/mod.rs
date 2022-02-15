@@ -760,8 +760,8 @@ impl<'a> PublicPacket<'a> {
 
     pub fn decrypt(&self, crypto: &mut CryptoStates, release_at: Instant) -> Res<DecryptedPacket> {
         let cspace: CryptoSpace = self.packet_type.into();
-        // When we don't have a version, the crypto code doesn't need to
-        // know, so using the default is fine.
+        // When we don't have a version, the crypto code doesn't need a version
+        // for lookup, so use the default, but fix it up if decryption succeeds.
         let version = self.version.unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
@@ -773,7 +773,7 @@ impl<'a> PublicPacket<'a> {
             let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
             qtrace!([rx], "decoded header: {:?}", header);
             let rx = crypto.rx(version, cspace, key_phase).unwrap();
-            let version = rx.version();
+            let version = rx.version(); // Version fixup; see above.
             let d = rx.decrypt(pn, &header, body)?;
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
