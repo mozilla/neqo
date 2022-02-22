@@ -12,7 +12,7 @@
     clippy::too_many_lines,
     clippy::upper_case_acronyms
 )]
-#![allow(unknown_lints, deref_nullptr)] // Until we require rust 1.53 or bindgen#1651 is fixed.
+#![allow(unknown_lints, deref_nullptr)] // Until bindgen#1651 is fixed.
 
 use crate::constants::Epoch;
 use crate::err::{secstatus_to_res, Res};

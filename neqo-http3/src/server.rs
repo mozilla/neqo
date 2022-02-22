@@ -342,12 +342,7 @@ mod tests {
 
     fn assert_closed(hconn: &mut Http3Server, expected: &Error) {
         let err = ConnectionError::Application(expected.code());
-        let closed = |e| {
-            matches!(e,
-            Http3ServerEvent::StateChange{ state: Http3State::Closing(e), .. }
-            | Http3ServerEvent::StateChange{ state: Http3State::Closed(e), .. }
-              if e == err)
-        };
+        let closed = |e| matches!(e, Http3ServerEvent::StateChange{ state: Http3State::Closing(e) | Http3State::Closed(e), .. } if e == err);
         assert!(hconn.events().any(closed));
     }
 
