@@ -30,9 +30,9 @@ pub type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
-    AeadInitFailure,
     AeadError,
     CertificateLoading,
+    CipherInitFailure,
     CreateSslSocket,
     EchRetry(Vec<u8>),
     HkdfError,

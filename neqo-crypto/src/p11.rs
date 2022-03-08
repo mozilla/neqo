@@ -14,6 +14,7 @@ use crate::err::{secstatus_to_res, Error, Res};
 use neqo_common::hex_with_len;
 
 use std::convert::TryFrom;
+use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_int, c_uint};
 use std::ptr::null_mut;
@@ -217,6 +218,11 @@ impl std::fmt::Debug for SymKey {
     }
 }
 
+unsafe fn destroy_pk11_context(ctxt: *mut PK11Context) {
+    PK11_DestroyContext(ctxt, PRBool::from(true));
+}
+scoped_ptr!(Context, PK11Context, destroy_pk11_context);
+
 unsafe fn destroy_secitem(item: *mut SECItem) {
     SECITEM_FreeItem(item, PRBool::from(true));
 }
@@ -225,12 +231,25 @@ scoped_ptr!(Item, SECItem, destroy_secitem);
 impl Item {
     /// Create a wrapper for a slice of this object.
     /// Creating this object is technically safe, but using it is extremely dangerous.
-    /// Minimally, it can only be passed as a `const SECItem*` argument to functions.
+    /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
+    /// or those that treat their argument as `const`.
     pub fn wrap(buf: &[u8]) -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
             data: buf.as_ptr() as *mut u8,
             len: c_uint::try_from(buf.len()).unwrap(),
+        }
+    }
+
+    /// Create a wrapper for a struct.
+    /// Creating this object is technically safe, but using it is extremely dangerous.
+    /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
+    /// or those that treat their argument as `const`.
+    pub fn wrap_struct<T>(v: &T) -> SECItem {
+        SECItem {
+            type_: SECItemType::siBuffer,
+            data: (v as *const T as *mut T).cast(),
+            len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
         }
     }
 
