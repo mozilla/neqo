@@ -7,8 +7,8 @@
 use super::super::{Connection, Output, State};
 use super::{
     assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    get_tokens, handshake, maybe_authenticate, send_something, CountingConnectionIdGenerator,
-    AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    get_tokens, handshake, maybe_authenticate, resumed_server, send_something,
+    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
 };
 use crate::connection::AddressValidation;
 use crate::events::ConnectionEvent;
@@ -17,8 +17,7 @@ use crate::server::ValidateAddress;
 use crate::tparams::{TransportParameter, MIN_ACK_DELAY};
 use crate::tracking::DEFAULT_ACK_DELAY;
 use crate::{
-    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, QuicVersion,
-    StreamType,
+    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
 };
 
 use neqo_common::{event::Provider, qdebug, Datagram};
@@ -356,7 +355,7 @@ fn reorder_05rtt_with_0rtt() {
     let token = get_tokens(&mut client).pop().unwrap();
     let mut client = default_client();
     client.enable_resumption(now, token).unwrap();
-    let mut server = default_server();
+    let mut server = resumed_server(&client);
 
     // Send ClientHello and some 0-RTT.
     let c1 = send_something(&mut client, now);
@@ -714,51 +713,36 @@ fn extra_initial_invalid_cid() {
     assert!(nothing.is_none());
 }
 
-fn connect_version(version: QuicVersion) {
-    fixture_init();
-    let mut client = Connection::new_client(
-        test_fixture::DEFAULT_SERVER_NAME,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
-        ConnectionParameters::default().quic_version(version),
-        now(),
-    )
-    .unwrap();
-    let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().quic_version(version),
-    )
-    .unwrap();
-    connect_force_idle(&mut client, &mut server);
-}
-
 #[test]
-fn connect_v1() {
-    connect_version(QuicVersion::Version1);
-}
+fn connect_one_version() {
+    fn connect_v(version: Version) {
+        fixture_init();
+        let mut client = Connection::new_client(
+            test_fixture::DEFAULT_SERVER_NAME,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            addr(),
+            addr(),
+            ConnectionParameters::default().versions(version, vec![version]),
+            now(),
+        )
+        .unwrap();
+        let mut server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            ConnectionParameters::default().versions(version, vec![version]),
+        )
+        .unwrap();
+        connect_force_idle(&mut client, &mut server);
+        assert_eq!(client.version(), version);
+        assert_eq!(server.version(), version);
+    }
 
-#[test]
-fn connect_29() {
-    connect_version(QuicVersion::Draft29);
-}
-
-#[test]
-fn connect_30() {
-    connect_version(QuicVersion::Draft30);
-}
-
-#[test]
-fn connect_31() {
-    connect_version(QuicVersion::Draft31);
-}
-
-#[test]
-fn connect_32() {
-    connect_version(QuicVersion::Draft32);
+    for v in Version::all() {
+        println!("Connecting with {:?}", v);
+        connect_v(v);
+    }
 }
 
 #[test]

@@ -62,9 +62,9 @@ impl Http3Server {
                 protocols,
                 anti_replay,
                 zero_rtt_checker
-                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(http3_parameters))),
+                    .unwrap_or_else(|| Box::new(HttpZeroRttChecker::new(http3_parameters.clone()))),
                 cid_manager,
-                *http3_parameters.get_connection_parameters(),
+                http3_parameters.get_connection_parameters().clone(),
             )?,
             http3_parameters,
             http3_handlers: HashMap::new(),
@@ -150,10 +150,12 @@ impl Http3Server {
 
     fn process_events(&mut self, conn: &mut ActiveConnectionRef, now: Instant) {
         let mut remove = false;
-        let http3_parameters = self.http3_parameters;
+        let http3_parameters = &self.http3_parameters;
         {
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
-                Rc::new(RefCell::new(Http3ServerHandler::new(http3_parameters)))
+                Rc::new(RefCell::new(Http3ServerHandler::new(
+                    http3_parameters.clone(),
+                )))
             });
             handler
                 .borrow_mut()
@@ -1138,7 +1140,7 @@ mod tests {
 
     /// Perform a handshake, then another with the token from the first.
     /// The second should always resume, but it might not always accept early data.
-    fn zero_rtt_with_settings(conn_params: Http3Parameters, zero_rtt: &ZeroRttState) {
+    fn zero_rtt_with_settings(conn_params: Http3Parameters, zero_rtt: ZeroRttState) {
         let (_, mut client) = connect();
         let token = client.events().find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
@@ -1160,7 +1162,7 @@ mod tests {
 
     #[test]
     fn zero_rtt() {
-        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), &ZeroRttState::AcceptedClient);
+        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), ZeroRttState::AcceptedClient);
     }
 
     /// A larger QPACK decoder table size isn't an impediment to 0-RTT.
@@ -1171,7 +1173,7 @@ mod tests {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::AcceptedClient,
+            ZeroRttState::AcceptedClient,
         );
     }
 
@@ -1183,7 +1185,7 @@ mod tests {
                 max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::Rejected,
+            ZeroRttState::Rejected,
         );
     }
 
@@ -1195,7 +1197,7 @@ mod tests {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::AcceptedClient,
+            ZeroRttState::AcceptedClient,
         );
     }
 
@@ -1207,7 +1209,7 @@ mod tests {
                 max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::Rejected,
+            ZeroRttState::Rejected,
         );
     }
 
@@ -1219,7 +1221,7 @@ mod tests {
                 max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
                 ..DEFAULT_SETTINGS
             }),
-            &ZeroRttState::AcceptedClient,
+            ZeroRttState::AcceptedClient,
         );
     }
 
@@ -1299,6 +1301,6 @@ mod tests {
 
         connect_transport(&mut server, &mut client, true);
         assert!(client.tls_info().unwrap().resumed());
-        assert_eq!(client.zero_rtt_state(), &ZeroRttState::Rejected);
+        assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
     }
 }

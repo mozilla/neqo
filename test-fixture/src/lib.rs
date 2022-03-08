@@ -12,8 +12,8 @@ use neqo_common::{event::Provider, Datagram, Decoder};
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_transport::{
-    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State,
+    version::WireVersion, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
+    ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
 };
 
 use std::cell::RefCell;
@@ -122,9 +122,8 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     }
 }
 
-/// Create a transport client with default configuration.
 #[must_use]
-pub fn default_client() -> Connection {
+pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
     Connection::new_client(
         DEFAULT_SERVER_NAME,
@@ -132,51 +131,42 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default().ack_ratio(255), // Tests work better with this set this way.
+        params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
-    .expect("create a default client")
+    .expect("create a client")
+}
+
+/// Create a transport client with default configuration.
+#[must_use]
+pub fn default_client() -> Connection {
+    new_client(ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    make_default_server(DEFAULT_ALPN)
-}
-
-/// Create a transport server with a configuration.
-#[must_use]
-pub fn configure_server(conn_param: ConnectionParameters) -> Connection {
-    fixture_init();
-
-    let mut c = Connection::new_server(
-        DEFAULT_KEYS,
-        DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        conn_param,
-    )
-    .expect("create a default server");
-    c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
-        .expect("enable 0-RTT");
-    c
+    new_server(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    make_default_server(DEFAULT_ALPN_H3)
+    new_server(DEFAULT_ALPN_H3, ConnectionParameters::default())
 }
 
-fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
+/// Create a transport server with a configuration.
+#[must_use]
+pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
     fixture_init();
 
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().ack_ratio(255),
+        params.ack_ratio(255),
     )
-    .expect("create a default server");
+    .expect("create a server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
@@ -286,17 +276,24 @@ pub fn default_http3_server() -> Http3Server {
 
 /// Split the first packet off a coalesced packet.
 fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
+    const TYPE_MASK: u8 = 0b1011_0000;
+
     if buf[0] & 0x80 == 0 {
         // Short header: easy.
         return (buf, None);
     }
     let mut dec = Decoder::from(buf);
     let first = dec.decode_byte().unwrap();
-    assert_ne!(first & 0b0011_0000, 0b0011_0000, "retry not supported");
-    dec.skip(4); // Version.
+    let v = Version::try_from(WireVersion::try_from(dec.decode_uint(4).unwrap()).unwrap()).unwrap(); // Version.
+    let (initial_type, retry_type) = if v == Version::Version2 {
+        (0b1001_0000, 0b1000_0000)
+    } else {
+        (0b1000_0000, 0b1011_0000)
+    };
+    assert_ne!(first & TYPE_MASK, retry_type, "retry not supported");
     dec.skip_vec(1); // DCID
     dec.skip_vec(1); // SCID
-    if first & 0b0011_0000 == 0 {
+    if first & TYPE_MASK == initial_type {
         dec.skip_vvec(); // Initial token
     }
     dec.skip_vvec(); // The rest of the packet.

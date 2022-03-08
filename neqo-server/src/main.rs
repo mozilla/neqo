@@ -9,7 +9,8 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::fmt::Display;
+use std::convert::TryFrom;
+use std::fmt::{self, Display};
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
@@ -18,6 +19,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use mio::net::UdpSocket;
@@ -33,7 +35,7 @@ use neqo_crypto::{
 use neqo_http3::{Error, Http3Parameters, Http3Server, Http3ServerEvent};
 use neqo_transport::{
     server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
-    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
+    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType, Version,
 };
 
 use crate::old_https::Http09Server;
@@ -42,6 +44,46 @@ const TIMER_TOKEN: Token = Token(0xffff_ffff);
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
 mod old_https;
+
+#[derive(Debug)]
+pub enum ServerError {
+    ArgumentError(&'static str),
+    Http3Error(neqo_http3::Error),
+    IoError(io::Error),
+    QlogError,
+    TransportError(neqo_transport::Error),
+}
+
+impl From<io::Error> for ServerError {
+    fn from(err: io::Error) -> Self {
+        Self::IoError(err)
+    }
+}
+
+impl From<neqo_http3::Error> for ServerError {
+    fn from(err: neqo_http3::Error) -> Self {
+        Self::Http3Error(err)
+    }
+}
+
+impl From<qlog::Error> for ServerError {
+    fn from(_err: qlog::Error) -> Self {
+        Self::QlogError
+    }
+}
+
+impl From<neqo_transport::Error> for ServerError {
+    fn from(err: neqo_transport::Error) -> Self {
+        Self::TransportError(err)
+    }
+}
+
+impl Display for ServerError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error: {:?}", self)?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-server", about = "A basic HTTP3 server.")]
@@ -152,8 +194,32 @@ impl Args {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VersionArg(Version);
+impl FromStr for VersionArg {
+    type Err = ServerError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v = u32::from_str_radix(s, 16)
+            .map_err(|_| ServerError::ArgumentError("versions need to be specified in hex"))?;
+        Ok(Self(Version::try_from(v).map_err(|_| {
+            ServerError::ArgumentError("unknown version")
+        })?))
+    }
+}
+
 #[derive(Debug, StructOpt)]
 struct QuicParameters {
+    #[structopt(
+        short = "V",
+        long,
+        multiple = true,
+        use_delimiter = true,
+        number_of_values = 1
+    )]
+    /// A list of versions to support in order of preference, in hex.
+    quic_version: Vec<VersionArg>,
+
     #[structopt(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
     max_streams_bidi: u64,
@@ -220,6 +286,10 @@ impl QuicParameters {
             .cc_algorithm(self.congestion_control);
         if let Some(pa) = self.preferred_address() {
             params = params.preferred_address(pa);
+        }
+
+        if let Some(first) = self.quic_version.first() {
+            params = params.versions(first.0, self.quic_version.iter().map(|&v| v.0).collect());
         }
         params
     }
@@ -475,6 +545,7 @@ impl ServersRunner {
                     anti_replay,
                     cid_mgr,
                     Http3Parameters::default()
+                        .connection_parameters(args.quic_parameters.get())
                         .max_table_size_encoder(args.max_table_size_encoder)
                         .max_table_size_decoder(args.max_table_size_decoder)
                         .max_blocked_streams(args.max_blocked_streams),
