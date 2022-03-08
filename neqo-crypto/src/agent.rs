@@ -87,8 +87,11 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
 
     let alpn = match (pre, alpn_state) {
         (true, ssl::SSLNextProtoState::SSL_NEXT_PROTO_EARLY_VALUE)
-        | (false, ssl::SSLNextProtoState::SSL_NEXT_PROTO_NEGOTIATED)
-        | (false, ssl::SSLNextProtoState::SSL_NEXT_PROTO_SELECTED) => {
+        | (
+            false,
+            ssl::SSLNextProtoState::SSL_NEXT_PROTO_NEGOTIATED
+            | ssl::SSLNextProtoState::SSL_NEXT_PROTO_SELECTED,
+        ) => {
             chosen.truncate(usize::try_from(chosen_len)?);
             Some(match String::from_utf8(chosen) {
                 Ok(a) => a,
