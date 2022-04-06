@@ -791,7 +791,7 @@ impl<'a> PublicPacket<'a> {
             Err(Error::KeysPending(cspace))
         } else {
             qtrace!("keys for {:?} already discarded", cspace);
-            Err(Error::KeysDiscarded)
+            Err(Error::KeysDiscarded(cspace))
         }
     }
 

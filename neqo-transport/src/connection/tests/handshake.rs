@@ -397,7 +397,9 @@ fn reorder_05rtt_with_0rtt() {
     now += RTT / 2;
     server.process_input(c4.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.paths.rtt(), RTT);
+    // Don't check server RTT as it will be massively inflated by a
+    // poor initial estimate received when the server dropped the
+    // Initial packet number space.
 }
 
 /// Test that a server that coalesces 0.5 RTT with handshake packets
@@ -521,7 +523,9 @@ fn reorder_handshake() {
     now += RTT / 2;
     let s3 = server.process(c3, now).dgram();
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.paths.rtt(), RTT);
+    // Don't check server RTT estimate as it will be inflated due to
+    // it making a guess based on retransmissions when it dropped
+    // the Initial packet number space.
 
     now += RTT / 2;
     client.process_input(s3.unwrap(), now);
@@ -565,9 +569,8 @@ fn reorder_1rtt() {
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
-    // The three additional are: an Initial ACK, a Handshake,
-    // and a 1-RTT (containing NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
+    // The two additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID).
+    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(*server.state(), State::Confirmed);
@@ -781,9 +784,9 @@ fn anti_amplification() {
     let ack = client.process(Some(s_init3), now).dgram().unwrap();
     assert!(!maybe_authenticate(&mut client)); // No need yet.
 
-    // The client sends a padded datagram, with just ACK for Initial + Handshake.
-    assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
-    assert_eq!(client.stats().frame_tx.all, frame_count + 2);
+    // The client sends a padded datagram, with just ACK for Handshake.
+    assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
+    assert_eq!(client.stats().frame_tx.all, frame_count + 1);
     assert_ne!(ack.len(), PATH_MTU_V6); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
@@ -1011,4 +1014,73 @@ fn bad_min_ack_delay() {
             Error::TransportParameterError.code()
         )))
     );
+}
+
+/// Ensure that the client probes correctly if it only receives Initial packets
+/// from the server.
+#[test]
+fn only_server_initial() {
+    let mut server = default_server();
+    let mut client = default_client();
+    let mut now = now();
+
+    let client_dgram = client.process_output(now).dgram();
+
+    // Now fetch two flights of messages from the server.
+    let server_dgram1 = server.process(client_dgram, now).dgram();
+    let server_dgram2 = server.process_output(now + AT_LEAST_PTO).dgram();
+
+    // Only pass on the Initial from the first.  We should get a Handshake in return.
+    let (initial, handshake) = split_datagram(&server_dgram1.unwrap());
+    assert!(handshake.is_some());
+
+    // The client will not acknowledge the Initial as it discards keys.
+    // It sends a Handshake probe instead, containing just a PING frame.
+    assert_eq!(client.stats().frame_tx.ping, 0);
+    let probe = client.process(Some(initial), now).dgram();
+    assertions::assert_handshake(&probe.unwrap());
+    assert_eq!(client.stats().frame_tx.ping, 1);
+
+    let (initial, handshake) = split_datagram(&server_dgram2.unwrap());
+    assert!(handshake.is_some());
+
+    // The same happens, even though the client will discard the Initial packet.
+    assert_eq!(client.stats().frame_tx.ping, 1);
+    let discarded = client.stats().dropped_rx;
+    let probe = client.process(Some(initial), now + AT_LEAST_PTO).dgram();
+    assertions::assert_handshake(&probe.unwrap());
+    assert_eq!(client.stats().frame_tx.ping, 2);
+    assert_eq!(client.stats().dropped_rx, discarded + 1);
+
+    // Pass the Handshake packet and complete the handshake.
+    now += AT_LEAST_PTO;
+    client.process_input(handshake.unwrap(), now);
+    maybe_authenticate(&mut client);
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+    client.process_input(dgram.unwrap(), now);
+
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(*server.state(), State::Confirmed);
+}
+
+#[test]
+fn implicit_rtt_server() {
+    const RTT: Duration = Duration::from_secs(2);
+    let mut server = default_server();
+    let mut client = default_client();
+    let mut now = now();
+
+    let dgram = client.process_output(now).dgram();
+    now += RTT / 2;
+    let dgram = server.process(dgram, now).dgram();
+    now += RTT / 2;
+    let dgram = client.process(dgram, now).dgram();
+    assertions::assert_handshake(dgram.as_ref().unwrap());
+    now += RTT / 2;
+    server.process_input(dgram.unwrap(), now);
+
+    // The server doesn't receive any acknowledgments, but it can infer
+    // an RTT estimate from having discarded the Initial packet number space.
+    assert_eq!(server.stats().rtt, RTT);
 }

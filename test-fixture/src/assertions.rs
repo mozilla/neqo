@@ -93,6 +93,16 @@ pub fn assert_initial(payload: &[u8], expect_token: bool) {
     assert_eq!(expect_token, !token.is_empty());
 }
 
+/// Assert that this is a Handshake packet.
+/// # Panics
+/// If the tests fail.
+pub fn assert_handshake(payload: &[u8]) {
+    let mut dec = Decoder::from(payload);
+    let t = dec.decode_byte().unwrap();
+    let version = assert_default_version(&mut dec);
+    assert_long_packet_type(t, 0b1010_0000, version);
+}
+
 /// # Panics
 /// If the tests fail.
 pub fn assert_no_1rtt(payload: &[u8]) {
