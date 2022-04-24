@@ -91,7 +91,12 @@ fn setup_clang() {
 
 fn nss_dir() -> PathBuf {
     let dir = if let Ok(dir) = env::var("NSS_DIR") {
-        PathBuf::from(dir.trim())
+        let path = PathBuf::from(dir.trim());
+        if path.is_relative() {
+            panic!("The NSS_DIR environment variable is expected to be an absolute path.");
+        }
+
+        path
     } else {
         let out_dir = env::var("OUT_DIR").unwrap();
         let dir = Path::new(&out_dir).join("nss");
