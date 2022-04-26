@@ -163,7 +163,7 @@ mod mac {
             thread_policy_set(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
-                addr_of_mut!(policy),
+                addr_of_mut!(policy) as _, // horror!
                 THREAD_TIME_CONSTRAINT_POLICY_COUNT,
             )
         };
@@ -198,7 +198,7 @@ mod mac {
             thread_policy_get(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
-                addr_of_mut!(policy),
+                addr_of_mut!(policy) as _, // horror!
                 &mut count,
                 &mut get_default,
             )
