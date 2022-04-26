@@ -413,7 +413,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                 continue;
             }
             if let Some(t) = start {
-                if p.time_sent.duration_since(t) > pc_period {
+                if p.time_sent.checked_duration_since(t).unwrap() > pc_period {
                     qinfo!([self], "persistent congestion");
                     self.congestion_window = CWND_MIN;
                     self.acked_bytes = 0;
