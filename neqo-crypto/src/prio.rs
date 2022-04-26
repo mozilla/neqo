@@ -12,7 +12,8 @@
     non_snake_case,
     clippy::cognitive_complexity,
     clippy::empty_enum,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    clippy::borrow_as_ptr
 )]
 
 include!(concat!(env!("OUT_DIR"), "/nspr_io.rs"));
