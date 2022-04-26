@@ -11,6 +11,7 @@
     clippy::cognitive_complexity,
     clippy::too_many_lines,
     clippy::upper_case_acronyms,
+    unknown_lints,
     clippy::borrow_as_ptr
 )]
 #![allow(unknown_lints, deref_nullptr)] // Until bindgen#1651 is fixed.
