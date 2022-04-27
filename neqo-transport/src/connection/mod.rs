@@ -1434,9 +1434,9 @@ impl Connection {
                             return Err(e);
                         }
                         Error::KeysDiscarded(cspace) => {
-                            // This was a valid-appearing Initial packet, maybe probe with
-                            // a Handshake packet to keep the server happy.
-                            self.received_untracked =
+                            // This was a valid-appearing Initial packet: maybe probe with
+                            // a Handshake packet to keep the handshake moving.
+                            self.received_untracked |=
                                 self.role == Role::Client && cspace == CryptoSpace::Initial;
                         }
                         _ => (),

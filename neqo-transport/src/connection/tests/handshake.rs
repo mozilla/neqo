@@ -1039,21 +1039,22 @@ fn only_server_initial() {
     assert_eq!(client.stats().frame_tx.ping, 0);
     let probe = client.process(Some(initial), now).dgram();
     assertions::assert_handshake(&probe.unwrap());
+    assert_eq!(client.stats().dropped_rx, 0);
     assert_eq!(client.stats().frame_tx.ping, 1);
 
     let (initial, handshake) = split_datagram(&server_dgram2.unwrap());
     assert!(handshake.is_some());
 
-    // The same happens, even though the client will discard the Initial packet.
+    // The same happens after a PTO, even though the client will discard the Initial packet.
+    now += AT_LEAST_PTO;
     assert_eq!(client.stats().frame_tx.ping, 1);
     let discarded = client.stats().dropped_rx;
-    let probe = client.process(Some(initial), now + AT_LEAST_PTO).dgram();
+    let probe = client.process(Some(initial), now).dgram();
     assertions::assert_handshake(&probe.unwrap());
     assert_eq!(client.stats().frame_tx.ping, 2);
     assert_eq!(client.stats().dropped_rx, discarded + 1);
 
     // Pass the Handshake packet and complete the handshake.
-    now += AT_LEAST_PTO;
     client.process_input(handshake.unwrap(), now);
     maybe_authenticate(&mut client);
     let dgram = client.process_output(now).dgram();
@@ -1062,6 +1063,48 @@ fn only_server_initial() {
 
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
+}
+
+// Collect a few spare Initial packets as the handshake is exchanged.
+// Later, replay those packets to see if they result in additional probes; they should not.
+#[test]
+fn no_extra_probes_after_confirmed() {
+    let mut server = default_server();
+    let mut client = default_client();
+    let mut now = now();
+
+    // First, collect a client Initial.
+    let spare_initial = client.process_output(now).dgram();
+    assert!(spare_initial.is_some());
+
+    // Collect ANOTHER client Initial.
+    now += AT_LEAST_PTO;
+    let dgram = client.process_output(now).dgram();
+    let (replay_initial, _) = split_datagram(dgram.as_ref().unwrap());
+
+    // Finally, run the handshake.
+    now += AT_LEAST_PTO * 2;
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+
+    // The server should have dropped the Initial keys now, so passing in the Initial
+    // should elicit a retransmit rather than having it completely ignored.
+    let spare_handshake = server.process(Some(replay_initial), now).dgram();
+    assert!(spare_handshake.is_some());
+
+    client.process_input(dgram.unwrap(), now);
+    maybe_authenticate(&mut client);
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+    client.process_input(dgram.unwrap(), now);
+
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(*server.state(), State::Confirmed);
+
+    let probe = server.process(spare_initial, now).dgram();
+    assert!(probe.is_none());
+    let probe = client.process(spare_handshake, now).dgram();
+    assert!(probe.is_none());
 }
 
 #[test]
