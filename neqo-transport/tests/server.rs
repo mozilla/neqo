@@ -409,13 +409,13 @@ fn bad_client_initial() {
         .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
-    let mut ciphertext = header_enc.to_vec();
+    let mut ciphertext = header_enc.as_ref().to_vec();
     ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
     let v = aead
         .encrypt(
             pn,
-            &header_enc,
-            &payload_enc,
+            header_enc.as_ref(),
+            payload_enc.as_ref(),
             &mut ciphertext[header_enc.len()..],
         )
         .unwrap();

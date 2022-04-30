@@ -317,7 +317,7 @@ mod tests {
             for i in to_encode {
                 enc.encode_varint(*i);
             }
-            self.decode_buffer(&enc[..], fin, outcome, done);
+            self.decode_buffer(enc.as_ref(), fin, outcome, done);
         }
     }
 

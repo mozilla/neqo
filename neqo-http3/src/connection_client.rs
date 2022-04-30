@@ -1021,9 +1021,9 @@ mod tests {
             self.settings.encode(&mut enc);
             assert_eq!(
                 self.conn
-                    .stream_send(self.control_stream_id.unwrap(), &enc[..])
+                    .stream_send(self.control_stream_id.unwrap(), enc.as_ref())
                     .unwrap(),
-                enc[..].len()
+                enc.len()
             );
         }
 
@@ -1164,7 +1164,7 @@ mod tests {
                     .borrow_mut()
                     .encode_header_block(&mut self.conn, headers, stream_id);
             let hframe = HFrame::Headers {
-                header_block: header_block.to_vec(),
+                header_block: header_block.as_ref().to_vec(),
             };
             hframe.encode(encoder);
         }
@@ -1419,10 +1419,13 @@ mod tests {
         client: &mut Http3Client,
         server: &mut TestServer,
         stream_id: StreamId,
-        response: &[u8],
+        response: impl AsRef<[u8]>,
         close_stream: bool,
     ) {
-        let _ = server.conn.stream_send(stream_id, response).unwrap();
+        let _ = server
+            .conn
+            .stream_send(stream_id, response.as_ref())
+            .unwrap();
         if close_stream {
             server.conn.stream_close_send(stream_id).unwrap();
         }
@@ -1454,7 +1457,7 @@ mod tests {
         };
         let mut d = Encoder::default();
         frame.encode(&mut d);
-        let _ = conn.stream_send(stream_id, &d).unwrap();
+        let _ = conn.stream_send(stream_id, d.as_ref()).unwrap();
     }
 
     fn send_push_data_and_exchange_packets(
@@ -1495,7 +1498,7 @@ mod tests {
         frame.encode(&mut d);
         server
             .conn
-            .stream_send(server.control_stream_id.unwrap(), &d)
+            .stream_send(server.control_stream_id.unwrap(), d.as_ref())
             .unwrap();
 
         let out = server.conn.process(None, now());
@@ -1531,13 +1534,13 @@ mod tests {
         conn: &mut Connection,
         push_stream_id: StreamId,
         push_id: u8,
-        data: &[u8],
+        data: impl AsRef<[u8]>,
         close_push_stream: bool,
     ) {
         // send data
         let _ = conn.stream_send(push_stream_id, PUSH_STREAM_TYPE).unwrap();
         let _ = conn.stream_send(push_stream_id, &[push_id]).unwrap();
-        let _ = conn.stream_send(push_stream_id, data).unwrap();
+        let _ = conn.stream_send(push_stream_id, data.as_ref()).unwrap();
         if close_push_stream {
             conn.stream_close_send(push_stream_id).unwrap();
         }
@@ -2407,7 +2410,7 @@ mod tests {
         let mut enc = Encoder::default();
         data_frame.encode(&mut enc);
 
-        (vec![0_u8; size], enc.to_vec())
+        (vec![0_u8; size], enc.as_ref().to_vec())
     }
 
     // Send 2 frames. For the second one we can only send 63 bytes.
@@ -3887,7 +3890,7 @@ mod tests {
         server.settings.encode(&mut enc);
         let mut sent = server.conn.stream_send(control_stream, CONTROL_STREAM_TYPE);
         assert_eq!(sent.unwrap(), CONTROL_STREAM_TYPE.len());
-        sent = server.conn.stream_send(control_stream, &enc);
+        sent = server.conn.stream_send(control_stream, enc.as_ref());
         assert_eq!(sent.unwrap(), enc.len());
 
         let out = server.conn.process(None, now());
@@ -4526,7 +4529,10 @@ mod tests {
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
         d.encode(&[0x61, 0x62, 0x63]);
-        let _ = server.conn.stream_send(request_stream_id, &d[..]).unwrap();
+        let _ = server
+            .conn
+            .stream_send(request_stream_id, d.as_ref())
+            .unwrap();
         server.conn.stream_close_send(request_stream_id).unwrap();
 
         let out = server.conn.process(None, now());
@@ -6082,9 +6088,9 @@ mod tests {
         for f in H3_RESERVED_FRAME_TYPES {
             let mut enc = Encoder::default();
             enc.encode_varint(*f);
-            test_wrong_frame_on_control_stream(&enc);
-            test_wrong_frame_on_push_stream(&enc);
-            test_wrong_frame_on_request_stream(&enc);
+            test_wrong_frame_on_control_stream(enc.as_ref());
+            test_wrong_frame_on_push_stream(enc.as_ref());
+            test_wrong_frame_on_request_stream(enc.as_ref());
         }
     }
 
@@ -6105,7 +6111,7 @@ mod tests {
             // The settings frame contains a reserved settings type and some value (0x1).
             enc.encode_varint(*s);
             enc.encode_varint(1_u64);
-            let sent = server.conn.stream_send(control_stream, &enc);
+            let sent = server.conn.stream_send(control_stream, enc.as_ref());
             assert_eq!(sent, Ok(4));
             let out = server.conn.process(None, now());
             client.process(out.dgram(), now());

@@ -375,12 +375,13 @@ fn mitm_retry() {
         .encode_vvec(&[])
         .encode_varint(u64::try_from(payload.len()).unwrap());
     let pn_offset = enc.len();
-    let notoken_header = enc.encode_uint(pn_len, pn).to_vec();
+    let notoken_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
     qtrace!("notoken_header={}", hex_with_len(&notoken_header));
 
     // Encrypt.
     let mut notoken_packet = Encoder::with_capacity(1200)
         .encode(&notoken_header)
+        .as_ref()
         .to_vec();
     notoken_packet.resize_with(1200, u8::default);
     aead.encrypt(
