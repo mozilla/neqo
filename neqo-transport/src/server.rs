@@ -573,6 +573,7 @@ impl Server {
             let vn = PacketBuilder::version_negotiation(
                 packet.scid(),
                 packet.dcid(),
+                packet.version().unwrap().as_u32(),
                 self.conn_params.get_versions().all(),
             );
             return Some(Datagram::new(dgram.destination(), dgram.source(), vn));

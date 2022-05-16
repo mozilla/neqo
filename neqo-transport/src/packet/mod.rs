@@ -437,11 +437,16 @@ impl PacketBuilder {
     }
 
     /// Make a Version Negotiation packet.
-    pub fn version_negotiation(dcid: &[u8], scid: &[u8], versions: &[Version]) -> Vec<u8> {
+    pub fn version_negotiation(
+        dcid: &[u8],
+        scid: &[u8],
+        client_version: u32,
+        versions: &[Version],
+    ) -> Vec<u8> {
         let mut encoder = Encoder::default();
-        let mut grease = random(5);
+        let mut grease = random(4);
         // This will not include the "QUIC bit" sometimes.  Intentionally.
-        encoder.encode_byte(PACKET_BIT_LONG | (grease[4] & 0x7f));
+        encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
         encoder.encode(&[0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
@@ -450,9 +455,13 @@ impl PacketBuilder {
             encoder.encode_uint(4, v.as_u32());
         }
         // Add a greased version, using the randomness already generated.
-        for g in &mut grease[..4] {
+        for g in &mut grease[..3] {
             *g = *g & 0xf0 | 0x0a;
         }
+
+        // Ensure our greased version does not collide with the client version
+        // by making the last byte differ from the client initial.
+        grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
         encoder.encode(&grease[..4]);
 
         Vec::from(encoder)
@@ -1347,7 +1356,8 @@ mod tests {
     #[test]
     fn build_vn() {
         fixture_init();
-        let mut vn = PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, &Version::all());
+        let mut vn =
+            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a0a0a, &Version::all());
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
@@ -1355,6 +1365,14 @@ mod tests {
             *v &= 0x0f;
         }
         assert_eq!(&vn, &SAMPLE_VN);
+    }
+
+    #[test]
+    fn vn_do_not_repeat_client_grease() {
+        fixture_init();
+        let vn =
+            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a0a0a, &Version::all());
+        assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
 
     #[test]
