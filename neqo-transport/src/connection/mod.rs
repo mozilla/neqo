@@ -715,7 +715,7 @@ impl Connection {
                 tps.borrow().local.encode(enc_inner);
             });
             enc.encode(extra);
-            let records = s.send_ticket(now, &enc)?;
+            let records = s.send_ticket(now, enc.as_ref())?;
             qinfo!([self], "send session ticket {}", hex(&enc));
             self.crypto.buffer_records(records)?;
         } else {
@@ -2128,13 +2128,20 @@ impl Connection {
                 continue;
             }
 
-            dump_packet(self, path, "TX ->", pt, pn, &builder[payload_start..]);
+            dump_packet(
+                self,
+                path,
+                "TX ->",
+                pt,
+                pn,
+                &builder.as_ref()[payload_start..],
+            );
             qlog::packet_sent(
                 &mut self.qlog,
                 pt,
                 pn,
                 builder.len() - header_start + aead_expansion,
-                &builder[payload_start..],
+                &builder.as_ref()[payload_start..],
             );
 
             self.stats.borrow_mut().packets_tx += 1;

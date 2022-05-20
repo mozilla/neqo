@@ -92,10 +92,10 @@ fn setup_clang() {
 fn nss_dir() -> PathBuf {
     let dir = if let Ok(dir) = env::var("NSS_DIR") {
         let path = PathBuf::from(dir.trim());
-        if path.is_relative() {
-            panic!("The NSS_DIR environment variable is expected to be an absolute path.");
-        }
-
+        assert!(
+            !path.is_relative(),
+            "The NSS_DIR environment variable is expected to be an absolute path."
+        );
         path
     } else {
         let out_dir = env::var("OUT_DIR").unwrap();

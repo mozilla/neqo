@@ -355,7 +355,7 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
+                qinfo!("resumption token {}", hex_snip_middle(enc.as_ref()));
                 Some(ResumptionToken::new(enc.into(), t.expiration_time()))
             } else {
                 None

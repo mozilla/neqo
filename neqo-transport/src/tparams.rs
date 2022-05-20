@@ -657,7 +657,7 @@ impl ExtensionHandler for TransportParametersHandler {
         let mut enc = Encoder::default();
         self.local.encode(&mut enc);
         assert!(enc.len() <= d.len());
-        d[..enc.len()].copy_from_slice(&enc);
+        d[..enc.len()].copy_from_slice(enc.as_ref());
         ExtensionWriterResult::Write(enc.len())
     }
 
@@ -811,7 +811,7 @@ mod tests {
         let spa = make_spa();
         let mut enc = Encoder::new();
         spa.encode(&mut enc, PREFERRED_ADDRESS);
-        assert_eq!(&enc[..], ENCODED);
+        assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
@@ -905,7 +905,7 @@ mod tests {
         let spa = make_spa();
         let mut enc = Encoder::new();
         spa.encode(&mut enc, PREFERRED_ADDRESS);
-        let mut dec = Decoder::from(&enc[..enc.len() - 1]);
+        let mut dec = Decoder::from(&enc.as_ref()[..enc.len() - 1]);
         assert_eq!(
             TransportParameter::decode(&mut dec).unwrap_err(),
             Error::NoMoreData
@@ -1097,7 +1097,7 @@ mod tests {
 
         let mut enc = Encoder::new();
         vn.encode(&mut enc, VERSION_NEGOTIATION);
-        assert_eq!(&enc[..], ENCODED);
+        assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();

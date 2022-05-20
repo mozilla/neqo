@@ -611,7 +611,7 @@ mod tests {
         };
         let mut e = Encoder::default();
         frame.encode(&mut e);
-        peer_conn.control_send(&e);
+        peer_conn.control_send(e.as_ref());
         let out = peer_conn.process(None, now());
         hconn.process(out.dgram(), now());
         // check if the given connection got closed on invalid stream ids

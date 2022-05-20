@@ -210,7 +210,7 @@ impl PacketBuilder {
     }
 
     fn is_long(&self) -> bool {
-        self[self.header.start] & 0x80 == PACKET_BIT_LONG
+        self.as_ref()[self.header.start] & 0x80 == PACKET_BIT_LONG
     }
 
     /// This stores a value that can be used as a limit.  This does not cause
@@ -267,7 +267,7 @@ impl PacketBuilder {
         let mask = if quic_bit { PACKET_BIT_FIXED_QUIC } else { 0 }
             | if self.is_long() { 0 } else { PACKET_BIT_SPIN };
         let first = self.header.start;
-        self[first] ^= random(1)[0] & mask;
+        self.encoder.as_mut()[first] ^= random(1)[0] & mask;
     }
 
     /// For an Initial packet, encode the token.
@@ -306,15 +306,15 @@ impl PacketBuilder {
         self.offsets.pn = pn_offset..self.encoder.len();
 
         // Now encode the packet number length and save the header length.
-        self.encoder[self.header.start] |= u8::try_from(pn_len - 1).unwrap();
+        self.encoder.as_mut()[self.header.start] |= u8::try_from(pn_len - 1).unwrap();
         self.header.end = self.encoder.len();
         self.pn = pn;
     }
 
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
-        self.encoder[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
-        self.encoder[self.offsets.len + 1] = (len & 0xff) as u8;
+        self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
+        self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
     fn pad_for_crypto(&mut self, crypto: &mut CryptoDxState) {
@@ -360,8 +360,8 @@ impl PacketBuilder {
             self.write_len(crypto.expansion());
         }
 
-        let hdr = &self.encoder[self.header.clone()];
-        let body = &self.encoder[self.header.end..];
+        let hdr = &self.encoder.as_ref()[self.header.clone()];
+        let body = &self.encoder.as_ref()[self.header.end..];
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
@@ -377,9 +377,9 @@ impl PacketBuilder {
         let mask = crypto.compute_mask(sample)?;
 
         // Apply the mask.
-        self.encoder[self.header.start] ^= mask[0] & self.offsets.first_byte_mask;
+        self.encoder.as_mut()[self.header.start] ^= mask[0] & self.offsets.first_byte_mask;
         for (i, j) in (1..=self.offsets.pn.len()).zip(self.offsets.pn) {
-            self.encoder[j] ^= mask[i];
+            self.encoder.as_mut()[j] ^= mask[i];
         }
 
         // Finally, cut off the plaintext and add back the ciphertext.
@@ -429,7 +429,7 @@ impl PacketBuilder {
         encoder.encode(token);
         let tag = retry::use_aead(version, |aead| {
             let mut buf = vec![0; aead.expansion()];
-            Ok(aead.encrypt(0, &encoder, &[], &mut buf)?.to_vec())
+            Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
         encoder.encode(&tag);
         let mut complete: Vec<u8> = encoder.into();
@@ -655,7 +655,7 @@ impl<'a> PublicPacket<'a> {
         encoder.encode(header);
         retry::use_aead(version, |aead| {
             let mut buf = vec![0; expansion];
-            Ok(aead.decrypt(0, &encoder, tag, &mut buf)?.is_empty())
+            Ok(aead.decrypt(0, encoder.as_ref(), tag, &mut buf)?.is_empty())
         })
         .unwrap_or(false)
     }
@@ -915,7 +915,7 @@ mod tests {
         builder.pn(1, 2);
         builder.encode(SAMPLE_INITIAL_PAYLOAD);
         let packet = builder.build(&mut prot).expect("build");
-        assert_eq!(&packet[..], SAMPLE_INITIAL);
+        assert_eq!(packet.as_ref(), SAMPLE_INITIAL);
     }
 
     #[test]
@@ -947,7 +947,7 @@ mod tests {
         enc.encode_vec(1, &[]);
         enc.encode(&[0xff; 40]); // junk
 
-        assert!(PublicPacket::decode(&enc, &cid_mgr()).is_err());
+        assert!(PublicPacket::decode(enc.as_ref(), &cid_mgr()).is_err());
     }
 
     #[test]
@@ -959,7 +959,7 @@ mod tests {
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
         enc.encode(&[0xff; 40]); // junk
 
-        assert!(PublicPacket::decode(&enc, &cid_mgr()).is_err());
+        assert!(PublicPacket::decode(enc.as_ref(), &cid_mgr()).is_err());
     }
 
     const SAMPLE_SHORT: &[u8] = &[
@@ -978,7 +978,7 @@ mod tests {
         let packet = builder
             .build(&mut CryptoDxState::test_default())
             .expect("build");
-        assert_eq!(&packet[..], SAMPLE_SHORT);
+        assert_eq!(packet.as_ref(), SAMPLE_SHORT);
     }
 
     #[test]
@@ -990,7 +990,7 @@ mod tests {
                 PacketBuilder::short(Encoder::new(), true, &ConnectionId::from(SERVER_CID));
             builder.scramble(true);
             builder.pn(0, 1);
-            firsts.push(builder[0]);
+            firsts.push(builder.as_ref()[0]);
         }
         let is_set = |bit| move |v| v & bit == bit;
         // There should be at least one value with the QUIC bit set:
@@ -1063,8 +1063,8 @@ mod tests {
         builder.encode(&[0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(
-            &first[..],
-            &encoder[..first.len()],
+            first.as_ref(),
+            &encoder.as_ref()[..first.len()],
             "the first packet should be a prefix"
         );
         assert_eq!(encoder.len(), 45 + 29);
@@ -1089,7 +1089,7 @@ mod tests {
         builder.pn(0, 1);
         builder.encode(&[1, 2, 3]);
         let packet = builder.build(&mut CryptoDxState::test_default()).unwrap();
-        assert_eq!(&packet[..], EXPECTED);
+        assert_eq!(packet.as_ref(), EXPECTED);
     }
 
     #[test]
@@ -1107,7 +1107,7 @@ mod tests {
             );
             builder.pn(0, 1);
             builder.scramble(true);
-            if (builder[0] & PACKET_BIT_FIXED_QUIC) == 0 {
+            if (builder.as_ref()[0] & PACKET_BIT_FIXED_QUIC) == 0 {
                 found_unset = true;
             } else {
                 found_set = true;
@@ -1399,7 +1399,7 @@ mod tests {
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =
-            PublicPacket::decode(&enc, &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(enc.as_ref(), &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], BIG_DCID);
         assert!(packet.scid.is_some());
