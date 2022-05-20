@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::os::raw::{c_char, c_int, c_uint};
-use std::ptr::{null, null_mut};
+use std::ptr::{addr_of_mut, null, null_mut};
 use std::rc::Rc;
 
 experimental_api!(SSL_HkdfExpandLabelWithMech(
@@ -166,11 +166,12 @@ impl HpKey {
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;
+                let mut param_item = Item::wrap_struct(&params);
                 secstatus_to_res(unsafe {
                     PK11_Encrypt(
                         **key,
                         CK_MECHANISM_TYPE::from(CKM_CHACHA20),
-                        &Item::wrap_struct(&params) as *const _ as *mut _,
+                        addr_of_mut!(param_item),
                         (&mut output[..]).as_mut_ptr(),
                         &mut output_len,
                         c_uint::try_from(output.len())?,
