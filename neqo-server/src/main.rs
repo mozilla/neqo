@@ -347,9 +347,14 @@ struct ResponseData {
     remaining: usize,
 }
 
-impl<T: ToOwned<Owned = Vec<u8>>> From<T> for ResponseData {
-    fn from(x: T) -> Self {
-        let data = x.to_owned();
+impl From<&[u8]> for ResponseData {
+    fn from(data: &[u8]) -> Self {
+        Self::from(data.to_vec())
+    }
+}
+
+impl From<Vec<u8>> for ResponseData {
+    fn from(data: Vec<u8>) -> Self {
         let remaining = data.len();
         Self {
             data,
@@ -462,14 +467,14 @@ impl HttpServer for SimpleServer {
                                 if let Some(data) = qns_read_response(path.value()) {
                                     ResponseData::from(data)
                                 } else {
-                                    ResponseData::from(Self::MESSAGE.to_vec())
+                                    ResponseData::from(Self::MESSAGE)
                                 }
                             } else if let Ok(count) =
                                 path.value().trim_matches(|p| p == '/').parse::<usize>()
                             {
                                 ResponseData::repeat(Self::MESSAGE, count)
                             } else {
-                                ResponseData::from(Self::MESSAGE.to_vec())
+                                ResponseData::from(Self::MESSAGE)
                             }
                         } else {
                             stream
