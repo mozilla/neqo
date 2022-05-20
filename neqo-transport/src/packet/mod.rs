@@ -188,7 +188,7 @@ impl PacketBuilder {
             && 11 + dcid.as_ref().len() + scid.as_ref().len() < limit - encoder.len()
         {
             encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.to_byte(version) << 4);
-            encoder.encode_uint(4, version.as_u32());
+            encoder.encode_uint(4, version.wire_version());
             encoder.encode_vec(1, dcid.as_ref());
             encoder.encode_vec(1, scid.as_ref());
         } else {
@@ -422,7 +422,7 @@ impl PacketBuilder {
                 | (PacketType::Retry.to_byte(version) << 4)
                 | (random(1)[0] & 0xf),
         );
-        encoder.encode_uint(4, version.as_u32());
+        encoder.encode_uint(4, version.wire_version());
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
         debug_assert_ne!(token.len(), 0);
@@ -452,7 +452,7 @@ impl PacketBuilder {
         encoder.encode_vec(1, scid);
 
         for v in versions {
-            encoder.encode_uint(4, v.as_u32());
+            encoder.encode_uint(4, v.wire_version());
         }
         // Add a greased version, using the randomness already generated.
         for g in &mut grease[..3] {
@@ -503,7 +503,7 @@ pub struct PublicPacket<'a> {
     /// The size of the header, not including the packet number.
     header_len: usize,
     /// Protocol version, if present in header.
-    version: Option<Version>,
+    version: Option<WireVersion>,
     /// A reference to the entire packet, including the header.
     data: &'a [u8],
 }
@@ -609,7 +609,7 @@ impl<'a> PublicPacket<'a> {
                     scid: Some(scid),
                     token: &[],
                     header_len: decoder.offset(),
-                    version: None,
+                    version: Some(version),
                     data,
                 },
                 &[],
@@ -632,7 +632,7 @@ impl<'a> PublicPacket<'a> {
                 scid: Some(scid),
                 token,
                 header_len,
-                version: Some(version),
+                version: Some(version.wire_version()),
                 data,
             },
             remainder,
@@ -644,7 +644,7 @@ impl<'a> PublicPacket<'a> {
         if self.packet_type != PacketType::Retry {
             return false;
         }
-        let version = self.version.unwrap();
+        let version = self.version().unwrap();
         let expansion = retry::expansion(version);
         if self.data.len() <= expansion {
             return false;
@@ -686,7 +686,12 @@ impl<'a> PublicPacket<'a> {
     }
 
     pub fn version(&self) -> Option<Version> {
-        self.version
+        self.version.and_then(|v| Version::try_from(v).ok())
+    }
+
+    pub fn wire_version(&self) -> WireVersion {
+        debug_assert!(self.version.is_some());
+        self.version.unwrap_or(0)
     }
 
     pub fn len(&self) -> usize {
@@ -771,7 +776,7 @@ impl<'a> PublicPacket<'a> {
         let cspace: CryptoSpace = self.packet_type.into();
         // When we don't have a version, the crypto code doesn't need a version
         // for lookup, so use the default, but fix it up if decryption succeeds.
-        let version = self.version.unwrap_or_default();
+        let version = self.version().unwrap_or_default();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
         if let Some(rx) = crypto.rx_hp(version, cspace) {
@@ -942,7 +947,7 @@ mod tests {
     fn disallow_long_dcid() {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
-        enc.encode_uint(4, Version::default().as_u32());
+        enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
         enc.encode_vec(1, &[]);
         enc.encode(&[0xff; 40]); // junk
@@ -954,7 +959,7 @@ mod tests {
     fn disallow_long_scid() {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
-        enc.encode_uint(4, Version::default().as_u32());
+        enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[]);
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
         enc.encode(&[0xff; 40]); // junk
@@ -1395,7 +1400,7 @@ mod tests {
         enc.encode_vec(1, BIG_DCID);
         enc.encode_vec(1, BIG_SCID);
         enc.encode_uint(4, 0x1a2a_3a4a_u64);
-        enc.encode_uint(4, Version::default().as_u32());
+        enc.encode_uint(4, Version::default().wire_version());
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =

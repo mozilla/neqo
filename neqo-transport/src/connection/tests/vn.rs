@@ -81,7 +81,10 @@ fn version_negotiation_current_version() {
         .expect("a datagram")
         .to_vec();
 
-    let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, Version::default().as_u32()]);
+    let vn = create_vn(
+        &initial_pkt,
+        &[0x1a1a_1a1a, Version::default().wire_version()],
+    );
 
     let dgram = Datagram::new(addr(), addr(), vn);
     let delay = client.process(Some(dgram), now()).callback();
@@ -244,7 +247,7 @@ fn compatible_upgrade_large_initial() {
     let dgram = server.process(dgram, now()).dgram();
     assert!(dgram.is_some());
     // The following uses the Version from *outside* this crate.
-    assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
     client.process_input(dgram.unwrap(), now());
 
     connect(&mut client, &mut server);
@@ -307,7 +310,7 @@ fn version_negotiation_downgrade() {
 
     // Start the handshake and spoof a VN packet.
     let initial = client.process_output(now()).dgram().unwrap();
-    let vn = create_vn(&initial, &[DOWNGRADE.as_u32()]);
+    let vn = create_vn(&initial, &[DOWNGRADE.wire_version()]);
     let dgram = Datagram::new(addr(), addr(), vn);
     client.process_input(dgram, now());
 
@@ -357,11 +360,11 @@ fn invalid_current_version_client() {
         .set_local_tparam(
             tparams::VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: OTHER_VERSION.as_u32(),
+                current: OTHER_VERSION.wire_version(),
                 other: Version::all()
                     .iter()
                     .copied()
-                    .map(Version::as_u32)
+                    .map(Version::wire_version)
                     .collect(),
             },
         )
@@ -393,8 +396,8 @@ fn invalid_current_version_server() {
         .set_local_tparam(
             tparams::VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: OTHER_VERSION.as_u32(),
-                other: vec![OTHER_VERSION.as_u32()],
+                current: OTHER_VERSION.wire_version(),
+                other: vec![OTHER_VERSION.wire_version()],
             },
         )
         .unwrap();
@@ -419,8 +422,8 @@ fn no_compatible_version() {
         .set_local_tparam(
             tparams::VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: Version::default().as_u32(),
-                other: vec![OTHER_VERSION.as_u32()],
+                current: Version::default().wire_version(),
+                other: vec![OTHER_VERSION.wire_version()],
             },
         )
         .unwrap();
@@ -458,7 +461,7 @@ fn compatible_upgrade_0rtt_rejected() {
 
     // Create a packet with 0-RTT from the client.
     let initial = send_something(&mut client, now());
-    assertions::assert_version(&initial, Version::Version1.as_u32());
+    assertions::assert_version(&initial, Version::Version1.wire_version());
     assertions::assert_coalesced_0rtt(&initial);
     server.process_input(initial, now());
     assert!(!server

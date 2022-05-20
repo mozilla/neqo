@@ -21,7 +21,7 @@ pub enum Version {
 }
 
 impl Version {
-    pub const fn as_u32(self) -> WireVersion {
+    pub const fn wire_version(self) -> WireVersion {
         match self {
             Self::Version2 => 0x709a50c4,
             Self::Version1 => 1,
@@ -208,7 +208,7 @@ impl VersionConfig {
         vn: &[WireVersion],
     ) -> Option<Version> {
         for v in preferences {
-            if vn.contains(&v.as_u32()) {
+            if vn.contains(&v.wire_version()) {
                 return Some(*v);
             }
         }

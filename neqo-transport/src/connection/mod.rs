@@ -1229,7 +1229,7 @@ impl Connection {
                 match packet.supported_versions() {
                     Ok(versions) => {
                         if versions.is_empty()
-                            || versions.contains(&self.version().as_u32())
+                            || versions.contains(&self.version().wire_version())
                             || versions.contains(&0)
                             || packet.scid() != self.odcid().unwrap()
                             || matches!(
@@ -2396,7 +2396,7 @@ impl Connection {
             qtrace!(
                 [self],
                 "validate_versions: current={:x} chosen={:x} other={:x?}",
-                self.version.as_u32(),
+                self.version.wire_version(),
                 current,
                 other,
             );
@@ -2406,7 +2406,7 @@ impl Connection {
                 // All we need to do is confirm that the transport parameter
                 // was provided.
                 Ok(())
-            } else if self.version().as_u32() != current {
+            } else if self.version().wire_version() != current {
                 qinfo!([self], "validate_versions: current version mismatch");
                 Err(Error::VersionNegotiation)
             } else if self

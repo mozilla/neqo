@@ -231,7 +231,7 @@ fn drop_non_initial() {
     let mut header = neqo_common::Encoder::with_capacity(1200);
     header
         .encode_byte(0xfa)
-        .encode_uint(4, Version::default().as_u32())
+        .encode_uint(4, Version::default().wire_version())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
     let mut bogus_data: Vec<u8> = header.into();
@@ -250,7 +250,7 @@ fn drop_short_initial() {
     let mut header = neqo_common::Encoder::with_capacity(1199);
     header
         .encode_byte(0xca)
-        .encode_uint(4, Version::default().as_u32())
+        .encode_uint(4, Version::default().wire_version())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
     let mut bogus_data: Vec<u8> = header.into();
@@ -402,7 +402,7 @@ fn bad_client_initial() {
     let mut header_enc = Encoder::new();
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
-        .encode_uint(4, Version::default().as_u32())
+        .encode_uint(4, Version::default().wire_version())
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
@@ -493,7 +493,7 @@ fn version_negotiation_ignored() {
     let mut found = false;
     while dec.remaining() > 0 {
         let v = dec.decode_uint(4).expect("supported version");
-        found |= v == u64::from(Version::default().as_u32());
+        found |= v == u64::from(Version::default().wire_version());
     }
     assert!(found, "valid version not found");
 
@@ -553,20 +553,20 @@ fn version_negotiation_and_compatible() {
     // Version Negotiation
     let dgram = client.process_output(now()).dgram();
     assert!(dgram.is_some());
-    assertions::assert_version(dgram.as_ref().unwrap(), ORIG_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), ORIG_VERSION.wire_version());
     let dgram = server.process(dgram, now()).dgram();
     assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(dgram.unwrap(), now());
 
     let dgram = client.process(None, now()).dgram(); // ClientHello
-    assertions::assert_version(dgram.as_ref().unwrap(), VN_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), VN_VERSION.wire_version());
     let dgram = server.process(dgram, now()).dgram(); // ServerHello...
-    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
     client.process_input(dgram.unwrap(), now());
 
     client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process_output(now()).dgram();
-    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram(); // ACK + HANDSHAKE_DONE + NST
     client.process_input(dgram.unwrap(), now());
@@ -615,7 +615,7 @@ fn compatible_upgrade_resumption_and_vn() {
     // The version negotiation exchange.
     let dgram = client.process_output(now()).dgram();
     assert!(dgram.is_some());
-    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.as_u32());
+    assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
     let dgram = server.process(dgram, now()).dgram();
     assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(dgram.unwrap(), now());
