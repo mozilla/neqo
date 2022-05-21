@@ -662,7 +662,7 @@ impl ServersRunner {
                 .expect("We cannot make a server!"),
             )
         } else {
-            Box::new(SimpleServer::new(&args, anti_replay, cid_mgr))
+            Box::new(SimpleServer::new(args, anti_replay, cid_mgr))
         };
         svr.set_ciphers(&args.get_ciphers());
         svr.set_qlog_dir(args.qlog_dir.clone());
