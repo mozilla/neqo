@@ -152,7 +152,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let is_app_limited = self.app_limited();
         qtrace!(
             [self],
-            "app limited={}, bytes_in_flight:{}, cwnd: {}, state: {:?} pacing_burst_size: {}",
+            "limited={}, bytes_in_flight={}, cwnd={}, state={:?} pacing_burst_size={}",
             is_app_limited,
             self.bytes_in_flight,
             self.congestion_window,
