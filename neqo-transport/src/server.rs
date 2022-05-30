@@ -569,11 +569,11 @@ impl Server {
                 return None;
             }
 
-            qdebug!([self], "Unsupported version: {:?}", packet.version());
+            qdebug!([self], "Unsupported version: {:x}", packet.wire_version());
             let vn = PacketBuilder::version_negotiation(
                 packet.scid(),
                 packet.dcid(),
-                packet.version().unwrap().as_u32(),
+                packet.wire_version(),
                 self.conn_params.get_versions().all(),
             );
             return Some(Datagram::new(dgram.destination(), dgram.source(), vn));

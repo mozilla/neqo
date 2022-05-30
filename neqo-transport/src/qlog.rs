@@ -98,7 +98,7 @@ fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
             Some("QUIC".into()),
             p.local_address().port().into(),
             p.remote_address().port().into(),
-            Some(format!("{:x}", Version::default().as_u32())),
+            Some(format!("{:x}", Version::default().wire_version())),
             Some(format!("{}", p.local_cid())),
             Some(format!("{}", p.remote_cid())),
         ))

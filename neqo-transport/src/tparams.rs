@@ -439,9 +439,9 @@ impl TransportParameters {
             if role == Role::Client && !versions.initial().is_compatible(v) {
                 continue;
             }
-            other.push(v.as_u32());
+            other.push(v.wire_version());
         }
-        let current = versions.initial().as_u32();
+        let current = versions.initial().wire_version();
         self.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions { current, other },
@@ -453,7 +453,7 @@ impl TransportParameters {
             ref mut current, ..
         }) = self.params.get_mut(&VERSION_NEGOTIATION)
         {
-            *current = v.as_u32();
+            *current = v.wire_version();
         } else {
             unreachable!("Compatible upgrade without transport parameters set!");
         }
@@ -609,16 +609,16 @@ impl TransportParametersHandler {
                     qinfo!(
                         "Chosen version {:x} is not compatible with initial version {:x}",
                         current,
-                        self.versions.initial().as_u32(),
+                        self.versions.initial().wire_version(),
                     );
                     Err(Error::TransportParameterError)
                 }
             } else {
-                if current != self.versions.initial().as_u32() {
+                if current != self.versions.initial().wire_version() {
                     qinfo!(
                         "Current version {:x} != own version {:x}",
                         current,
-                        self.versions.initial().as_u32(),
+                        self.versions.initial().wire_version(),
                     );
                     return Err(Error::TransportParameterError);
                 }
@@ -1091,7 +1091,7 @@ mod tests {
             0x6a, 0x7a, 0x8a,
         ];
         let vn = TransportParameter::Versions {
-            current: Version::Version1.as_u32(),
+            current: Version::Version1.wire_version(),
             other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
         };
 
@@ -1143,7 +1143,7 @@ mod tests {
         current.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: Version::Version1.as_u32(),
+                current: Version::Version1.wire_version(),
                 other: vec![0x1a2a_3a4a],
             },
         );
@@ -1158,7 +1158,7 @@ mod tests {
         remembered.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: Version::Version1.as_u32(),
+                current: Version::Version1.wire_version(),
                 other: vec![0x5a6a_7a8a, 0x9aaa_baca],
             },
         );
@@ -1169,7 +1169,7 @@ mod tests {
         remembered.set(
             VERSION_NEGOTIATION,
             TransportParameter::Versions {
-                current: Version::Version1.as_u32() + 1,
+                current: Version::Version1.wire_version() + 1,
                 other: vec![],
             },
         );

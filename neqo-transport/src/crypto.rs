@@ -348,7 +348,7 @@ impl Crypto {
             if let Some(ref t) = c.resumption_token() {
                 qtrace!("TLS token {}", hex(t.as_ref()));
                 let mut enc = Encoder::default();
-                enc.encode_uint(4, version.as_u32());
+                enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
                 enc.encode_vvec_with(|enc_inner| {
                     tps.encode(enc_inner);
