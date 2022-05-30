@@ -247,6 +247,8 @@ pub struct Connection {
     /// when they are either just reordered or we haven't been able to install keys yet.
     /// In particular, this occurs when asynchronous certificate validation happens.
     saved_datagrams: SavedDatagrams,
+    /// Some packets were received, but not tracked.
+    received_untracked: bool,
 
     /// This is responsible for the QuicDatagrams' handling:
     /// https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
@@ -393,6 +395,7 @@ impl Connection {
             remote_initial_source_cid: None,
             original_destination_cid: None,
             saved_datagrams: SavedDatagrams::default(),
+            received_untracked: false,
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::new(conn_params.get_idle_timeout()),
@@ -1020,7 +1023,7 @@ impl Connection {
         self.process_output(now)
     }
 
-    fn handle_retry(&mut self, packet: &PublicPacket) {
+    fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) {
         qinfo!([self], "received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
@@ -1049,7 +1052,7 @@ impl Connection {
             retry_scid
         );
 
-        let lost_packets = self.loss_recovery.retry(&path);
+        let lost_packets = self.loss_recovery.retry(&path, now);
         self.handle_lost_packets(&lost_packets);
 
         self.crypto.states.init(
@@ -1254,7 +1257,7 @@ impl Connection {
                 }
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
-                self.handle_retry(packet);
+                self.handle_retry(packet, now);
                 return Ok(PreprocessResult::Next);
             }
             (PacketType::Handshake, State::WaitInitial, Role::Client)
@@ -1430,6 +1433,12 @@ impl Connection {
                             // Exhausting read keys is fatal.
                             return Err(e);
                         }
+                        Error::KeysDiscarded(cspace) => {
+                            // This was a valid-appearing Initial packet: maybe probe with
+                            // a Handshake packet to keep the handshake moving.
+                            self.received_untracked |=
+                                self.role == Role::Client && cspace == CryptoSpace::Initial;
+                        }
                         _ => (),
                     }
                     // Decryption failure, or not having keys is not fatal.
@@ -1487,11 +1496,26 @@ impl Connection {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
             }
         }
-        let largest_received = self
+
+        let largest_received = if let Some(space) = self
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
-            .unwrap()
-            .set_received(now, packet.pn(), ack_eliciting);
+        {
+            space.set_received(now, packet.pn(), ack_eliciting)
+        } else {
+            qdebug!(
+                [self],
+                "processed a {:?} packet without tracking it",
+                packet.packet_type(),
+            );
+            // This was a valid packet that caused the same packet number to be
+            // discarded.  This happens when the client discards the Initial packet
+            // number space after receiving the ServerHello.  Remember this so
+            // that we guarantee that we send a Handshake packet.
+            self.received_untracked = true;
+            // We don't migrate during the handshake, so return false.
+            false
+        };
 
         Ok(largest_received && !probing)
     }
@@ -1953,13 +1977,18 @@ impl Connection {
         tokens: &mut Vec<RecoveryToken>,
         now: Instant,
     ) -> bool {
+        let untracked = self.received_untracked && !self.state.connected();
+        self.received_untracked = false;
+
         // Anything written after an ACK already elicits acknowledgment.
         // If we need to probe and nothing has been written, send a PING.
         if builder.len() > ack_end {
             return true;
         }
-        let probe = if force_probe {
-            // The packet might be empty, but we need to probe.
+
+        let probe = if untracked && builder.packet_empty() || force_probe {
+            // If we received an untracked packet and we aren't probing already
+            // or the PTO timer fired: probe.
             true
         } else {
             let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
@@ -2176,14 +2205,13 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent);
             }
 
-            if *space == PacketNumberSpace::Handshake {
-                if self.role == Role::Client {
-                    // Client can send Handshake packets -> discard Initial keys and states
-                    self.discard_keys(PacketNumberSpace::Initial, now);
-                } else if self.state == State::Confirmed {
-                    // We could discard handshake keys in set_state, but wait until after sending an ACK.
-                    self.discard_keys(PacketNumberSpace::Handshake, now);
-                }
+            if *space == PacketNumberSpace::Handshake
+                && self.role == Role::Server
+                && self.state == State::Confirmed
+            {
+                // We could discard handshake keys in set_state,
+                // but wait until after sending an ACK.
+                self.discard_keys(PacketNumberSpace::Handshake, now);
             }
         }
 
@@ -2509,6 +2537,11 @@ impl Connection {
                 self.set_initial_limits();
             }
             if self.crypto.install_keys(self.role)? {
+                if self.role == Role::Client {
+                    // We won't acknowledge Initial packets as a result of this, but the
+                    // server can rely on implicit acknowledgment.
+                    self.discard_keys(PacketNumberSpace::Initial, now);
+                }
                 self.saved_datagrams.make_available(CryptoSpace::Handshake);
             }
         }
@@ -2778,14 +2811,14 @@ impl Connection {
     }
 
     /// When the server rejects 0-RTT we need to drop a bunch of stuff.
-    fn client_0rtt_rejected(&mut self) {
+    fn client_0rtt_rejected(&mut self, now: Instant) {
         if !matches!(self.zero_rtt_state, ZeroRttState::Sending) {
             return;
         }
         qdebug!([self], "0-RTT rejected");
 
         // Tell 0-RTT packets that they were "lost".
-        let dropped = self.loss_recovery.drop_0rtt(&self.paths.primary());
+        let dropped = self.loss_recovery.drop_0rtt(&self.paths.primary(), now);
         self.handle_lost_packets(&dropped);
 
         self.streams.zero_rtt_rejected();
@@ -2813,7 +2846,7 @@ impl Connection {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient
             } else {
-                self.client_0rtt_rejected();
+                self.client_0rtt_rejected(now);
                 ZeroRttState::Rejected
             };
         }

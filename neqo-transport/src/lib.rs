@@ -97,7 +97,7 @@ pub enum Error {
     InvalidResumptionToken,
     InvalidRetry,
     InvalidStreamId,
-    KeysDiscarded,
+    KeysDiscarded(crypto::CryptoSpace),
     /// Packet protection keys are exhausted.
     /// Also used when too many key updates have happened.
     KeysExhausted,

@@ -50,6 +50,26 @@ fn retry_basic() {
     connected_server(&mut server);
 }
 
+/// Receiving a Retry is enough to infer something about the RTT.
+/// Probably.
+#[test]
+fn implicit_rtt_retry() {
+    const RTT: Duration = Duration::from_secs(2);
+    let mut server = default_server();
+    server.set_validation(ValidateAddress::Always);
+    let mut client = default_client();
+    let mut now = now();
+
+    let dgram = client.process(None, now).dgram();
+    now += RTT / 2;
+    let dgram = server.process(dgram, now).dgram();
+    assertions::assert_retry(dgram.as_ref().unwrap());
+    now += RTT / 2;
+    client.process_input(dgram.unwrap(), now);
+
+    assert_eq!(client.stats().rtt, RTT);
+}
+
 #[test]
 fn retry_expired() {
     let mut server = default_server();
