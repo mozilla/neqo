@@ -495,11 +495,6 @@ impl Http3Client {
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id)
     }
 
-    #[must_use]
-    pub fn webtransport_remote_datagram_size(&self) -> u64 {
-        self.conn.remote_datagram_size()
-    }
-
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     ///  packet number, ack frames, etc.

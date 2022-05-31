@@ -122,11 +122,11 @@ impl ExtendedConnectSession {
         matches!(self.state, SessionState::Active(_))
     }
 
-    pub fn take_sub_streams(&mut self) -> Option<(BTreeSet<StreamId>, BTreeSet<StreamId>)> {
-        Some((
+    pub fn take_sub_streams(&mut self) -> (BTreeSet<StreamId>, BTreeSet<StreamId>) {
+        (
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
-        ))
+        )
     }
 
     pub fn send_datagram(
@@ -140,9 +140,11 @@ impl ExtendedConnectSession {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(session_id.as_u64() / 4);
             dgram_data.encode(buf);
-            conn.send_datagram(&dgram_data, id)?;
+            conn.send_datagram(&dgram_data, id)?
+        } else {
+            debug_assert!(false);
+            return Err(Error::Unavailable);
         }
-        Ok(())
     }
 
     pub fn datagram(&mut self, datagram: Vec<u8>) {

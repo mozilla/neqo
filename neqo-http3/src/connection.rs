@@ -422,14 +422,14 @@ impl Http3Connection {
 
     pub fn handle_datagram(&mut self, datagram: &[u8]) {
         let mut decoder = Decoder::new(datagram);
-        if let Some(session_id) = decoder.decode_varint() {
-            if let Some(stream) = self.recv_streams.get_mut(&StreamId::from(session_id)) {
-                if let Some(session) = stream.webtransport() {
-                    session
-                        .borrow_mut()
-                        .datagram(datagram[decoder.offset()..].to_vec());
-                }
-            }
+        let session = decoder.decode_varint().and_then(|id| {
+            self.recv_streams.get_mut(&StreamId::from(id))
+        }).and_then(|stream| {
+            stream.webtransport()
+        });
+        if let Some(s) = session {
+            s.borrow_mut()
+                .datagram(decoder.decode_remainder().to_vec());
         }
     }
 
@@ -1296,11 +1296,7 @@ impl Http3Connection {
         wt: &Rc<RefCell<WebTransportSession>>,
         conn: &mut Connection,
     ) {
-        let out = wt.borrow_mut().take_sub_streams();
-        if out.is_none() {
-            return;
-        }
-        let (recv, send) = out.unwrap();
+        let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         for id in recv {
             qtrace!("Remove the extended connect sub receiver stream {}", id);

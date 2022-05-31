@@ -323,11 +323,11 @@ impl WebTransportSession {
         matches!(self.state, SessionState::Active)
     }
 
-    pub fn take_sub_streams(&mut self) -> Option<(BTreeSet<StreamId>, BTreeSet<StreamId>)> {
-        Some((
+    pub fn take_sub_streams(&mut self) -> (BTreeSet<StreamId>, BTreeSet<StreamId>) {
+        (
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
-        ))
+        )
     }
 
     /// # Errors
