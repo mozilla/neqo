@@ -15,7 +15,7 @@ log = {version = "0.4.0", default-features = false}
 bindgen = {version = "0.59", default-features = false, features= ["runtime"]}
 serde = "1.0"
 serde_derive = "1.0"
-toml = "0.4"
+toml = "0.5"
 mozbuild = {version = "0.1", optional = true}
 
 [dev-dependencies]
