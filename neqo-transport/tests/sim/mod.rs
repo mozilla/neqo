@@ -59,7 +59,7 @@ macro_rules! simulate {
         #[test]
         fn $n() {
             let fixture = $setup;
-            let mut nodes: Vec<Box<dyn crate::sim::Node>> = Vec::new();
+            let mut nodes: Vec<Box<dyn $crate::sim::Node>> = Vec::new();
             $(
                 let f: Box<dyn FnOnce(&_) -> _> = Box::new($v);
                 nodes.push(Box::new(f(&fixture)));
