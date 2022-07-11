@@ -412,6 +412,8 @@ impl PacketBuilder {
         scid: &[u8],
         token: &[u8],
         odcid: &[u8],
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
     ) -> Res<Vec<u8>> {
         let mut encoder = Encoder::default();
         encoder.encode_vec(1, odcid);
@@ -427,10 +429,15 @@ impl PacketBuilder {
         encoder.encode_vec(1, scid);
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
-        let tag = retry::use_aead(version, |aead| {
-            let mut buf = vec![0; aead.expansion()];
-            Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
-        })?;
+        let tag = retry::use_aead(
+            version,
+            #[cfg(feature = "fuzzing")]
+            fuzzing_mode,
+            |aead| {
+                let mut buf = vec![0; aead.expansion()];
+                Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
+            },
+        )?;
         encoder.encode(&tag);
         let mut complete: Vec<u8> = encoder.into();
         Ok(complete.split_off(start))
@@ -506,6 +513,8 @@ pub struct PublicPacket<'a> {
     version: Option<WireVersion>,
     /// A reference to the entire packet, including the header.
     data: &'a [u8],
+    #[cfg(feature = "fuzzing")]
+    fuzzing_mode: bool,
 }
 
 impl<'a> PublicPacket<'a> {
@@ -524,10 +533,16 @@ impl<'a> PublicPacket<'a> {
         decoder: &mut Decoder<'a>,
         packet_type: PacketType,
         version: Version,
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
     ) -> Res<(&'a [u8], usize)> {
         if packet_type == PacketType::Retry {
             let header_len = decoder.offset();
-            let expansion = retry::expansion(version);
+            let expansion = retry::expansion(
+                version,
+                #[cfg(feature = "fuzzing")]
+                fuzzing_mode,
+            );
             let token = Self::opt(decoder.decode(decoder.remaining() - expansion))?;
             if token.is_empty() {
                 return Err(Error::InvalidPacket);
@@ -548,7 +563,12 @@ impl<'a> PublicPacket<'a> {
 
     /// Decode the common parts of a packet.  This provides minimal parsing and validation.
     /// Returns a tuple of a `PublicPacket` and a slice with any remainder from the datagram.
-    pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
+    pub fn decode(
+        data: &'a [u8],
+        dcid_decoder: &dyn ConnectionIdDecoder,
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
+    ) -> Res<(Self, &'a [u8])> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_byte())?;
 
@@ -572,6 +592,8 @@ impl<'a> PublicPacket<'a> {
                     header_len,
                     version: None,
                     data,
+                    #[cfg(feature = "fuzzing")]
+                    fuzzing_mode,
                 },
                 &[],
             ));
@@ -593,6 +615,8 @@ impl<'a> PublicPacket<'a> {
                     header_len: decoder.offset(),
                     version: None,
                     data,
+                    #[cfg(feature = "fuzzing")]
+                    fuzzing_mode,
                 },
                 &[],
             ));
@@ -611,6 +635,8 @@ impl<'a> PublicPacket<'a> {
                     header_len: decoder.offset(),
                     version: Some(version),
                     data,
+                    #[cfg(feature = "fuzzing")]
+                    fuzzing_mode,
                 },
                 &[],
             ));
@@ -622,7 +648,13 @@ impl<'a> PublicPacket<'a> {
         let packet_type = PacketType::from_byte((first >> 4) & 3, version);
 
         // The type-specific code includes a token.  This consumes the remainder of the packet.
-        let (token, header_len) = Self::decode_long(&mut decoder, packet_type, version)?;
+        let (token, header_len) = Self::decode_long(
+            &mut decoder,
+            packet_type,
+            version,
+            #[cfg(feature = "fuzzing")]
+            fuzzing_mode,
+        )?;
         let end = data.len() - decoder.remaining();
         let (data, remainder) = data.split_at(end);
         Ok((
@@ -634,6 +666,8 @@ impl<'a> PublicPacket<'a> {
                 header_len,
                 version: Some(version.wire_version()),
                 data,
+                #[cfg(feature = "fuzzing")]
+                fuzzing_mode,
             },
             remainder,
         ))
@@ -645,7 +679,11 @@ impl<'a> PublicPacket<'a> {
             return false;
         }
         let version = self.version().unwrap();
-        let expansion = retry::expansion(version);
+        let expansion = retry::expansion(
+            version,
+            #[cfg(feature = "fuzzing")]
+            self.fuzzing_mode,
+        );
         if self.data.len() <= expansion {
             return false;
         }
@@ -653,10 +691,15 @@ impl<'a> PublicPacket<'a> {
         let mut encoder = Encoder::with_capacity(self.data.len());
         encoder.encode_vec(1, odcid);
         encoder.encode(header);
-        retry::use_aead(version, |aead| {
-            let mut buf = vec![0; expansion];
-            Ok(aead.decrypt(0, encoder.as_ref(), tag, &mut buf)?.is_empty())
-        })
+        retry::use_aead(
+            version,
+            #[cfg(feature = "fuzzing")]
+            self.fuzzing_mode,
+            |aead| {
+                let mut buf = vec![0; expansion];
+                Ok(aead.decrypt(0, encoder.as_ref(), tag, &mut buf)?.is_empty())
+            },
+        )
         .unwrap_or(false)
     }
 
@@ -862,7 +905,7 @@ impl Deref for DecryptedPacket {
     }
 }
 
-#[cfg(all(test, not(feature = "fuzzing")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::crypto::{CryptoDxState, CryptoStates};
@@ -930,7 +973,12 @@ mod tests {
         fixture_init();
         let mut padded = SAMPLE_INITIAL.to_vec();
         padded.extend_from_slice(EXTRA);
-        let (packet, remainder) = PublicPacket::decode(&padded, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(
+            &padded,
+            &cid_mgr(),
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap();
         assert_eq!(packet.packet_type(), PacketType::Initial);
         assert_eq!(&packet.dcid()[..], &[] as &[u8]);
         assert_eq!(&packet.scid()[..], SERVER_CID);
@@ -952,7 +1000,12 @@ mod tests {
         enc.encode_vec(1, &[]);
         enc.encode(&[0xff; 40]); // junk
 
-        assert!(PublicPacket::decode(enc.as_ref(), &cid_mgr()).is_err());
+        assert!(PublicPacket::decode(
+            enc.as_ref(),
+            &cid_mgr(),
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).is_err());
     }
 
     #[test]
@@ -964,7 +1017,12 @@ mod tests {
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
         enc.encode(&[0xff; 40]); // junk
 
-        assert!(PublicPacket::decode(enc.as_ref(), &cid_mgr()).is_err());
+        assert!(PublicPacket::decode(
+            enc.as_ref(),
+            &cid_mgr(),
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).is_err());
     }
 
     const SAMPLE_SHORT: &[u8] = &[
@@ -1011,7 +1069,12 @@ mod tests {
     #[test]
     fn decode_short() {
         fixture_init();
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(
+            SAMPLE_SHORT,
+            &cid_mgr(),
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap();
         assert_eq!(packet.packet_type(), PacketType::Short);
         assert!(remainder.is_empty());
         let decrypted = packet
@@ -1027,6 +1090,8 @@ mod tests {
         let (packet, remainder) = PublicPacket::decode(
             SAMPLE_SHORT,
             &RandomConnectionIdGenerator::new(SERVER_CID.len() - 1),
+            #[cfg(feature = "fuzzing")]
+            false,
         )
         .unwrap();
         assert_eq!(packet.packet_type(), PacketType::Short);
@@ -1041,7 +1106,9 @@ mod tests {
     fn decode_short_long_cid() {
         assert!(PublicPacket::decode(
             SAMPLE_SHORT,
-            &RandomConnectionIdGenerator::new(SERVER_CID.len() + 1)
+            &RandomConnectionIdGenerator::new(SERVER_CID.len() + 1),
+            #[cfg(feature = "fuzzing")]
+            false,
         )
         .is_err());
     }
@@ -1210,9 +1277,22 @@ mod tests {
     fn build_retry_single(version: Version, sample_retry: &[u8]) {
         fixture_init();
         let retry =
-            PacketBuilder::retry(version, &[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
+            PacketBuilder::retry(
+                version,
+                &[],
+                SERVER_CID,
+                RETRY_TOKEN,
+                CLIENT_CID,
+                #[cfg(feature = "fuzzing")]
+                false,
+            ).unwrap();
 
-        let (packet, remainder) = PublicPacket::decode(&retry, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(
+            &retry,
+            &cid_mgr(),
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert!(remainder.is_empty());
 
@@ -1279,7 +1359,12 @@ mod tests {
     fn decode_retry(version: Version, sample_retry: &[u8]) {
         fixture_init();
         let (packet, remainder) =
-            PublicPacket::decode(sample_retry, &RandomConnectionIdGenerator::new(5)).unwrap();
+            PublicPacket::decode(
+                sample_retry,
+                &RandomConnectionIdGenerator::new(5),
+                #[cfg(feature = "fuzzing")]
+                false,
+            ).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert_eq!(Some(version), packet.version());
         assert!(packet.dcid().is_empty());
@@ -1325,30 +1410,60 @@ mod tests {
         let cid_mgr = RandomConnectionIdGenerator::new(5);
         let odcid = ConnectionId::from(CLIENT_CID);
 
-        assert!(PublicPacket::decode(&[], &cid_mgr).is_err());
+        assert!(PublicPacket::decode(
+            &[],
+            &cid_mgr,
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).is_err());
 
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_RETRY_V1, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(
+            SAMPLE_RETRY_V1,
+            &cid_mgr,
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap();
         assert!(remainder.is_empty());
         assert!(packet.is_valid_retry(&odcid));
 
         let mut damaged_retry = SAMPLE_RETRY_V1.to_vec();
         let last = damaged_retry.len() - 1;
         damaged_retry[last] ^= 66;
-        let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(
+            &damaged_retry,
+            &cid_mgr,
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap();
         assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
 
         damaged_retry.truncate(last);
-        let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
+        let (packet, remainder) = PublicPacket::decode(
+            &damaged_retry,
+            &cid_mgr,
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap();
         assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
 
         // An invalid token should be rejected sooner.
         damaged_retry.truncate(last - 4);
-        assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
+        assert!(PublicPacket::decode(
+            &damaged_retry,
+            &cid_mgr,
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).is_err());
 
         damaged_retry.truncate(last - 1);
-        assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
+        assert!(PublicPacket::decode(
+            &damaged_retry,
+            &cid_mgr,
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).is_err());
     }
 
     const SAMPLE_VN: &[u8] = &[
@@ -1383,7 +1498,12 @@ mod tests {
     #[test]
     fn parse_vn() {
         let (packet, remainder) =
-            PublicPacket::decode(SAMPLE_VN, &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(
+                SAMPLE_VN,
+                &EmptyConnectionIdGenerator::default(),
+                #[cfg(feature = "fuzzing")]
+                false,
+            ).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], SERVER_CID);
         assert!(packet.scid.is_some());
@@ -1404,7 +1524,12 @@ mod tests {
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =
-            PublicPacket::decode(enc.as_ref(), &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(
+                enc.as_ref(),
+                &EmptyConnectionIdGenerator::default(),
+                #[cfg(feature = "fuzzing")]
+                false,
+            ).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], BIG_DCID);
         assert!(packet.scid.is_some());
@@ -1440,7 +1565,12 @@ mod tests {
         ];
         fixture_init();
         let (packet, slice) =
-            PublicPacket::decode(PACKET, &EmptyConnectionIdGenerator::default()).unwrap();
+            PublicPacket::decode(
+                PACKET,
+                &EmptyConnectionIdGenerator::default(),
+                #[cfg(feature = "fuzzing")]
+                false,
+            ).unwrap();
         assert!(slice.is_empty());
         let decrypted = packet
             .decrypt(&mut CryptoStates::test_chacha(), now())

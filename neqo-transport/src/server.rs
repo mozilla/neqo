@@ -199,7 +199,12 @@ impl Server {
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         conn_params: ConnectionParameters,
     ) -> Res<Self> {
-        let validation = AddressValidation::new(now, ValidateAddress::Never)?;
+        let validation = AddressValidation::new(
+            now,
+            ValidateAddress::Never,
+            #[cfg(feature = "fuzzing")]
+            conn_params.get_fuzzing_mode(),
+        )?;
         Ok(Self {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
             protocols: protocols.iter().map(|x| String::from(x.as_ref())).collect(),
@@ -344,6 +349,8 @@ impl Server {
                         &new_dcid,
                         &token,
                         &initial.dst_cid,
+                        #[cfg(feature = "fuzzing")]
+                        self.conn_params.get_fuzzing_mode(),
                     );
                     if let Ok(p) = packet {
                         let retry = Datagram::new(dgram.destination(), dgram.source(), p);
@@ -536,7 +543,12 @@ impl Server {
 
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
-        let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
+        let res = PublicPacket::decode(
+            &dgram[..],
+            self.cid_generator.borrow().as_decoder(),
+            #[cfg(feature = "fuzzing")]
+            self.conn_params.get_fuzzing_mode(),
+        );
         let (packet, _remainder) = match res {
             Ok(res) => res,
             _ => {

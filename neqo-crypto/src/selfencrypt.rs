@@ -20,6 +20,8 @@ pub struct SelfEncrypt {
     key_id: u8,
     key: SymKey,
     old_key: Option<SymKey>,
+    #[cfg(feature = "fuzzing")]
+    fuzzing_mode: bool,
 }
 
 impl SelfEncrypt {
@@ -28,7 +30,12 @@ impl SelfEncrypt {
 
     /// # Errors
     /// Failure to generate a new HKDF key using NSS results in an error.
-    pub fn new(version: Version, cipher: Cipher) -> Res<Self> {
+    pub fn new(
+        version: Version,
+        cipher: Cipher,
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
+    ) -> Res<Self> {
         let key = hkdf::generate_key(version, cipher)?;
         Ok(Self {
             version,
@@ -36,6 +43,8 @@ impl SelfEncrypt {
             key_id: 0,
             key,
             old_key: None,
+            #[cfg(feature = "fuzzing")]
+            fuzzing_mode: fuzzing_mode,
         })
     }
 
@@ -43,7 +52,14 @@ impl SelfEncrypt {
         debug_assert_eq!(salt.len(), Self::SALT_LENGTH);
         let salt = hkdf::import_key(self.version, salt)?;
         let secret = hkdf::extract(self.version, self.cipher, Some(&salt), k)?;
-        Aead::new(self.version, self.cipher, &secret, "neqo self")
+        Aead::new(
+            self.version,
+            self.cipher,
+            &secret,
+            "neqo self",
+            #[cfg(feature = "fuzzing")]
+            self.fuzzing_mode,
+        )
     }
 
     /// Rotate keys.  This causes any previous key that is being held to be replaced by the current key.

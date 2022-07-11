@@ -371,6 +371,8 @@ impl Connection {
             agent,
             protocols.iter().map(P::as_ref).map(String::from).collect(),
             Rc::clone(&tphandler),
+            #[cfg(feature = "fuzzing")]
+            conn_params.get_fuzzing_mode(),
         )?;
 
         let stats = StatsCell::default();
@@ -1375,7 +1377,12 @@ impl Connection {
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
             let (packet, remainder) =
-                match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
+                match PublicPacket::decode(
+                    slc,
+                    self.cid_manager.decoder().as_ref(),
+                    #[cfg(feature = "fuzzing")]
+                    self.conn_params.get_fuzzing_mode(),
+                ) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
                         qinfo!([self], "Garbage packet: {}", e);

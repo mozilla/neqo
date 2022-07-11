@@ -144,7 +144,14 @@ pub fn client_initial_aead_and_hp(dcid: &[u8]) -> (Aead, HpKey) {
     )
     .unwrap();
     (
-        Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap(),
+        Aead::new(
+            TLS_VERSION_1_3,
+            TLS_AES_128_GCM_SHA256,
+            &secret,
+            "quic ",
+            #[cfg(feature = "fuzzing")]
+            false,
+        ).unwrap(),
         HpKey::extract(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic hp").unwrap(),
     )
 }

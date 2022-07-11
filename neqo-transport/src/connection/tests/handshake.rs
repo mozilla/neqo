@@ -339,7 +339,12 @@ fn reorder_05rtt_with_0rtt() {
 
     let mut client = default_client();
     let mut server = default_server();
-    let validation = AddressValidation::new(now(), ValidateAddress::NoToken).unwrap();
+    let validation = AddressValidation::new(
+        now(),
+        ValidateAddress::NoToken,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap();
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(Rc::clone(&validation));
     let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
@@ -600,7 +605,6 @@ fn reorder_1rtt() {
     }
 }
 
-#[cfg(not(feature = "fuzzing"))]
 #[test]
 fn corrupted_initial() {
     let mut client = default_client();
@@ -803,7 +807,6 @@ fn anti_amplification() {
     assert_eq!(*server.state(), State::Confirmed);
 }
 
-#[cfg(not(feature = "fuzzing"))]
 #[test]
 fn garbage_initial() {
     let mut client = default_client();

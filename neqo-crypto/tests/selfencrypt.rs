@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
-#![cfg(not(feature = "fuzzing"))]
 
 use neqo_crypto::constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 use neqo_crypto::{init, selfencrypt::SelfEncrypt, Error};
@@ -8,7 +7,12 @@ use neqo_crypto::{init, selfencrypt::SelfEncrypt, Error};
 #[test]
 fn se_create() {
     init();
-    SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).expect("constructor works");
+    SelfEncrypt::new(
+        TLS_VERSION_1_3,
+        TLS_AES_128_GCM_SHA256,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).expect("constructor works");
 }
 
 const PLAINTEXT: &[u8] = b"PLAINTEXT";
@@ -16,7 +20,12 @@ const AAD: &[u8] = b"AAD";
 
 fn sealed() -> (SelfEncrypt, Vec<u8>) {
     init();
-    let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();
+    let se = SelfEncrypt::new(
+        TLS_VERSION_1_3,
+        TLS_AES_128_GCM_SHA256,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap();
     let sealed = se.seal(AAD, PLAINTEXT).expect("sealing works");
     (se, sealed)
 }

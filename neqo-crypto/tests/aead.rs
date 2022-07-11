@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
-#![cfg(not(feature = "fuzzing"))]
 
 use neqo_crypto::constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 use neqo_crypto::hkdf;
@@ -38,6 +37,8 @@ fn make_aead(cipher: Cipher) -> Aead {
         cipher,
         &secret,
         "quic ", // QUICv1 label prefix; note the trailing space here.
+        #[cfg(feature = "fuzzing")]
+        false,
     )
     .expect("can make an AEAD")
 }

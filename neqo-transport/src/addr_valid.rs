@@ -67,10 +67,20 @@ pub struct AddressValidation {
 }
 
 impl AddressValidation {
-    pub fn new(now: Instant, validation: ValidateAddress) -> Res<Self> {
+    pub fn new(
+        now: Instant,
+        validation: ValidateAddress,
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
+    ) -> Res<Self> {
         Ok(Self {
             validation,
-            self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
+            self_encrypt: SelfEncrypt::new(
+                TLS_VERSION_1_3,
+                TLS_AES_128_GCM_SHA256,
+                #[cfg(feature = "fuzzing")]
+                fuzzing_mode,
+            )?,
             start_time: now,
         })
     }

@@ -364,9 +364,12 @@ fn low() {
     let now = now();
     // Use address validation; note that we need to hold a strong reference
     // as the server will only hold a weak reference.
-    let validation = Rc::new(RefCell::new(
-        AddressValidation::new(now, ValidateAddress::Never).unwrap(),
-    ));
+    let validation = Rc::new(RefCell::new(AddressValidation::new(
+        now,
+        ValidateAddress::Never,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap()));
     server.set_validation(Rc::clone(&validation));
     connect(&mut client, &mut server);
 

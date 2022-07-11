@@ -48,7 +48,12 @@ fn remember_smoothed_rtt() {
     // We can't use exchange_ticket here because it doesn't respect RTT.
     // Also, connect_with_rtt() ends with the server receiving a packet it
     // wants to acknowledge; so the ticket will include an ACK frame too.
-    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
+    let validation = AddressValidation::new(
+        now,
+        ValidateAddress::NoToken,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap();
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(Rc::clone(&validation));
     server.send_ticket(now, &[]).expect("can send ticket");
@@ -82,7 +87,12 @@ fn address_validation_token_resume() {
 
     let mut client = default_client();
     let mut server = default_server();
-    let validation = AddressValidation::new(now(), ValidateAddress::Always).unwrap();
+    let validation = AddressValidation::new(
+        now(),
+        ValidateAddress::Always,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap();
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(Rc::clone(&validation));
     let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
@@ -153,7 +163,12 @@ fn two_tickets_on_timer() {
 fn two_tickets_with_new_token() {
     let mut client = default_client();
     let mut server = default_server();
-    let validation = AddressValidation::new(now(), ValidateAddress::Always).unwrap();
+    let validation = AddressValidation::new(
+        now(),
+        ValidateAddress::Always,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap();
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(Rc::clone(&validation));
     connect(&mut client, &mut server);

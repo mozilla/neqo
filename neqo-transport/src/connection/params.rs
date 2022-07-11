@@ -73,6 +73,8 @@ pub struct ConnectionParameters {
     outgoing_datagram_queue: usize,
     incoming_datagram_queue: usize,
     fast_pto: u8,
+    #[cfg(feature = "fuzzing")]
+    fuzzing_mode: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -93,6 +95,8 @@ impl Default for ConnectionParameters {
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             fast_pto: FAST_PTO_SCALE,
+            #[cfg(feature = "fuzzing")]
+            fuzzing_mode: false,
         }
     }
 }
@@ -279,6 +283,17 @@ impl ConnectionParameters {
     pub fn fast_pto(mut self, scale: u8) -> Self {
         assert_ne!(scale, 0);
         self.fast_pto = scale;
+        self
+    }
+
+    #[cfg(feature = "fuzzing")]
+    pub fn get_fuzzing_mode(&self) -> bool {
+        self.fuzzing_mode
+    }
+
+    #[cfg(feature = "fuzzing")]
+    pub fn fuzzing_mode(mut self, enable: bool) -> Self {
+        self.fuzzing_mode = enable;
         self
     }
 

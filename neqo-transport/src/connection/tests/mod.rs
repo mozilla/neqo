@@ -111,6 +111,10 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 pub fn default_client() -> Connection {
     new_client(ConnectionParameters::default())
 }
+#[cfg(feature = "fuzzing")]
+pub fn default_fuzzing_client() -> Connection {
+    new_client(ConnectionParameters::default().fuzzing_mode(true))
+}
 
 pub fn new_server(params: ConnectionParameters) -> Connection {
     fixture_init();
@@ -129,6 +133,12 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
 pub fn default_server() -> Connection {
     new_server(ConnectionParameters::default())
 }
+
+#[cfg(feature = "fuzzing")]
+pub fn default_fuzzing_server() -> Connection {
+    new_server(ConnectionParameters::default().fuzzing_mode(true))
+}
+
 pub fn resumed_server(client: &Connection) -> Connection {
     new_server(ConnectionParameters::default().versions(client.version(), Version::all()))
 }
@@ -229,7 +239,12 @@ fn exchange_ticket(
     server: &mut Connection,
     now: Instant,
 ) -> ResumptionToken {
-    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
+    let validation = AddressValidation::new(
+        now,
+        ValidateAddress::NoToken,
+        #[cfg(feature = "fuzzing")]
+        false,
+    ).unwrap();
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(Rc::clone(&validation));
     server.send_ticket(now, &[]).expect("can send ticket");

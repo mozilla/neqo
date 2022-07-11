@@ -8,7 +8,7 @@
 #![warn(clippy::pedantic)]
 #![cfg(feature = "fuzzing")]
 
-use super::{connect_force_idle, default_client, default_server};
+use super::{connect_force_idle, default_fuzzing_client, default_fuzzing_server};
 use crate::StreamType;
 use neqo_crypto::FIXED_TAG_FUZZING;
 use test_fixture::now;
@@ -17,8 +17,8 @@ use test_fixture::now;
 fn no_encryption() {
     const DATA_CLIENT: &[u8] = &[2; 40];
     const DATA_SERVER: &[u8] = &[3; 50];
-    let mut client = default_client();
-    let mut server = default_server();
+    let mut client = default_fuzzing_client();
+    let mut server = default_fuzzing_server();
     connect_force_idle(&mut client, &mut server);
 
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();

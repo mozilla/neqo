@@ -6,6 +6,8 @@
 
 use crate::constants::{Cipher, Version};
 use crate::err::Res;
+#[cfg(feature = "fuzzing")]
+use crate::err::{sec::SEC_ERROR_BAD_DATA, Error};
 use crate::p11::{PK11SymKey, SymKey};
 use crate::ssl;
 use crate::ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext};
@@ -49,8 +51,13 @@ experimental_api!(SSL_AeadDecrypt(
 experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext));
 scoped_ptr!(AeadContext, SSLAeadContext, SSL_DestroyAead);
 
+#[cfg(feature = "fuzzing")]
+pub const FIXED_TAG_FUZZING: &[u8] = &[0x0a; 16];
+
 pub struct Aead {
     ctx: AeadContext,
+    #[cfg(feature = "fuzzing")]
+    fuzzing_mode: bool,
 }
 
 impl Aead {
@@ -58,14 +65,33 @@ impl Aead {
     ///
     /// # Errors
     /// Returns `Error` when the supporting NSS functions fail.
-    pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
+    pub fn new(
+        version: Version,
+        cipher: Cipher,
+        secret: &SymKey,
+        prefix: &str,
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
+    ) -> Res<Self> {
         let s: *mut PK11SymKey = **secret;
-        unsafe { Self::from_raw(version, cipher, s, prefix) }
+        unsafe {
+            Self::from_raw(
+                version,
+                cipher,
+                s,
+                prefix,
+                #[cfg(feature = "fuzzing")]
+                fuzzing_mode,
+            )
+        }
     }
 
     #[must_use]
-    #[allow(clippy::unused_self)]
     pub fn expansion(&self) -> usize {
+        #[cfg(feature = "fuzzing")]
+        if self.fuzzing_mode {
+            return FIXED_TAG_FUZZING.len();
+        }
         16
     }
 
@@ -74,6 +100,8 @@ impl Aead {
         cipher: Cipher,
         secret: *mut PK11SymKey,
         prefix: &str,
+        #[cfg(feature = "fuzzing")]
+        fuzzing_mode: bool,
     ) -> Res<Self> {
         let p = prefix.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
@@ -87,6 +115,8 @@ impl Aead {
         )?;
         Ok(Self {
             ctx: AeadContext::from_ptr(ctx)?,
+            #[cfg(feature = "fuzzing")]
+            fuzzing_mode: fuzzing_mode,
         })
     }
 
@@ -104,6 +134,14 @@ impl Aead {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
+        #[cfg(feature = "fuzzing")]
+        if self.fuzzing_mode {
+            let l = input.len();
+            output[..l].copy_from_slice(input);
+            output[l..l + 16].copy_from_slice(FIXED_TAG_FUZZING);
+            return Ok(&output[..l + 16]);
+        }
+
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadEncrypt(
@@ -136,6 +174,27 @@ impl Aead {
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
+        #[cfg(feature = "fuzzing")]
+        if self.fuzzing_mode {
+            if input.len() < FIXED_TAG_FUZZING.len() {
+                return Err(Error::from(SEC_ERROR_BAD_DATA));
+            }
+
+            let len_encrypted = input.len() - FIXED_TAG_FUZZING.len();
+            // Check that:
+            // 1) expansion is all zeros and
+            // 2) if the encrypted data is also supplied that at least some values
+            //    are no zero (otherwise padding will be interpreted as a valid packet)
+            if &input[len_encrypted..] == FIXED_TAG_FUZZING
+                && (len_encrypted == 0 || input[..len_encrypted].iter().any(|x| *x != 0x0))
+            {
+                output[..len_encrypted].copy_from_slice(&input[..len_encrypted]);
+                return Ok(&output[..len_encrypted]);
+            } else {
+                return Err(Error::from(SEC_ERROR_BAD_DATA));
+            }
+        }
+
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadDecrypt(
@@ -156,6 +215,11 @@ impl Aead {
 
 impl fmt::Debug for Aead {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        #[cfg(feature = "fuzzing")]
+        if self.fuzzing_mode {
+            return write!(f, "[FUZZING AEAD]");
+        }
+
         write!(f, "[AEAD Context]")
     }
 }
