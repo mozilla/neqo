@@ -59,7 +59,7 @@ pub use stream_type_reader::NewStreamType;
 
 type Res<T> = Result<T, Error>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     HttpNoError,
     HttpGeneralProtocol,
@@ -298,7 +298,7 @@ pub enum Http3StreamType {
 }
 
 #[must_use]
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum ReceiveOutput {
     NoOutput,
     PushStream,

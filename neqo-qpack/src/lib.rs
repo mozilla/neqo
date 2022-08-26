@@ -38,7 +38,7 @@ pub struct QpackSettings {
     pub max_blocked_streams: u16,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     DecompressionFailed,
     EncoderStream,
