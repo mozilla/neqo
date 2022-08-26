@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::{smallvec, SmallVec};
 
-use neqo_common::{qdebug, qlog::NeqoQlog, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 
 use crate::ackrate::AckRate;
 use crate::cid::ConnectionIdEntry;
@@ -670,10 +670,14 @@ impl LossRecovery {
             largest_acked
         );
 
-        let space = self
-            .spaces
-            .get_mut(pn_space)
-            .expect("ACK on discarded space");
+        let space = self.spaces.get_mut(pn_space);
+        let space = if let Some(sp) = space {
+            sp
+        } else {
+            qinfo!("ACK on discarded space");
+            return (Vec::new(), Vec::new());
+        };
+
         let (acked_packets, any_ack_eliciting) =
             space.remove_acked(acked_ranges, &mut *self.stats.borrow_mut());
         if acked_packets.is_empty() {
@@ -1411,17 +1415,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "ACK on discarded space")]
     fn ack_after_drop() {
         let mut lr = Fixture::default();
         lr.discard(PacketNumberSpace::Initial, now());
-        lr.on_ack_received(
+        let (acked, lost) = lr.on_ack_received(
             PacketNumberSpace::Initial,
             0,
             vec![],
             Duration::from_millis(0),
             pn_time(0),
         );
+        assert!(acked.is_empty());
+        assert!(lost.is_empty());
     }
 
     #[test]

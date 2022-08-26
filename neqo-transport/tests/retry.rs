@@ -11,10 +11,10 @@
 mod common;
 
 use common::{
-    apply_header_protection, client_initial_aead_and_hp, connected_server, decode_initial_header,
-    default_server, generate_ticket, remove_header_protection,
+    apply_header_protection, connected_server, decode_initial_header, default_server,
+    generate_ticket, initial_aead_and_hp, remove_header_protection,
 };
-use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder};
+use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{server::ValidateAddress, ConnectionError, Error, State, StreamType};
 use std::convert::TryFrom;
@@ -373,10 +373,11 @@ fn mitm_retry() {
     // Now to start the epic process of decrypting the packet,
     // rewriting the header to remove the token, and then re-encrypting.
     let client_initial2 = client_initial2.unwrap();
-    let (protected_header, d_cid, s_cid, payload) = decode_initial_header(&client_initial2);
+    let (protected_header, d_cid, s_cid, payload) =
+        decode_initial_header(&client_initial2, Role::Client);
 
     // Now we have enough information to make keys.
-    let (aead, hp) = client_initial_aead_and_hp(d_cid);
+    let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (header, pn) = remove_header_protection(&hp, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
 
