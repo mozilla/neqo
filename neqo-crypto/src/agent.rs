@@ -37,7 +37,7 @@ use std::time::Instant;
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HandshakeState {
     New,
     InProgress,
@@ -194,7 +194,7 @@ impl SecretAgentPreInfo {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SecretAgentInfo {
     version: Version,
     cipher: Cipher,
@@ -967,7 +967,7 @@ impl ::std::fmt::Display for Client {
 }
 
 /// `ZeroRttCheckResult` encapsulates the options for handling a `ClientHello`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeroRttCheckResult {
     /// Accept 0-RTT.
     Accept,
@@ -1189,8 +1189,8 @@ impl Deref for Agent {
     #[must_use]
     fn deref(&self) -> &SecretAgent {
         match self {
-            Self::Client(c) => &*c,
-            Self::Server(s) => &*s,
+            Self::Client(c) => &**c,
+            Self::Server(s) => &**s,
         }
     }
 }
@@ -1198,8 +1198,8 @@ impl Deref for Agent {
 impl DerefMut for Agent {
     fn deref_mut(&mut self) -> &mut SecretAgent {
         match self {
-            Self::Client(c) => &mut *c,
-            Self::Server(s) => &mut *s,
+            Self::Client(c) => &mut **c,
+            Self::Server(s) => &mut **s,
         }
     }
 }

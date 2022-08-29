@@ -18,7 +18,7 @@ pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NewStreamType {
     Control,
     Decoder,

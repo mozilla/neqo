@@ -26,7 +26,7 @@ pub const H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH: HFrameType = 0xf0701;
 pub const H3_RESERVED_FRAME_TYPES: &[HFrameType] = &[0x2, 0x6, 0x8, 0x9];
 
 // data for DATA frame is not read into HFrame::Data.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum HFrame {
     Data {
         len: u64, // length of the data

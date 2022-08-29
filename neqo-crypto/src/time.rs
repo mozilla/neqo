@@ -78,7 +78,7 @@ pub(crate) fn init() {
 }
 
 /// Time wraps Instant and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Time {
     t: Instant,
 }
@@ -139,7 +139,7 @@ impl From<Time> for Instant {
 }
 
 /// Interval wraps Duration and provides conversion functions into `PRTime`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Interval {
     d: Duration,
 }
