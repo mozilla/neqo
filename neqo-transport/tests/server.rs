@@ -10,12 +10,11 @@
 mod common;
 
 use common::{
-    apply_header_protection, client_initial_aead_and_hp, connect, connected_server,
-    decode_initial_header, default_server, find_ticket, generate_ticket, new_server,
-    remove_header_protection,
+    apply_header_protection, connect, connected_server, decode_initial_header, default_server,
+    find_ticket, generate_ticket, initial_aead_and_hp, new_server, remove_header_protection,
 };
 
-use neqo_common::{qtrace, Datagram, Decoder, Encoder};
+use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
     generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
 };
@@ -385,8 +384,8 @@ fn bad_client_initial() {
     let mut server = default_server();
 
     let dgram = client.process(None, now()).dgram().expect("a datagram");
-    let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram);
-    let (aead, hp) = client_initial_aead_and_hp(d_cid);
+    let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client);
+    let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (fixed_header, pn) = remove_header_protection(&hp, header, payload);
     let payload = &payload[(fixed_header.len() - header.len())..];
 

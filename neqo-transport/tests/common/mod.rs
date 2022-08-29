@@ -6,8 +6,9 @@
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
+#![allow(unused)]
 
-use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder};
+use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
@@ -96,10 +97,14 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnection
 // * the protected payload including the packet number.
 // Any token is thrown away.
 #[must_use]
-pub fn decode_initial_header(dgram: &Datagram) -> (&[u8], &[u8], &[u8], &[u8]) {
+pub fn decode_initial_header(dgram: &Datagram, role: Role) -> (&[u8], &[u8], &[u8], &[u8]) {
     let mut dec = Decoder::new(&dgram[..]);
     let type_and_ver = dec.decode(5).unwrap().to_vec();
-    assert_eq!(type_and_ver[0] & 0xf0, 0xc0);
+    // The client sets the QUIC bit, the server might not.
+    match role {
+        Role::Client => assert_eq!(type_and_ver[0] & 0xf0, 0xc0),
+        Role::Server => assert_eq!(type_and_ver[0] & 0xb0, 0x80),
+    }
     let dest_cid = dec.decode_vec(1).unwrap();
     let src_cid = dec.decode_vec(1).unwrap();
     dec.skip_vvec(); // Ignore any the token.
@@ -118,7 +123,7 @@ pub fn decode_initial_header(dgram: &Datagram) -> (&[u8], &[u8], &[u8], &[u8]) {
 /// Generate an AEAD and header protection object for a client Initial.
 /// Note that this works for QUIC version 1 only.
 #[must_use]
-pub fn client_initial_aead_and_hp(dcid: &[u8]) -> (Aead, HpKey) {
+pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, HpKey) {
     const INITIAL_SALT: &[u8] = &[
         0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c,
         0xad, 0xcc, 0xbb, 0x7f, 0x0a,
@@ -140,7 +145,10 @@ pub fn client_initial_aead_and_hp(dcid: &[u8]) -> (Aead, HpKey) {
         TLS_AES_128_GCM_SHA256,
         &initial_secret,
         &[],
-        "client in",
+        match role {
+            Role::Client => "client in",
+            Role::Server => "server in",
+        },
     )
     .unwrap();
     (
