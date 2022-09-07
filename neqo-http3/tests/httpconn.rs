@@ -12,8 +12,9 @@ use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
 };
-use neqo_transport::{ConnectionParameters, StreamType};
+use neqo_transport::{ConnectionError, ConnectionParameters, Error, Output, StreamType};
 use std::mem;
+use std::time::{Duration, Instant};
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
@@ -109,6 +110,38 @@ fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option
     // assert!(hconn_c.settings_received);
 
     out.dgram()
+}
+
+fn connect_peers_with_rtt(
+    hconn_c: &mut Http3Client,
+    hconn_s: &mut Http3Server,
+    net_delay: u64,
+) -> (Option<Datagram>, Instant) {
+    let net_delay = Duration::from_millis(net_delay);
+    assert_eq!(hconn_c.state(), Http3State::Initializing);
+    let mut now = now();
+    let out = hconn_c.process(None, now); // Initial
+    now += net_delay;
+    let out = hconn_s.process(out.dgram(), now); // Initial + Handshake
+    now += net_delay;
+    let out = hconn_c.process(out.dgram(), now); // ACK
+    now += net_delay;
+    mem::drop(hconn_s.process(out.dgram(), now)); //consume ACK
+    let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
+    assert!(hconn_c.events().any(authentication_needed));
+    now += net_delay;
+    hconn_c.authenticated(AuthenticationStatus::Ok, now);
+    let out = hconn_c.process(None, now); // Handshake
+    assert_eq!(hconn_c.state(), Http3State::Connected);
+    now += net_delay;
+    let out = hconn_s.process(out.dgram(), now); // Handshake
+    now += net_delay;
+    let out = hconn_c.process(out.dgram(), now);
+    now += net_delay;
+    let out = hconn_s.process(out.dgram(), now);
+    now += net_delay;
+    let out = hconn_c.process(out.dgram(), now);
+    (out.dgram(), now)
 }
 
 fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
@@ -378,4 +411,46 @@ fn zerortt() {
     // Receive the response
     exchange_packets(&mut hconn_c, &mut hconn_s, out.dgram());
     process_client_events(&mut hconn_c);
+}
+
+#[test]
+fn test_fetch_noresponse_will_idletimeout() {
+    let mut hconn_c = default_http3_client();
+    let mut hconn_s = default_http3_server();
+
+    let (dgram, mut now) = connect_peers_with_rtt(&mut hconn_c, &mut hconn_s, 10);
+
+    eprintln!("-----client");
+    let req = hconn_c
+        .fetch(
+            now,
+            "GET",
+            &("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    assert_eq!(req, 0);
+    hconn_c.stream_close_send(req).unwrap();
+    let _out = hconn_c.process(dgram, now);
+    eprintln!("-----server");
+
+    let mut done = false;
+    while !done {
+        while let Some(event) = hconn_c.next_event() {
+            if let Http3ClientEvent::StateChange(state) = event {
+                match state {
+                    Http3State::Closing(error_code) | Http3State::Closed(error_code) => {
+                        assert_eq!(error_code, ConnectionError::Transport(Error::IdleTimeout));
+                        done = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if let Output::Callback(t) = hconn_c.process_output(now) {
+            now += t;
+        }
+    }
 }
