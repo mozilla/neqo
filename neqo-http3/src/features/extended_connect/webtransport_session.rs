@@ -209,14 +209,13 @@ impl WebTransportSession {
         }
         qtrace!("ExtendedConnect close the session");
         self.state = SessionState::Done;
-        if let CloseType::ResetApp(_) = close_type {
-            return;
+        if !close_type.locally_initiated() {
+            self.events.session_end(
+                ExtendedConnectType::WebTransport,
+                self.session_id,
+                SessionCloseReason::from(close_type),
+            );
         }
-        self.events.session_end(
-            ExtendedConnectType::WebTransport,
-            self.session_id,
-            SessionCloseReason::from(close_type),
-        );
     }
 
     /// # Panics
@@ -406,6 +405,9 @@ impl WebTransportSession {
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
             dgram_data.encode(buf);
             conn.send_datagram(dgram_data.as_ref(), id)?;
+        } else {
+            debug_assert!(false);
+            return Err(Error::Unavailable);
         }
         Ok(())
     }
