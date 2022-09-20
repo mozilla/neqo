@@ -6,7 +6,7 @@
 
 #![allow(unused_assignments)]
 
-use neqo_common::{event::Provider, Datagram};
+use neqo_common::{event::Provider, qtrace, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
@@ -112,7 +112,7 @@ fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option
     out.dgram()
 }
 
-fn connect_peers_with_rtt(
+fn connect_peers_with_network_propagation_delay(
     hconn_c: &mut Http3Client,
     hconn_s: &mut Http3Server,
     net_delay: u64,
@@ -126,7 +126,8 @@ fn connect_peers_with_rtt(
     now += net_delay;
     let out = hconn_c.process(out.dgram(), now); // ACK
     now += net_delay;
-    mem::drop(hconn_s.process(out.dgram(), now)); //consume ACK
+    let out = hconn_s.process(out.dgram(), now); //consume ACK
+    assert!(out.dgram() == None);
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     now += net_delay;
@@ -134,13 +135,13 @@ fn connect_peers_with_rtt(
     let out = hconn_c.process(None, now); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);
     now += net_delay;
-    let out = hconn_s.process(out.dgram(), now); // Handshake
+    let out = hconn_s.process(out.dgram(), now); // HANDSHAKE_DONE
     now += net_delay;
-    let out = hconn_c.process(out.dgram(), now);
+    let out = hconn_c.process(out.dgram(), now); // Consume HANDSHAKE_DONE, send control streams.
     now += net_delay;
-    let out = hconn_s.process(out.dgram(), now);
+    let out = hconn_s.process(out.dgram(), now); // consume and send control streams.
     now += net_delay;
-    let out = hconn_c.process(out.dgram(), now);
+    let out = hconn_c.process(out.dgram(), now); // consume control streams.
     (out.dgram(), now)
 }
 
@@ -172,7 +173,7 @@ fn test_connect() {
 fn test_fetch() {
     let (mut hconn_c, mut hconn_s, dgram) = connect();
 
-    eprintln!("-----client");
+    qtrace!("-----client");
     let req = hconn_c
         .fetch(
             now(),
@@ -185,13 +186,13 @@ fn test_fetch() {
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
     let out = hconn_c.process(dgram, now());
-    eprintln!("-----server");
+    qtrace!("-----server");
     let out = hconn_s.process(out.dgram(), now());
     mem::drop(hconn_c.process(out.dgram(), now()));
     process_server_events(&mut hconn_s);
     let out = hconn_s.process(None, now());
 
-    eprintln!("-----client");
+    qtrace!("-----client");
     mem::drop(hconn_c.process(out.dgram(), now()));
     let out = hconn_s.process(None, now());
     mem::drop(hconn_c.process(out.dgram(), now()));
@@ -414,13 +415,16 @@ fn zerortt() {
 }
 
 #[test]
-fn test_fetch_noresponse_will_idletimeout() {
+/// When a client has an outstanding fetch, it will send keepalives.
+/// Test that it will successfully run until the connection times out.
+fn fetch_noresponse_will_idletimeout() {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 
-    let (dgram, mut now) = connect_peers_with_rtt(&mut hconn_c, &mut hconn_s, 10);
+    let (dgram, mut now) =
+        connect_peers_with_network_propagation_delay(&mut hconn_c, &mut hconn_s, 10);
 
-    eprintln!("-----client");
+    qtrace!("-----client");
     let req = hconn_c
         .fetch(
             now,
@@ -433,7 +437,7 @@ fn test_fetch_noresponse_will_idletimeout() {
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
     let _out = hconn_c.process(dgram, now);
-    eprintln!("-----server");
+    qtrace!("-----server");
 
     let mut done = false;
     while !done {
