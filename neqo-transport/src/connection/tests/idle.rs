@@ -6,9 +6,9 @@
 
 use super::super::{Connection, ConnectionParameters, IdleTimeout, Output, State};
 use super::{
-    connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_and_receive, send_something, AT_LEAST_PTO,
-    DEFAULT_STREAM_DATA,
+    connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, default_client,
+    default_server, maybe_authenticate, new_client, new_server, send_and_receive, send_something,
+    AT_LEAST_PTO, DEFAULT_STREAM_DATA,
 };
 use crate::packet::PacketBuilder;
 use crate::stats::FrameStats;
@@ -663,14 +663,16 @@ fn keep_alive_uni() {
 #[test]
 fn keep_alive_with_ack_eliciting_packet_lost() {
     const RTT: Duration = Duration::from_millis(500); // PTO will be ~1.1125s
-    // idle time  out  will be  set to ~ 5 * PTO. (IDLE_TIMEOUT/2 > pto and IDLE_TIMEOUT/2 < pto + 2pto)
+
+    // The idle time  out  will be  set to ~ 5 * PTO. (IDLE_TIMEOUT/2 > pto and IDLE_TIMEOUT/2 < pto + 2pto)
     // After handshake all packets will be lost. The following steps will happen after the handshake:
     //  - data will be sent on a stream that is marked for keep-alive, (at start time)
     //  - PTO timer will trigger first, and the data will be retransmited toghether with a PING, (at the start time + pto)
     //  - keep-alive timer will trigger and a keep-alive PING will be sent, (at the start time + IDLE_TIMEOUT / 2)
     //  - PTO timer will trigger again. (at the start time + pto + 2*pto)
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(6000); // > 5 * PTO;
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
+
     let mut client = new_client(ConnectionParameters::default().idle_timeout(IDLE_TIMEOUT));
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
@@ -698,7 +700,10 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     assert!(retransmit.is_some());
 
     // The next callback should be for an idle PING.
-    assert_eq!(client.process_output(now).callback(), IDLE_TIMEOUT / 2 - pto);
+    assert_eq!(
+        client.process_output(now).callback(),
+        IDLE_TIMEOUT / 2 - pto
+    );
 
     // Wait that long and the client should send a PING frame.
     now += IDLE_TIMEOUT / 2 - pto;
@@ -717,7 +722,10 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     assert!(retransmit.is_some());
 
     // The next callback will be an idle timeout.
-    assert_eq!(client.process_output(now).callback(), IDLE_TIMEOUT / 2 - 2 * pto);
+    assert_eq!(
+        client.process_output(now).callback(),
+        IDLE_TIMEOUT / 2 - 2 * pto
+    );
 
     now += IDLE_TIMEOUT / 2 - 2 * pto;
     let out = client.process_output(now);
