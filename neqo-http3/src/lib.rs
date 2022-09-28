@@ -498,5 +498,5 @@ impl CloseType {
     #[must_use]
     pub fn locally_initiated(&self) -> bool {
         matches!(self, CloseType::ResetApp(_))
-     }
+    }
 }

@@ -422,14 +422,12 @@ impl Http3Connection {
 
     pub fn handle_datagram(&mut self, datagram: &[u8]) {
         let mut decoder = Decoder::new(datagram);
-        let session = decoder.decode_varint().and_then(|id| {
-            self.recv_streams.get_mut(&StreamId::from(id))
-        }).and_then(|stream| {
-            stream.webtransport()
-        });
+        let session = decoder
+            .decode_varint()
+            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id)))
+            .and_then(|stream| stream.webtransport());
         if let Some(s) = session {
-            s.borrow_mut()
-                .datagram(decoder.decode_remainder().to_vec());
+            s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
         }
     }
 
