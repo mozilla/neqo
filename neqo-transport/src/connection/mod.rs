@@ -607,13 +607,13 @@ impl Connection {
         }
     }
 
-    /// Get a resumption token.  The correct way to obtain a resumption token is
-    /// waiting for the `ConnectionEvent::ResumptionToken` event.  However, some
-    /// servers don't send `NEW_TOKEN` frames and so that event might be slow in
-    /// arriving.  This is especially a problem for short-lived connections, where
-    /// the connection is closed before any events are released.  This retrieves
-    /// the token, without waiting for the `NEW_TOKEN` frame to arrive.
-    ///
+    /// The correct way to obtain a resumption token is to wait for the
+    /// `ConnectionEvent::ResumptionToken` event. To emit the event we are waiting for a
+    /// resumtion token and a `NEW_TOKEN` frame to arrive. Some servers don't send `NEW_TOKEN`
+    /// frames and in this case, we wait for 3xPTO before emitting an event. This is especially a
+    /// problem for short-lived connections, where the connection is closed before any events are
+    /// released. This function retrieves the token, without waiting for a `NEW_TOKEN` frame to
+    /// arrive.
     /// # Panics
     /// If this is called on a server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {

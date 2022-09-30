@@ -61,7 +61,7 @@ available.
 
 An example interaction with a socket:
 
-```
+```ignore
 let socket = match UdpSocket::bind(local_addr) {
     Err(e) => {
         eprintln!("Unable to bind UDP socket: {}", e);
@@ -113,7 +113,7 @@ events that can be obtain by calling
 [`Http3ServerEvent`](enum.Http3ServerEvent.html) respectively. They are informing the application
 when the connection changes state, when new data is received on a stream, etc.
 
-```
+```ignore
 ...
 
 while let Some(event) = client.next_event() {
