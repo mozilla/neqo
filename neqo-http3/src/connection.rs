@@ -327,6 +327,9 @@ impl Http3Connection {
         }
     }
 
+    /// Ths function is called when a not default feature needs to be negotiated. This is currently
+    /// only used for the WebTransport feature. The negotiation is done via the `SETTINGS` frame
+    /// and when the peer's `SETTINGS` frame has been received the listener will be called.
     pub fn set_features_listener(&mut self, feature_listener: Http3ClientEvents) {
         self.webtransport.set_listener(feature_listener);
     }
@@ -376,6 +379,10 @@ impl Http3Connection {
         !self.streams_with_pending_data.is_empty()
     }
 
+    /// This function calls the `send` function for all streams that have data to send. If a stream
+    /// has data to send it will be added to the `streams_with_pending_data` list.
+    ///
+    /// Control and QPACK streams are handled differently and are never added to the list.
     fn send_non_control_streams(&mut self, conn: &mut Connection) -> Res<()> {
         let to_send = mem::take(&mut self.streams_with_pending_data);
         for stream_id in to_send {
@@ -395,7 +402,8 @@ impl Http3Connection {
         Ok(())
     }
 
-    /// Call `send` for all streams that need to send data.
+    /// Call `send` for all streams that need to send data. See explanation for the main structure
+    /// for more details.
     pub fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local
@@ -431,6 +439,8 @@ impl Http3Connection {
         }
     }
 
+    /// This is called when a `ConnectionEvent::NewStream` event is received. This register the
+    /// stream with a `NewStreamHeadReader` handler.
     pub fn add_new_stream(&mut self, stream_id: StreamId) {
         qtrace!([self], "A new stream: {}.", stream_id);
         self.recv_streams.insert(
@@ -439,6 +449,8 @@ impl Http3Connection {
         );
     }
 
+    /// The function calls `receive` for a stream. It also deals with the outcome of a read by
+    /// calling `handle_stream_manipulation_output`.
     #[allow(clippy::option_if_let_else)] // False positive as borrow scope isn't lexical here.
     fn stream_receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<ReceiveOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
@@ -474,8 +486,9 @@ impl Http3Connection {
     /// This function handles reading from all streams, i.e. control, qpack, request/response
     /// stream and unidi stream that are still do not have a type.
     /// The function cannot handle:
-    /// 1) a Push stream (if an unknown unidi stream is decoded to be a push stream)
-    /// 2) frames `MaxPushId` or `Goaway` must be handled by `Http3Client`/`Server`.
+    /// 1) a `Push(_)`, `Htttp` or `WebTransportStream(_)` stream
+    /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway`
+    ///    must be handled by `Http3Client`/`Server`.
     /// The function returns `ReceiveOutput`.
     pub fn handle_stream_readable(
         &mut self,
@@ -645,10 +658,10 @@ impl Http3Connection {
         }
     }
 
-    /// If the new stream is a control stream, this function creates a proper handler
+    /// If the new stream is a control or QPACK stream, this function creates a proper handler
     /// and perform a read.
-    /// if the new stream is a push stream, the function returns `ReceiveOutput::PushStream`
-    /// and the caller will handle it.
+    /// if the new stream is a `Push(_)`, `Http` or `WebTransportStream(_)` stream, the function
+    /// returns `ReceiveOutput::NewStream(_)` and the caller will handle it.
     /// If the stream is of a unknown type the stream will be closed.
     fn handle_new_stream(
         &mut self,
@@ -1320,8 +1333,9 @@ impl Http3Connection {
             .send_datagram(conn, buf, id)
     }
 
-    // If the control stream has received frames MaxPushId or Goaway which handling is specific to
-    // the client and server, we must give them to the specific client/server handler.
+    /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or
+    /// `PriorityUpdateRequestPush` which handling is specific to the client and server, we must
+    /// give them to the specific client/server handler.
     fn handle_control_frame(&mut self, f: HFrame) -> Res<Option<HFrame>> {
         qinfo!([self], "Handle a control frame {:?}", f);
         if !matches!(f, HFrame::Settings { .. })
