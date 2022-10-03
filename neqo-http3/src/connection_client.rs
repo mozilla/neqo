@@ -589,7 +589,10 @@ impl Http3Client {
             .stream_stop_sending(&mut self.conn, stream_id, error)
     }
 
-    /// To supply a request body this function is called (headers are supplied through the `fetch` function.)
+    /// This function is used for regular HTTP requests and WebTransport streams.
+    /// In the case of regular HTTP requests, the request body is supplied using this function, and
+    /// headers are supplied through the `fetch` function.
+    ///
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
@@ -893,6 +896,11 @@ impl Http3Client {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
+                    // During this event we only add a new stream to the Http3Connection stream list,
+                    // with NewStreamHeadReader stream handler.
+                    // This function will not read from the stream and try to decode the stream.
+                    // RecvStreamReadable  will be emitted after this event and reading, i.e. decoding
+                    // of a stream will happen during that event.
                     self.base_handler.add_new_stream(stream_id);
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
