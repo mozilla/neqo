@@ -143,7 +143,7 @@ The API consists of:
 
 ## Streams
 
-Http3Connection holds a list of stream handlers. Each send and receive-handler is registered in
+Each `Http3Connection` holds a list of stream handlers. Each send and receive-handler is registered in
 `send_streams` and `recv_streams`. Unidirectional streams are registered only on one of the lists
 and bidirectional streams are registered in both lists and the 2 handlers are independent, e.g. one
 can be closed and removed ane second may still be active.
