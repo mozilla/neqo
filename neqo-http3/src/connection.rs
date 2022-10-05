@@ -66,7 +66,7 @@ enum Http3RemoteSettingsState {
 /// - Connected
 /// - GoingAway(StreamId): The connection has received a `GOAWAY` frame
 /// - Closing(ConnectionError): The connection is closed. The closing has been initiated by this
-///   end of the connection, e.g. the `CONNECTION_CLOSE` frame has been sent. In this state, the
+///   end of the connection, e.g., the `CONNECTION_CLOSE` frame has been sent. In this state, the
 ///   connection waits a certain amount of time to retransmit the `CONNECTION_CLOSE` frame if
 ///   needed.
 /// - Closed(ConnectionError): This is the final close state: closing has been initialized by the
