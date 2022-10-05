@@ -173,7 +173,7 @@ There are the following types of streams:
 The streams are registered in `send_streams` and `recv_streams` in following ways depending if they
 are local or remote:
 - local streams:
-  - all local stream will ve register with the appropriate handled.
+  - all local stream will be registered with the appropriate handler.
 - remote streams:
   - all new incoming streams are registed with NewStreamHeadReader. This is triggered by
     `ConnectionEvent::NewStream` and `add_new_stream` is called.
