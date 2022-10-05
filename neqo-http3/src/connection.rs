@@ -167,7 +167,7 @@ There are the following types of streams:
 - `WebTransport(StreamId)`: `WebTransportSendStream` and `WebTransportRecvStream` are responsible
                             sender and receiver handler.
 - `Unknown`: These are all other stream types that are not unknown to the current implementation
-             and should be handled properly by the spec, e.g in our implementation the streams are
+             and should be handled properly by the spec, e.g., in our implementation the streams are
              reset.
 
 The streams are registered in `send_streams` and `recv_streams` in following ways depending if they
