@@ -62,7 +62,7 @@ enum Http3RemoteSettingsState {
 
 /// States:
 /// - Initializing: this is the state during the QUIC handshake,
-/// - ZeroRtt: this is the state during the ZeroRtt phase,
+/// - `ZeroRtt`: 0-RTT has been enabled and is active
 /// - Connected
 /// - GoingAway(StreamId): The connection has received a `GOAWAY` frame
 /// - Closing(ConnectionError): The connection is closed. The closing has been initiated by this
