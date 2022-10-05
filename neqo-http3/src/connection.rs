@@ -175,7 +175,7 @@ are local or remote:
 - local streams:
   - all local stream will be registered with the appropriate handler.
 - remote streams:
-  - all new incoming streams are registed with NewStreamHeadReader. This is triggered by
+  - all new incoming streams are registered with NewStreamHeadReader. This is triggered by
     `ConnectionEvent::NewStream` and `add_new_stream` is called.
   - reading from a NewStreamHeadReader stream, via the `receive` function, will decode a stream
     type. `NewStreamHeadReader::receive` will return `ReceiveOutput::NewStream(_)` when a stream
