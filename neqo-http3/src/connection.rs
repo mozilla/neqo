@@ -97,7 +97,7 @@ impl Http3State {
 # HTTP/3 core implementation
 
 This is the core implementation of HTTP/3 protocol. It implements most of the features of the
-protocol. Http3Client and Http3ServerHandler implement only client and server side bbehavior.
+protocol. `Http3Client` and `Http3ServerHandler` implement only client and server side behavior.
 
 The API consists of:
 - functions that correspond to the Http3Client Http3ServerHandler API:
