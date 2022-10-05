@@ -278,7 +278,7 @@ WebTransport streams are associated with a session. `WebTransportSendStream` and
 are added to the session upon createion by `Http3Connection`. They will remove unregistered if they
 are reset or canceled.
 
-The call to function `receive` may produced `Http3ClientEvent::DataReadable`. Actual reading of
+The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Actual reading of
 data is done in the `read_data` function.
 */
 #[derive(Debug)]
