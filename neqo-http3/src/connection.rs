@@ -109,6 +109,7 @@ The API consists of:
   - `stream_stop_sending`
   - `cancel_fetch`
   - `stream_close_send`
+- functions that correspond to [WebTransport](https://w3c.github.io/webtransport/) functions:
   - `webtransport_create_session` -  only used by the client-side implementation
   - `webtransport_session_accept` -  only used by the server-side implementation
   - `webtransport_close_session`
