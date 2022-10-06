@@ -274,9 +274,9 @@ holds a list of its active streams and clean up is done in `remove_extended_conn
 ###  `WebTransportSendStream` and `WebTransportRecvStream`
 
 WebTransport streams are associated with a session. `WebTransportSendStream` and
-`WebTransportRecvStream` hold a reference to the session and are registered in the session. They
-are added to the session upon createion by `Http3Connection`. They will remove unregistered if they
-are reset or canceled.
+`WebTransportRecvStream` hold a reference to the session and are registered in the session upon
+ creation by `Http3Connection`. The `WebTransportSendStream` and `WebTransportRecvStream`
+ handlers will be unregistered from the session if they are closed, reset, or canceled.
 
 The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Actual reading of
 data is done in the `read_data` function.
