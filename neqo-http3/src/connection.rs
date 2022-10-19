@@ -307,7 +307,7 @@ impl Http3Connection {
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
-            _ => Ok(output),
+            ReceiveOutput::NoOutput => Ok(output),
         }
     }
 
