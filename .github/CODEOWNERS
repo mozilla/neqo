@@ -1,7 +1,7 @@
-*    @ddragana @martinthomson
+*    @KershawChang @martinthomson
 /docker/	@martinthomson
 /hooks/    @martinthomson
 /neqo-crypto/    @martinthomson
-/neqo-http3/    @ddragana
-/neqo-qpack/    @ddragana
+/neqo-http3/    @KershawChang
+/neqo-qpack/    @KershawChang
 /qns/    @martinthomson
