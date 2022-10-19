@@ -7,6 +7,134 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
+/*!
+
+# The HTTP/3 protocol
+
+This crate implements [RFC9114](https://datatracker.ietf.org/doc/html/rfc9114).
+
+The implementation depends on:
+ - [neqo-transport](../neqo_transport/index.html) --- implements the QUIC protocol
+   ([RFC9000](https://www.rfc-editor.org/info/rfc9000)) and
+ - [neqo-qpack](../neqo_qpack/index.html) --- implements QPACK
+   ([RFC9204](https://www.rfc-editor.org/info/rfc9204));
+
+## Features
+
+Both client and server-side HTTP/3 protocols are implemented, although the server-side
+implementation is not meant to be used in production and its only purpose is to facilitate testing
+of the client-side code.
+
+__`WebTransport`__
+([draft version 2](https://datatracker.ietf.org/doc/html/draft-vvv-webtransport-http3-02)) is
+supported and can be enabled using [`Http3Parameters`](struct.Http3Parameters.html).
+
+## Interaction with an application
+
+### Driving HTTP/3  session
+
+The crate does not create an OS level UDP socket, it produces, i.e. encodes, data that should be
+sent as a payload in a UDP packet and consumes data received on the UDP socket. For example,
+[`std::net::UdpSocket`](std::net::UdpSocket) or [`mio::net::UdpSocket`](https://crates.io/crates/mio)
+could be used for creating UDP sockets.
+
+The application is responsible for creating a socket, polling the socket, and sending and receiving
+data from the socket.
+
+In addition to receiving data HTTP/3 session’s actions may be triggered when a certain amount of
+time passes, e.g. after a certain amount of time data may be considered lost and should be
+retransmitted, packet pacing requires a timer, etc. The implementation does not use timers, but
+instead informs the application when processing needs to be triggered.
+
+
+The core functions for driving HTTP/3 sessions are:
+ - __On the client-side__ :
+   - [`process_output`](struct.Http3Client.html#method.process_output) used for producing UDP
+payload. If a payload is not produced this function returns a callback time, e.g. the time when
+[`process_output`](struct.Http3Client.html#method.process_output) should be called again.
+   - [`process_input`](struct.Http3Client.html#method.process_input)  used consuming UDP payload.
+   - [`process`](struct.Http3Client.html#method.process) combines the 2 functions into one, i.e. it
+consumes UDP payload if available and produces some UDP payload to be sent or returns a
+callback time.
+- __On the server-side__ only [`process`](struct.Http3Server.html#method.process) is
+available.
+
+An example interaction with a socket:
+
+```ignore
+let socket = match UdpSocket::bind(local_addr) {
+    Err(e) => {
+        eprintln!("Unable to bind UDP socket: {}", e);
+    }
+    Ok(s) => s,
+};
+let mut client = Http3Client::new(...);
+
+...
+
+// process_output can return 3 values, data to be sent, time duration when process_output should
+// be called, and None when Http3Client is done.
+match client.process_output(Instant::now()) {
+    Output::Datagram(dgram) => {
+        // Send dgram on a socket.
+        socket.send_to(&dgram[..], dgram.destination())
+
+    }
+    Output::Callback(duration) => {
+        // the client is idle for “duration”, set read timeout on the socket to this value and
+        // poll the socket for reading in the meantime.
+        socket.set_read_timeout(Some(duration)).unwrap();
+    }
+    Output::None => {
+        // client is done.
+    }
+};
+
+...
+
+// Reading new data coming for the network.
+match socket.recv_from(&mut buf[..]) {
+     Ok((sz, remote)) => {
+        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+        client.process_input(d, Instant::now());
+    }
+    Err(err) => {
+         eprintln!("UDP error: {}", err);
+    }
+}
+ ```
+
+### HTTP/3 session events
+
+[`Http3Client`](struct.Http3Client.html) and [`Http3Server`](struct.Http3Server.html) produce
+events that can be obtain by calling
+[`next_event`](neqo_common/event/trait.Provider.html#tymethod.next_event). The events are of type
+[`Http3ClientEvent`](enum.Http3ClientEvent.html) and
+[`Http3ServerEvent`](enum.Http3ServerEvent.html) respectively. They are informing the application
+when the connection changes state, when new data is received on a stream, etc.
+
+```ignore
+...
+
+while let Some(event) = client.next_event() {
+    match event {
+        Http3ClientEvent::DataReadable { stream_id } => {
+            println!("New data available on stream {}", stream_id);
+        }
+        Http3ClientEvent::StateChange(Http3State::Connected) => {
+            println!("Http3 session is in state Connected now");
+        }
+        _ => {
+            println!("Unhandled event {:?}", event);
+        }
+    }
+}
+```
+
+
+
+*/
+
 mod buffered_send_stream;
 mod client_events;
 mod conn_params;
