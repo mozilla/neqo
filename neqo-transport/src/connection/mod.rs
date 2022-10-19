@@ -609,7 +609,7 @@ impl Connection {
 
     /// The correct way to obtain a resumption token is to wait for the
     /// `ConnectionEvent::ResumptionToken` event. To emit the event we are waiting for a
-    /// resumtion token and a `NEW_TOKEN` frame to arrive. Some servers don't send `NEW_TOKEN`
+    /// resumption token and a `NEW_TOKEN` frame to arrive. Some servers don't send `NEW_TOKEN`
     /// frames and in this case, we wait for 3xPTO before emitting an event. This is especially a
     /// problem for short-lived connections, where the connection is closed before any events are
     /// released. This function retrieves the token, without waiting for a `NEW_TOKEN` frame to

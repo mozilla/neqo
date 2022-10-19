@@ -25,7 +25,7 @@ Both client and server-side HTTP/3 protocols are implemented, although the serve
 implementation is not meant to be used in production and its only purpose is to facilitate testing
 of the client-side code.
 
-__WebTransport__
+__`WebTransport`__
 ([draft version 2](https://datatracker.ietf.org/doc/html/draft-vvv-webtransport-http3-02)) is
 supported and can be enabled using [`Http3Parameters`](struct.Http3Parameters.html).
 
@@ -35,7 +35,7 @@ supported and can be enabled using [`Http3Parameters`](struct.Http3Parameters.ht
 
 The crate does not create an OS level UDP socket, it produces, i.e. encodes, data that should be
 sent as a payload in a UDP packet and consumes data received on the UDP socket. For example,
-[std::net::UdpSocket](std::net::UdpSocket) or [mio::net::UdpSocket](https://crates.io/crates/mio)
+[`std::net::UdpSocket`](std::net::UdpSocket) or [`mio::net::UdpSocket`](https://crates.io/crates/mio)
 could be used for creating UDP sockets.
 
 The application is responsible for creating a socket, polling the socket, and sending and receiving

@@ -64,7 +64,7 @@ fn alpn_from_quic_version(version: Version) -> &'static str {
 ///
 /// This module implements the HTTP/3 client API. The main implementation of the protocol is in
 /// [connection.rs](https://github.com/mozilla/neqo/blob/main/neqo-http3/src/connection.rs) which
-/// implements common behavior for the client-side and the server-side. Http3Client structure
+/// implements common behavior for the client-side and the server-side. `Http3Client` structure
 /// implements the public API and set of functions that differ between the client and the server.
 
 /// The API is used for:
@@ -101,7 +101,7 @@ fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`set_stream_max_data`](struct.Http3Client.html#method.set_stream_max_data)
 /// - priority feature:
 ///   - [`priority_update`](struct.Http3Client.html#method.priority_update)
-/// - WebTransport feature:
+/// - `WebTransport` feature:
 ///   - [`webtransport_create_session`](struct.Http3Client.html#method.webtransport_create_session)
 ///   - [`webtransport_close_session`](struct.Http3Client.html#method.webtransport_close_session)
 ///   - [`webtransport_create_stream`](struct.Http3Client.html#method.webtransport_create_sstream)
@@ -161,7 +161,7 @@ fn alpn_from_quic_version(version: Version) -> &'static str {
 /// }
 ///```
 ///
-/// ### Crearing a WebTransport session
+/// ### Creating a `WebTransport` session
 ///
 /// ```ignore
 /// let mut client = Http3Client::new(...);
@@ -198,7 +198,7 @@ fn alpn_from_quic_version(version: Version) -> &'static str {
 ///
 ///```
 ///
-/// ### WebTransport: create a stream, send and receive data on the stream
+/// ### `WebTransport`: create a stream, send and receive data on the stream
 ///
 /// ```ignore
 /// const BUF_CLIENT: &[u8] = &[0; 10];
@@ -243,7 +243,7 @@ fn alpn_from_quic_version(version: Version) -> &'static str {
 /// }
 /// ```
 ///
-/// ### WebTransport: receive a new stream form the server
+/// ### `WebTransport`: receive a new stream form the server
 ///
 /// ```ignore
 /// // wt_session_id is the session ID of a newly created WebTransport session, see the example above.
@@ -589,7 +589,7 @@ impl Http3Client {
             .stream_stop_sending(&mut self.conn, stream_id, error)
     }
 
-    /// This function is used for regular HTTP requests and WebTransport streams.
+    /// This function is used for regular HTTP requests and `WebTransport` streams.
     /// In the case of regular HTTP requests, the request body is supplied using this function, and
     /// headers are supplied through the `fetch` function.
     ///
@@ -969,9 +969,9 @@ impl Http3Client {
     /// server. The following actions need to be handled by the client-specific code:
     ///  - `ReceiveOutput::NewStream(NewStreamType::Push(_))` - the server cannot receive a push
     ///    stream,
-    ///  - ReceiveOutput::NewStream(NewStreamType::Http) - client cannot  receive a
+    ///  - `ReceiveOutput::NewStream(NewStreamType::Http)` - client cannot  receive a
     ///    server-initiated HTTP request,
-    ///  - ReceiveOutput::NewStream(NewStreamType::WebTransportStream(_))` - because
+    ///  - `ReceiveOutput::NewStream(NewStreamType::WebTransportStream(_))` - because
     ///    `Http3ClientEvents`is needed and events handler is specific to the client.
     ///  - `ReceiveOutput::ControlFrames(control_frames)` - some control frame handling differs
     ///     between the  client and the server:
