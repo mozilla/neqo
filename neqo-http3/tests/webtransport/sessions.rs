@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::webtransport::{default_http3_server, WtTest};
+use crate::webtransport::{default_http3_server, wt_default_parameters, WtTest};
 use neqo_common::{event::Provider, Encoder};
 use neqo_http3::{
     features::extended_connect::SessionCloseReason, frames::WebTransportFrame, Error, Header,
@@ -342,7 +342,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
             .webtransport(true)
             .connection_parameters(ConnectionParameters::default().max_data(LIMIT)),
     );
-    let server = default_http3_server(true);
+    let server = default_http3_server(wt_default_parameters());
     let mut wt = WtTest::new_with(client, server);
 
     let mut wt_session = wt.create_wt_session();

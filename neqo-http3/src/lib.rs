@@ -494,4 +494,9 @@ impl CloseType {
             Self::Done => None,
         }
     }
+
+    #[must_use]
+    pub fn locally_initiated(&self) -> bool {
+        matches!(self, CloseType::ResetApp(_))
+    }
 }

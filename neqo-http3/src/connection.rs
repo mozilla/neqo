@@ -27,11 +27,12 @@ use crate::{
     HttpRecvStreamEvents, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvStream,
     RecvStreamEvents, SendStream, SendStreamEvents,
 };
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Header, MessageType, Role};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{
-    AppError, Connection, ConnectionError, State, StreamId, StreamType, ZeroRttState,
+    AppError, Connection, ConnectionError, DatagramTracking, State, StreamId, StreamType,
+    ZeroRttState,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -416,6 +417,17 @@ impl Http3Connection {
         } else {
             debug_assert!(false, "Zero rtt rejected in the wrong state.");
             Err(Error::HttpInternal(3))
+        }
+    }
+
+    pub fn handle_datagram(&mut self, datagram: &[u8]) {
+        let mut decoder = Decoder::new(datagram);
+        let session = decoder
+            .decode_varint()
+            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id)))
+            .and_then(|stream| stream.webtransport());
+        if let Some(s) = session {
+            s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
         }
     }
 
@@ -1090,6 +1102,22 @@ impl Http3Connection {
         }
     }
 
+    pub fn webtransport_send_datagram(
+        &mut self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: impl Into<DatagramTracking>,
+    ) -> Res<()> {
+        self.recv_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .webtransport()
+            .ok_or(Error::InvalidStreamId)?
+            .borrow_mut()
+            .send_datagram(conn, buf, id)
+    }
+
     // If the control stream has received frames MaxPushId or Goaway which handling is specific to
     // the client and server, we must give them to the specific client/server handler.
     fn handle_control_frame(&mut self, f: HFrame) -> Res<Option<HFrame>> {
@@ -1266,11 +1294,7 @@ impl Http3Connection {
         wt: &Rc<RefCell<WebTransportSession>>,
         conn: &mut Connection,
     ) {
-        let out = wt.borrow_mut().take_sub_streams();
-        if out.is_none() {
-            return;
-        }
-        let (recv, send) = out.unwrap();
+        let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         for id in recv {
             qtrace!("Remove the extended connect sub receiver stream {}", id);

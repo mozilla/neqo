@@ -21,10 +21,11 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
-    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
+    Output, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::mem;
@@ -478,6 +479,34 @@ impl Http3Client {
         )
     }
 
+    /// Send `WebTransport` datagram.
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// the allowed remote datagram size.
+    pub fn webtransport_send_datagram(
+        &mut self,
+        session_id: StreamId,
+        buf: &[u8],
+        id: impl Into<DatagramTracking>,
+    ) -> Res<()> {
+        qtrace!("webtransport_send_datagram session:{:?}", session_id);
+        self.base_handler
+            .webtransport_send_datagram(session_id, &mut self.conn, buf, id)
+    }
+
+    /// Returns the current max size of a datagram that can fit into a packet.
+    /// The value will change over time depending on the encoded size of the
+    ///  packet number, ack frames, etc.
+    /// # Errors
+    /// The function returns `NotAvailable` if datagrams are not enabled.
+    /// # Panics
+    /// This cannot panic. The max varint length is 8.
+    pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
+        Ok(self.conn.max_datagram_size()?
+            - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
+    }
+
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");
         if let Some(d) = dgram {
@@ -617,8 +646,10 @@ impl Http3Client {
                         self.events.resumption_token(t);
                     }
                 }
+                ConnectionEvent::Datagram(dgram) => {
+                    self.base_handler.handle_datagram(&dgram);
+                }
                 ConnectionEvent::SendStreamComplete { .. }
-                | ConnectionEvent::Datagram { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
                 | ConnectionEvent::IncomingDatagramDropped => {}
             }

@@ -17,7 +17,7 @@ use crate::{
 };
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, DatagramTracking, StreamId};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -209,14 +209,13 @@ impl WebTransportSession {
         }
         qtrace!("ExtendedConnect close the session");
         self.state = SessionState::Done;
-        if let CloseType::ResetApp(_) = close_type {
-            return;
+        if !close_type.locally_initiated() {
+            self.events.session_end(
+                ExtendedConnectType::WebTransport,
+                self.session_id,
+                SessionCloseReason::from(close_type),
+            );
         }
-        self.events.session_end(
-            ExtendedConnectType::WebTransport,
-            self.session_id,
-            SessionCloseReason::from(close_type),
-        );
     }
 
     /// # Panics
@@ -323,11 +322,11 @@ impl WebTransportSession {
         matches!(self.state, SessionState::Active)
     }
 
-    pub fn take_sub_streams(&mut self) -> Option<(BTreeSet<StreamId>, BTreeSet<StreamId>)> {
-        Some((
+    pub fn take_sub_streams(&mut self) -> (BTreeSet<StreamId>, BTreeSet<StreamId>) {
+        (
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
-        ))
+        )
     }
 
     /// # Errors
@@ -390,6 +389,33 @@ impl WebTransportSession {
 
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
         self.control_stream_send.send_data(conn, buf)
+    }
+
+    /// # Errors
+    /// Returns an error if the datagram exceeds the remote datagram size limit.
+    pub fn send_datagram(
+        &self,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: impl Into<DatagramTracking>,
+    ) -> Res<()> {
+        qtrace!([self], "send_datagram state={:?}", self.state);
+        if let SessionState::Active = self.state {
+            let mut dgram_data = Encoder::default();
+            dgram_data.encode_varint(self.session_id.as_u64() / 4);
+            dgram_data.encode(buf);
+            conn.send_datagram(dgram_data.as_ref(), id)?;
+        } else {
+            debug_assert!(false);
+            return Err(Error::Unavailable);
+        }
+        Ok(())
+    }
+
+    pub fn datagram(&mut self, datagram: Vec<u8>) {
+        if let SessionState::Active = self.state {
+            self.events.new_datagram(self.session_id, datagram);
+        }
     }
 }
 

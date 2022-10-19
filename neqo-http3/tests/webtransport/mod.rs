@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+mod datagrams;
 mod negotiation;
 mod sessions;
 mod streams;
@@ -15,7 +16,7 @@ use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
 };
-use neqo_transport::{StreamId, StreamType};
+use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use std::cell::RefCell;
 use std::rc::Rc;
 use test_fixture::{
@@ -23,27 +24,35 @@ use test_fixture::{
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,
 };
 
-pub fn default_http3_client(webtransport: bool) -> Http3Client {
+const DATAGRAM_SIZE: u64 = 1200;
+
+pub fn wt_default_parameters() -> Http3Parameters {
+    Http3Parameters::default()
+        .webtransport(true)
+        .connection_parameters(ConnectionParameters::default().datagram_size(DATAGRAM_SIZE))
+}
+
+pub fn default_http3_client(client_params: Http3Parameters) -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        Http3Parameters::default().webtransport(webtransport),
+        client_params,
         now(),
     )
     .expect("create a default client")
 }
 
-pub fn default_http3_server(webtransport: bool) -> Http3Server {
+pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        Http3Parameters::default().webtransport(webtransport),
+        server_params,
         None,
     )
     .expect("create a server")
@@ -89,9 +98,12 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     let _ = server.process(out.dgram(), now());
 }
 
-fn connect(wt_enable_client: bool, wt_enable_server: bool) -> (Http3Client, Http3Server) {
-    let mut client = default_http3_client(wt_enable_client);
-    let mut server = default_http3_server(wt_enable_server);
+fn connect(
+    client_params: Http3Parameters,
+    server_params: Http3Parameters,
+) -> (Http3Client, Http3Server) {
+    let mut client = default_http3_client(client_params);
+    let mut server = default_http3_server(server_params);
     connect_with(&mut client, &mut server);
     (client, server)
 }
@@ -103,7 +115,12 @@ struct WtTest {
 
 impl WtTest {
     pub fn new() -> Self {
-        let (client, server) = connect(true, true);
+        let (client, server) = connect(wt_default_parameters(), wt_default_parameters());
+        Self { client, server }
+    }
+
+    pub fn new_with_params(client_params: Http3Parameters, server_params: Http3Parameters) -> Self {
+        let (client, server) = connect(client_params, server_params);
         Self { client, server }
     }
 
@@ -543,5 +560,67 @@ impl WtTest {
         message: &str,
     ) {
         wt_session.close_session(error, message).unwrap();
+    }
+
+    fn max_datagram_size(&self, stream_id: StreamId) -> Result<u64, Error> {
+        self.client.webtransport_max_datagram_size(stream_id)
+    }
+
+    fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<(), Error> {
+        self.client.webtransport_send_datagram(stream_id, buf, None)
+    }
+
+    fn check_datagram_received_client(
+        &mut self,
+        expected_stream_id: StreamId,
+        expected_dgram: &[u8],
+    ) {
+        let wt_datagram_event = |e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Datagram {
+                    session_id,
+                    datagram
+                }) if session_id == expected_stream_id && datagram == expected_dgram
+            )
+        };
+        assert!(self.client.events().any(wt_datagram_event));
+    }
+
+    fn check_datagram_received_server(
+        &mut self,
+        expected_session: &WebTransportRequest,
+        expected_dgram: &[u8],
+    ) {
+        let wt_datagram_event = |e| {
+            matches!(
+                e,
+                Http3ServerEvent::WebTransport(WebTransportServerEvent::Datagram {
+                    session,
+                    datagram
+                }) if session.stream_id() == expected_session.stream_id() && datagram == expected_dgram
+            )
+        };
+        assert!(self.server.events().any(wt_datagram_event));
+    }
+
+    fn check_no_datagram_received_client(&mut self) {
+        let wt_datagram_event = |e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Datagram { .. })
+            )
+        };
+        assert!(!self.client.events().any(wt_datagram_event));
+    }
+
+    fn check_no_datagram_received_server(&mut self) {
+        let wt_datagram_event = |e| {
+            matches!(
+                e,
+                Http3ServerEvent::WebTransport(WebTransportServerEvent::Datagram { .. })
+            )
+        };
+        assert!(!self.server.events().any(wt_datagram_event));
     }
 }
