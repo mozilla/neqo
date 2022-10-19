@@ -6,8 +6,8 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-pub mod webtransport_session;
-pub mod webtransport_streams;
+pub(crate) mod webtransport_session;
+pub(crate) mod webtransport_streams;
 
 use crate::client_events::Http3ClientEvents;
 use crate::features::NegotiationState;
@@ -15,7 +15,7 @@ use crate::settings::{HSettingType, HSettings};
 use crate::{CloseType, Http3StreamInfo, Http3StreamType};
 use neqo_transport::{AppError, StreamId};
 use std::fmt::Debug;
-pub use webtransport_session::WebTransportSession;
+pub(crate) use webtransport_session::WebTransportSession;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SessionCloseReason {
@@ -38,7 +38,7 @@ impl From<CloseType> for SessionCloseReason {
     }
 }
 
-pub trait ExtendedConnectEvents: Debug {
+pub(crate) trait ExtendedConnectEvents: Debug {
     fn session_start(&self, connect_type: ExtendedConnectType, stream_id: StreamId, status: u16);
     fn session_end(
         &self,
@@ -51,7 +51,7 @@ pub trait ExtendedConnectEvents: Debug {
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
-pub enum ExtendedConnectType {
+pub(crate) enum ExtendedConnectType {
     WebTransport,
 }
 
@@ -60,12 +60,6 @@ impl ExtendedConnectType {
     #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     pub fn string(&self) -> &str {
         "webtransport"
-    }
-
-    #[must_use]
-    #[allow(clippy::unused_self)] // this will change when there is more types of the extended CONNECT.
-    pub fn setting_type(self) -> HSettingType {
-        HSettingType::EnableWebTransport
     }
 
     #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
@@ -83,7 +77,7 @@ impl From<ExtendedConnectType> for HSettingType {
 }
 
 #[derive(Debug)]
-pub struct ExtendedConnectFeature {
+pub(crate) struct ExtendedConnectFeature {
     feature_negotiation: NegotiationState,
 }
 

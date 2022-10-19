@@ -42,7 +42,7 @@ use std::rc::Rc;
 
 use crate::{Error, Res};
 
-pub struct RequestDescription<'b, 't, T>
+pub(crate) struct RequestDescription<'b, 't, T>
 where
     T: AsRequestTarget<'t> + ?Sized + Debug,
 {
@@ -307,7 +307,7 @@ impl Http3Connection {
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
-            _ => Ok(output),
+            ReceiveOutput::NoOutput => Ok(output),
         }
     }
 

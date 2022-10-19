@@ -251,7 +251,7 @@ pub struct Connection {
     received_untracked: bool,
 
     /// This is responsible for the QuicDatagrams' handling:
-    /// https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
+    /// <https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram>
     quic_datagrams: QuicDatagrams,
 
     pub(crate) crypto: Crypto,

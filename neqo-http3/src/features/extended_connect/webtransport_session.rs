@@ -39,7 +39,7 @@ impl SessionState {
 }
 
 #[derive(Debug)]
-pub struct WebTransportSession {
+pub(crate) struct WebTransportSession {
     control_stream_recv: Box<dyn RecvStream>,
     control_stream_send: Box<dyn SendStream>,
     stream_event_listener: Rc<RefCell<WebTransportSessionListener>>,
