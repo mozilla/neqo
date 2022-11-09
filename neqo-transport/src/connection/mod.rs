@@ -2222,7 +2222,12 @@ impl Connection {
             let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
-                    qdebug!([self], "pad Initial to path MTU {}", mtu);
+                    qdebug!(
+                        [self],
+                        "pad Initial from {} to path MTU {}",
+                        packets.len(),
+                        mtu
+                    );
                     initial.size += mtu - packets.len();
                     packets.resize(mtu, 0);
                 }
