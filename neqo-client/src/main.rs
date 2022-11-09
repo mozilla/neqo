@@ -490,9 +490,9 @@ impl<'a> Handler<'a> {
                 self.streams.insert(client_stream_id, out_file);
                 true
             }
-            _e @ Err(Error::TransportError(TransportError::StreamLimitError))
-            | _e @ Err(Error::StreamLimitError)
-            | _e @ Err(Error::Unavailable) => {
+            Err(Error::TransportError(TransportError::StreamLimitError))
+            | Err(Error::StreamLimitError)
+            | Err(Error::Unavailable) => {
                 self.url_queue.push_front(url);
                 false
             }
