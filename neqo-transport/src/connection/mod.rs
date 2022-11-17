@@ -661,20 +661,20 @@ impl Connection {
         qtrace!([self], "  RTT {:?}", rtt);
 
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!([self], "  transport parameters {}", hex(&tp_slice));
+        qtrace!([self], "  transport parameters {}", hex(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp =
             TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!([self], "  Initial token {}", hex(&init_token));
+        qtrace!([self], "  Initial token {}", hex(init_token));
 
         let tok = dec.decode_remainder();
-        qtrace!([self], "  TLS token {}", hex(&tok));
+        qtrace!([self], "  TLS token {}", hex(tok));
 
         match self.crypto.tls {
             Agent::Client(ref mut c) => {
-                let res = c.enable_resumption(&tok);
+                let res = c.enable_resumption(tok);
                 if let Err(e) = res {
                     self.absorb_error::<Error>(now, Err(Error::from(e)));
                     return Ok(());
@@ -2101,7 +2101,7 @@ impl Connection {
 
         // Determine how we are sending packets (PTO, etc..).
         let mtu = path.borrow().mtu();
-        let profile = self.loss_recovery.send_profile(&*path.borrow(), now);
+        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
         // Frames for different epochs must go in different packets, but then these
@@ -2362,7 +2362,7 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
+        qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow());
         Ok(())
     }
 

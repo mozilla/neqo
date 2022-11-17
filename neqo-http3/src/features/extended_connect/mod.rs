@@ -32,7 +32,7 @@ impl From<CloseType> for SessionCloseReason {
             }
             CloseType::Done => SessionCloseReason::Clean {
                 error: 0,
-                message: "".to_string(),
+                message: String::new(),
             },
         }
     }
