@@ -240,7 +240,7 @@ impl WebTransportSession {
                         self.session_id,
                         SessionCloseReason::Clean {
                             error: 0,
-                            message: "".to_string(),
+                            message: String::new(),
                         },
                     );
                     self.state = SessionState::Done;
@@ -264,7 +264,7 @@ impl WebTransportSession {
                             self.session_id,
                             SessionCloseReason::Clean {
                                 error: 0,
-                                message: "".to_string(),
+                                message: String::new(),
                             },
                         );
                         SessionState::Done
@@ -357,7 +357,7 @@ impl WebTransportSession {
                 self.session_id,
                 SessionCloseReason::Clean {
                     error: 0,
-                    message: "".to_string(),
+                    message: String::new(),
                 },
             );
             self.state = SessionState::Done;

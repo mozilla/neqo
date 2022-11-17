@@ -127,7 +127,7 @@ fn connect_peers_with_network_propagation_delay(
     let out = hconn_c.process(out.dgram(), now); // ACK
     now += net_delay;
     let out = hconn_s.process(out.dgram(), now); //consume ACK
-    assert!(out.dgram() == None);
+    assert!(out.dgram().is_none());
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     now += net_delay;
