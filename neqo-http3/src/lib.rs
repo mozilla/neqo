@@ -169,7 +169,7 @@ use crate::priority::PriorityHandler;
 use buffered_send_stream::BufferedStream;
 pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
-pub use connection::Http3State;
+pub use connection::{Http3State, WebTransportSessionAcceptAction};
 pub use connection_client::Http3Client;
 use features::extended_connect::WebTransportSession;
 use frames::HFrame;
