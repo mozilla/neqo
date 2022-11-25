@@ -5,10 +5,8 @@
 // except according to those terms.
 
 #![allow(clippy::module_name_repetitions)]
-
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
-
 use crate::client_events::Http3ClientEvents;
 use crate::features::NegotiationState;
 use crate::settings::{HSettingType, HSettings};
@@ -102,3 +100,5 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.enabled()
     }
 }
+#[cfg(test)]
+mod tests;

@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::webtransport::WtTest;
-use neqo_http3::{features::extended_connect::SessionCloseReason, Error};
+use crate::features::extended_connect::tests::webtransport::WtTest;
+use crate::{features::extended_connect::SessionCloseReason, Error};
 use neqo_transport::StreamType;
 use std::mem;
 

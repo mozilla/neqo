@@ -4,21 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-mod datagrams;
-mod negotiation;
-mod sessions;
-mod streams;
+pub(crate) mod datagrams;
+pub(crate) mod negotiation;
+pub(crate) mod sessions;
+pub(crate) mod streams;
+
 use neqo_common::event::Provider;
 
-use neqo_crypto::AuthenticationStatus;
-use neqo_http3::{
+use crate::{
     features::extended_connect::SessionCloseReason, Error, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
 };
+use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use std::cell::RefCell;
 use std::rc::Rc;
+
 use test_fixture::{
     addr, anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ALPN_H3,
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,

@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::webtransport::{wt_default_parameters, WtTest, DATAGRAM_SIZE};
+use crate::features::extended_connect::tests::webtransport::{
+    wt_default_parameters, WtTest, DATAGRAM_SIZE,
+};
+use crate::{Error, Http3Parameters};
 use neqo_common::Encoder;
-use neqo_http3::{Error, Http3Parameters};
 use neqo_transport::Error as TransportError;
 use std::convert::TryFrom;
 
