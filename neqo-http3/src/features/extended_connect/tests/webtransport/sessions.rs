@@ -10,7 +10,7 @@ use crate::features::extended_connect::tests::webtransport::{
 use crate::{
     features::extended_connect::SessionCloseReason, frames::WebTransportFrame, Error, Header,
     Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent, Http3State,
-    Priority, WebTransportEvent, WebTransportServerEvent,
+    Priority, WebTransportEvent, WebTransportServerEvent, WebTransportSessionAcceptAction,
 };
 use neqo_common::{event::Provider, Encoder};
 use neqo_transport::StreamType;
@@ -26,7 +26,9 @@ fn wt_session() {
 #[test]
 fn wt_session_reject() {
     let mut wt = WtTest::new();
-    let (wt_session_id, _wt_session) = wt.negotiate_wt_session(false);
+    let accept_res =
+        WebTransportSessionAcceptAction::Reject([Header::new(":status", "404")].to_vec());
+    let (wt_session_id, _wt_session) = wt.negotiate_wt_session(&accept_res);
 
     wt.check_session_closed_event_client(wt_session_id, &SessionCloseReason::Status(404));
 }
@@ -102,7 +104,7 @@ fn wt_session_close_server_reset() {
 }
 
 #[test]
-fn wt_session_respone_with_1xx() {
+fn wt_session_response_with_1xx() {
     let mut wt = WtTest::new();
 
     let wt_session_id = wt
@@ -136,7 +138,9 @@ fn wt_session_respone_with_1xx() {
     wt_server_session
         .send_headers(&[Header::new(":status", "111")])
         .unwrap();
-    wt_server_session.response(true).unwrap();
+    wt_server_session
+        .response(&WebTransportSessionAcceptAction::Accept)
+        .unwrap();
 
     wt.exchange_packets();
 
@@ -152,6 +156,19 @@ fn wt_session_respone_with_1xx() {
     assert!(wt.client.events().any(wt_session_negotiated_event));
 
     assert_eq!(wt_session_id, wt_server_session.stream_id());
+}
+
+#[test]
+fn wt_session_response_with_redirect() {
+    let mut wt = WtTest::new();
+
+    let accept_res = WebTransportSessionAcceptAction::Reject(
+        [Header::new(":status", "302"), Header::new("location", "/")].to_vec(),
+    );
+
+    let (wt_session_id, _wt_session) = wt.negotiate_wt_session(&accept_res);
+
+    wt.check_session_closed_event_client(wt_session_id, &SessionCloseReason::Status(302));
 }
 
 #[test]
@@ -183,7 +200,9 @@ fn wt_session_respone_200_with_fin() {
     }
 
     let mut wt_server_session = wt_server_session.unwrap();
-    wt_server_session.response(true).unwrap();
+    wt_server_session
+        .response(&WebTransportSessionAcceptAction::Accept)
+        .unwrap();
     wt_server_session.stream_close_send().unwrap();
 
     wt.exchange_packets();

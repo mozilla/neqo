@@ -8,13 +8,13 @@ mod datagrams;
 mod negotiation;
 mod sessions;
 mod streams;
-
 use neqo_common::event::Provider;
 
 use crate::{
     features::extended_connect::SessionCloseReason, Error, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
+    WebTransportSessionAcceptAction,
 };
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
@@ -130,7 +130,10 @@ impl WtTest {
         connect_with(&mut client, &mut server);
         Self { client, server }
     }
-    fn negotiate_wt_session(&mut self, accept: bool) -> (StreamId, Option<WebTransportRequest>) {
+    fn negotiate_wt_session(
+        &mut self,
+        accept: &WebTransportSessionAcceptAction,
+    ) -> (StreamId, Option<WebTransportRequest>) {
         let wt_session_id = self
             .client
             .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
@@ -167,7 +170,8 @@ impl WtTest {
     }
 
     fn create_wt_session(&mut self) -> WebTransportRequest {
-        let (wt_session_id, wt_server_session) = self.negotiate_wt_session(true);
+        let (wt_session_id, wt_server_session) =
+            self.negotiate_wt_session(&WebTransportSessionAcceptAction::Accept);
         let wt_session_negotiated_event = |e| {
             matches!(
                 e,

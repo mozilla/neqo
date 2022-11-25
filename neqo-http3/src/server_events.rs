@@ -245,7 +245,7 @@ impl WebTransportRequest {
     /// Respond to a `WebTransport` session request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&mut self, accept: WebTransportSessionAcceptAction) -> Res<()> {
+    pub fn response(&mut self, accept: &WebTransportSessionAcceptAction) -> Res<()> {
         qinfo!([self], "Set a response for a WebTransport session.");
         self.stream_handler
             .handler

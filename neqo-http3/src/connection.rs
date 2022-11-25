@@ -55,16 +55,14 @@ where
 
 pub enum WebTransportSessionAcceptAction {
     Accept,
-    Reject,
-    Redirect
+    Reject(Vec<Header>),
 }
 
 impl ::std::fmt::Display for WebTransportSessionAcceptAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         match self {
-            WebTransportSessionAcceptAction::Accept => write!(f, "Accept"),
-            WebTransportSessionAcceptAction::Reject => write!(f, "Reject"),
-            WebTransportSessionAcceptAction::Redirect => write!(f, "Redirect"),
+            WebTransportSessionAcceptAction::Accept => f.write_str("Accept"),
+            WebTransportSessionAcceptAction::Reject(_) => f.write_str("Reject"),
         }
     }
 }
@@ -1116,9 +1114,12 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
-        accept_res: WebTransportSessionAcceptAction,
+        accept_res: &WebTransportSessionAcceptAction,
     ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={}.", accept_res);
+        qtrace!(
+            "Respond to WebTransport session with accept={}.",
+            accept_res
+        );
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -1142,10 +1143,10 @@ impl Http3Connection {
                 self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 Err(Error::InvalidStreamId)
             }
-            (Some(s), Some(_r), WebTransportSessionAcceptAction::Reject) => {
+            (Some(s), Some(_r), WebTransportSessionAcceptAction::Reject(headers)) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "404")], conn)
+                    .send_headers(headers, conn)
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
@@ -1160,34 +1161,6 @@ impl Http3Connection {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
                     .send_headers(&[Header::new(":status", "200")], conn)
-                    .is_ok()
-                {
-                    let extended_conn =
-                        Rc::new(RefCell::new(WebTransportSession::new_with_http_streams(
-                            stream_id,
-                            events,
-                            self.role,
-                            self.recv_streams.remove(&stream_id).unwrap(),
-                            self.send_streams.remove(&stream_id).unwrap(),
-                        )));
-                    self.add_streams(
-                        stream_id,
-                        Box::new(extended_conn.clone()),
-                        Box::new(extended_conn),
-                    );
-                    self.streams_with_pending_data.insert(stream_id);
-                } else {
-                    self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
-                    return Err(Error::InvalidStreamId);
-                }
-                Ok(())
-            }
-            (Some(s), Some(_r), WebTransportSessionAcceptAction::Redirect) => {
-                if s.http_stream()
-                    .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "302"), 
-                                  Header::new("location", "/")],
-                                  conn)
                     .is_ok()
                 {
                     let extended_conn =

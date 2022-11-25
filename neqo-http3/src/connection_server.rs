@@ -142,7 +142,7 @@ impl Http3ServerHandler {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        accept: WebTransportSessionAcceptAction,
+        accept: &WebTransportSessionAcceptAction,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.webtransport_session_accept(
