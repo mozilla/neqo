@@ -102,3 +102,5 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.enabled()
     }
 }
+#[cfg(test)]
+mod tests;

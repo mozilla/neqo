@@ -8,17 +8,19 @@ mod datagrams;
 mod negotiation;
 mod sessions;
 mod streams;
+
 use neqo_common::event::Provider;
 
-use neqo_crypto::AuthenticationStatus;
-use neqo_http3::{
+use crate::{
     features::extended_connect::SessionCloseReason, Error, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
 };
+use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use std::cell::RefCell;
 use std::rc::Rc;
+
 use test_fixture::{
     addr, anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ALPN_H3,
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,
@@ -95,7 +97,7 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
-    let _ = server.process(out.dgram(), now());
+    std::mem::drop(server.process(out.dgram(), now()));
 }
 
 fn connect(
@@ -219,12 +221,12 @@ impl WtTest {
     pub fn check_session_closed_event_client(
         &mut self,
         wt_session_id: StreamId,
-        expected_reason: SessionCloseReason,
+        expected_reason: &SessionCloseReason,
     ) {
         let mut event_found = false;
 
         while let Some(event) = self.client.next_event() {
-            event_found = WtTest::session_closed_client(&event, wt_session_id, &expected_reason);
+            event_found = WtTest::session_closed_client(&event, wt_session_id, expected_reason);
             if event_found {
                 break;
             }
@@ -256,13 +258,13 @@ impl WtTest {
     pub fn check_session_closed_event_server(
         &mut self,
         wt_session: &mut WebTransportRequest,
-        expected_reeason: SessionCloseReason,
+        expected_reeason: &SessionCloseReason,
     ) {
         let event = self.server.next_event().unwrap();
         assert!(WtTest::session_closed_server(
             &event,
             wt_session.stream_id(),
-            &expected_reeason
+            expected_reeason
         ));
     }
 
@@ -370,7 +372,7 @@ impl WtTest {
         expected_stop_sending_ids: &[StreamId],
         expected_error_stream_stop_sending: Option<u64>,
         expected_local: bool,
-        expected_session_close: Option<(StreamId, SessionCloseReason)>,
+        expected_session_close: &Option<(StreamId, SessionCloseReason)>,
     ) {
         let mut reset_ids_count = 0;
         let mut stop_sending_ids_count = 0;
@@ -409,7 +411,6 @@ impl WtTest {
     }
 
     fn create_wt_stream_server(
-        &mut self,
         wt_server_session: &mut WebTransportRequest,
         stream_type: StreamType,
     ) -> Http3OrWebTransportStream {
@@ -511,7 +512,7 @@ impl WtTest {
         expected_error_stream_reset: Option<u64>,
         expected_stop_sending_ids: &[StreamId],
         expected_error_stream_stop_sending: Option<u64>,
-        expected_session_close: Option<(StreamId, SessionCloseReason)>,
+        expected_session_close: &Option<(StreamId, SessionCloseReason)>,
     ) {
         let mut reset_ids_count = 0;
         let mut stop_sending_ids_count = 0;
@@ -554,7 +555,6 @@ impl WtTest {
     }
 
     pub fn session_close_frame_server(
-        &mut self,
         wt_session: &mut WebTransportRequest,
         error: u32,
         message: &str,

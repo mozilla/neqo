@@ -5,16 +5,16 @@
 // except according to those terms.
 
 use super::{connect, default_http3_client, default_http3_server, exchange_packets};
-use neqo_common::{event::Provider, Encoder};
-use neqo_crypto::AuthenticationStatus;
-use neqo_http3::{
+use crate::{
     settings::{HSetting, HSettingType, HSettings},
     Error, HFrame, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State,
     WebTransportEvent,
 };
+use neqo_common::{event::Provider, Encoder};
+use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{Connection, ConnectionError, StreamType};
 use std::time::Duration;
-use test_fixture::*;
+use test_fixture::{default_server_h3, now};
 
 fn check_wt_event(client: &mut Http3Client, wt_enable_client: bool, wt_enable_server: bool) {
     let wt_event = client.events().find_map(|e| {
@@ -57,14 +57,49 @@ fn negotiate_wt() {
     check_wt_event(&mut client, false, false);
 }
 
-fn zero_rtt(client_org: bool, server_org: bool, client_resumed: bool, server_resumed: bool) {
-    let (mut client, mut server) = connect_wt(client_org, server_org);
-    assert_eq!(client.webtransport_enabled(), client_org && server_org);
+#[derive(PartialEq, Eq)]
+enum ClientState {
+    ClientEnabled,
+    ClientDisabled,
+}
+
+#[derive(PartialEq, Eq)]
+enum ClientResumedState {
+    ClientResumed,
+    ClientSuspended,
+}
+
+#[derive(PartialEq, Eq)]
+enum ServerState {
+    ServerEnabled,
+    ServerDisabled,
+}
+
+#[derive(PartialEq, Eq)]
+enum ServerResumedState {
+    ServerResumed,
+    ServerSuspended,
+}
+
+fn zero_rtt(
+    client_state: &ClientState,
+    server_state: &ServerState,
+    client_resumed: &ClientResumedState,
+    server_resumed: &ServerResumedState,
+) {
+    let (mut client, mut server) = connect_wt(
+        ClientState::ClientEnabled.eq(client_state),
+        ServerState::ServerEnabled.eq(server_state),
+    );
+    assert_eq!(
+        client.webtransport_enabled(),
+        ClientState::ClientEnabled.eq(client_state) && ServerState::ServerEnabled.eq(server_state)
+    );
 
     // exchane token
     let out = server.process(None, now());
     // We do not have a token so we need to wait for a resumption token timer to trigger.
-    let _ = client.process(out.dgram(), now() + Duration::from_millis(250));
+    std::mem::drop(client.process(out.dgram(), now() + Duration::from_millis(250)));
     assert_eq!(client.state(), Http3State::Connected);
     let token = client
         .events()
@@ -77,8 +112,14 @@ fn zero_rtt(client_org: bool, server_org: bool, client_resumed: bool, server_res
         })
         .unwrap();
 
-    let mut client = default_http3_client(Http3Parameters::default().webtransport(client_resumed));
-    let mut server = default_http3_server(Http3Parameters::default().webtransport(server_resumed));
+    let mut client = default_http3_client(
+        Http3Parameters::default()
+            .webtransport(ClientResumedState::ClientResumed.eq(client_resumed)),
+    );
+    let mut server = default_http3_server(
+        Http3Parameters::default()
+            .webtransport(ServerResumedState::ServerResumed.eq(server_resumed)),
+    );
     client
         .enable_resumption(now(), &token)
         .expect("Set resumption token.");
@@ -89,32 +130,117 @@ fn zero_rtt(client_org: bool, server_org: bool, client_resumed: bool, server_res
     assert_eq!(&client.state(), &Http3State::Connected);
     assert_eq!(
         client.webtransport_enabled(),
-        client_resumed && server_resumed
+        ClientResumedState::ClientResumed.eq(client_resumed)
+            && ServerResumedState::ServerResumed.eq(server_resumed)
     );
-    check_wt_event(&mut client, client_resumed, server_resumed);
+    check_wt_event(
+        &mut client,
+        ClientResumedState::ClientResumed.eq(client_resumed),
+        ServerResumedState::ServerResumed.eq(server_resumed),
+    );
 }
 
 #[test]
 fn zero_rtt_wt_settings() {
-    zero_rtt(true, true, true, true);
-    zero_rtt(true, true, true, false);
-    zero_rtt(true, true, false, true);
-    zero_rtt(true, true, false, false);
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerResumed,
+    );
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerResumed,
+    );
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerSuspended,
+    );
 
-    zero_rtt(true, false, true, false);
-    zero_rtt(true, false, true, true);
-    zero_rtt(true, false, false, false);
-    zero_rtt(true, false, false, true);
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerResumed,
+    );
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientEnabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerResumed,
+    );
 
-    zero_rtt(false, false, false, false);
-    zero_rtt(false, false, false, true);
-    zero_rtt(false, false, true, false);
-    zero_rtt(false, false, true, true);
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerResumed,
+    );
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerDisabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerResumed,
+    );
 
-    zero_rtt(false, true, false, true);
-    zero_rtt(false, true, false, false);
-    zero_rtt(false, true, true, false);
-    zero_rtt(false, true, true, true);
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerResumed,
+    );
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientSuspended,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerSuspended,
+    );
+    zero_rtt(
+        &ClientState::ClientDisabled,
+        &ServerState::ServerEnabled,
+        &ClientResumedState::ClientResumed,
+        &ServerResumedState::ServerResumed,
+    );
 }
 
 fn exchange_packets2(client: &mut Http3Client, server: &mut Connection) {
