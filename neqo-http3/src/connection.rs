@@ -721,6 +721,14 @@ impl Http3Connection {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
                 }
+
+                if !StreamId::from(session_id).is_client_initiated()
+                    || !StreamId::from(session_id).is_bidi()
+                    || !conn.is_stream_id_allowed(StreamId::from(session_id))
+                {
+                    conn.stream_stop_sending(stream_id, Error::HttpId.code())?;
+                    return Ok(ReceiveOutput::NoOutput);
+                }
             }
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
