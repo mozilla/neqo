@@ -53,6 +53,20 @@ where
     pub priority: Priority,
 }
 
+pub enum WebTransportSessionAcceptAction {
+    Accept,
+    Reject(Vec<Header>),
+}
+
+impl ::std::fmt::Display for WebTransportSessionAcceptAction {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        match self {
+            WebTransportSessionAcceptAction::Accept => f.write_str("Accept"),
+            WebTransportSessionAcceptAction::Reject(_) => f.write_str("Reject"),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Http3RemoteSettingsState {
     NotReceived,
@@ -1100,9 +1114,12 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
-        accept: bool,
+        accept_res: &WebTransportSessionAcceptAction,
     ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={}.", accept);
+        qtrace!(
+            "Respond to WebTransport session with accept={}.",
+            accept_res
+        );
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -1119,17 +1136,17 @@ impl Http3Connection {
 
         let send_stream = self.send_streams.get_mut(&stream_id);
 
-        match (send_stream, recv_stream, accept) {
+        match (send_stream, recv_stream, accept_res) {
             (None, None, _) => Err(Error::InvalidStreamId),
             (None, Some(_), _) | (Some(_), None, _) => {
                 // TODO this needs a better error
                 self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 Err(Error::InvalidStreamId)
             }
-            (Some(s), Some(_r), false) => {
+            (Some(s), Some(_r), WebTransportSessionAcceptAction::Reject(headers)) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "404")], conn)
+                    .send_headers(headers, conn)
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
@@ -1140,7 +1157,7 @@ impl Http3Connection {
                 }
                 Ok(())
             }
-            (Some(s), Some(_r), true) => {
+            (Some(s), Some(_r), WebTransportSessionAcceptAction::Accept) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
                     .send_headers(&[Header::new(":status", "200")], conn)

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{Http3Connection, Http3State};
+use crate::connection::{Http3Connection, Http3State, WebTransportSessionAcceptAction};
 use crate::frames::HFrame;
 use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::send_message::SendMessage;
@@ -142,7 +142,7 @@ impl Http3ServerHandler {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        accept: bool,
+        accept: &WebTransportSessionAcceptAction,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.webtransport_session_accept(
