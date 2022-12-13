@@ -400,6 +400,10 @@ impl SecretAgent {
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         self.set_option(ssl::Opt::OcspStapling, true)?;
+        if let Err(e) = self.set_option(ssl::Opt::Grease, true) {
+            // Until NSS supports greasing, it's OK to fail here.
+            qinfo!([self], "Failed to enable greasing {:?}", e);
+        }
         Ok(())
     }
 
