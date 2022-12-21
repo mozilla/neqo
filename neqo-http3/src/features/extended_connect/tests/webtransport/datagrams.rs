@@ -134,9 +134,9 @@ fn datagrams_client_only() {
 fn datagrams_multiple_session() {
     let mut wt = WtTest::new();
 
-    let mut wt_session = wt.create_wt_session();
-    do_datagram_test(&mut wt, &mut wt_session);
+    let mut wt_session1 = wt.create_wt_session();
+    do_datagram_test(&mut wt, &mut wt_session1);
 
-    let mut wt_session_1 = wt.create_wt_session();
-    do_datagram_test(&mut wt, &mut wt_session_1);
+    let mut wt_session_2 = wt.create_wt_session();
+    do_datagram_test(&mut wt, &mut wt_session_2);
 }
