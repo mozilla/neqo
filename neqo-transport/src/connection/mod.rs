@@ -2940,6 +2940,13 @@ impl Connection {
         Ok(())
     }
 
+    pub fn stream_bytes_acked(&mut self, stream_id: StreamId) -> Res<u64> {
+        let res = self.streams
+            .get_send_stream_mut(stream_id)?
+            .bytes_acked();
+        Ok(res)
+    }
+
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.

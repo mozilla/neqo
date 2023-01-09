@@ -13,6 +13,7 @@ use crate::{
     request_target::AsRequestTarget,
     settings::HSettings,
     Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, ReceiveOutput,
+    SendStreamStats,
 };
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
@@ -752,6 +753,17 @@ impl Http3Client {
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         Ok(self.conn.max_datagram_size()?
             - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
+    }
+
+    /// Returns the current SendStreamStats of a WebTransport send stream.
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
+        self.base_handler
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .stats(&mut self.conn)
     }
 
     /// This function combines  `process_input` and `process_output` function.

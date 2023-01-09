@@ -164,6 +164,7 @@ use neqo_qpack::Error as QpackError;
 use neqo_transport::{AppError, Connection, Error as TransportError};
 pub use neqo_transport::{Output, StreamId};
 use std::fmt::Debug;
+use std::time::Duration;
 
 use crate::priority::PriorityHandler;
 use buffered_send_stream::BufferedStream;
@@ -543,6 +544,47 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
     fn extended_connect_new_session(&self, _stream_id: StreamId, _headers: Vec<Header>) {}
 }
 
+// See https://www.w3.org/TR/webtransport/#send-stream-stats.
+#[derive(Debug, Clone)]
+pub struct SendStreamStats {
+    pub timestamp: Duration,
+    pub bytes_written: u64,
+    pub bytes_sent: u64,
+    pub bytes_acked: u64,
+}
+
+impl SendStreamStats {
+    #[must_use]
+    pub fn new(timestamp: Duration, bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
+        Self {
+            timestamp,
+            bytes_written,
+            bytes_sent,
+            bytes_acked,
+        }
+    }
+
+    #[must_use]
+    pub fn timestamp(&self) -> Duration {
+        self.timestamp
+    }
+
+    #[must_use]
+    pub fn bytes_written(&self) -> u64 {
+        self.bytes_written
+    }
+
+    #[must_use]
+    pub fn bytes_sent(&self) -> u64 {
+        self.bytes_sent
+    }
+
+    #[must_use]
+    pub fn bytes_acked(&self) -> u64 {
+        self.bytes_acked
+    }
+}
+
 trait SendStream: Stream {
     /// # Errors
     /// Error my occure during sending data, e.g. protocol error, etc.
@@ -578,6 +620,11 @@ trait SendStream: Stream {
     /// It may happen that the transport stream is already close. This is unlikely.
     fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
         Err(Error::InvalidStreamId)
+    }
+
+    /// This function is only implemented by WebTransportSendStream.
+    fn stats(&mut self, _conn: &mut Connection) -> Res<SendStreamStats> {
+        Err(Error::Unavailable)
     }
 }
 

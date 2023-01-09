@@ -7,12 +7,13 @@
 use super::WebTransportSession;
 use crate::{
     CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, RecvStreamEvents, Res,
-    SendStream, SendStreamEvents, Stream,
+    SendStream, SendStreamEvents, SendStreamStats, Stream,
 };
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
@@ -91,6 +92,9 @@ pub(crate) struct WebTransportSendStream {
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<WebTransportSession>>,
     session_id: StreamId,
+    bytes_written: u64,
+    bytes_sent: u64,
+    bytes_non_app_data: u64,
 }
 
 impl WebTransportSendStream {
@@ -121,6 +125,9 @@ impl WebTransportSendStream {
             events,
             session_id,
             session,
+            bytes_written: 0,
+            bytes_sent: 0,
+            bytes_non_app_data: 0,
         }
     }
 
@@ -145,6 +152,11 @@ impl SendStream for WebTransportSendStream {
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         if let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state {
             let sent = conn.stream_send(self.stream_id, &buf[..])?;
+            // We only want to count bytes when the state is SendingData.
+            // However, the underlying connection is not aware of the state
+            // here. That's why we need to count the bytes sent before
+            // SendingData state.
+            self.bytes_non_app_data += sent as u64;
             if sent == buf.len() {
                 if fin {
                     conn.stream_close_send(self.stream_id)?;
@@ -178,7 +190,9 @@ impl SendStream for WebTransportSendStream {
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
         self.send(conn)?;
         if self.state == WebTransportSenderStreamState::SendingData {
+            self.bytes_written += buf.len() as u64;
             let sent = conn.stream_send(self.stream_id, buf)?;
+            self.bytes_sent += sent as u64;
             Ok(sent)
         } else {
             Ok(0)
@@ -198,5 +212,19 @@ impl SendStream for WebTransportSendStream {
             self.set_done(CloseType::Done);
         }
         Ok(())
+    }
+
+    fn stats(&mut self, conn: &mut Connection) -> Res<SendStreamStats> {
+        let mut acked = conn.stream_bytes_acked(self.stream_id)?;
+        acked -= self.bytes_non_app_data;
+        let stats = SendStreamStats::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("SystemTime before UNIX EPOCH!"),
+            self.bytes_written,
+            self.bytes_sent,
+            acked,
+        );
+        Ok(stats)
     }
 }

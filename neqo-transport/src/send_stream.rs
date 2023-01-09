@@ -556,6 +556,7 @@ pub struct SendStream {
     priority: TransmissionPriority,
     retransmission_priority: RetransmissionPriority,
     retransmission_offset: u64,
+    bytes_acked: u64,
 }
 
 impl SendStream {
@@ -575,6 +576,7 @@ impl SendStream {
             priority: TransmissionPriority::default(),
             retransmission_priority: RetransmissionPriority::default(),
             retransmission_offset: 0,
+            bytes_acked: 0,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -598,6 +600,10 @@ impl SendStream {
             SendStreamState::ResetSent { final_size, .. } => Some(*final_size),
             _ => None,
         }
+    }
+
+    pub fn bytes_acked(&self) -> u64 {
+        self.bytes_acked
     }
 
     /// Return the next range to be sent, if any.
@@ -845,6 +851,7 @@ impl SendStream {
                 ref mut send_buf, ..
             } => {
                 send_buf.mark_as_acked(offset, len);
+                self.bytes_acked += len as u64;
                 if self.avail() > 0 {
                     self.conn_events.send_stream_writable(self.stream_id)
                 }
@@ -855,6 +862,7 @@ impl SendStream {
                 ..
             } => {
                 send_buf.mark_as_acked(offset, len);
+                self.bytes_acked += len as u64;
                 if fin {
                     *fin_acked = true;
                 }
