@@ -755,7 +755,7 @@ impl Http3Client {
             - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
     }
 
-    /// Returns the current SendStreamStats of a WebTransport send stream.
+    /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {

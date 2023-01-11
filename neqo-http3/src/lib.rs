@@ -614,7 +614,7 @@ trait SendStream: Stream {
         Err(Error::InvalidStreamId)
     }
 
-    /// This function is only implemented by WebTransportSendStream.
+    /// This function is only implemented by `WebTransportSendStream`.
     fn stats(&mut self, _conn: &mut Connection) -> Res<SendStreamStats> {
         Err(Error::Unavailable)
     }
