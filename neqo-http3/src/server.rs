@@ -1290,7 +1290,7 @@ mod tests {
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             http3params(DEFAULT_SETTINGS),
-            Some(Box::new(RejectZeroRtt::default())),
+            Some(Box::<RejectZeroRtt>::default()),
         )
         .expect("create a server");
         let mut client = connect_to(&mut server);

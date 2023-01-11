@@ -83,19 +83,19 @@ impl HSettings {
             for iter in &self.settings {
                 match iter.setting_type {
                     HSettingType::MaxHeaderListSize => {
-                        enc_inner.encode_varint(SETTINGS_MAX_HEADER_LIST_SIZE as u64);
+                        enc_inner.encode_varint(SETTINGS_MAX_HEADER_LIST_SIZE);
                         enc_inner.encode_varint(iter.value);
                     }
                     HSettingType::MaxTableCapacity => {
-                        enc_inner.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY as u64);
+                        enc_inner.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
                         enc_inner.encode_varint(iter.value);
                     }
                     HSettingType::BlockedStreams => {
-                        enc_inner.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS as u64);
+                        enc_inner.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS);
                         enc_inner.encode_varint(iter.value);
                     }
                     HSettingType::EnableWebTransport => {
-                        enc_inner.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT as u64);
+                        enc_inner.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT);
                         enc_inner.encode_varint(iter.value);
                     }
                 }
