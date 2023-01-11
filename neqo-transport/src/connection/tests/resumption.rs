@@ -145,8 +145,8 @@ fn two_tickets_on_timer() {
     assert_eq!(get_tokens(&mut client).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());
 
-    can_resume(&token1, false);
-    can_resume(&token2, false);
+    can_resume(token1, false);
+    can_resume(token2, false);
 }
 
 #[test]
