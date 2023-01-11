@@ -342,8 +342,7 @@ impl LossRecoverySpace {
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
         self.in_flight_outstanding = 0;
-        mem::take(&mut self.sent_packets)
-            .into_values()
+        mem::take(&mut self.sent_packets).into_values()
     }
 
     /// Remove the primary path marking on any packets this is tracking.
