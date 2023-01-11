@@ -98,7 +98,8 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
-    std::mem::drop(server.process(out.dgram(), now()));
+    let out = server.process(out.dgram(), now());
+    std::mem::drop(client.process(out.dgram(), now()));
 }
 
 fn connect(
@@ -201,13 +202,10 @@ impl WtTest {
         loop {
             now += RTT / 2;
             out = self.client.process(out, now).dgram();
+            let client_none = out.is_none();
             now += RTT / 2;
             out = self.server.process(out, now).dgram();
-            now += RTT / 2;
-            out = self.client.process(out, now).dgram();
-            now += RTT / 2;
-            out = self.server.process(out, now).dgram();
-            if out.is_none() {
+            if client_none && out.is_none() {
                 break;
             }
         }

@@ -469,6 +469,10 @@ impl TxBuffer {
         self.ranges.unmark_sent();
     }
 
+    pub fn retired(&self) -> u64 {
+        self.retired
+    }
+
     fn buffered(&self) -> usize {
         self.send_buf.len()
     }
@@ -501,13 +505,18 @@ pub(crate) enum SendStreamState {
         fin_sent: bool,
         fin_acked: bool,
     },
-    DataRecvd,
+    DataRecvd {
+        retired: u64,
+    },
     ResetSent {
         err: AppError,
         final_size: u64,
         priority: Option<TransmissionPriority>,
+        final_retired: u64,
     },
-    ResetRecvd,
+    ResetRecvd {
+        final_retired: u64,
+    },
 }
 
 impl SendStreamState {
@@ -517,7 +526,7 @@ impl SendStreamState {
             Self::Ready { .. }
             | Self::DataRecvd { .. }
             | Self::ResetSent { .. }
-            | Self::ResetRecvd => None,
+            | Self::ResetRecvd { .. } => None,
         }
     }
 
@@ -526,7 +535,7 @@ impl SendStreamState {
             // In Ready, TxBuffer not yet allocated but size is known
             Self::Ready { .. } => SEND_BUFFER_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
-            Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd => 0,
+            Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
         }
     }
 
@@ -537,7 +546,7 @@ impl SendStreamState {
             Self::DataSent { .. } => "DataSent",
             Self::DataRecvd { .. } => "DataRecvd",
             Self::ResetSent { .. } => "ResetSent",
-            Self::ResetRecvd => "ResetRecvd",
+            Self::ResetRecvd { .. } => "ResetRecvd",
         }
     }
 
@@ -556,7 +565,8 @@ pub struct SendStream {
     priority: TransmissionPriority,
     retransmission_priority: RetransmissionPriority,
     retransmission_offset: u64,
-    bytes_acked: u64,
+    bytes_written: u64,
+    bytes_sent: u64,
 }
 
 impl SendStream {
@@ -576,7 +586,8 @@ impl SendStream {
             priority: TransmissionPriority::default(),
             retransmission_priority: RetransmissionPriority::default(),
             retransmission_offset: 0,
-            bytes_acked: 0,
+            bytes_written: 0,
+            bytes_sent: 0,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -602,8 +613,23 @@ impl SendStream {
         }
     }
 
+    pub fn bytes_written(&self) -> u64 {
+        self.bytes_written
+    }
+
+    pub fn bytes_sent(&self) -> u64 {
+        self.bytes_sent
+    }
+
     pub fn bytes_acked(&self) -> u64 {
-        self.bytes_acked
+        match &self.state {
+            SendStreamState::Send { send_buf, .. } => send_buf.retired(),
+            SendStreamState::DataSent { send_buf, .. } => send_buf.retired(),
+            SendStreamState::DataRecvd { retired } => *retired,
+            SendStreamState::ResetSent { final_retired, .. } => *final_retired,
+            SendStreamState::ResetRecvd { final_retired } => *final_retired,
+            _ => 0,
+        }
     }
 
     /// Return the next range to be sent, if any.
@@ -651,7 +677,7 @@ impl SendStream {
             SendStreamState::Ready { .. }
             | SendStreamState::DataRecvd { .. }
             | SendStreamState::ResetSent { .. }
-            | SendStreamState::ResetRecvd => None,
+            | SendStreamState::ResetRecvd { .. } => None,
         }
     }
 
@@ -728,7 +754,7 @@ impl SendStream {
                 builder.encode_vvec(&data[..length]);
             }
             debug_assert!(builder.len() <= builder.limit());
-
+            self.bytes_sent += length as u64;
             self.mark_as_sent(offset, length, fin);
             tokens.push(RecoveryToken::Stream(StreamRecoveryToken::Stream(
                 SendStreamRecoveryToken {
@@ -750,8 +776,10 @@ impl SendStream {
             | SendStreamState::DataRecvd { .. } => {
                 qtrace!([self], "Reset acked while in {} state?", self.state.name())
             }
-            SendStreamState::ResetSent { .. } => self.state.transition(SendStreamState::ResetRecvd),
-            SendStreamState::ResetRecvd => qtrace!([self], "already in ResetRecvd state"),
+            SendStreamState::ResetSent { final_retired, .. } => self
+                .state
+                .transition(SendStreamState::ResetRecvd { final_retired }),
+            SendStreamState::ResetRecvd { .. } => qtrace!([self], "already in ResetRecvd state"),
         };
     }
 
@@ -762,7 +790,7 @@ impl SendStream {
             } => {
                 *priority = Some(self.priority + self.retransmission_priority);
             }
-            SendStreamState::ResetRecvd => (),
+            SendStreamState::ResetRecvd { .. } => (),
             _ => unreachable!(),
         }
     }
@@ -779,6 +807,7 @@ impl SendStream {
             final_size,
             err,
             ref mut priority,
+            ..
         } = self.state
         {
             if *priority != Some(p) {
@@ -851,7 +880,6 @@ impl SendStream {
                 ref mut send_buf, ..
             } => {
                 send_buf.mark_as_acked(offset, len);
-                self.bytes_acked += len as u64;
                 if self.avail() > 0 {
                     self.conn_events.send_stream_writable(self.stream_id)
                 }
@@ -862,13 +890,14 @@ impl SendStream {
                 ..
             } => {
                 send_buf.mark_as_acked(offset, len);
-                self.bytes_acked += len as u64;
                 if fin {
                     *fin_acked = true;
                 }
                 if *fin_acked && send_buf.buffered() == 0 {
                     self.conn_events.send_stream_complete(self.stream_id);
-                    self.state.transition(SendStreamState::DataRecvd);
+                    let retired = send_buf.retired();
+                    self.state
+                        .transition(SendStreamState::DataRecvd { retired });
                 }
             }
             _ => qtrace!(
@@ -935,7 +964,7 @@ impl SendStream {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.state,
-            SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd
+            SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd { .. }
         )
     }
 
@@ -1004,6 +1033,7 @@ impl SendStream {
                 let sent = send_buf.send(buf);
                 fc.consume(sent);
                 conn_fc.borrow_mut().consume(sent);
+                self.bytes_written += sent as u64;
                 Ok(sent)
             }
             _ => Err(Error::FinalSizeError),
@@ -1030,31 +1060,44 @@ impl SendStream {
             SendStreamState::DataSent { .. } => qtrace!([self], "already in DataSent state"),
             SendStreamState::DataRecvd { .. } => qtrace!([self], "already in DataRecvd state"),
             SendStreamState::ResetSent { .. } => qtrace!([self], "already in ResetSent state"),
-            SendStreamState::ResetRecvd => qtrace!([self], "already in ResetRecvd state"),
+            SendStreamState::ResetRecvd { .. } => qtrace!([self], "already in ResetRecvd state"),
         }
     }
 
     pub fn reset(&mut self, err: AppError) {
         match &self.state {
-            SendStreamState::Ready { fc, .. } | SendStreamState::Send { fc, .. } => {
+            SendStreamState::Ready { fc, .. } => {
                 let final_size = fc.used();
                 self.state.transition(SendStreamState::ResetSent {
                     err,
                     final_size,
                     priority: Some(self.priority),
+                    final_retired: 0,
                 });
             }
-            SendStreamState::DataSent { send_buf, .. } => {
-                let final_size = send_buf.used();
+            SendStreamState::Send { fc, send_buf, .. } => {
+                let final_size = fc.used();
+                let final_retired = send_buf.retired();
                 self.state.transition(SendStreamState::ResetSent {
                     err,
                     final_size,
                     priority: Some(self.priority),
+                    final_retired,
+                });
+            }
+            SendStreamState::DataSent { send_buf, .. } => {
+                let final_size = send_buf.used();
+                let final_retired = send_buf.retired();
+                self.state.transition(SendStreamState::ResetSent {
+                    err,
+                    final_size,
+                    priority: Some(self.priority),
+                    final_retired,
                 });
             }
             SendStreamState::DataRecvd { .. } => qtrace!([self], "already in DataRecvd state"),
             SendStreamState::ResetSent { .. } => qtrace!([self], "already in ResetSent state"),
-            SendStreamState::ResetRecvd => qtrace!([self], "already in ResetRecvd state"),
+            SendStreamState::ResetRecvd { .. } => qtrace!([self], "already in ResetRecvd state"),
         };
     }
 

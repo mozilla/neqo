@@ -164,7 +164,6 @@ use neqo_qpack::Error as QpackError;
 use neqo_transport::{AppError, Connection, Error as TransportError};
 pub use neqo_transport::{Output, StreamId};
 use std::fmt::Debug;
-use std::time::Duration;
 
 use crate::priority::PriorityHandler;
 use buffered_send_stream::BufferedStream;
@@ -545,9 +544,8 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
 }
 
 // See https://www.w3.org/TR/webtransport/#send-stream-stats.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SendStreamStats {
-    pub timestamp: Duration,
     pub bytes_written: u64,
     pub bytes_sent: u64,
     pub bytes_acked: u64,
@@ -555,18 +553,12 @@ pub struct SendStreamStats {
 
 impl SendStreamStats {
     #[must_use]
-    pub fn new(timestamp: Duration, bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
+    pub fn new(bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
         Self {
-            timestamp,
             bytes_written,
             bytes_sent,
             bytes_acked,
         }
-    }
-
-    #[must_use]
-    pub fn timestamp(&self) -> Duration {
-        self.timestamp
     }
 
     #[must_use]

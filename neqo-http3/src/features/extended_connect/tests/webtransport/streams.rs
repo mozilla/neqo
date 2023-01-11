@@ -16,6 +16,11 @@ fn wt_client_stream_uni() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    let stats = wt.send_stream_stats(wt_stream).unwrap();
+    assert_eq!(stats.bytes_written(), 0);
+    assert_eq!(stats.bytes_sent(), 0);
+    assert_eq!(stats.bytes_acked(), 0);
+
     wt.send_data_client(wt_stream, BUF_CLIENT);
     wt.receive_data_server(wt_stream, true, BUF_CLIENT, false);
     let stats = wt.send_stream_stats(wt_stream).unwrap();
@@ -37,7 +42,6 @@ fn wt_client_stream_bidi() {
     wt.send_data_server(&mut wt_server_stream, BUF_SERVER);
     wt.receive_data_client(wt_client_stream, false, BUF_SERVER, false);
     let stats = wt.send_stream_stats(wt_client_stream).unwrap();
-    eprintln!("stats: {:?}", stats);
     assert_eq!(stats.bytes_written(), BUF_CLIENT.len() as u64);
     assert_eq!(stats.bytes_sent(), BUF_CLIENT.len() as u64);
     assert_eq!(stats.bytes_acked(), BUF_CLIENT.len() as u64);
