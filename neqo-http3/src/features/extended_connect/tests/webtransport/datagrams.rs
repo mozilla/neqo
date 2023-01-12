@@ -62,7 +62,7 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &mut WebTransportRequest) {
 
     wt.exchange_packets();
     wt.check_datagram_received_client(wt_session.stream_id(), DGRAM);
-    wt.check_datagram_received_server(&wt_session, DGRAM);
+    wt.check_datagram_received_server(wt_session, DGRAM);
 }
 
 #[test]
