@@ -23,7 +23,6 @@ use neqo_transport::{
     EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
 };
 
-use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
@@ -35,6 +34,7 @@ use std::process::exit;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Instant;
+use std::{cell::RefCell, time::Duration};
 
 use structopt::StructOpt;
 use url::{Origin, Url};
@@ -290,6 +290,10 @@ struct QuicParameters {
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
 
+    #[structopt(long = "idle", default_value = "30")]
+    /// The idle timeout for connections, in seconds.
+    idle_timeout: u64,
+
     #[structopt(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
@@ -300,6 +304,7 @@ impl QuicParameters {
         let params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
+            .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control);
 
         if let Some(&first) = self.quic_version.first() {
