@@ -8,6 +8,9 @@ To run test HTTP/3 programs (neqo-client and neqo-server):
 * `./target/debug/neqo-server [::]:12345 --db ./test-fixture/db`
 * `./target/debug/neqo-client http://127.0.0.1:12345/`
 
+If a "Failure to load dynamic library" error happens at runtime, do
+export [DY]LD\_LIBRARY\_PATH="$(dirname "$(find . -name libssl3.so -print)")"
+
 ## Faster Builds with Separate NSS/NSPR
 
 You can clone NSS (https://hg.mozilla.org/projects/nss) and NSPR
