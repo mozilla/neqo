@@ -49,44 +49,27 @@ Some examples:
 
 ### Trying In-development Neqo code in Gecko
 
-In a checked-out copy of Gecko source, set paths for the four Neqo crates to
-local versions in `netwerk/socket/neqo_glue/Cargo.toml`. For example, if Neqo
-was checked out to /home/alice/git/neqo, change:
+In a checked-out copy of Gecko source, set `[patches.*]` values for the four
+Neqo crates to local versions in the root `Cargo.toml`. For example, if Neqo
+was checked out to `/home/alice/git/neqo`, add the following lines to the root
+`Cargo.toml`.
 
 ```
-neqo-http3 = { tag = "v0.1.7", git = "https://github.com/mozilla/neqo" }
-neqo-transport = { tag = "v0.1.7", git = "https://github.com/mozilla/neqo" }
-neqo-common = { tag = "v0.1.7", git = "https://github.com/mozilla/neqo" }
-```
-
-to
-
-```
+[patch."https://github.com/mozilla/neqo"]
 neqo-http3 = { path = "/home/alice/git/neqo/neqo-http3" }
 neqo-transport = { path = "/home/alice/git/neqo/neqo-transport" }
 neqo-common = { path = "/home/alice/git/neqo/neqo-common" }
+neqo-qpack = { path = "/home/alice/git/neqo/neqo-qpack" }
+neqo-crypto = { path = "/home/alice/git/neqo/neqo-crypto" }
 ```
 
-and
+Then run the following:
 
 ```
-[dependencies.neqo-crypto]
-tag = "v0.1.7"
-git = "https://github.com/mozilla/neqo"
-default-features = false
-features = ["gecko"]
+./mach vendor rust
 ```
 
-to
-
-```
-[dependencies.neqo-crypto]
-path = "/home/alice/git/neqo/neqo-crypto"
-default-features = false
-features = ["gecko"]
-```
+Compile Gecko as usual with `./mach build`.
 
 Note: Using newer Neqo code with Gecko may also require changes (likely to `neqo_glue`) if
 something has changed.
-
-Compile Gecko as usual with `./mach build`.
