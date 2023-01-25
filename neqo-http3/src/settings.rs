@@ -24,7 +24,7 @@ const SETTINGS_ENABLE_WEB_TRANSPORT: SettingsType = 0x2b60_3742;
 // draft-ietf-masque-h3-datagram-04.
 // We use this old value because the current web-platform test only supports
 // this value.
-const SETTINGS_H3_DATAGRAM_DRAFT04: SettingsType = 0xffd277;
+const SETTINGS_H3_DATAGRAM_DRAFT04: SettingsType = 0x00ff_d277;
 
 pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 

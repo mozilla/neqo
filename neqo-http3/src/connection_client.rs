@@ -1483,7 +1483,10 @@ mod tests {
             assert_eq!(dec.decode_varint().unwrap(), 4); // SETTINGS
             assert_eq!(
                 dec.decode_vvec().unwrap(),
-                &[1, 0x40, 0x64, 7, 0x40, 0x64, 0xab, 0x60, 0x37, 0x42, 0x00]
+                &[
+                    1, 0x40, 0x64, 7, 0x40, 0x64, 0xab, 0x60, 0x37, 0x42, 0x00, 0x80, 0xff, 0xd2,
+                    0x77, 0x00
+                ]
             );
 
             assert_eq!((dec.decode_varint().unwrap() - 0x21) % 0x1f, 0); // Grease
