@@ -1426,7 +1426,9 @@ impl Http3Connection {
                             qpack_changed = true;
                         }
                         HSettingType::BlockedStreams => qpack_changed = true,
-                        HSettingType::MaxHeaderListSize | HSettingType::EnableWebTransport => (),
+                        HSettingType::MaxHeaderListSize |
+                        HSettingType::EnableWebTransport |
+                        HSettingType::EnableH3Datagram => (),
                     }
                 }
                 if qpack_changed {
