@@ -150,11 +150,10 @@ impl HSettings {
                     if value > 1 {
                         return Err(Error::HttpSettings);
                     }
-                    if self
+                    if !self
                         .settings
                         .iter()
-                        .find(|s| s.setting_type == HSettingType::EnableH3Datagram)
-                        .is_none()
+                        .any(|s| s.setting_type == HSettingType::EnableH3Datagram)
                     {
                         self.settings
                             .push(HSetting::new(HSettingType::EnableH3Datagram, value));
@@ -164,11 +163,10 @@ impl HSettings {
                     if value > 1 {
                         return Err(Error::HttpSettings);
                     }
-                    if self
+                    if !self
                         .settings
                         .iter()
-                        .find(|s| s.setting_type == HSettingType::EnableH3Datagram)
-                        .is_none()
+                        .any(|s| s.setting_type == HSettingType::EnableH3Datagram)
                     {
                         self.settings
                             .push(HSetting::new(HSettingType::EnableH3Datagram, value));
