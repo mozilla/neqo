@@ -154,7 +154,7 @@ impl HSettings {
                         .settings
                         .iter()
                         .find(|s| s.setting_type == HSettingType::EnableH3Datagram)
-                        == None
+                        .is_none()
                     {
                         self.settings
                             .push(HSetting::new(HSettingType::EnableH3Datagram, value));
@@ -168,7 +168,7 @@ impl HSettings {
                         .settings
                         .iter()
                         .find(|s| s.setting_type == HSettingType::EnableH3Datagram)
-                        == None
+                        .is_none()
                     {
                         self.settings
                             .push(HSetting::new(HSettingType::EnableH3Datagram, value));
