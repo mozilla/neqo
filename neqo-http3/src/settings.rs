@@ -22,9 +22,11 @@ const SETTINGS_QPACK_MAX_TABLE_CAPACITY: SettingsType = 0x1;
 const SETTINGS_QPACK_BLOCKED_STREAMS: SettingsType = 0x7;
 const SETTINGS_ENABLE_WEB_TRANSPORT: SettingsType = 0x2b60_3742;
 // draft-ietf-masque-h3-datagram-04.
-// We use this old value because the current web-platform test only supports
+// We also use this old value because the current web-platform test only supports
 // this value.
 const SETTINGS_H3_DATAGRAM_DRAFT04: SettingsType = 0x00ff_d277;
+
+const SETTINGS_H3_DATAGRAM: SettingsType = 0x33;
 
 pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 
@@ -107,6 +109,8 @@ impl HSettings {
                     HSettingType::EnableH3Datagram => {
                         enc_inner.encode_varint(SETTINGS_H3_DATAGRAM_DRAFT04);
                         enc_inner.encode_varint(iter.value);
+                        enc_inner.encode_varint(SETTINGS_H3_DATAGRAM);
+                        enc_inner.encode_varint(iter.value);
                     }
                 }
             }
@@ -146,8 +150,29 @@ impl HSettings {
                     if value > 1 {
                         return Err(Error::HttpSettings);
                     }
-                    self.settings
-                        .push(HSetting::new(HSettingType::EnableH3Datagram, value));
+                    if self
+                        .settings
+                        .iter()
+                        .find(|s| s.setting_type == HSettingType::EnableH3Datagram)
+                        == None
+                    {
+                        self.settings
+                            .push(HSetting::new(HSettingType::EnableH3Datagram, value));
+                    }
+                }
+                (Some(SETTINGS_H3_DATAGRAM), Some(value)) => {
+                    if value > 1 {
+                        return Err(Error::HttpSettings);
+                    }
+                    if self
+                        .settings
+                        .iter()
+                        .find(|s| s.setting_type == HSettingType::EnableH3Datagram)
+                        == None
+                    {
+                        self.settings
+                            .push(HSetting::new(HSettingType::EnableH3Datagram, value));
+                    }
                 }
                 // other supported settings here
                 (Some(_), Some(_)) => {} // ignore unknown setting, it is fine.
@@ -213,7 +238,7 @@ impl HttpZeroRttChecker {
             .encode_varint(settings.get_max_blocked_streams())
             .encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT)
             .encode_varint(settings.get_webtransport())
-            .encode_varint(SETTINGS_H3_DATAGRAM_DRAFT04)
+            .encode_varint(SETTINGS_H3_DATAGRAM)
             .encode_varint(settings.get_http3_datagram());
         enc.into()
     }
@@ -245,14 +270,14 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                 self.settings.get_max_table_size_decoder() >= setting.value
             }
             HSettingType::EnableWebTransport => {
-                if setting.value > 0 {
+                if setting.value > 1 {
                     return false;
                 }
                 let value = setting.value == 1;
                 self.settings.get_webtransport() || !value
             }
             HSettingType::EnableH3Datagram => {
-                if setting.value > 0 {
+                if setting.value > 1 {
                     return false;
                 }
                 let value = setting.value == 1;
