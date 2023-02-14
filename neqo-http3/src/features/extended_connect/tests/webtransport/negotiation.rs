@@ -83,7 +83,7 @@ fn zero_rtt(
     let (mut client, mut server) = connect_wt(client_org, server_org);
     assert_eq!(client.webtransport_enabled(), client_org && server_org);
 
-    // exchane token
+    // exchange token
     let out = server.process(None, now());
     // We do not have a token so we need to wait for a resumption token timer to trigger.
     std::mem::drop(client.process(out.dgram(), now() + Duration::from_millis(250)));

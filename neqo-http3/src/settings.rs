@@ -107,10 +107,12 @@ impl HSettings {
                         enc_inner.encode_varint(iter.value);
                     }
                     HSettingType::EnableH3Datagram => {
-                        enc_inner.encode_varint(SETTINGS_H3_DATAGRAM_DRAFT04);
-                        enc_inner.encode_varint(iter.value);
-                        enc_inner.encode_varint(SETTINGS_H3_DATAGRAM);
-                        enc_inner.encode_varint(iter.value);
+                        if iter.value == 1 {
+                            enc_inner.encode_varint(SETTINGS_H3_DATAGRAM_DRAFT04);
+                            enc_inner.encode_varint(iter.value);
+                            enc_inner.encode_varint(SETTINGS_H3_DATAGRAM);
+                            enc_inner.encode_varint(iter.value);
+                        }
                     }
                 }
             }
@@ -233,11 +235,14 @@ impl HttpZeroRttChecker {
             .encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)
             .encode_varint(settings.get_max_table_size_decoder())
             .encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS)
-            .encode_varint(settings.get_max_blocked_streams())
-            .encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT)
-            .encode_varint(settings.get_webtransport())
-            .encode_varint(SETTINGS_H3_DATAGRAM)
-            .encode_varint(settings.get_http3_datagram());
+            .encode_varint(settings.get_max_blocked_streams());
+        if settings.get_webtransport() {
+            enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT)
+                .encode_varint(true);
+        }
+        if settings.get_http3_datagram() {
+            enc.encode_varint(SETTINGS_H3_DATAGRAM).encode_varint(true);
+        }
         enc.into()
     }
 }
