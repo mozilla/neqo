@@ -22,6 +22,14 @@ NSS builds require gyp, and ninja (or ninja-build) to be present also.
 
 ## Debugging Neqo
 
+### QUIC logs:
+
+* mkdir $logdir
+* `./target/debug/neqo-server [::]:12345 --db ./test-fixture/db --qlog-dir $logdir
+* `./target/debug/neqo-client http://127.0.0.1:12345/ --qlog-dir $logdir`
+
+You may use https://qvis.quictools.info by uploading the QLOG files and visualize the flows
+
 ### Using SSLKEYLOGFILE to decrypt Wireshark logs
 
 [Info here](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format)
