@@ -22,7 +22,7 @@ NSS builds require gyp, and ninja (or ninja-build) to be present also.
 
 ## Debugging Neqo
 
-### QUIC logs:
+### QUIC Logging
 
 Enable [QLOG](https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-main-schema/) with:
 
