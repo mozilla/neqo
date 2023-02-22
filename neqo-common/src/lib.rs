@@ -24,9 +24,6 @@ pub use self::incrdecoder::{
     IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
 
-#[macro_use]
-extern crate lazy_static;
-
 use std::fmt::Write;
 
 #[must_use]
