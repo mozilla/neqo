@@ -11,6 +11,8 @@ use lazy_static::lazy_static;
 use std::io::Write;
 use std::sync::Once;
 use std::time::Instant;
+use env_logger::Builder;
+use lazy_static::lazy_static;
 
 #[macro_export]
 macro_rules! do_log {
