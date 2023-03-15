@@ -1,5 +1,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
+#![allow(unknown_lints)]
+#![allow(clippy::uninlined_format_args)]
 
 use neqo_crypto::{
     generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, SecretAgentPreInfo,

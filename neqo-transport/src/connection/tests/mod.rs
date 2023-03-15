@@ -5,6 +5,8 @@
 // except according to those terms.
 
 #![deny(clippy::pedantic)]
+#![allow(unknown_lints)]
+#![allow(clippy::uninlined_format_args)]
 
 use super::{Connection, ConnectionError, ConnectionId, Output, State};
 use crate::addr_valid::{AddressValidation, ValidateAddress};

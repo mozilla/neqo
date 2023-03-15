@@ -11,6 +11,8 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::unseparated_literal_suffix)]
 #![allow(clippy::used_underscore_binding)]
+#![allow(unknown_lints)]
+#![allow(clippy::uninlined_format_args)]
 
 #[macro_use]
 mod exp;
