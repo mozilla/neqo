@@ -152,6 +152,9 @@ fn build_nss(dir: PathBuf) {
         build_nss.push(String::from("-j"));
         build_nss.push(d);
     }
+    if env::var("TARGET").unwrap() == "aarch64-apple-darwin" {
+        build_nss.push(String::from("--target=arm64"));
+    }
     let status = Command::new(get_bash())
         .args(build_nss)
         .current_dir(dir)
