@@ -390,7 +390,7 @@ mod test {
             let e = Instant::now();
             let actual = e - s;
             let lag = actual - d;
-            println!("sleep({:?}) \u{2192} {:?} \u{394}{:?}", d, actual, lag);
+            println!("sleep({d:?}) \u{2192} {actual:?} \u{394}{lag:?}");
             if lag > max_lag {
                 return Err(());
             }

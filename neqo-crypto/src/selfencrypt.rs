@@ -124,9 +124,7 @@ impl SelfEncrypt {
         if ciphertext[0] != Self::VERSION {
             return Err(Error::SelfEncryptFailure);
         }
-        let key = if let Some(k) = self.select_key(ciphertext[1]) {
-            k
-        } else {
+        let Some(key) = self.select_key(ciphertext[1]) else {
             return Err(Error::SelfEncryptFailure);
         };
         let offset = 2 + Self::SALT_LENGTH;

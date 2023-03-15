@@ -93,9 +93,9 @@ fn check_server_preinfo(server_preinfo: &SecretAgentPreInfo) {
 fn raw() {
     fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
-    println!("client {:?}", client);
+    println!("client {client:?}");
     let mut server = Server::new(&["key"]).expect("should create server");
-    println!("server {:?}", server);
+    println!("server {server:?}");
 
     let client_records = client.handshake_raw(now(), None).expect("send CH");
     assert!(!client_records.is_empty());
@@ -439,9 +439,7 @@ fn ech_retry() {
         HandshakeState::EchFallbackAuthenticationPending(String::from(PUBLIC_NAME))
     );
     client.authenticated(AuthenticationStatus::Ok);
-    let updated_config = if let Err(Error::EchRetry(c)) = client.handshake_raw(now(), None) {
-        c
-    } else {
+    let Err(Error::EchRetry(updated_config)) = client.handshake_raw(now(), None)  else {
         panic!(
             "Handshake should fail with EchRetry, state is instead {:?}",
             client.state()

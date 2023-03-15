@@ -81,7 +81,7 @@ fn connect_single_version_both() {
     }
 
     for v in Version::all() {
-        println!("Connecting with {:?}", v);
+        println!("Connecting with {v:?}");
         connect_one_version(v);
     }
 }
@@ -99,7 +99,7 @@ fn connect_single_version_client() {
     }
 
     for v in Version::all() {
-        println!("Connecting with {:?}", v);
+        println!("Connecting with {v:?}");
         connect_one_version(v);
     }
 }
@@ -127,7 +127,7 @@ fn connect_single_version_server() {
     }
 
     for v in Version::all() {
-        println!("Connecting with {:?}", v);
+        println!("Connecting with {v:?}");
         connect_one_version(v);
     }
 }

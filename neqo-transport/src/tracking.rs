@@ -590,10 +590,7 @@ impl RecvdPackets {
 
         builder.encode_varint(crate::frame::FRAME_TYPE_ACK);
         let mut iter = ranges.iter();
-        let first = match iter.next() {
-            Some(v) => v,
-            None => return, // Nothing to send.
-        };
+        let Some(first) = iter.next() else { return };
         builder.encode_varint(first.largest);
         stats.largest_acknowledged = first.largest;
         stats.ack += 1;

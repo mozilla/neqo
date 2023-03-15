@@ -110,10 +110,7 @@ impl<'a> Decoder<'a> {
     /// Decodes a QUIC varint.
     #[allow(clippy::missing_panics_doc)] // See https://github.com/rust-lang/rust-clippy/issues/6699
     pub fn decode_varint(&mut self) -> Option<u64> {
-        let b1 = match self.decode_byte() {
-            Some(b) => b,
-            None => return None,
-        };
+        let Some(b1) = self.decode_byte() else { return None };
         match b1 >> 6 {
             0 => Some(u64::from(b1 & 0x3f)),
             1 => Some((u64::from(b1 & 0x3f) << 8) | self.decode_uint(1)?),
@@ -131,10 +128,7 @@ impl<'a> Decoder<'a> {
     }
 
     fn decode_checked(&mut self, n: Option<u64>) -> Option<&'a [u8]> {
-        let len = match n {
-            Some(l) => l,
-            None => return None,
-        };
+        let Some(len) = n else { return None };
         if let Ok(l) = usize::try_from(len) {
             self.decode(l)
         } else {

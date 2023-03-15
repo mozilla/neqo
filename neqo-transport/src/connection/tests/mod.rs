@@ -218,7 +218,7 @@ fn connect(client: &mut Connection, server: &mut Connection) {
 fn assert_error(c: &Connection, expected: &ConnectionError) {
     match c.state() {
         State::Closing { error, .. } | State::Draining { error, .. } | State::Closed(error) => {
-            assert_eq!(*error, *expected, "{} error mismatch", c);
+            assert_eq!(*error, *expected, "{c} error mismatch");
         }
         _ => panic!("bad state {:?}", c.state()),
     }
