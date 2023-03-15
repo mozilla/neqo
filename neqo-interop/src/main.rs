@@ -28,8 +28,6 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
-#[macro_use]
-extern crate lazy_static;
 
 #[derive(Debug, StructOpt, Clone)]
 #[structopt(name = "neqo-interop", about = "A QUIC interop client.")]

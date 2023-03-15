@@ -12,9 +12,7 @@
 #![allow(clippy::unseparated_literal_suffix)]
 #![allow(clippy::used_underscore_binding)]
 
-#[macro_use]
 mod exp;
-#[macro_use]
 mod p11;
 
 #[cfg(not(feature = "fuzzing"))]
