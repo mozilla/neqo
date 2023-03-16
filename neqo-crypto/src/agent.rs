@@ -4,35 +4,40 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-pub use crate::agentio::{as_c_void, Record, RecordList};
-use crate::agentio::{AgentIo, METHODS};
-use crate::assert_initialized;
-use crate::auth::AuthenticationStatus;
-pub use crate::cert::CertificateInfo;
-use crate::constants::{
-    Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
+pub use crate::{
+    agentio::{as_c_void, Record, RecordList},
+    cert::CertificateInfo,
 };
-use crate::ech;
-use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
-use crate::ext::{ExtensionHandler, ExtensionTracker};
-use crate::p11::{self, PrivateKey, PublicKey};
-use crate::prio;
-use crate::replay::AntiReplay;
-use crate::secrets::SecretHolder;
-use crate::ssl::{self, PRBool};
-use crate::time::{Time, TimeHolder};
-
+use crate::{
+    agentio::{AgentIo, METHODS},
+    assert_initialized,
+    auth::AuthenticationStatus,
+    constants::{
+        Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
+    },
+    ech,
+    err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
+    ext::{ExtensionHandler, ExtensionTracker},
+    p11::{self, PrivateKey, PublicKey},
+    prio,
+    replay::AntiReplay,
+    secrets::SecretHolder,
+    ssl::{self, PRBool},
+    time::{Time, TimeHolder},
+};
 use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qinfo, qtrace, qwarn};
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::ffi::{CStr, CString};
-use std::mem::{self, MaybeUninit};
-use std::ops::{Deref, DerefMut};
-use std::os::raw::{c_uint, c_void};
-use std::pin::Pin;
-use std::ptr::{null, null_mut};
-use std::rc::Rc;
-use std::time::Instant;
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    ffi::{CStr, CString},
+    mem::{self, MaybeUninit},
+    ops::{Deref, DerefMut},
+    os::raw::{c_uint, c_void},
+    pin::Pin,
+    ptr::{null, null_mut},
+    rc::Rc,
+    time::Instant,
+};
 
 /// The maximum number of tickets to remember for a given connection.
 const MAX_TICKETS: usize = 4;

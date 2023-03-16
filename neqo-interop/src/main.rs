@@ -15,18 +15,22 @@ use neqo_transport::{
     Error, Output, State, StreamId, StreamType,
 };
 
-use std::cell::RefCell;
-use std::cmp::min;
-use std::collections::HashSet;
-use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    cmp::min,
+    collections::HashSet,
+    mem,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    rc::Rc,
+};
 // use std::path::PathBuf;
-use std::str::FromStr;
-use std::string::ParseError;
-use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    str::FromStr,
+    string::ParseError,
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt, Clone)]
@@ -63,7 +67,7 @@ fn emit_datagram(socket: &UdpSocket, d: Datagram) {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref TEST_TIMEOUT: Mutex<Duration> = Mutex::new(Duration::from_secs(5));
 }
 
