@@ -100,7 +100,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    qtrace!([format!("{:p}", fd)], "got ALPN {:?}", alpn);
+    qtrace!([format!("{fd:p}")], "got ALPN {:?}", alpn);
     Ok(alpn)
 }
 
@@ -359,11 +359,7 @@ impl SecretAgent {
             if st.is_none() {
                 *st = Some(alert.description);
             } else {
-                qwarn!(
-                    [format!("{:p}", fd)],
-                    "duplicate alert {}",
-                    alert.description
-                );
+                qwarn!([format!("{fd:p}")], "duplicate alert {}", alert.description);
             }
         }
     }
@@ -863,7 +859,7 @@ impl Client {
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(std::slice::from_raw_parts(token, len));
         qinfo!(
-            [format!("{:p}", fd)],
+            [format!("{fd:p}")],
             "Got resumption token {}",
             hex_snip_middle(&v)
         );
@@ -1031,15 +1027,11 @@ impl Server {
         for n in certificates {
             let c = CString::new(n.as_ref())?;
             let cert_ptr = unsafe { p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut()) };
-            let cert = if let Ok(c) = p11::Certificate::from_ptr(cert_ptr) {
-                c
-            } else {
+            let Ok(cert) = p11::Certificate::from_ptr(cert_ptr) else {
                 return Err(Error::CertificateLoading);
             };
             let key_ptr = unsafe { p11::PK11_FindKeyByAnyCert(*cert.deref(), null_mut()) };
-            let key = if let Ok(k) = p11::PrivateKey::from_ptr(key_ptr) {
-                k
-            } else {
+            let Ok(key) = p11::PrivateKey::from_ptr(key_ptr) else {
                 return Err(Error::CertificateLoading);
             };
             secstatus_to_res(unsafe {

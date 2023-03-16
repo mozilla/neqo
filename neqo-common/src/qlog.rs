@@ -104,14 +104,14 @@ impl Drop for NeqoQlogShared {
 pub fn new_trace(role: Role) -> qlog::Trace {
     Trace {
         vantage_point: VantagePoint {
-            name: Some(format!("neqo-{}", role)),
+            name: Some(format!("neqo-{role}")),
             ty: match role {
                 Role::Client => VantagePointType::Client,
                 Role::Server => VantagePointType::Server,
             },
             flow: None,
         },
-        title: Some(format!("neqo-{} trace", role)),
+        title: Some(format!("neqo-{role} trace")),
         description: Some("Example qlog trace description".to_string()),
         configuration: Some(Configuration {
             time_offset: Some("0".into()),

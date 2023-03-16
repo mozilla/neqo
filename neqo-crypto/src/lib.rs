@@ -114,8 +114,7 @@ fn version_check() {
     assert_ne!(
         unsafe { nss::NSS_VersionCheck(min_ver.as_ptr()) },
         0,
-        "Minimum NSS version of {} not supported",
-        MINIMUM_NSS_VERSION,
+        "Minimum NSS version of {MINIMUM_NSS_VERSION} not supported",
     );
 }
 

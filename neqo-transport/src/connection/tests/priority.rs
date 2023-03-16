@@ -181,7 +181,7 @@ fn repairing_loss() {
     // Only the low priority stream has data as the retransmission of the data from
     // the lost packet is now more important than new data from the high priority stream.
     for e in server.events() {
-        println!("Event: {:?}", e);
+        println!("Event: {e:?}");
         if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
             assert_eq!(stream_id, id_low);
         }
