@@ -6,28 +6,32 @@
 
 // Buffering data to send until it is acked.
 
-use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
-use std::collections::{BTreeMap, VecDeque};
-use std::convert::TryFrom;
-use std::mem;
-use std::ops::Add;
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    cmp::{max, min, Ordering},
+    collections::{BTreeMap, VecDeque},
+    convert::TryFrom,
+    mem,
+    ops::Add,
+    rc::Rc,
+};
 
 use indexmap::IndexMap;
 use smallvec::SmallVec;
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, Encoder, Role};
 
-use crate::events::ConnectionEvents;
-use crate::fc::SenderFlowControl;
-use crate::frame::{Frame, FRAME_TYPE_RESET_STREAM};
-use crate::packet::PacketBuilder;
-use crate::recovery::{RecoveryToken, StreamRecoveryToken};
-use crate::stats::FrameStats;
-use crate::stream_id::StreamId;
-use crate::tparams::{self, TransportParameters};
-use crate::{AppError, Error, Res};
+use crate::{
+    events::ConnectionEvents,
+    fc::SenderFlowControl,
+    frame::{Frame, FRAME_TYPE_RESET_STREAM},
+    packet::PacketBuilder,
+    recovery::{RecoveryToken, StreamRecoveryToken},
+    stats::FrameStats,
+    stream_id::StreamId,
+    tparams::{self, TransportParameters},
+    AppError, Error, Res,
+};
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
 
@@ -1859,7 +1863,7 @@ mod tests {
         s.set_max_stream_data(len_u64);
 
         // Send all the data, then the fin.
-        let _ = s.send(MESSAGE).unwrap();
+        _ = s.send(MESSAGE).unwrap();
         s.mark_as_sent(0, MESSAGE.len(), false);
         s.close();
         s.mark_as_sent(len_u64, 0, true);
@@ -1883,7 +1887,7 @@ mod tests {
         s.set_max_stream_data(len_u64);
 
         // Send all the data, then the fin.
-        let _ = s.send(MESSAGE).unwrap();
+        _ = s.send(MESSAGE).unwrap();
         s.mark_as_sent(0, MESSAGE.len(), false);
         s.close();
         s.mark_as_sent(len_u64, 0, true);

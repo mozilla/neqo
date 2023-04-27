@@ -16,13 +16,15 @@ use neqo_transport::{
     ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
 };
 
-use std::cell::RefCell;
-use std::cmp::max;
-use std::convert::TryFrom;
-use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    cmp::max,
+    convert::TryFrom,
+    mem,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use lazy_static::lazy_static;
 
@@ -195,7 +197,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
         )
     };
     while !is_done(a) {
-        let _ = maybe_authenticate(a);
+        _ = maybe_authenticate(a);
         let d = a.process(datagram, now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);

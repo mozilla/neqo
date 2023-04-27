@@ -4,14 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cell::RefCell;
-use std::cmp::{max, min};
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::mem;
-use std::ops::{Index, IndexMut, Range};
-use std::rc::Rc;
-use std::time::Instant;
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    collections::HashMap,
+    convert::TryFrom,
+    mem,
+    ops::{Index, IndexMut, Range},
+    rc::Rc,
+    time::Instant,
+};
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 
@@ -23,16 +25,18 @@ use neqo_crypto::{
     TLS_VERSION_1_3,
 };
 
-use crate::cid::ConnectionIdRef;
-use crate::packet::{PacketBuilder, PacketNumber};
-use crate::recovery::RecoveryToken;
-use crate::recv_stream::RxStreamOrderer;
-use crate::send_stream::TxBuffer;
-use crate::stats::FrameStats;
-use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
-use crate::tracking::PacketNumberSpace;
-use crate::version::Version;
-use crate::{Error, Res};
+use crate::{
+    cid::ConnectionIdRef,
+    packet::{PacketBuilder, PacketNumber},
+    recovery::RecoveryToken,
+    recv_stream::RxStreamOrderer,
+    send_stream::TxBuffer,
+    stats::FrameStats,
+    tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
+    tracking::PacketNumberSpace,
+    version::Version,
+    Error, Res,
+};
 
 const MAX_AUTH_TAG: usize = 32;
 /// The number of invocations remaining on a write cipher before we try
@@ -1155,7 +1159,7 @@ impl CryptoStates {
         // because they aren't allowed to update without first having received
         // something from us. If the ACK isn't in the packet that triggered this
         // key update, it must be in some other packet they have sent.
-        let _ = self.maybe_update_write()?;
+        _ = self.maybe_update_write()?;
 
         // We shouldn't have 0-RTT keys at this point, but if we do, dump them.
         debug_assert_eq!(self.read_update_time.is_some(), self.has_0rtt_read());

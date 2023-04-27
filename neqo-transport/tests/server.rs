@@ -27,12 +27,7 @@ use test_fixture::{
     CountingConnectionIdGenerator,
 };
 
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::mem;
-use std::net::SocketAddr;
-use std::rc::Rc;
-use std::time::Duration;
+use std::{cell::RefCell, convert::TryFrom, mem, net::SocketAddr, rc::Rc, time::Duration};
 
 /// Take a pair of connections in any state and complete the handshake.
 /// The `datagram` argument is a packet that was received from the server.
@@ -51,7 +46,7 @@ pub fn complete_connection(
         )
     };
     while !is_done(client) {
-        let _ = test_fixture::maybe_authenticate(client);
+        _ = test_fixture::maybe_authenticate(client);
         let out = client.process(datagram, now());
         let out = server.process(out.dgram(), now());
         datagram = out.dgram();
@@ -725,7 +720,7 @@ fn max_streams_after_0rtt_rejection() {
 
     let mut client = default_client();
     client.enable_resumption(now(), &token).unwrap();
-    let _ = client.stream_create(StreamType::BiDi).unwrap();
+    _ = client.stream_create(StreamType::BiDi).unwrap();
     let dgram = client.process_output(now()).dgram();
     let dgram = server.process(dgram, now()).dgram();
     let dgram = client.process(dgram, now()).dgram();
