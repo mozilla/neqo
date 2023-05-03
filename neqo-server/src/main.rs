@@ -7,24 +7,25 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use std::cell::RefCell;
-use std::cmp::min;
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
-use std::fs::OpenOptions;
-use std::io;
-use std::io::Read;
-use std::mem;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
-use std::process::exit;
-use std::rc::Rc;
-use std::str::FromStr;
-use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    cmp::min,
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fmt::{self, Display},
+    fs::OpenOptions,
+    io,
+    io::Read,
+    mem,
+    net::{SocketAddr, ToSocketAddrs},
+    path::PathBuf,
+    process::exit,
+    rc::Rc,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
-use mio::net::UdpSocket;
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
 use neqo_transport::ConnectionIdGenerator;
 use structopt::StructOpt;
@@ -729,10 +730,10 @@ impl ServersRunner {
                     if dgram.is_none() {
                         break;
                     }
-                    let _ = self.process(inx, dgram);
+                    _ = self.process(inx, dgram);
                 }
             } else {
-                let _ = self.process(inx, None);
+                _ = self.process(inx, None);
             }
             self.server.process_events(&self.args, self.args.now());
             if self.process(inx, None) {

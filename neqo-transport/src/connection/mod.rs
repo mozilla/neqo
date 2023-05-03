@@ -6,15 +6,17 @@
 
 // The class implementing a QUIC connection.
 
-use std::cell::RefCell;
-use std::cmp::{max, min};
-use std::convert::TryFrom;
-use std::fmt::{self, Debug};
-use std::mem;
-use std::net::{IpAddr, SocketAddr};
-use std::ops::RangeInclusive;
-use std::rc::{Rc, Weak};
-use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    convert::TryFrom,
+    fmt::{self, Debug},
+    mem,
+    net::{IpAddr, SocketAddr},
+    ops::RangeInclusive,
+    rc::{Rc, Weak},
+    time::{Duration, Instant},
+};
 
 use smallvec::SmallVec;
 
@@ -28,34 +30,40 @@ use neqo_crypto::{
     Server, ZeroRttChecker,
 };
 
-use crate::addr_valid::{AddressValidation, NewTokenState};
-use crate::cid::{
-    ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager, ConnectionIdRef,
-    ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
+use crate::{
+    addr_valid::{AddressValidation, NewTokenState},
+    cid::{
+        ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
+        ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
+    },
 };
 
-use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
-use crate::dump::*;
-use crate::events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome};
-use crate::frame::{
-    CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
-    FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
-};
-use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
-use crate::path::{Path, PathRef, Paths};
-use crate::quic_datagrams::{DatagramTracking, QuicDatagrams};
-use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
-use crate::rtt::GRANULARITY;
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
-use crate::stats::{Stats, StatsCell};
-use crate::stream_id::StreamType;
-use crate::streams::Streams;
-use crate::tparams::{
-    self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
+use crate::{
+    crypto::{Crypto, CryptoDxState, CryptoSpace},
+    dump::*,
+    events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
+    frame::{
+        CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
+        FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+    },
+    packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
+    path::{Path, PathRef, Paths},
+    qlog,
+    quic_datagrams::{DatagramTracking, QuicDatagrams},
+    recovery::{LossRecovery, RecoveryToken, SendProfile},
+    rtt::GRANULARITY,
+    stats::{Stats, StatsCell},
+    stream_id::StreamType,
+    streams::Streams,
+    tparams::{
+        self, TransportParameter, TransportParameterId, TransportParameters,
+        TransportParametersHandler,
+    },
+    tracking::{AckTracker, PacketNumberSpace, SentPacket},
+    version::{Version, WireVersion},
+    AppError, ConnectionError, Error, Res, StreamId,
 };
-use crate::tracking::{AckTracker, PacketNumberSpace, SentPacket};
-use crate::version::{Version, WireVersion};
-use crate::{qlog, AppError, ConnectionError, Error, Res, StreamId};
 
 mod idle;
 pub mod params;
@@ -1856,7 +1864,7 @@ impl Connection {
                 version,
                 grease_quic_bit,
             );
-            let _ = Self::add_packet_number(
+            _ = Self::add_packet_number(
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
@@ -3064,7 +3072,7 @@ impl Connection {
             version,
             false,
         );
-        let _ = Self::add_packet_number(
+        _ = Self::add_packet_number(
             &mut builder,
             tx,
             self.loss_recovery

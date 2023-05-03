@@ -6,20 +6,20 @@
 
 // Stream management for a connection.
 
-use crate::fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
-use crate::frame::Frame;
-use crate::packet::PacketBuilder;
-use crate::recovery::{RecoveryToken, StreamRecoveryToken};
-use crate::recv_stream::{RecvStream, RecvStreams};
-use crate::send_stream::{SendStream, SendStreams, TransmissionPriority};
-use crate::stats::FrameStats;
-use crate::stream_id::{StreamId, StreamType};
-use crate::tparams::{self, TransportParametersHandler};
-use crate::ConnectionEvents;
-use crate::{Error, Res};
+use crate::{
+    fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
+    frame::Frame,
+    packet::PacketBuilder,
+    recovery::{RecoveryToken, StreamRecoveryToken},
+    recv_stream::{RecvStream, RecvStreams},
+    send_stream::{SendStream, SendStreams, TransmissionPriority},
+    stats::FrameStats,
+    stream_id::{StreamId, StreamType},
+    tparams::{self, TransportParametersHandler},
+    ConnectionEvents, Error, Res,
+};
 use neqo_common::{qtrace, qwarn, Role};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 pub struct Streams {
     role: Role,
@@ -441,13 +441,13 @@ impl Streams {
     }
 
     pub fn set_initial_limits(&mut self) {
-        let _ = self.local_stream_limits[StreamType::BiDi].update(
+        _ = self.local_stream_limits[StreamType::BiDi].update(
             self.tps
                 .borrow()
                 .remote()
                 .get_integer(tparams::INITIAL_MAX_STREAMS_BIDI),
         );
-        let _ = self.local_stream_limits[StreamType::UniDi].update(
+        _ = self.local_stream_limits[StreamType::UniDi].update(
             self.tps
                 .borrow()
                 .remote()

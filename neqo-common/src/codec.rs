@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom;
-use std::fmt::Debug;
+use std::{convert::TryFrom, fmt::Debug};
 
 use crate::hex_with_len;
 
@@ -614,7 +613,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn encoded_length_oob() {
-        let _ = Encoder::varint_len(1 << 62);
+        _ = Encoder::varint_len(1 << 62);
     }
 
     #[test]
@@ -631,7 +630,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn encoded_vvec_length_oob() {
-        let _ = Encoder::vvec_len(1 << 62);
+        _ = Encoder::vvec_len(1 << 62);
     }
 
     #[test]

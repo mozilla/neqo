@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cmp::min;
-use std::mem;
+use std::{cmp::min, mem};
 
 use crate::codec::Decoder;
 
@@ -124,7 +123,7 @@ impl IncrementalDecoderIgnore {
 
     pub fn consume(&mut self, dv: &mut Decoder) -> bool {
         let amount = min(self.remaining, dv.remaining());
-        let _ = dv.decode(amount);
+        _ = dv.decode(amount);
         self.remaining -= amount;
         self.remaining == 0
     }

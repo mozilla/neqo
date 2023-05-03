@@ -6,22 +6,26 @@
 
 // Transport parameters. See -transport section 7.3.
 
-use crate::cid::{
-    ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN,
+use crate::{
+    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    version::{Version, VersionConfig, WireVersion},
+    Error, Res,
 };
-use crate::version::{Version, VersionConfig, WireVersion};
-use crate::{Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
-use neqo_crypto::constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
-use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::{random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker};
+use neqo_crypto::{
+    constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
+};
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    convert::TryFrom,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    rc::Rc,
+};
 
 pub type TransportParameterId = u64;
 macro_rules! tpids {
@@ -940,7 +944,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v4_unspecified() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0)), 443)),
             None,
         );
@@ -949,7 +953,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v4_zero_port() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0xc000_0201)), 0)),
             None,
         );
@@ -958,7 +962,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_unspecified() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(0)), 443)),
         );
@@ -967,7 +971,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_zero_port() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 0)),
         );
@@ -976,7 +980,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v4_is_v6() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)),
             None,
         );
@@ -985,7 +989,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_is_v4() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::from(0xc000_0201)),

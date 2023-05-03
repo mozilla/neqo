@@ -108,7 +108,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
             } else if header.name() == ":scheme" {
                 scheme_value = Some(header.value());
             }
-            let _ = bytes.next();
+            _ = bytes.next();
         }
 
         if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
