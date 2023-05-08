@@ -379,6 +379,7 @@ impl Connection {
             agent,
             protocols.iter().map(P::as_ref).map(String::from).collect(),
             Rc::clone(&tphandler),
+            conn_params.is_fuzzing(),
         )?;
 
         let stats = StatsCell::default();
