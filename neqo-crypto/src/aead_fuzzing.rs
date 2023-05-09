@@ -35,10 +35,10 @@ impl FuzzingAead {
     #[must_use]
     pub fn expansion(&self) -> usize {
         if let Some(aead) = &self.real {
-            return aead.expansion()
+            aead.expansion()
+        } else {
+            FIXED_TAG_FUZZING.len()
         }
-
-        FIXED_TAG_FUZZING.len()
     }
 
     pub fn encrypt<'a>(
@@ -91,10 +91,10 @@ impl FuzzingAead {
 
 impl fmt::Debug for FuzzingAead {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.real.is_none() {
-            write!(f, "[FUZZING AEAD]")
+        if let Some(a) = &self.real {
+            a.fmt(f)
         } else {
-            write!(f, "[AEAD Context]")
+            write!(f, "[FUZZING AEAD]")
         }
     }
 }

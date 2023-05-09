@@ -96,7 +96,7 @@ impl Crypto {
             tls: agent,
             streams: Default::default(),
             states: CryptoStates {
-                fuzzing: fuzzing,
+                fuzzing,
                 ..Default::default()
             },
         })
