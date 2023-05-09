@@ -17,6 +17,7 @@ jobs:
       - name: Install Packages
         env:
           DEBIAN_FRONTEND: noninteractive
+          llvm_version: 14
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -29,7 +30,8 @@ jobs:
             libclang-dev \
             libssl-dev \
             lld \
-            llvm \
+            llvm-"$llvm_version" \
+            llvm-"$llvm_version"-runtime \
             make \
             mercurial \
             ninja-build \
@@ -37,8 +39,8 @@ jobs:
             ssh \
             zlib1g-dev \
             --no-install-recommends
-          [ -d /usr/lib/llvm-14/lib ] # Expect clang 14
-          echo "LIBCLANG_DIR=/usr/lib/llvm-14/lib" >> "$GITHUB_ENV"
+          [ -d "/usr/lib/llvm-$llvm_version/lib" ]
+          echo "LIBCLANG_DIR=/usr/lib/llvm-$llvm_version/lib" >> "$GITHUB_ENV"
 
       # Rust installation cribbed from Dockerfiles at https://github.com/rust-lang/docker-rust
       - name: Install Rust
