@@ -12,7 +12,6 @@
 #![allow(clippy::unseparated_literal_suffix)]
 #![allow(clippy::used_underscore_binding)]
 
-#[cfg(not(feature = "fuzzing"))]
 mod aead;
 #[cfg(feature = "fuzzing")]
 mod aead_fuzzing;
@@ -39,13 +38,13 @@ mod ssl;
 mod time;
 
 #[cfg(not(feature = "fuzzing"))]
-pub use self::aead::Aead;
+pub use self::aead::RealAead as Aead;
 
 #[cfg(feature = "fuzzing")]
-pub use self::aead_fuzzing::Aead;
+pub use self::aead_fuzzing::FuzzingAead as Aead;
 
 #[cfg(feature = "fuzzing")]
-pub use self::aead_fuzzing::FIXED_TAG_FUZZING;
+pub use self::aead::RealAead;
 
 pub use self::{
     agent::{

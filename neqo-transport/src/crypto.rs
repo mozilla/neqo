@@ -70,6 +70,7 @@ impl Crypto {
         mut agent: Agent,
         protocols: Vec<String>,
         tphandler: TpHandler,
+        fuzzing: bool,
     ) -> Res<Self> {
         agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         agent.set_ciphers(&[
@@ -94,7 +95,10 @@ impl Crypto {
             protocols,
             tls: agent,
             streams: Default::default(),
-            states: Default::default(),
+            states: CryptoStates {
+                fuzzing,
+                ..Default::default()
+            },
         })
     }
 
@@ -412,6 +416,7 @@ pub struct CryptoDxState {
     /// The total number of operations that are remaining before the keys
     /// become exhausted and can't be used any more.
     invocations: PacketNumber,
+    fuzzing: bool,
 }
 
 impl CryptoDxState {
@@ -422,6 +427,7 @@ impl CryptoDxState {
         epoch: Epoch,
         secret: &SymKey,
         cipher: Cipher,
+        fuzzing: bool,
     ) -> Self {
         qinfo!(
             "Making {:?} {} CryptoDxState, v={:?} cipher={}",
@@ -435,11 +441,19 @@ impl CryptoDxState {
             version,
             direction,
             epoch: usize::from(epoch),
-            aead: Aead::new(TLS_VERSION_1_3, cipher, secret, version.label_prefix()).unwrap(),
+            aead: Aead::new(
+                fuzzing,
+                TLS_VERSION_1_3,
+                cipher,
+                secret,
+                version.label_prefix(),
+            )
+            .unwrap(),
             hpkey: HpKey::extract(TLS_VERSION_1_3, cipher, secret, &hplabel).unwrap(),
             used_pn: 0..0,
             min_pn: 0,
             invocations: Self::limit(direction, cipher),
+            fuzzing,
         }
     }
 
@@ -448,6 +462,7 @@ impl CryptoDxState {
         direction: CryptoDxDirection,
         label: &str,
         dcid: &[u8],
+        fuzzing: bool,
     ) -> Self {
         qtrace!("new_initial {:?} {}", version, ConnectionIdRef::from(dcid));
         let salt = version.initial_salt();
@@ -463,7 +478,14 @@ impl CryptoDxState {
         let secret =
             hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label).unwrap();
 
-        Self::new(version, direction, TLS_EPOCH_INITIAL, &secret, cipher)
+        Self::new(
+            version,
+            direction,
+            TLS_EPOCH_INITIAL,
+            &secret,
+            cipher,
+            fuzzing,
+        )
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
@@ -523,6 +545,7 @@ impl CryptoDxState {
             direction: self.direction,
             epoch: self.epoch + 1,
             aead: Aead::new(
+                self.fuzzing,
                 TLS_VERSION_1_3,
                 cipher,
                 next_secret,
@@ -533,6 +556,7 @@ impl CryptoDxState {
             used_pn: pn..pn,
             min_pn: pn,
             invocations,
+            fuzzing: self.fuzzing,
         }
     }
 
@@ -677,6 +701,7 @@ impl CryptoDxState {
             CryptoDxDirection::Write,
             "server in",
             CLIENT_CID,
+            false,
         )
     }
 
@@ -730,6 +755,7 @@ pub(crate) struct CryptoDxAppData {
     cipher: Cipher,
     // Not the secret used to create `self.dx`, but the one needed for the next iteration.
     next_secret: SymKey,
+    fuzzing: bool,
 }
 
 impl CryptoDxAppData {
@@ -738,11 +764,20 @@ impl CryptoDxAppData {
         dir: CryptoDxDirection,
         secret: SymKey,
         cipher: Cipher,
+        fuzzing: bool,
     ) -> Res<Self> {
         Ok(Self {
-            dx: CryptoDxState::new(version, dir, TLS_EPOCH_APPLICATION_DATA, &secret, cipher),
+            dx: CryptoDxState::new(
+                version,
+                dir,
+                TLS_EPOCH_APPLICATION_DATA,
+                &secret,
+                cipher,
+                fuzzing,
+            ),
             cipher,
             next_secret: Self::update_secret(cipher, &secret)?,
+            fuzzing,
         })
     }
 
@@ -761,6 +796,7 @@ impl CryptoDxAppData {
             dx: self.dx.next(&self.next_secret, self.cipher),
             cipher: self.cipher,
             next_secret,
+            fuzzing: self.fuzzing,
         })
     }
 
@@ -794,6 +830,7 @@ pub struct CryptoStates {
     // If this is set, then we have noticed a genuine update.
     // Once this time passes, we should switch in new keys.
     read_update_time: Option<Instant>,
+    fuzzing: bool,
 }
 
 impl CryptoStates {
@@ -948,8 +985,20 @@ impl CryptoStates {
             );
 
             let mut initial = CryptoState {
-                tx: CryptoDxState::new_initial(*v, CryptoDxDirection::Write, write, dcid),
-                rx: CryptoDxState::new_initial(*v, CryptoDxDirection::Read, read, dcid),
+                tx: CryptoDxState::new_initial(
+                    *v,
+                    CryptoDxDirection::Write,
+                    write,
+                    dcid,
+                    self.fuzzing,
+                ),
+                rx: CryptoDxState::new_initial(
+                    *v,
+                    CryptoDxDirection::Read,
+                    read,
+                    dcid,
+                    self.fuzzing,
+                ),
             };
             if let Some(prev) = self.initials.get(v) {
                 qinfo!(
@@ -1003,6 +1052,7 @@ impl CryptoStates {
             TLS_EPOCH_ZERO_RTT,
             secret,
             cipher,
+            self.fuzzing,
         ));
     }
 
@@ -1043,6 +1093,7 @@ impl CryptoStates {
                 TLS_EPOCH_HANDSHAKE,
                 write_secret,
                 cipher,
+                self.fuzzing,
             ),
             rx: CryptoDxState::new(
                 version,
@@ -1050,6 +1101,7 @@ impl CryptoStates {
                 TLS_EPOCH_HANDSHAKE,
                 read_secret,
                 cipher,
+                self.fuzzing,
             ),
         });
     }
@@ -1057,7 +1109,13 @@ impl CryptoStates {
     pub fn set_application_write_key(&mut self, version: Version, secret: SymKey) -> Res<()> {
         debug_assert!(self.app_write.is_none());
         debug_assert_ne!(self.cipher, 0);
-        let mut app = CryptoDxAppData::new(version, CryptoDxDirection::Write, secret, self.cipher)?;
+        let mut app = CryptoDxAppData::new(
+            version,
+            CryptoDxDirection::Write,
+            secret,
+            self.cipher,
+            self.fuzzing,
+        )?;
         if let Some(z) = &self.zero_rtt {
             if z.direction == CryptoDxDirection::Write {
                 app.dx.continuation(z)?;
@@ -1076,7 +1134,13 @@ impl CryptoStates {
     ) -> Res<()> {
         debug_assert!(self.app_write.is_some(), "should have write keys installed");
         debug_assert!(self.app_read.is_none());
-        let mut app = CryptoDxAppData::new(version, CryptoDxDirection::Read, secret, self.cipher)?;
+        let mut app = CryptoDxAppData::new(
+            version,
+            CryptoDxDirection::Read,
+            secret,
+            self.cipher,
+            self.fuzzing,
+        )?;
         if let Some(z) = &self.zero_rtt {
             if z.direction == CryptoDxDirection::Read {
                 app.dx.continuation(z)?;
@@ -1231,6 +1295,7 @@ impl CryptoStates {
             dx: read(epoch),
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
+            fuzzing: false,
         };
         let mut initials = HashMap::new();
         initials.insert(
@@ -1250,6 +1315,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            fuzzing: false,
         }
     }
 
@@ -1267,6 +1333,7 @@ impl CryptoStates {
                 direction: CryptoDxDirection::Read,
                 epoch,
                 aead: Aead::new(
+                    false,
                     TLS_VERSION_1_3,
                     TLS_CHACHA20_POLY1305_SHA256,
                     &secret,
@@ -1283,9 +1350,11 @@ impl CryptoStates {
                 used_pn: 0..645_971_972,
                 min_pn: 0,
                 invocations: 10,
+                fuzzing: false,
             },
             cipher: TLS_CHACHA20_POLY1305_SHA256,
             next_secret: secret.clone(),
+            fuzzing: false,
         };
         Self {
             initials: HashMap::new(),
@@ -1296,6 +1365,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            fuzzing: false,
         }
     }
 }
