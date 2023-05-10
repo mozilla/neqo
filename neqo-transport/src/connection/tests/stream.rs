@@ -4,23 +4,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::State;
 use super::{
-    assert_error, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
-    new_client, new_server, send_something, DEFAULT_STREAM_DATA,
+    super::State, assert_error, connect, connect_force_idle, default_client, default_server,
+    maybe_authenticate, new_client, new_server, send_something, DEFAULT_STREAM_DATA,
 };
-use crate::events::ConnectionEvent;
-use crate::recv_stream::RECV_BUFFER_SIZE;
-use crate::send_stream::{SendStreamState, SEND_BUFFER_SIZE};
-use crate::tparams::{self, TransportParameter};
-use crate::tracking::DEFAULT_ACK_PACKET_TOLERANCE;
-use crate::{Connection, ConnectionError, ConnectionParameters};
-use crate::{Error, StreamType};
+use crate::{
+    events::ConnectionEvent,
+    recv_stream::RECV_BUFFER_SIZE,
+    send_stream::{SendStreamState, SEND_BUFFER_SIZE},
+    tparams::{self, TransportParameter},
+    tracking::DEFAULT_ACK_PACKET_TOLERANCE,
+    Connection, ConnectionError, ConnectionParameters, Error, StreamType,
+};
 
 use neqo_common::{event::Provider, qdebug};
-use std::cmp::max;
-use std::convert::TryFrom;
-use std::mem;
+use std::{cmp::max, convert::TryFrom, mem};
 use test_fixture::now;
 
 #[test]
@@ -492,7 +490,7 @@ fn stream_data_blocked_generates_max_stream_data() {
 
     // Send some data and consume some flow control.
     let stream_id = server.stream_create(StreamType::UniDi).unwrap();
-    let _ = server.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    _ = server.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
     let dgram = server.process(None, now).dgram();
     assert!(dgram.is_some());
 
@@ -551,7 +549,7 @@ fn max_streams_after_bidi_closed() {
         // Exhaust the stream limit.
     }
     // Write on the one stream and send that out.
-    let _ = client.stream_send(stream_id, REQUEST).unwrap();
+    _ = client.stream_send(stream_id, REQUEST).unwrap();
     client.stream_close_send(stream_id).unwrap();
     let dgram = client.process(None, now()).dgram();
 

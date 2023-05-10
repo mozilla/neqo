@@ -23,18 +23,20 @@ use neqo_transport::{
     EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
 };
 
-use std::collections::{HashMap, VecDeque};
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
-use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{self, ErrorKind, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::path::PathBuf;
-use std::process::exit;
-use std::rc::Rc;
-use std::str::FromStr;
-use std::time::Instant;
-use std::{cell::RefCell, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+    convert::TryFrom,
+    fmt::{self, Display},
+    fs::{create_dir_all, File, OpenOptions},
+    io::{self, ErrorKind, Write},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    path::PathBuf,
+    process::exit,
+    rc::Rc,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use structopt::StructOpt;
 use url::{Origin, Url};
@@ -861,15 +863,17 @@ fn main() -> Res<()> {
 }
 
 mod old {
-    use std::cell::RefCell;
-    use std::collections::{HashMap, VecDeque};
-    use std::fs::File;
-    use std::io::{ErrorKind, Write};
-    use std::net::{SocketAddr, UdpSocket};
-    use std::path::PathBuf;
-    use std::process::exit;
-    use std::rc::Rc;
-    use std::time::Instant;
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, VecDeque},
+        fs::File,
+        io::{ErrorKind, Write},
+        net::{SocketAddr, UdpSocket},
+        path::PathBuf,
+        process::exit,
+        rc::Rc,
+        time::Instant,
+    };
 
     use url::Url;
 
@@ -921,7 +925,7 @@ mod old {
                 Ok(client_stream_id) => {
                     println!("Created stream {} for {}", client_stream_id, url);
                     let req = format!("GET {}\r\n", url.path());
-                    let _ = client
+                    _ = client
                         .stream_send(client_stream_id, req.as_bytes())
                         .unwrap();
                     client.stream_close_send(client_stream_id).unwrap();

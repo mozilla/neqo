@@ -4,16 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Error, Output};
-use super::{connect, default_client, default_server, fill_cwnd, maybe_authenticate};
-use crate::addr_valid::{AddressValidation, ValidateAddress};
-use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
-use crate::{ConnectionEvent, StreamId, StreamType};
+use super::{
+    super::{Connection, Error, Output},
+    connect, default_client, default_server, fill_cwnd, maybe_authenticate,
+};
+use crate::{
+    addr_valid::{AddressValidation, ValidateAddress},
+    send_stream::{RetransmissionPriority, TransmissionPriority},
+    ConnectionEvent, StreamId, StreamType,
+};
 
 use neqo_common::event::Provider;
-use std::cell::RefCell;
-use std::mem;
-use std::rc::Rc;
+use std::{cell::RefCell, mem, rc::Rc};
 use test_fixture::{self, now};
 
 const BLOCK_SIZE: usize = 4_096;
@@ -169,7 +171,7 @@ fn repairing_loss() {
 
     // Generate an ACK.  The first packet is now considered lost.
     let ack = server.process_output(now).dgram();
-    let _ = server.events().count(); // Drain events.
+    _ = server.events().count(); // Drain events.
 
     let id_normal = client.stream_create(StreamType::UniDi).unwrap();
     fill_stream(&mut client, id_normal);
