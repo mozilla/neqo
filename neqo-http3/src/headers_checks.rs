@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::expl_impl_clone_on_copy)] // see https://github.com/Lymia/enumset/issues/28
+#![allow(clippy::unused_unit)] // see https://github.com/Lymia/enumset/issues/44
 
 use crate::{Error, MessageType, Res};
 use enumset::{enum_set, EnumSet, EnumSetType};
