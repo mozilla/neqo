@@ -550,6 +550,7 @@ trait SendStream: Stream {
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
+    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<i64>);
     /// # Errors
     /// Error my occure during sending data, e.g. protocol error, etc.
     fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
