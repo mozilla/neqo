@@ -18,6 +18,7 @@ use std::{
 
 use indexmap::IndexMap;
 use smallvec::SmallVec;
+use std::hash::{Hash, Hasher};
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace, Encoder, Role};
 
@@ -556,7 +557,21 @@ pub struct SendStream {
     priority: TransmissionPriority,
     retransmission_priority: RetransmissionPriority,
     retransmission_offset: u64,
+    sendorder: Option<i64>,
 }
+
+impl Hash for SendStream {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+       self.stream_id.hash(state)
+    }
+}
+
+impl PartialEq for SendStream {
+    fn eq(&self, other: &Self) -> bool {
+        self.stream_id == other.stream_id
+    }
+}
+impl Eq for SendStream {}
 
 impl SendStream {
     pub fn new(
@@ -575,11 +590,26 @@ impl SendStream {
             priority: TransmissionPriority::default(),
             retransmission_priority: RetransmissionPriority::default(),
             retransmission_offset: 0,
+	    sendorder: None,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
         }
         ss
+    }
+
+    pub fn write_frames(
+        &mut self,
+        priority: TransmissionPriority,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) {
+        qtrace!("write STREAM frames at priority {:?}", priority);
+	if !self.write_reset_frame(priority, builder, tokens, stats) {
+          self.write_blocked_frame(priority, builder, tokens, stats);
+          self.write_stream_frame(priority, builder, tokens, stats);
+        }
     }
 
     pub fn set_priority(
@@ -589,6 +619,18 @@ impl SendStream {
     ) {
         self.priority = transmission;
         self.retransmission_priority = retransmission;
+    }
+
+    pub fn sendorder(&self) -> Option<i64> {
+       self.sendorder
+    }
+
+    pub fn set_sendorder(
+        &mut self,
+	sendorder: Option<i64>,
+    ) {
+        self.sendorder = sendorder;
+	// Caller must remove and re-insert into ordered_streams
     }
 
     /// If all data has been buffered or written, how much was sent.
@@ -1116,8 +1158,12 @@ impl SendStreams {
         self.0.clear()
     }
 
-    pub fn clear_terminal(&mut self) {
-        self.0.retain(|_, stream| !stream.is_terminal())
+    pub fn get_terminal(&self) -> Vec<StreamId> {
+	self.0.iter().filter_map(|(stream_id, stream)| stream.is_terminal().then_some(*stream_id)).collect()
+    }
+
+    pub fn remove(&mut self, stream_id: &StreamId) {
+	self.0.remove(stream_id);
     }
 
     pub(crate) fn write_frames(

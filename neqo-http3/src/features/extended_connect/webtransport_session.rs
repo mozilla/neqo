@@ -486,6 +486,10 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
         self.borrow_mut().has_data_to_send()
     }
 
+    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<i64>) {
+//	self.borrow_mut().set_sendorder(conn, sendorder);
+    }
+    
     fn stream_writable(&self) {}
 
     fn done(&self) -> bool {

@@ -232,7 +232,7 @@ possible if there is no buffered data.
 If a stream has buffered data it will be registered in the `streams_with_pending_data` queue and
 actual sending will be performed in the `process_sending` function call. (This is done in this way,
 i.e. data is buffered first and then sent, for 2 reasons: in this way, sending will happen in a
-single function,  therefore error handling and clean up is easier and the QUIIC layer may not be
+single function,  therefore error handling and clean up is easier and the QUIC layer may not be
 able to accept all data and being able to buffer data is required in any case.)
 
 The `send` and `send_data` functions may detect that the stream is closed and all outstanding data
@@ -920,7 +920,7 @@ impl Http3Connection {
         );
 
         // Call immediately send so that at least headers get sent. This will make Firefox faster, since
-        // it can send request body immediatly in most cases and does not need to do a complete process loop.
+        // it can send request body immediately in most cases and does not need to do a complete process loop.
         self.send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
@@ -993,6 +993,17 @@ impl Http3Connection {
         // Stream may be already be closed and we may get an error here, but we do not care.
         conn.stream_stop_sending(stream_id, error)?;
         Ok(())
+    }
+
+    pub fn stream_set_sendorder(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+	sendorder: Option<i64>) -> Res<()> {
+        let send_stream = self.send_streams.get_mut(&stream_id)
+	                .ok_or(Error::InvalidStreamId)?;
+	send_stream.set_sendorder(conn, sendorder);
+	Ok(())
     }
 
     pub fn cancel_fetch(

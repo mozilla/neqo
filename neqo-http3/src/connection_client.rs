@@ -754,6 +754,16 @@ impl Http3Client {
             - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
     }
 
+    /// Sets the SendOrder for a given stream
+    /// # Errors
+    /// XXX No errors are returned
+    /// # Panics
+    /// This cannot panic.
+    pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: i64) {
+	self.base_handler
+	    .stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder)).ok();
+    }
+
     /// This function combines  `process_input` and `process_output` function.
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");

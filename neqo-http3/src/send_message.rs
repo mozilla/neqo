@@ -271,6 +271,10 @@ impl SendStream for SendMessage {
         self.stream.has_buffered_data()
     }
 
+    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<i64>) {
+//	self.stream.set_sendorder(conn, sendorder);
+    }
+    
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
         self.state.fin()?;
         if !self.stream.has_buffered_data() {
