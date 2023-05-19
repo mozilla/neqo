@@ -2964,7 +2964,7 @@ impl Connection {
 
     /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
     /// # Errors
-    /// `InvalidStreamId` the stream does not exist.
+    /// None
     pub fn stream_sendorder(
         &mut self,
         stream_id: StreamId,
