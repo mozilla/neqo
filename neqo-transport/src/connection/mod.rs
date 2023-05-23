@@ -1967,9 +1967,9 @@ impl Connection {
 	let stream_ids = self.streams.ordered().copied().collect::<Vec<StreamId>>();
 	for stream_id in stream_ids.iter() {
 	    self.streams.get_send_stream_mut(*stream_id).unwrap().write_frames(TransmissionPriority::Normal, builder, tokens, stats);
-            if builder.is_full() {
+	    if builder.is_full() {
 		return Ok(());
-            }
+	    }
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.

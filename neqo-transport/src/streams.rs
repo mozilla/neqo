@@ -24,13 +24,22 @@ use neqo_common::{qtrace, qwarn, Role};
 use std::{cell::RefCell, rc::Rc};
 use std::cmp::Ordering;
 
-struct StreamOrder {
-    sendorder: Option<i64>,
+#[derive(Copy, Clone)]
+pub struct StreamOrder {
+    pub sendorder: Option<i64>,
 }
 
-// We want highest to lowest
+// We want highest to lowest, with None being higher than any value
 impl Ord for StreamOrder {
     fn cmp(&self, other: &Self) -> Ordering {
+	if self.sendorder == None {
+	    if other.sendorder == None {
+		return Ordering::Equal;
+	    }
+	    return Ordering::Less;
+	} else if other.sendorder == None {
+	    return Ordering::Greater;
+	}
         other.sendorder.cmp(&self.sendorder)
     }
 }
