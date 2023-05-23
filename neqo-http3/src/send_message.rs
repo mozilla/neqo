@@ -13,7 +13,7 @@ use crate::{
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, StreamId, streams::SendOrder};
 use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::min;
@@ -271,8 +271,8 @@ impl SendStream for SendMessage {
         self.stream.has_buffered_data()
     }
 
-    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<i64>) {
-//	self.stream.set_sendorder(conn, sendorder);
+    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) {
+	// Not relevant for SendMessage
     }
     
     fn close(&mut self, conn: &mut Connection) -> Res<()> {

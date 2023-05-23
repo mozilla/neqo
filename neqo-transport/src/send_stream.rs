@@ -9,7 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque, HashSet},
     convert::TryFrom,
     mem,
     ops::Add,
@@ -30,6 +30,7 @@ use crate::{
     recovery::{RecoveryToken, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::StreamId,
+    streams::SendOrder,
     tparams::{self, TransportParameters},
     AppError, Error, Res,
 };
@@ -557,7 +558,7 @@ pub struct SendStream {
     priority: TransmissionPriority,
     retransmission_priority: RetransmissionPriority,
     retransmission_offset: u64,
-    sendorder: Option<i64>,
+    sendorder: Option<SendOrder>,
 }
 
 impl Hash for SendStream {
@@ -621,13 +622,13 @@ impl SendStream {
         self.retransmission_priority = retransmission;
     }
 
-    pub fn sendorder(&self) -> Option<i64> {
+    pub fn sendorder(&self) -> Option<SendOrder> {
        self.sendorder
     }
 
     pub fn set_sendorder(
         &mut self,
-	sendorder: Option<i64>,
+	sendorder: Option<SendOrder>,
     ) {
         self.sendorder = sendorder;
 	// Caller must remove and re-insert into ordered_streams
@@ -714,7 +715,7 @@ impl SendStream {
     }
 
     /// Maybe write a `STREAM` frame.
-    fn write_stream_frame(
+    pub fn write_stream_frame(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
@@ -1105,65 +1106,143 @@ impl ::std::fmt::Display for SendStream {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SendStreams(IndexMap<StreamId, SendStream>);
+pub(crate) struct SendStreams {
+    map: IndexMap<StreamId, SendStream>,
+
+    // What we really want is a Priority Queue that we can do arbitrary removes
+    // from (so we can reprioritize). BinaryHeap doesn't work, because there's no
+    // remove().  BTreeMap doesn't work, since you can't duplicate keys.
+    // PriorityQueue does have what we need, except for an ordered iterator that doesn't consume the queue.
+
+    // So we use a HashSet for the unordered streams (that's usually all of
+    // them), and then a BTreeMap of an entry for each SendOrder value, and
+    // for each of those entries a HashSet of the stream_ids at that
+    // sendorder.  In most cases (such as stream-per-frame), there will be
+    // a single stream at a given sendorder.
+
+    // These both store stream_ids, which need to be looked up in 'map'.  This avoids the complexity
+    // of trying to hold references to the Streams which are owned by the IndexMap.
+    // Note: dispose of the Option<> for ordered_send
+    ordered: BTreeMap<SendOrder, HashSet<StreamId>>,
+    unordered: HashSet<StreamId>, // streams with no SendOrder set
+}
 
 impl SendStreams {
     pub fn get(&self, id: StreamId) -> Res<&SendStream> {
-        self.0.get(&id).ok_or(Error::InvalidStreamId)
+        self.map.get(&id).ok_or(Error::InvalidStreamId)
     }
 
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
-        self.0.get_mut(&id).ok_or(Error::InvalidStreamId)
+        self.map.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
 
     pub fn exists(&self, id: StreamId) -> bool {
-        self.0.contains_key(&id)
+        self.map.contains_key(&id)
     }
 
     pub fn insert(&mut self, id: StreamId, stream: SendStream) {
-        self.0.insert(id, stream);
+        self.map.insert(id, stream);
+	self.unordered.insert(id);
+    }
+
+    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
+	// don't grab stream here; causes borrow errors
+        let old_sendorder = self.map.get(&stream_id).unwrap().sendorder();
+	if old_sendorder != sendorder {
+	    // we have to remove it from the list it was in, and reinsert it with the new
+	    // sendorder key
+            if old_sendorder.is_none() {
+		self.unordered.remove(&stream_id);
+            } else {
+		self.ordered.get_mut(&(old_sendorder.unwrap())).unwrap().remove(&stream_id);
+	    }
+            self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
+	    if sendorder.is_none() {
+		self.unordered.insert(stream_id);
+	    } else {
+		let set = self.ordered.entry(sendorder.unwrap()).or_default();
+		set.insert(stream_id);
+	    }
+
+	    qtrace!(
+		"ordering of sendorder hashsets: {:?}",
+		self.ordered.keys().collect::<Vec::<_>>()
+            );
+	    qtrace!(
+		"ordering of stream_ids: {:?}",
+		self.ordered.values().collect::<Vec::<_>>()
+            );
+	}
     }
 
     pub fn acked(&mut self, token: &SendStreamRecoveryToken) {
-        if let Some(ss) = self.0.get_mut(&token.id) {
+        if let Some(ss) = self.map.get_mut(&token.id) {
             ss.mark_as_acked(token.offset, token.length, token.fin);
         }
     }
 
     pub fn reset_acked(&mut self, id: StreamId) {
-        if let Some(ss) = self.0.get_mut(&id) {
+        if let Some(ss) = self.map.get_mut(&id) {
             ss.reset_acked()
         }
     }
 
     pub fn lost(&mut self, token: &SendStreamRecoveryToken) {
-        if let Some(ss) = self.0.get_mut(&token.id) {
+        if let Some(ss) = self.map.get_mut(&token.id) {
             ss.mark_as_lost(token.offset, token.length, token.fin);
         }
     }
 
     pub fn reset_lost(&mut self, stream_id: StreamId) {
-        if let Some(ss) = self.0.get_mut(&stream_id) {
+        if let Some(ss) = self.map.get_mut(&stream_id) {
             ss.reset_lost();
         }
     }
 
     pub fn blocked_lost(&mut self, stream_id: StreamId, limit: u64) {
-        if let Some(ss) = self.0.get_mut(&stream_id) {
+        if let Some(ss) = self.map.get_mut(&stream_id) {
             ss.blocked_lost(limit);
         }
     }
 
     pub fn clear(&mut self) {
-        self.0.clear()
+        self.map.clear();
+	self.ordered.clear();
+	self.unordered.clear();
     }
 
     pub fn get_terminal(&self) -> Vec<StreamId> {
-	self.0.iter().filter_map(|(stream_id, stream)| stream.is_terminal().then_some(*stream_id)).collect()
+	self.map.iter().filter_map(|(stream_id, stream)| stream.is_terminal().then_some(*stream_id)).collect()
     }
 
-    pub fn remove(&mut self, stream_id: &StreamId) {
-	self.0.remove(stream_id);
+    pub fn remove_terminal(&mut self) {
+	let clean_list = self.get_terminal();
+	for stream_id in clean_list {
+	    self.remove_sendorder(&stream_id);
+	}
+    }
+
+    pub fn remove_sendorder(&mut self, stream_id: &StreamId) {
+	let stream = &self.map[stream_id];
+	match stream.sendorder() {
+	    None => self.unordered.remove(stream_id),
+	    Some(sendorder) => self.ordered.get_mut(&sendorder).unwrap().remove(stream_id),
+	};
+    }
+
+    // ordered iterator that iterates over the unordered streams and then
+    // the ordered streams, from highest to lowest.   Note: no attempt at
+    // fairness is made here.
+    // Note: the BTreeMap is keyed by SendOrder, but it would normally iterate
+    // smallest-to-largest, and we want the opposite.
+    #[allow(dead_code)]
+    pub fn ordered_iter(&mut self) -> impl Iterator<Item = &StreamId> {
+	self.unordered.iter().chain(self.ordered.values().rev().flatten())
+    }
+
+    #[allow(dead_code)]
+    pub fn unordered_iter(&mut self) -> impl Iterator<Item = (&StreamId, &SendStream)> {
+      self.map.iter()
     }
 
     pub(crate) fn write_frames(
@@ -1174,16 +1253,39 @@ impl SendStreams {
         stats: &mut FrameStats,
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
-        for stream in self.0.values_mut() {
+        // WebTransport data (which is Normal) may have a SendOrder
+	// priority attached.  The spec states (6.3 write-chunk 6.1):
+
+        // If stream.[[SendOrder]] is null then this sending MUST NOT
+	// starve except for flow control reasons or error.  If
+	// stream.[[SendOrder]] is not null then this sending MUST starve
+	// until all bytes queued for sending on WebTransportSendStreams
+	// with a non-null and higher [[SendOrder]], that are neither
+	// errored nor blocked by flow control, have been sent.
+
+	// So data without SendOrder goes first.   Then the highest priority
+	// SendOrdered streams.   Round-robining the data at the same priority
+	// isn't required (currently) by the spec, but would be good to do in the future.
+	// "ordered()" returns a chained hash that iterates all the streams in the order
+	// described above.
+	let stream_ids = self.unordered.iter().chain(self.ordered.values().rev().flatten()); //self.ordered_iter();
+	for stream_id in stream_ids {
+	    let stream = self.map.get_mut(stream_id).unwrap();
             if !stream.write_reset_frame(priority, builder, tokens, stats) {
                 stream.write_blocked_frame(priority, builder, tokens, stats);
+		if builder.is_full() {
+                    return;
+		}
                 stream.write_stream_frame(priority, builder, tokens, stats);
+		if builder.is_full() {
+                    return;
+		}
             }
         }
     }
 
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
-        for (id, ss) in self.0.iter_mut() {
+        for (id, ss) in self.map.iter_mut() {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
                 remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
@@ -1200,7 +1302,7 @@ impl<'a> IntoIterator for &'a mut SendStreams {
     type IntoIter = indexmap::map::IterMut<'a, StreamId, SendStream>;
 
     fn into_iter(self) -> indexmap::map::IterMut<'a, StreamId, SendStream> {
-        self.0.iter_mut()
+        self.map.iter_mut()
     }
 }
 

@@ -32,7 +32,7 @@ use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{
     AppError, Connection, ConnectionError, DatagramTracking, State, StreamId, StreamType,
-    ZeroRttState,
+    ZeroRttState, streams::SendOrder,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -999,7 +999,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-	sendorder: Option<i64>) -> Res<()> {
+	sendorder: Option<SendOrder>) -> Res<()> {
         let send_stream = self.send_streams.get_mut(&stream_id)
 	                .ok_or(Error::InvalidStreamId)?;
 	send_stream.set_sendorder(conn, sendorder);

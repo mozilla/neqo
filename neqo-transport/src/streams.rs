@@ -5,9 +5,6 @@
 // except according to those terms.
 
 // Stream management for a connection.
-use std::collections::BTreeMap;
-use std::collections::HashSet;
-
 use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
@@ -24,29 +21,28 @@ use neqo_common::{qtrace, qwarn, Role};
 use std::{cell::RefCell, rc::Rc};
 use std::cmp::Ordering;
 
+pub type SendOrder = i64;
+
 #[derive(Copy, Clone)]
 pub struct StreamOrder {
-    pub sendorder: Option<i64>,
+    pub sendorder: Option<SendOrder>,
 }
 
 // We want highest to lowest, with None being higher than any value
 impl Ord for StreamOrder {
-    fn cmp(&self, other: &Self) -> Ordering {
-	if self.sendorder == None {
-	    if other.sendorder == None {
-		return Ordering::Equal;
-	    }
-	    return Ordering::Less;
-	} else if other.sendorder == None {
-	    return Ordering::Greater;
-	}
-        other.sendorder.cmp(&self.sendorder)
+  fn cmp(&self, other: &Self) -> Ordering {
+    if let (Some(_), Some(_)) = (self.sendorder, other.sendorder) {
+      // We want reverse order (high to low) when both values are specified.
+      other.sendorder.cmp(&self.sendorder)
+    } else {
+      self.sendorder.cmp(&other.sendorder)
     }
+  }
 }
 
 impl PartialOrd for StreamOrder {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(other.cmp(self))
+        Some(self.cmp(other))
     }
 }
 
@@ -67,23 +63,10 @@ pub struct Streams {
     receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
     remote_stream_limits: RemoteStreamLimits,
     local_stream_limits: LocalStreamLimits,
+    // note: SendStreams also keeps track of SendOrder and provides an iterator
+    // based on SendOrder
     pub(crate) send: SendStreams,
     pub(crate) recv: RecvStreams,
-    // What we really want is a Priority Queue that we can do arbitrary removes
-    // from (so we can reprioritize). BinaryHeap doesn't work, because there's no
-    // remove().  BTreeMap doesn't work, since you can't duplicate keys.
-    // PriorityQueue does have what we need, except for an ordered iterator that doesn't consume the queue.
-
-    // So we use a HashSet for the unordered streams (that's usually all of
-    // them), and then a BTreeMap of an entry for each SendOrder value, and
-    // for each of those entries a HashSet of the stream_ids at that
-    // sendorder.  In most cases (such as stream-per-frame), there will be
-    // a single stream at a given sendorder.
-    
-    // These both store stream_ids, which need to be looked up in 'send'.  This avoids the complexity
-    // of trying to hold references to the Streams which are owned by the send IndexMap.
-    ordered_send: BTreeMap<StreamOrder, HashSet<StreamId>>,
-    unordered_send: HashSet<StreamId>, // streams with no SendOrder set
 }
 
 impl Streams {
@@ -111,8 +94,6 @@ impl Streams {
             local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
             recv: RecvStreams::default(),
-	    ordered_send: BTreeMap::new(),
-	    unordered_send: HashSet::new(),
         }
     }
 
@@ -121,10 +102,7 @@ impl Streams {
     }
 
     pub fn zero_rtt_rejected(&mut self) {
-        self.send.clear();
-        self.recv.clear();
-	self.ordered_send.clear();
-	self.unordered_send.clear();
+        self.clear_streams();
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::BiDi].max_active(),
             self.tps
@@ -286,7 +264,7 @@ impl Streams {
             }
         }
 
-        self.send.write_frames(priority, builder, tokens, stats);
+	self.send.write_frames(priority, builder, tokens, stats)
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
@@ -349,22 +327,13 @@ impl Streams {
     pub fn clear_streams(&mut self) {
         self.send.clear();
         self.recv.clear();
-	self.ordered_send.clear();
-	self.unordered_send.clear();
     }
 
     pub fn cleanup_closed_streams(&mut self) {
-	let clean_list = self.send.get_terminal();
-	for stream_id in clean_list.iter() {
-	    // Not sure which one it's in
-	    self.unordered_send.remove(stream_id);
-	    for (_, set) in self.ordered_send.iter_mut() {
-		set.remove(stream_id);
-	    }
-	    self.send.remove(stream_id);
-	}
+	// filter the list, removing closed streams
+	self.send.remove_terminal();
 
-        let send = &self.send;
+	let send = &self.send;
         let (removed_bidi, removed_uni) = self.recv.clear_terminal(send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
@@ -445,49 +414,8 @@ impl Streams {
         ))
     }
 
-    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<i64>) -> Res<()> {
-	// don't grab stream here; causes borrow errors
-        let old_sendorder = self.get_send_stream(stream_id).unwrap().sendorder();
-	if old_sendorder != sendorder {
-	    // we have to remove it from the list it was in, and reinsert it with the new
-	    // sendorder key
-            if old_sendorder == None {
-		self.unordered_send.remove(&stream_id);
-            } else {
-		let order = StreamOrder { sendorder: old_sendorder };
-		self.ordered_send.get_mut(&order).unwrap().remove(&stream_id);
-	    }
-            self.get_send_stream_mut(stream_id).unwrap().set_sendorder(sendorder);
-	    if sendorder == None {
-		self.unordered_send.insert(stream_id);
-	    } else {
-		let mut set = self.ordered_send.get_mut(&StreamOrder { sendorder });
-		if set == None {
-		    // new sendorder; create a hash for it
-		    let hash = HashSet::<StreamId>::new();
-		    self.ordered_send.insert(StreamOrder { sendorder }, hash);
-		    set = self.ordered_send.get_mut(&StreamOrder { sendorder });
-		}
-		set.unwrap().insert(stream_id);
-	    }
-
-	    qtrace!(
-		"ordering of sendorder hashsets: {:?}",
-		self.ordered_send.keys().map(|order| order.sendorder.unwrap()).collect::<Vec::<_>>()
-            );
-	    qtrace!(
-		"ordering of stream_ids: {:?}",
-		self.ordered_send.values().collect::<Vec::<_>>()
-            );
-	}
-	Ok(())
-    }
-
-    // ordered iterator that iterates over the unordered streams and then
-    // the ordered streams, from highest to lowest.   Note: no attempt at
-    // fairness is made here.
-    pub fn ordered(&mut self) -> impl Iterator<Item = &StreamId> {
-	self.unordered_send.iter().chain(self.ordered_send.values().flatten())
+    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
+	self.send.set_sendorder(stream_id, sendorder);
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
@@ -508,7 +436,6 @@ impl Streams {
                 self.send.insert(
                     new_id, stream,
                 );
-                self.unordered_send.insert(new_id);
 
                 if st == StreamType::BiDi {
                     // From the local perspective, this is a local- originated BiDi stream. From the

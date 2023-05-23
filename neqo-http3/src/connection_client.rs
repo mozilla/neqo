@@ -22,7 +22,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
-    Output, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    Output, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState, streams::SendOrder,
 };
 use std::{
     cell::RefCell,
@@ -755,11 +755,9 @@ impl Http3Client {
     }
 
     /// Sets the SendOrder for a given stream
-    /// # Errors
-    /// XXX No errors are returned
     /// # Panics
     /// This cannot panic.
-    pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: i64) {
+    pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: SendOrder) {
 	self.base_handler
 	    .stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder)).ok();
     }

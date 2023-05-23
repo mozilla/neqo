@@ -17,7 +17,7 @@ use crate::{
 };
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
-use neqo_transport::{Connection, DatagramTracking, StreamId};
+use neqo_transport::{Connection, DatagramTracking, StreamId, streams::SendOrder};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -486,8 +486,8 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
         self.borrow_mut().has_data_to_send()
     }
 
-    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<i64>) {
-//	self.borrow_mut().set_sendorder(conn, sendorder);
+    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) {
+	// Not relevant on session
     }
     
     fn stream_writable(&self) {}

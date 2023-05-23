@@ -55,7 +55,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::Streams,
+    streams::{Streams, SendOrder},
     tparams::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
@@ -1949,27 +1949,10 @@ impl Connection {
             return Ok(());
         }
 
-        // WebTransport data (which is Normal) may have a SendOrder
-	// priority attached.  The spec states (6.3 write-chunk 6.1):
-
-        // If stream.[[SendOrder]] is null then this sending MUST NOT
-	// starve except for flow control reasons or error.  If
-	// stream.[[SendOrder]] is not null then this sending MUST starve
-	// until all bytes queued for sending on WebTransportSendStreams
-	// with a non-null and higher [[SendOrder]], that are neither
-	// errored nor blocked by flow control, have been sent.
-
-	// So data without SendOrder goes first.   Then the highest priority
-	// SendOrdered streams.   Round-robining the data at the same priority
-	// isn't required (currently) by the spec, but would be good to do in the future.
-	// "ordered()" returns a chained hash that iterates all the streams in the order
-	// described above.
-	let stream_ids = self.streams.ordered().copied().collect::<Vec<StreamId>>();
-	for stream_id in stream_ids.iter() {
-	    self.streams.get_send_stream_mut(*stream_id).unwrap().write_frames(TransmissionPriority::Normal, builder, tokens, stats);
-	    if builder.is_full() {
-		return Ok(());
-	    }
+        self.streams
+            .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
+	if builder.is_full() {
+	    return Ok(());
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2968,9 +2951,9 @@ impl Connection {
     pub fn stream_sendorder(
         &mut self,
         stream_id: StreamId,
-        sendorder: Option<i64>,
+        sendorder: Option<SendOrder>,
     ) {
-	self.streams.set_sendorder(stream_id, sendorder).ok();
+	self.streams.set_sendorder(stream_id, sendorder);
     }
 
     /// Send data on a stream.

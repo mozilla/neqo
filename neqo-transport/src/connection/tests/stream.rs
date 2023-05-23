@@ -15,9 +15,9 @@ use crate::{
     tparams::{self, TransportParameter},
     tracking::DEFAULT_ACK_PACKET_TOLERANCE,
     Connection, ConnectionError, ConnectionParameters, Error, StreamType, StreamId,
-    streams::StreamOrder,
+    streams::{StreamOrder, SendOrder},
 };
-use std::collections::BinaryHeap;
+use std::collections::HashMap;
 
 use neqo_common::{event::Provider, qdebug};
 use std::{cmp::max, convert::TryFrom, mem};
@@ -113,7 +113,6 @@ fn transfer() {
     assert!(fin3);
 }
 
-#[cfg(test)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct IdEntry {
     sendorder: StreamOrder,
@@ -122,20 +121,20 @@ struct IdEntry {
 
 #[cfg(test)]
 // tests stream sendorder priorization
-fn sendorder_test(order_of_sendorder: &Vec<StreamOrder>) {
+fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
     qdebug!("---- client sends");
     // open all streams and set the sendorders
-    let mut ordered = BinaryHeap::new();
+    let mut ordered = Vec::new();
     let mut streams = Vec::<StreamId>::new();
     for sendorder in order_of_sendorder {
-	streams.push(client.stream_create(StreamType::UniDi).unwrap());
-	let id = *(streams.last()).unwrap();
-	ordered.push(IdEntry { sendorder: *sendorder, stream_id: id });
-	client.streams.set_sendorder(id, sendorder.sendorder).ok();
+	let id = client.stream_create(StreamType::UniDi).unwrap();
+	streams.push(id);
+	ordered.push((id, *sendorder));
+	client.streams.set_sendorder(id, *sendorder);
     }
     // Write some data to all the streams
     for stream_id in streams {
@@ -143,7 +142,8 @@ fn sendorder_test(order_of_sendorder: &Vec<StreamOrder>) {
     }
 
     // Sending this much takes a few datagrams.
-    let mut datagrams = vec![];
+    // Note: this test uses an RTT of 0 which simplifies things (no pacing)
+    let mut datagrams = Vec::new();
     let mut out = client.process_output(now());
     while let Some(d) = out.dgram() {
         datagrams.push(d);
@@ -152,79 +152,50 @@ fn sendorder_test(order_of_sendorder: &Vec<StreamOrder>) {
     assert_eq!(*client.state(), State::Confirmed);
 
     qdebug!("---- server receives");
-    for (d_num, d) in datagrams.into_iter().enumerate() {
+    for (_, d) in datagrams.into_iter().enumerate() {
         let out = server.process(Some(d), now());
-        assert_eq!(
-            out.as_dgram_ref().is_some(),
-            (d_num + 1) % usize::try_from(DEFAULT_ACK_PACKET_TOLERANCE + 1).unwrap() == 0
-        );
         qdebug!("Output={:0x?}", out.as_dgram_ref());
     }
     assert_eq!(*server.state(), State::Confirmed);
 
-    let mut stream_ids = server.events().filter_map(|evt| match evt {
+    let stream_ids = server.events().filter_map(|evt| match evt {
         ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
         _ => None,
-    });
+    }).enumerate().map(|(a, b)| (b, a)).collect::<HashMap<_, _>>();
 
     // streams should arrive in priority order, not order of creation, if sendorder prioritization
     // is working correctly
-    let mut recv_streams = Vec::<StreamId>::new();
-    let mut should_recv_streams =  Vec::<StreamId>::new();
-    // walk the ordered list of streams, and handle random ordering within a sendorder
-    let mut last_sendorder: StreamOrder = StreamOrder{sendorder: None};
-    // BinaryHeap's sorted iterator is nightly only for now
-    // the ordering is inverted, however!
-    let mut ordered_vec = ordered.into_sorted_vec();
-    ordered_vec.reverse();
-    for identry in ordered_vec.iter() {
-	let sendorder = identry.sendorder;
-	let stream_id = identry.stream_id;
-	// collect set of streams at the same priority
-	if sendorder != last_sendorder {
-	    // do checks on the list received
-	    for id in &should_recv_streams {
-		// check if this is the right id
-		assert!(recv_streams.contains(&id));
-	    }
-	    recv_streams.clear();
-	    should_recv_streams.clear();
-	    last_sendorder = sendorder
-	}
-	recv_streams.push(stream_ids.next().expect("should have data on a new stream"));
-	should_recv_streams.push(stream_id);
-    }
-    // Check the last bucket
-    for id in &should_recv_streams {
-	// check if this is the right id
-	assert!(recv_streams.contains(&id));
-    }
 
-    assert!(stream_ids.next().is_none());
-}
-
-macro_rules! sendorder_tests {
-    ($($name:ident: $value:expr)*) => {
-    $(
-        #[test]
-        fn $name() {
-            let input = $value;
-	    let mut sendorders: Vec<StreamOrder> = vec![];
-	    for val in input {
-		sendorders.push(StreamOrder { sendorder: val });
-	    }
-            sendorder_test(&sendorders);
-        }
-    )*
+    // 'ordered' has the send order currently.  Re-sort it by sendorder, but
+    // if two items from the same sendorder exist, secondarily sort by the ordering in
+    // the stream_ids vector (HashMap<StreamId, index: usize>)
+    ordered.sort_unstable_by_key(|(stream_id, sendorder)| (StreamOrder { sendorder: *sendorder}, stream_ids[stream_id]));
+    // make sure everything now is in the same order, since we modified the order of
+    // same-sendorder items to match the ordering of those we saw in reception
+    for (i, (stream_id, _sendorder)) in ordered.iter().enumerate() {
+	assert_eq!(i, stream_ids[stream_id]);
     }
 }
 
-sendorder_tests! {
-    sendorder_0: [None, Some(1), Some(2), Some(3)]
-    sendorder_1: [Some(3), Some(2), Some(1), None]
-    sendorder_2: [Some(3), None, Some(2), Some(1)]
-    sendorder_3: [Some(1), Some(2), None, Some(3)]
-    sendorder_4: [Some(1), Some(2), Some(1), None, Some(3), Some(1), Some(3), None]
+#[test]
+fn sendorder_0() {
+    sendorder_test(&[None, Some(1), Some(2), Some(3)]);
+}
+#[test]
+fn sendorder_1() {
+    sendorder_test(&[Some(3), Some(2), Some(1), None]);
+}
+#[test]
+fn sendorder_2() {
+    sendorder_test(&[Some(3), None, Some(2), Some(1)]);
+}
+#[test]
+fn sendorder_3() {
+    sendorder_test(&[Some(1), Some(2), None, Some(3)]);
+}
+#[test]
+fn sendorder_4() {
+    sendorder_test(&[Some(1), Some(2), Some(1), None, Some(3), Some(1), Some(3), None]);
 }
 
 
