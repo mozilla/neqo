@@ -1911,10 +1911,6 @@ impl Connection {
             }
         }
 
-        // Check if there is a Datagram to be written
-        self.quic_datagrams
-            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
-
         let stats = &mut self.stats.borrow_mut().frame_tx;
 
         self.streams
@@ -1944,6 +1940,12 @@ impl Connection {
         if builder.is_full() {
             return Ok(());
         }
+
+        // Check if there is a Datagram to be written
+	// Currently we're giving them priority over user streams; they could be moved
+	// to after them (after Normal)
+        self.quic_datagrams
+            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
 
         self.streams
             .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
