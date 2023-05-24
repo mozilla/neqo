@@ -9,7 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
-    collections::{BTreeMap, VecDeque, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     convert::TryFrom,
     mem,
     ops::Add,
@@ -1124,7 +1124,7 @@ pub(crate) struct SendStreams {
     // of trying to hold references to the Streams which are owned by the IndexMap.
     // Note: dispose of the Option<> for ordered_send
     ordered: BTreeMap<SendOrder, HashSet<StreamId>>,
-    unordered: HashSet<StreamId>, // streams with no SendOrder set
+    unordered: BTreeSet<StreamId>, // streams with no SendOrder set
 }
 
 impl SendStreams {
@@ -1218,16 +1218,17 @@ impl SendStreams {
     pub fn remove_terminal(&mut self) {
 	let clean_list = self.get_terminal();
 	for stream_id in clean_list {
-	    self.remove_sendorder(&stream_id);
+	    self.remove(&stream_id);
 	}
     }
 
-    pub fn remove_sendorder(&mut self, stream_id: &StreamId) {
+    pub fn remove(&mut self, stream_id: &StreamId) {
 	let stream = &self.map[stream_id];
 	match stream.sendorder() {
 	    None => self.unordered.remove(stream_id),
 	    Some(sendorder) => self.ordered.get_mut(&sendorder).unwrap().remove(stream_id),
 	};
+	self.map.remove(stream_id);
     }
 
     // ordered iterator that iterates over the unordered streams and then
