@@ -9,7 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
-    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     convert::TryFrom,
     mem,
     ops::Add,
@@ -631,7 +631,7 @@ impl SendStream {
 	sendorder: Option<SendOrder>,
     ) {
         self.sendorder = sendorder;
-	// Caller must remove and re-insert into ordered_streams
+	// Caller must remove and re-insert into sendordered_streams
     }
 
     /// If all data has been buffered or written, how much was sent.
@@ -1109,22 +1109,23 @@ impl ::std::fmt::Display for SendStream {
 pub(crate) struct SendStreams {
     map: IndexMap<StreamId, SendStream>,
 
-    // What we really want is a Priority Queue that we can do arbitrary removes
-    // from (so we can reprioritize). BinaryHeap doesn't work, because there's no
-    // remove().  BTreeMap doesn't work, since you can't duplicate keys.
-    // PriorityQueue does have what we need, except for an ordered iterator that doesn't consume the queue.
+    // What we really want is a Priority Queue that we can do arbitrary
+    // removes from (so we can reprioritize). BinaryHeap doesn't work,
+    // because there's no remove().  BTreeMap doesn't work, since you can't
+    // duplicate keys.  PriorityQueue does have what we need, except for an
+    // ordered iterator that doesn't consume the queue.  So we roll our own.
 
-    // So we use a HashSet for the unordered streams (that's usually all of
+    // So we use a sorted Vec<> for the regular streams (that's usually all of
     // them), and then a BTreeMap of an entry for each SendOrder value, and
     // for each of those entries a HashSet of the stream_ids at that
     // sendorder.  In most cases (such as stream-per-frame), there will be
     // a single stream at a given sendorder.
 
-    // These both store stream_ids, which need to be looked up in 'map'.  This avoids the complexity
-    // of trying to hold references to the Streams which are owned by the IndexMap.
-    // Note: dispose of the Option<> for ordered_send
-    ordered: BTreeMap<SendOrder, HashSet<StreamId>>,
-    unordered: BTreeSet<StreamId>, // streams with no SendOrder set
+    // These both store stream_ids, which need to be looked up in 'map'.
+    // This avoids the complexity of trying to hold references to the
+    // Streams which are owned by the IndexMap.
+    sendordered: BTreeMap<SendOrder, HashSet<StreamId>>,
+    regular: Vec<StreamId>, // streams with no SendOrder set, sorted in stream_id order
 }
 
 impl SendStreams {
@@ -1142,7 +1143,21 @@ impl SendStreams {
 
     pub fn insert(&mut self, id: StreamId, stream: SendStream) {
         self.map.insert(id, stream);
-	self.unordered.insert(id);
+	// This normally is only called when a new stream is created.  If
+	// so, because of how we allocate StreamIds, it should always have
+	// the largest value.  This means we can just append it to the
+	// regular vector.  However, if we were ever to change this
+	// invariant, things would break subtly.
+
+	// We could add assertions, or we can try to insert at the end and
+	// if not fall back to binary-search insertion
+	if let Some(last) = self.regular.last() {
+	    if id > *last {
+		self.regular.push(id);
+		return;
+	    }
+	}
+	self.insert_regular(&id);
     }
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
@@ -1152,25 +1167,25 @@ impl SendStreams {
 	    // we have to remove it from the list it was in, and reinsert it with the new
 	    // sendorder key
             if old_sendorder.is_none() {
-		self.unordered.remove(&stream_id);
+		self.remove_regular(&stream_id);
             } else {
-		self.ordered.get_mut(&(old_sendorder.unwrap())).unwrap().remove(&stream_id);
+		self.sendordered.get_mut(&(old_sendorder.unwrap())).unwrap().remove(&stream_id);
 	    }
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
 	    if sendorder.is_none() {
-		self.unordered.insert(stream_id);
+		self.insert_regular(&stream_id);
 	    } else {
-		let set = self.ordered.entry(sendorder.unwrap()).or_default();
+		let set = self.sendordered.entry(sendorder.unwrap()).or_default();
 		set.insert(stream_id);
 	    }
 
 	    qtrace!(
 		"ordering of sendorder hashsets: {:?}",
-		self.ordered.keys().collect::<Vec::<_>>()
+		self.sendordered.keys().collect::<Vec::<_>>()
             );
 	    qtrace!(
 		"ordering of stream_ids: {:?}",
-		self.ordered.values().collect::<Vec::<_>>()
+		self.sendordered.values().collect::<Vec::<_>>()
             );
 	}
     }
@@ -1207,8 +1222,8 @@ impl SendStreams {
 
     pub fn clear(&mut self) {
         self.map.clear();
-	self.ordered.clear();
-	self.unordered.clear();
+	self.sendordered.clear();
+	self.regular.clear();
     }
 
     pub fn get_terminal(&self) -> Vec<StreamId> {
@@ -1222,27 +1237,42 @@ impl SendStreams {
 	}
     }
 
+    fn insert_regular(&mut self, stream_id: &StreamId) {
+	match self.regular.binary_search(&stream_id) {
+	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
+	    Err(pos) => self.regular.insert(pos, *stream_id),
+	}
+    }
+
+    fn remove_regular(&mut self, stream_id: &StreamId) -> bool {
+	match self.regular.binary_search(stream_id) {
+	    Ok(pos) => { self.regular.remove(pos); },
+	    Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
+	}
+	true
+    }
+
     pub fn remove(&mut self, stream_id: &StreamId) {
 	let stream = &self.map[stream_id];
 	match stream.sendorder() {
-	    None => self.unordered.remove(stream_id),
-	    Some(sendorder) => self.ordered.get_mut(&sendorder).unwrap().remove(stream_id),
+	    None => self.remove_regular(stream_id),
+	    Some(sendorder) => self.sendordered.get_mut(&sendorder).unwrap().remove(stream_id),
 	};
 	self.map.remove(stream_id);
     }
 
-    // ordered iterator that iterates over the unordered streams and then
+    // ordered iterator that iterates over the regular streams and then
     // the ordered streams, from highest to lowest.   Note: no attempt at
     // fairness is made here.
     // Note: the BTreeMap is keyed by SendOrder, but it would normally iterate
     // smallest-to-largest, and we want the opposite.
     #[allow(dead_code)]
     pub fn ordered_iter(&mut self) -> impl Iterator<Item = &StreamId> {
-	self.unordered.iter().chain(self.ordered.values().rev().flatten())
+	self.regular.iter().chain(self.sendordered.values().rev().flatten())
     }
 
     #[allow(dead_code)]
-    pub fn unordered_iter(&mut self) -> impl Iterator<Item = (&StreamId, &SendStream)> {
+    pub fn iter(&mut self) -> impl Iterator<Item = (&StreamId, &SendStream)> {
       self.map.iter()
     }
 
@@ -1267,9 +1297,11 @@ impl SendStreams {
 	// So data without SendOrder goes first.   Then the highest priority
 	// SendOrdered streams.   Round-robining the data at the same priority
 	// isn't required (currently) by the spec, but would be good to do in the future.
-	// "ordered()" returns a chained hash that iterates all the streams in the order
+	// "ordered_iter()" returns a chained hash that iterates all the streams in the order
 	// described above.
-	let stream_ids = self.unordered.iter().chain(self.ordered.values().rev().flatten()); //self.ordered_iter();
+	//
+	// iterator is in-line to avoid complaints from the compiler
+	let stream_ids = self.regular.iter().chain(self.sendordered.values().rev().flatten());
 	for stream_id in stream_ids {
 	    let stream = self.map.get_mut(stream_id).unwrap();
             if !stream.write_reset_frame(priority, builder, tokens, stats) {
