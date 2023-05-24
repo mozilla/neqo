@@ -1166,17 +1166,17 @@ impl SendStreams {
 	if old_sendorder != sendorder {
 	    // we have to remove it from the list it was in, and reinsert it with the new
 	    // sendorder key
-            if old_sendorder.is_none() {
-		self.remove_regular(&stream_id);
+            if let Some(old) = old_sendorder {
+		self.sendordered.get_mut(&old).unwrap().remove(&stream_id);
             } else {
-		self.sendordered.get_mut(&(old_sendorder.unwrap())).unwrap().remove(&stream_id);
+		self.remove_regular(&stream_id);
 	    }
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
-	    if sendorder.is_none() {
-		self.insert_regular(&stream_id);
-	    } else {
-		let set = self.sendordered.entry(sendorder.unwrap()).or_default();
+	    if let Some(order) = sendorder {
+		let set = self.sendordered.entry(order).or_default();
 		set.insert(stream_id);
+	    } else {
+		self.insert_regular(&stream_id);
 	    }
 
 	    qtrace!(
@@ -1238,7 +1238,7 @@ impl SendStreams {
     }
 
     fn insert_regular(&mut self, stream_id: &StreamId) {
-	match self.regular.binary_search(&stream_id) {
+	match self.regular.binary_search(stream_id) {
 	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
 	    Err(pos) => self.regular.insert(pos, *stream_id),
 	}
