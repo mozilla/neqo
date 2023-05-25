@@ -754,7 +754,7 @@ impl Http3Client {
             - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
     }
 
-    /// Sets the SendOrder for a given stream
+    /// Sets the `SendOrder` for a given stream
     /// # Panics
     /// This cannot panic.
     pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: SendOrder) {
