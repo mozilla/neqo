@@ -631,7 +631,6 @@ impl SendStream {
 	sendorder: Option<SendOrder>,
     ) {
         self.sendorder = sendorder;
-	// Caller must remove and re-insert into sendordered_streams
     }
 
     /// If all data has been buffered or written, how much was sent.
@@ -1151,16 +1150,14 @@ impl SendStreams {
 
 	// We could add assertions, or we can try to insert at the end and
 	// if not fall back to binary-search insertion
-	if let Some(last) = self.regular.last() {
-	    if id > *last {
-		self.regular.push(id);
-		return;
-	    }
-	}
-	self.insert_regular(&id);
+	if matches!(self.regular.last(), Some(last) if id > *last) {
+	  self.regular.push(id);
+	} else {
+	  self.insert_regular(&id);
+        }
     }
 
-    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
+    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()>{
 	// don't grab stream here; causes borrow errors
         let old_sendorder = self.map.get(&stream_id).unwrap().sendorder();
 	if old_sendorder != sendorder {
@@ -1169,7 +1166,7 @@ impl SendStreams {
             if let Some(old) = old_sendorder {
 		self.sendordered.get_mut(&old).unwrap().remove(&stream_id);
             } else {
-		self.remove_regular(&stream_id);
+		Self::remove_regular(&mut self.regular, &stream_id);
 	    }
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
 	    if let Some(order) = sendorder {
@@ -1188,6 +1185,7 @@ impl SendStreams {
 		self.sendordered.values().collect::<Vec::<_>>()
             );
 	}
+	Ok(())
     }
 
     pub fn acked(&mut self, token: &SendStreamRecoveryToken) {
@@ -1226,15 +1224,24 @@ impl SendStreams {
 	self.regular.clear();
     }
 
-    pub fn get_terminal(&self) -> Vec<StreamId> {
-	self.map.iter().filter_map(|(stream_id, stream)| stream.is_terminal().then_some(*stream_id)).collect()
+    pub fn remove_terminal(&mut self) {
+	Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
     }
 
-    pub fn remove_terminal(&mut self) {
-	let clean_list = self.get_terminal();
-	for stream_id in clean_list {
-	    self.remove(&stream_id);
-	}
+    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut Vec<StreamId>, sendordered: &mut BTreeMap<SendOrder, HashSet<StreamId>>) {
+	// Take refs to all the items we need to modify instead of &mut
+	// self to keept the compiler happy (if we use self.map.retain it
+	// gets upset due to borrows)
+	map.retain(|stream_id, stream| {
+	    if stream.is_terminal() {
+		match stream.sendorder() {
+		    None => Self::remove_regular(regular, &stream_id),
+		    Some(sendorder) => sendordered.get_mut(&sendorder).unwrap().remove(stream_id),
+		};
+		return false;
+	    }
+	    return true;
+	});
     }
 
     fn insert_regular(&mut self, stream_id: &StreamId) {
@@ -1244,21 +1251,12 @@ impl SendStreams {
 	}
     }
 
-    fn remove_regular(&mut self, stream_id: &StreamId) -> bool {
-	match self.regular.binary_search(stream_id) {
-	    Ok(pos) => { self.regular.remove(pos); },
+    fn remove_regular(regular: &mut Vec<StreamId>, stream_id: &StreamId) -> bool {
+	match regular.binary_search(stream_id) {
+	    Ok(pos) => { regular.remove(pos); },
 	    Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
 	}
 	true
-    }
-
-    pub fn remove(&mut self, stream_id: &StreamId) {
-	let stream = &self.map[stream_id];
-	match stream.sendorder() {
-	    None => self.remove_regular(stream_id),
-	    Some(sendorder) => self.sendordered.get_mut(&sendorder).unwrap().remove(stream_id),
-	};
-	self.map.remove(stream_id);
     }
 
     // ordered iterator that iterates over the regular streams and then
@@ -1297,8 +1295,6 @@ impl SendStreams {
 	// So data without SendOrder goes first.   Then the highest priority
 	// SendOrdered streams.   Round-robining the data at the same priority
 	// isn't required (currently) by the spec, but would be good to do in the future.
-	// "ordered_iter()" returns a chained hash that iterates all the streams in the order
-	// described above.
 	//
 	// iterator is in-line to avoid complaints from the compiler
 	let stream_ids = self.regular.iter().chain(self.sendordered.values().rev().flatten());

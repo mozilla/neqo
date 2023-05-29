@@ -31,7 +31,7 @@ pub struct StreamOrder {
 // We want highest to lowest, with None being higher than any value
 impl Ord for StreamOrder {
   fn cmp(&self, other: &Self) -> Ordering {
-    if let (Some(_), Some(_)) = (self.sendorder, other.sendorder) {
+    if self.sendorder.is_some() && other.sendorder.is_some() {
       // We want reverse order (high to low) when both values are specified.
       other.sendorder.cmp(&self.sendorder)
     } else {
@@ -63,8 +63,6 @@ pub struct Streams {
     receiver_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
     remote_stream_limits: RemoteStreamLimits,
     local_stream_limits: LocalStreamLimits,
-    // note: SendStreams also keeps track of SendOrder and provides an iterator
-    // based on SendOrder
     pub(crate) send: SendStreams,
     pub(crate) recv: RecvStreams,
 }
@@ -264,7 +262,7 @@ impl Streams {
             }
         }
 
-	self.send.write_frames(priority, builder, tokens, stats)
+	self.send.write_frames(priority, builder, tokens, stats);
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
@@ -415,7 +413,7 @@ impl Streams {
     }
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
-	self.send.set_sendorder(stream_id, sendorder);
+	self.send.set_sendorder(stream_id, sendorder).ok();
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {

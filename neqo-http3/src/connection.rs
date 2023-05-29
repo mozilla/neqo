@@ -995,6 +995,9 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Set the stream SendOrder.
+    /// # Errors
+    /// Returns InvalidStreamId if the stream id doesn't exist
     pub fn stream_set_sendorder(
         &mut self,
         conn: &mut Connection,

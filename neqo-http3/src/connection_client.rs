@@ -755,11 +755,13 @@ impl Http3Client {
     }
 
     /// Sets the `SendOrder` for a given stream
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// # Panics
     /// This cannot panic.
-    pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: SendOrder) {
+    pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: SendOrder) -> Res<()> {
 	self.base_handler
-	    .stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder)).ok();
+	    .stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
     }
 
     /// This function combines  `process_input` and `process_output` function.
