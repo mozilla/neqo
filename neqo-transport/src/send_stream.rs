@@ -9,7 +9,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     convert::TryFrom,
     mem,
     ops::Add,
@@ -1116,14 +1116,14 @@ pub(crate) struct SendStreams {
 
     // So we use a sorted Vec<> for the regular streams (that's usually all of
     // them), and then a BTreeMap of an entry for each SendOrder value, and
-    // for each of those entries a HashSet of the stream_ids at that
+    // for each of those entries a Vec of the stream_ids at that
     // sendorder.  In most cases (such as stream-per-frame), there will be
     // a single stream at a given sendorder.
 
     // These both store stream_ids, which need to be looked up in 'map'.
     // This avoids the complexity of trying to hold references to the
     // Streams which are owned by the IndexMap.
-    sendordered: BTreeMap<SendOrder, HashSet<StreamId>>,
+    sendordered: BTreeMap<SendOrder, Vec<StreamId>>,
     regular: Vec<StreamId>, // streams with no SendOrder set, sorted in stream_id order
 }
 
@@ -1153,7 +1153,7 @@ impl SendStreams {
 	if matches!(self.regular.last(), Some(last) if id > *last) {
 	  self.regular.push(id);
 	} else {
-	  self.insert_regular(&id);
+	  Self::insert_streamid(&mut self.regular, &id);
         }
     }
 
@@ -1163,23 +1163,20 @@ impl SendStreams {
 	if old_sendorder != sendorder {
 	    // we have to remove it from the list it was in, and reinsert it with the new
 	    // sendorder key
+	    let mut vec : &mut Vec<StreamId>;
             if let Some(old) = old_sendorder {
-		self.sendordered.get_mut(&old).unwrap().remove(&stream_id);
+		vec = self.sendordered.get_mut(&old).unwrap();
             } else {
-		Self::remove_regular(&mut self.regular, &stream_id);
+		vec = &mut self.regular;
 	    }
+	    Self::remove_streamid(&mut vec, &stream_id);
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
 	    if let Some(order) = sendorder {
-		let set = self.sendordered.entry(order).or_default();
-		set.insert(stream_id);
+		vec = self.sendordered.entry(order).or_default();
 	    } else {
-		self.insert_regular(&stream_id);
+		vec = &mut self.regular;
 	    }
-
-	    qtrace!(
-		"ordering of sendorder hashsets: {:?}",
-		self.sendordered.keys().collect::<Vec::<_>>()
-            );
+	    Self::insert_streamid(&mut vec, &stream_id);
 	    qtrace!(
 		"ordering of stream_ids: {:?}",
 		self.sendordered.values().collect::<Vec::<_>>()
@@ -1228,15 +1225,15 @@ impl SendStreams {
 	Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
     }
 
-    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut Vec<StreamId>, sendordered: &mut BTreeMap<SendOrder, HashSet<StreamId>>) {
+    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut Vec<StreamId>, sendordered: &mut BTreeMap<SendOrder, Vec<StreamId>>) {
 	// Take refs to all the items we need to modify instead of &mut
 	// self to keept the compiler happy (if we use self.map.retain it
 	// gets upset due to borrows)
 	map.retain(|stream_id, stream| {
 	    if stream.is_terminal() {
 		match stream.sendorder() {
-		    None => Self::remove_regular(regular, &stream_id),
-		    Some(sendorder) => sendordered.get_mut(&sendorder).unwrap().remove(stream_id),
+		    None => Self::remove_streamid(regular, &stream_id),
+		    Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap(), stream_id),
 		};
 		return false;
 	    }
@@ -1244,16 +1241,16 @@ impl SendStreams {
 	});
     }
 
-    fn insert_regular(&mut self, stream_id: &StreamId) {
-	match self.regular.binary_search(stream_id) {
+    fn insert_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) {
+	match vec.binary_search(stream_id) {
 	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
-	    Err(pos) => self.regular.insert(pos, *stream_id),
+	    Err(pos) => vec.insert(pos, *stream_id),
 	}
     }
 
-    fn remove_regular(regular: &mut Vec<StreamId>, stream_id: &StreamId) -> bool {
-	match regular.binary_search(stream_id) {
-	    Ok(pos) => { regular.remove(pos); },
+    fn remove_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) -> bool {
+	match vec.binary_search(stream_id) {
+	    Ok(pos) => { vec.remove(pos); },
 	    Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
 	}
 	true
