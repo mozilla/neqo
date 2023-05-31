@@ -1163,12 +1163,11 @@ impl SendStreams {
 	if old_sendorder != sendorder {
 	    // we have to remove it from the list it was in, and reinsert it with the new
 	    // sendorder key
-	    let mut vec : &mut Vec<StreamId>;
-            if let Some(old) = old_sendorder {
-		vec = self.sendordered.get_mut(&old).unwrap();
+	    let mut vec = if let Some(old) = old_sendorder {
+		self.sendordered.get_mut(&old).unwrap()
             } else {
-		vec = &mut self.regular;
-	    }
+		&mut self.regular
+	    };
 	    Self::remove_streamid(&mut vec, &stream_id);
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
 	    if let Some(order) = sendorder {
