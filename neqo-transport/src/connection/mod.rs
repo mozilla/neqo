@@ -1942,8 +1942,8 @@ impl Connection {
         }
 
         // Check if there is a Datagram to be written
-	// Currently we're giving them priority over user streams; they could be moved
-	// to after them (after Normal)
+        // Currently we're giving them priority over user streams; they could be moved
+        // to after them (after Normal)
         self.quic_datagrams
             .write_frames(builder, tokens, &mut self.stats.borrow_mut());
 
