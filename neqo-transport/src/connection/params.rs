@@ -28,7 +28,6 @@ const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
 /// The local value for the idle timeout period.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
-const DEFAULT_GREASE: bool = true;
 
 /// What to do with preferred addresses.
 #[derive(Debug, Clone, Copy)]
@@ -97,7 +96,7 @@ impl Default for ConnectionParameters {
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             fast_pto: FAST_PTO_SCALE,
             fuzzing: false,
-            grease: DEFAULT_GREASE,
+            grease: true,
         }
     }
 }
@@ -296,7 +295,7 @@ impl ConnectionParameters {
         self
     }
 
-    pub fn get_grease(&self) -> bool {
+    pub fn is_greasing(&self) -> bool {
         self.grease
     }
 
