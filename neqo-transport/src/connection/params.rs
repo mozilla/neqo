@@ -28,6 +28,7 @@ const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
 /// The local value for the idle timeout period.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
+const DEFAULT_GREASE: bool = true;
 
 /// What to do with preferred addresses.
 #[derive(Debug, Clone, Copy)]
