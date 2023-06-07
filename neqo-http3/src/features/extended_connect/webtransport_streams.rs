@@ -10,7 +10,7 @@ use crate::{
     SendStream, SendStreamEvents, Stream,
 };
 use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId, send_stream::SendStreamStats};
+use neqo_transport::{send_stream::SendStreamStats, Connection, StreamId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -214,9 +214,8 @@ impl SendStream for WebTransportSendStream {
             0
         };
 
-        let subtract_non_app_bytes = |count: u64| -> u64 {
-            count.saturating_sub(stream_header_size)
-        };
+        let subtract_non_app_bytes =
+            |count: u64| -> u64 { count.saturating_sub(stream_header_size) };
 
         let stats = conn.stream_stats(self.stream_id)?;
         let bytes_written = subtract_non_app_bytes(stats.bytes_written());

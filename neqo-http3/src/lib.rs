@@ -161,7 +161,7 @@ mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
-use neqo_transport::{AppError, Connection, Error as TransportError, send_stream::SendStreamStats};
+use neqo_transport::{send_stream::SendStreamStats, AppError, Connection, Error as TransportError};
 pub use neqo_transport::{Output, StreamId};
 use std::fmt::Debug;
 
