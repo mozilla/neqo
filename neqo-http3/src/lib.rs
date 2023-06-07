@@ -161,7 +161,7 @@ mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
-use neqo_transport::{AppError, Connection, Error as TransportError};
+use neqo_transport::{AppError, Connection, Error as TransportError, send_stream::SendStreamStats};
 pub use neqo_transport::{Output, StreamId};
 use std::fmt::Debug;
 
@@ -541,40 +541,6 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
         fin: bool,
     );
     fn extended_connect_new_session(&self, _stream_id: StreamId, _headers: Vec<Header>) {}
-}
-
-// See https://www.w3.org/TR/webtransport/#send-stream-stats.
-#[derive(Debug, Clone, Copy)]
-pub struct SendStreamStats {
-    pub bytes_written: u64,
-    pub bytes_sent: u64,
-    pub bytes_acked: u64,
-}
-
-impl SendStreamStats {
-    #[must_use]
-    pub fn new(bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
-        Self {
-            bytes_written,
-            bytes_sent,
-            bytes_acked,
-        }
-    }
-
-    #[must_use]
-    pub fn bytes_written(&self) -> u64 {
-        self.bytes_written
-    }
-
-    #[must_use]
-    pub fn bytes_sent(&self) -> u64 {
-        self.bytes_sent
-    }
-
-    #[must_use]
-    pub fn bytes_acked(&self) -> u64 {
-        self.bytes_acked
-    }
 }
 
 trait SendStream: Stream {

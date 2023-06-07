@@ -13,7 +13,6 @@ use crate::{
     request_target::AsRequestTarget,
     settings::HSettings,
     Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, ReceiveOutput,
-    SendStreamStats,
 };
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
@@ -23,7 +22,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
-    Output, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    Output,  send_stream::SendStreamStats, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use std::{
     cell::RefCell,

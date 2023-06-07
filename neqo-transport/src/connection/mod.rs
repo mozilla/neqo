@@ -38,7 +38,7 @@ use crate::{
     },
 };
 
-pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
+pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 use crate::{
     crypto::{Crypto, CryptoDxState, CryptoSpace},
     dump::*,
@@ -2940,19 +2940,8 @@ impl Connection {
         Ok(())
     }
 
-    pub fn stream_bytes_written(&mut self, stream_id: StreamId) -> Res<u64> {
-        let res = self.streams.get_send_stream_mut(stream_id)?.bytes_written();
-        Ok(res)
-    }
-
-    pub fn stream_bytes_sent(&mut self, stream_id: StreamId) -> Res<u64> {
-        let res = self.streams.get_send_stream_mut(stream_id)?.bytes_sent();
-        Ok(res)
-    }
-
-    pub fn stream_bytes_acked(&mut self, stream_id: StreamId) -> Res<u64> {
-        let res = self.streams.get_send_stream_mut(stream_id)?.bytes_acked();
-        Ok(res)
+    pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
+        self.streams.get_send_stream(stream_id).map(|s| s.stats())
     }
 
     /// Send data on a stream.

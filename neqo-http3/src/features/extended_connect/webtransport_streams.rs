@@ -7,15 +7,17 @@
 use super::WebTransportSession;
 use crate::{
     CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, RecvStreamEvents, Res,
-    SendStream, SendStreamEvents, SendStreamStats, Stream,
+    SendStream, SendStreamEvents, Stream,
 };
 use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, StreamId, send_stream::SendStreamStats};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
+const TYPE_LEN_UNI: usize = Encoder::varint_len(WEBTRANSPORT_UNI_STREAM);
+const TYPE_LEN_BIDI: usize = Encoder::varint_len(WEBTRANSPORT_STREAM);
 
 #[derive(Debug)]
 pub(crate) struct WebTransportRecvStream {
@@ -203,24 +205,23 @@ impl SendStream for WebTransportSendStream {
     fn stats(&mut self, conn: &mut Connection) -> Res<SendStreamStats> {
         let stream_header_size = if self.stream_id.is_client_initiated() {
             let id_len = if self.stream_id.is_uni() {
-                Encoder::varint_len(WEBTRANSPORT_UNI_STREAM)
+                TYPE_LEN_UNI
             } else {
-                Encoder::varint_len(WEBTRANSPORT_STREAM)
+                TYPE_LEN_BIDI
             };
             (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
         } else {
             0
         };
+
         let subtract_non_app_bytes = |count: u64| -> u64 {
-            if count >= stream_header_size {
-                count - stream_header_size
-            } else {
-                0
-            }
+            count.saturating_sub(stream_header_size)
         };
-        let bytes_written = subtract_non_app_bytes(conn.stream_bytes_written(self.stream_id)?);
-        let bytes_sent = subtract_non_app_bytes(conn.stream_bytes_sent(self.stream_id)?);
-        let bytes_acked = subtract_non_app_bytes(conn.stream_bytes_acked(self.stream_id)?);
+
+        let stats = conn.stream_stats(self.stream_id)?;
+        let bytes_written = subtract_non_app_bytes(stats.bytes_written());
+        let bytes_sent = subtract_non_app_bytes(stats.bytes_sent());
+        let bytes_acked = subtract_non_app_bytes(stats.bytes_acked());
         Ok(SendStreamStats::new(bytes_written, bytes_sent, bytes_acked))
     }
 }

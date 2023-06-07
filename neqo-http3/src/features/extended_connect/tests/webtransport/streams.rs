@@ -27,6 +27,14 @@ fn wt_client_stream_uni() {
     assert_eq!(stats.bytes_written(), BUF_CLIENT.len() as u64);
     assert_eq!(stats.bytes_sent(), BUF_CLIENT.len() as u64);
     assert_eq!(stats.bytes_acked(), BUF_CLIENT.len() as u64);
+
+    // Send data again to test if the stats has the expected values.
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    wt.receive_data_server(wt_stream, false, BUF_CLIENT, false);
+    let stats = wt.send_stream_stats(wt_stream).unwrap();
+    assert_eq!(stats.bytes_written(), (BUF_CLIENT.len() * 2) as u64);
+    assert_eq!(stats.bytes_sent(), (BUF_CLIENT.len() * 2) as u64);
+    assert_eq!(stats.bytes_acked(), (BUF_CLIENT.len() * 2) as u64);
 }
 
 #[test]
