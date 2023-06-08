@@ -968,7 +968,7 @@ impl SendStream {
                 if *fin_acked && send_buf.buffered() == 0 {
                     self.conn_events.send_stream_complete(self.stream_id);
                     let retired = send_buf.retired();
-                    let buffered = send_buf.buffered() as u64;
+                    let buffered = u64::try_from(send_buf.buffered()).unwrap();
                     self.state.transition(SendStreamState::DataRecvd {
                         retired,
                         written: buffered,

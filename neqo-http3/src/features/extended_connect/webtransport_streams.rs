@@ -16,8 +16,6 @@ use std::rc::Rc;
 
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
-const TYPE_LEN_UNI: usize = Encoder::varint_len(WEBTRANSPORT_UNI_STREAM);
-const TYPE_LEN_BIDI: usize = Encoder::varint_len(WEBTRANSPORT_STREAM);
 
 #[derive(Debug)]
 pub(crate) struct WebTransportRecvStream {
@@ -203,6 +201,9 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn stats(&mut self, conn: &mut Connection) -> Res<SendStreamStats> {
+        const TYPE_LEN_UNI: usize = Encoder::varint_len(WEBTRANSPORT_UNI_STREAM);
+        const TYPE_LEN_BIDI: usize = Encoder::varint_len(WEBTRANSPORT_STREAM);
+
         let stream_header_size = if self.stream_id.is_client_initiated() {
             let id_len = if self.stream_id.is_uni() {
                 TYPE_LEN_UNI
