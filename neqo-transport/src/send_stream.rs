@@ -1534,7 +1534,7 @@ impl SendStreams {
                 // if unfair, we're done
                 return false;
             }
-            true
+            return true;
         });
     }
 
