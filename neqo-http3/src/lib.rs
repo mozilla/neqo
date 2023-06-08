@@ -161,7 +161,7 @@ mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
-use neqo_transport::{AppError, Connection, Error as TransportError};
+use neqo_transport::{send_stream::SendStreamStats, AppError, Connection, Error as TransportError};
 pub use neqo_transport::{Output, StreamId};
 use std::fmt::Debug;
 
@@ -578,6 +578,11 @@ trait SendStream: Stream {
     /// It may happen that the transport stream is already close. This is unlikely.
     fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
         Err(Error::InvalidStreamId)
+    }
+
+    /// This function is only implemented by `WebTransportSendStream`.
+    fn stats(&mut self, _conn: &mut Connection) -> Res<SendStreamStats> {
+        Err(Error::Unavailable)
     }
 }
 

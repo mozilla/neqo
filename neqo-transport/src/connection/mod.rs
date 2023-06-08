@@ -38,7 +38,7 @@ use crate::{
     },
 };
 
-pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
+pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 use crate::{
     crypto::{Crypto, CryptoDxState, CryptoSpace},
     dump::*,
@@ -2939,6 +2939,10 @@ impl Connection {
             .get_send_stream_mut(stream_id)?
             .set_priority(transmission, retransmission);
         Ok(())
+    }
+
+    pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
+        self.streams.get_send_stream(stream_id).map(|s| s.stats())
     }
 
     /// Send data on a stream.
