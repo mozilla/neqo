@@ -17,7 +17,7 @@ pub enum StreamType {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
-pub struct StreamId(u64);
+pub struct StreamId(pub u64);
 
 impl StreamId {
     pub const fn new(id: u64) -> Self {
