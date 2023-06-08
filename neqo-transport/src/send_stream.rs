@@ -1235,6 +1235,73 @@ impl ::std::fmt::Display for SendStream {
 }
 
 #[derive(Debug, Default)]
+pub struct OrderGroup {
+    // This vector is sorted by StreamId
+    vec: Vec<StreamId>,
+
+    // Since we need to remember where we were, we'll store the iterator next
+    // position in the object.  This means there can only be a single iterator active
+    // at a time!
+    next: usize,
+    // This is used when an iterator is created to set the start/stop point for the
+    // iteration.  The iterator must iterate from this entry to the end, and then
+    // wrap and iterate from 0 until before the initial value of next.
+    // This value may need to be updated after insertion and removal; in theory we should
+    // track the target entry across modifications, but in practice it should be good
+    // enough to simply leave it alone unless it points past the end of the
+    // Vec, and re-initialize to 0 in that case.
+}
+
+pub struct OrderGroupIter<'a> {
+    group: &'a mut OrderGroup,
+    // We store the next position in the OrderGroup.
+    // Otherwise we'd need an explicit "done iterating" call to be made, or implement Drop to
+    // copy the value back.
+    // This is where next was when we iterated for the first time; when we get back to that we stop.
+    started_at: Option<usize>,
+}
+
+impl<'a> OrderGroup {
+    pub fn iter_mut(&mut self) -> OrderGroupIter {
+	// Ids may have been deleted since we last iterated
+	if self.next >= self.vec.len() {
+	    self.next = 0;
+	}
+        OrderGroupIter {
+	    started_at: None,
+	    group: self,
+	}
+    }
+
+    pub fn stream_ids(&mut self) -> &mut Vec<StreamId> {
+	&mut self.vec
+    }
+}
+
+
+impl<'a> Iterator for OrderGroupIter<'a> {
+    type Item = StreamId;
+    fn next(&mut self) -> Option<Self::Item> {
+	// Stop when we would return the started_at element on the next
+	// call.  Note that this must take into account wrapping.
+	if self.started_at == Some(self.group.next) || self.group.vec.is_empty() {
+	    return None;
+	}
+	match self.started_at {
+	    None => self.started_at = Some(self.group.next),
+	    Some(_) => {},
+	}
+        let mut next = self.group.next + 1;
+	if next >= self.group.vec.len() {
+	    next = 0;
+	}
+	let orig = self.group.next;
+        self.group.next = next;
+	return Some(self.group.vec[orig]);
+    }
+}
+
+#[derive(Debug, Default)]
 pub(crate) struct SendStreams {
     map: IndexMap<StreamId, SendStream>,
 
@@ -1253,8 +1320,8 @@ pub(crate) struct SendStreams {
     // These both store stream_ids, which need to be looked up in 'map'.
     // This avoids the complexity of trying to hold references to the
     // Streams which are owned by the IndexMap.
-    sendordered: BTreeMap<SendOrder, Vec<StreamId>>,
-    regular: Vec<StreamId>, // streams with no SendOrder set, sorted in stream_id order
+    sendordered: BTreeMap<SendOrder, OrderGroup>,
+    regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
 }
 
 impl SendStreams {
@@ -1280,10 +1347,10 @@ impl SendStreams {
 
 	// We could add assertions, or we can try to insert at the end and
 	// if not fall back to binary-search insertion
-	if matches!(self.regular.last(), Some(last) if id > *last) {
-	  self.regular.push(id);
+	if matches!(self.regular.stream_ids().last(), Some(last) if id > *last) {
+	  self.regular.stream_ids().push(id);
 	} else {
-	  Self::insert_streamid(&mut self.regular, &id);
+	  Self::insert_streamid(&mut self.regular.stream_ids(), &id);
         }
     }
 
@@ -1293,19 +1360,19 @@ impl SendStreams {
 	if old_sendorder != sendorder {
 	    // we have to remove it from the list it was in, and reinsert it with the new
 	    // sendorder key
-	    let mut vec = if let Some(old) = old_sendorder {
+	    let mut group = if let Some(old) = old_sendorder {
 		self.sendordered.get_mut(&old).unwrap()
             } else {
 		&mut self.regular
 	    };
-	    Self::remove_streamid(&mut vec, &stream_id);
+	    Self::remove_streamid(&mut group.stream_ids(), &stream_id);
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
 	    if let Some(order) = sendorder {
-		vec = self.sendordered.entry(order).or_default();
+		group = self.sendordered.entry(order).or_default();
 	    } else {
-		vec = &mut self.regular;
+		group = &mut self.regular;
 	    }
-	    Self::insert_streamid(&mut vec, &stream_id);
+	    Self::insert_streamid(&mut group.stream_ids(), &stream_id);
 	    qtrace!(
 		"ordering of stream_ids: {:?}",
 		self.sendordered.values().collect::<Vec::<_>>()
@@ -1347,22 +1414,22 @@ impl SendStreams {
     pub fn clear(&mut self) {
         self.map.clear();
 	self.sendordered.clear();
-	self.regular.clear();
+	self.regular.stream_ids().clear();
     }
 
     pub fn remove_terminal(&mut self) {
 	Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
     }
 
-    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut Vec<StreamId>, sendordered: &mut BTreeMap<SendOrder, Vec<StreamId>>) {
+    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut OrderGroup, sendordered: &mut BTreeMap<SendOrder, OrderGroup>) {
 	// Take refs to all the items we need to modify instead of &mut
 	// self to keept the compiler happy (if we use self.map.retain it
 	// gets upset due to borrows)
 	map.retain(|stream_id, stream| {
 	    if stream.is_terminal() {
 		match stream.sendorder() {
-		    None => Self::remove_streamid(regular, &stream_id),
-		    Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap(), stream_id),
+		    None => Self::remove_streamid(regular.stream_ids(), &stream_id),
+		    Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap().stream_ids(), stream_id),
 		};
 		return false;
 	    }
@@ -1383,21 +1450,6 @@ impl SendStreams {
 	    Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
 	}
 	true
-    }
-
-    // ordered iterator that iterates over the regular streams and then
-    // the ordered streams, from highest to lowest.   Note: no attempt at
-    // fairness is made here.
-    // Note: the BTreeMap is keyed by SendOrder, but it would normally iterate
-    // smallest-to-largest, and we want the opposite.
-    #[allow(dead_code)]
-    pub fn ordered_iter(&mut self) -> impl Iterator<Item = &StreamId> {
-	self.regular.iter().chain(self.sendordered.values().rev().flatten())
-    }
-
-    #[allow(dead_code)]
-    pub fn iter(&mut self) -> impl Iterator<Item = (&StreamId, &SendStream)> {
-      self.map.iter()
     }
 
     pub(crate) fn write_frames(
@@ -1422,10 +1474,19 @@ impl SendStreams {
 	// SendOrdered streams.   Round-robining the data at the same priority
 	// isn't required (currently) by the spec, but would be good to do in the future.
 	//
-	// iterator is in-line to avoid complaints from the compiler
-	let stream_ids = self.regular.iter().chain(self.sendordered.values().rev().flatten());
+	// Fairness is implemented by a round-robining within a single
+	// sendorder/unordered vector.  We do this by recording where we
+	// stopped in the previous pass, and starting there the next pass.
+	// If we store an index into the vec, this means we can't use a
+	// chained iterator, since we want to retain our
+	// place-in-the-vector.  If we rotate the vector, that would let us use
+	// the chained iterator, but would require more expensive searches for
+	// insertion and removal (since the sorted order would be lost).
+	//
+	// Iterate OrderGroups, then iterate each group
+	let stream_ids = self.regular.iter_mut().chain(self.sendordered.values_mut().rev().flat_map(|group| group.iter_mut()));
 	for stream_id in stream_ids {
-	    let stream = self.map.get_mut(stream_id).unwrap();
+	    let stream = self.map.get_mut(&stream_id).unwrap();
             if !stream.write_reset_frame(priority, builder, tokens, stats) {
                 stream.write_blocked_frame(priority, builder, tokens, stats);
 		if builder.is_full() {

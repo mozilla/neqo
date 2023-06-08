@@ -16,6 +16,7 @@ use crate::{
     tracking::DEFAULT_ACK_PACKET_TOLERANCE,
     Connection, ConnectionError, ConnectionParameters, Error, StreamType, StreamId,
     streams::{StreamOrder, SendOrder},
+    send_stream::OrderGroup,
 };
 use std::collections::HashMap;
 
@@ -198,6 +199,90 @@ fn sendorder_4() {
     sendorder_test(&[Some(1), Some(2), Some(1), None, Some(3), Some(1), Some(3), None]);
 }
 
+
+#[cfg(test)]
+// tests stream sendorder priorization
+fn fairness_test(stream_ids: &[StreamId], number_iterates: usize, truncate_to: usize, result_of_second_iteration: &[StreamId]) {
+    // test the OrderGroup code used for fairness
+    let mut group: OrderGroup = Default::default();
+    for stream_id in stream_ids {
+	match group.stream_ids().binary_search(stream_id) {
+	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
+	    Err(pos) => group.stream_ids().insert(pos, *stream_id),
+	}
+    }
+    {
+	let mut iterator1 = group.iter_mut();
+	// advance_by() would help here
+	let mut n = number_iterates;
+	while n > 0 {
+	    iterator1.next();
+	    n -= 1;
+	}
+	// let iterator1 go out of scope
+    }
+    group.stream_ids().truncate(truncate_to);
+
+    let iterator2 = group.iter_mut();
+    let result: Vec<StreamId> = iterator2.collect();
+    assert_eq!(result, result_of_second_iteration);
+}
+
+#[test]
+fn ordergroup_0() {
+    let source: [u64; 0] = [];
+    let result: [u64; 0] = [];
+    fairness_test(&source.map(|x| StreamId(x)), 1, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_1() {
+    let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    let result: [u64; 6] = [1, 2, 3, 4, 5, 0];
+    fairness_test(&source.map(|x| StreamId(x)), 1, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_2() {
+    let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    let result: [u64; 6] = [2, 3, 4, 5, 0, 1];
+    fairness_test(&source.map(|x| StreamId(x)), 2, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_3() {
+    let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    let result: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    fairness_test(&source.map(|x| StreamId(x)), 10, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_4() {
+    let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    let result: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    fairness_test(&source.map(|x| StreamId(x)), 0, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_5() {
+    let source: [u64; 1] = [0];
+    let result: [u64; 1] = [0];
+    fairness_test(&source.map(|x| StreamId(x)), 1, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_6() {
+    let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    let result: [u64; 6] = [5, 0, 1, 2, 3, 4];
+    fairness_test(&source.map(|x| StreamId(x)), 5, usize::MAX, &result.map(|x| StreamId(x)));
+}
+
+#[test]
+fn ordergroup_7() {
+    let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
+    let result: [u64; 3] = [0, 1, 2];
+    fairness_test(&source.map(|x| StreamId(x)), 5, 3, &result.map(|x| StreamId(x)));
+}
 
 #[test]
 // Send fin even if a peer closes a reomte bidi send stream before sending any data.
