@@ -1157,7 +1157,7 @@ impl SendStreams {
         }
     }
 
-    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()>{
+    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
 	// don't grab stream here; causes borrow errors
         let old_sendorder = self.map.get(&stream_id).unwrap().sendorder();
 	if old_sendorder != sendorder {

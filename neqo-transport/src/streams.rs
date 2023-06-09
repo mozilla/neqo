@@ -412,8 +412,8 @@ impl Streams {
         ))
     }
 
-    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
-	self.send.set_sendorder(stream_id, sendorder).ok();
+    pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
+	self.send.set_sendorder(stream_id, sendorder)
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {

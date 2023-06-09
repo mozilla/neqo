@@ -2947,13 +2947,14 @@ impl Connection {
 
     /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
     /// # Errors
-    /// None
+    /// Returns InvalidStreamId if the stream id doesn't exist
     pub fn stream_sendorder(
         &mut self,
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
-    ) {
-	self.streams.set_sendorder(stream_id, sendorder);
+    ) -> Res<()> {
+	self.streams.set_sendorder(stream_id, sendorder)
+    }
     }
 
     /// Send data on a stream.

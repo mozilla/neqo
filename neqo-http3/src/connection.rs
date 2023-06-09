@@ -1003,10 +1003,8 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
 	sendorder: Option<SendOrder>) -> Res<()> {
-        let send_stream = self.send_streams.get_mut(&stream_id)
-	                .ok_or(Error::InvalidStreamId)?;
-	send_stream.set_sendorder(conn, sendorder);
-	Ok(())
+	Ok(conn.stream_sendorder(stream_id, sendorder)?)
+    }
     }
 
     pub fn cancel_fetch(
