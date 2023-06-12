@@ -777,6 +777,16 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
+    /// Sets the `Fairness` for a given stream
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// # Panics
+    /// This cannot panic.
+    pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        self.base_handler
+            .stream_set_fairness(&mut self.conn, stream_id, fairness)
+    }
+
     /// This function combines  `process_input` and `process_output` function.
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");

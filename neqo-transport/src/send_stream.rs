@@ -617,6 +617,7 @@ pub struct SendStream {
     retransmission_offset: u64,
     sendorder: Option<SendOrder>,
     bytes_sent: u64,
+    fair: bool,
 }
 
 impl Hash for SendStream {
@@ -651,6 +652,7 @@ impl SendStream {
             retransmission_offset: 0,
             sendorder: None,
             bytes_sent: 0,
+            fair: false,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -666,10 +668,18 @@ impl SendStream {
         stats: &mut FrameStats,
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
-	if !self.write_reset_frame(priority, builder, tokens, stats) {
+        if !self.write_reset_frame(priority, builder, tokens, stats) {
           self.write_blocked_frame(priority, builder, tokens, stats);
           self.write_stream_frame(priority, builder, tokens, stats);
         }
+    }
+
+    pub fn set_fairness(&mut self, make_fair: bool) {
+        self.fair = make_fair;
+    }
+
+    pub fn is_fair(&self) -> bool {
+        self.fair
     }
 
     pub fn set_priority(
@@ -687,7 +697,7 @@ impl SendStream {
 
     pub fn set_sendorder(
         &mut self,
-	sendorder: Option<SendOrder>,
+        sendorder: Option<SendOrder>,
     ) {
         self.sendorder = sendorder;
     }
@@ -1263,18 +1273,18 @@ pub struct OrderGroupIter<'a> {
 
 impl<'a> OrderGroup {
     pub fn iter_mut(&mut self) -> OrderGroupIter {
-	// Ids may have been deleted since we last iterated
-	if self.next >= self.vec.len() {
-	    self.next = 0;
-	}
+        // Ids may have been deleted since we last iterated
+        if self.next >= self.vec.len() {
+            self.next = 0;
+        }
         OrderGroupIter {
-	    started_at: None,
-	    group: self,
-	}
+            started_at: None,
+            group: self,
+        }
     }
 
     pub fn stream_ids(&mut self) -> &mut Vec<StreamId> {
-	&mut self.vec
+        &mut self.vec
     }
 }
 
@@ -1282,22 +1292,22 @@ impl<'a> OrderGroup {
 impl<'a> Iterator for OrderGroupIter<'a> {
     type Item = StreamId;
     fn next(&mut self) -> Option<Self::Item> {
-	// Stop when we would return the started_at element on the next
-	// call.  Note that this must take into account wrapping.
-	if self.started_at == Some(self.group.next) || self.group.vec.is_empty() {
-	    return None;
-	}
-	match self.started_at {
-	    None => self.started_at = Some(self.group.next),
-	    Some(_) => {},
-	}
+        // Stop when we would return the started_at element on the next
+        // call.  Note that this must take into account wrapping.
+        if self.started_at == Some(self.group.next) || self.group.vec.is_empty() {
+            return None;
+        }
+        match self.started_at {
+            None => self.started_at = Some(self.group.next),
+            Some(_) => {},
+        }
         let mut next = self.group.next + 1;
-	if next >= self.group.vec.len() {
-	    next = 0;
-	}
-	let orig = self.group.next;
+        if next >= self.group.vec.len() {
+            next = 0;
+        }
+        let orig = self.group.next;
         self.group.next = next;
-	return Some(self.group.vec[orig]);
+        return Some(self.group.vec[orig]);
     }
 }
 
@@ -1311,6 +1321,19 @@ pub(crate) struct SendStreams {
     // duplicate keys.  PriorityQueue does have what we need, except for an
     // ordered iterator that doesn't consume the queue.  So we roll our own.
 
+    // Added complication: We want to have Fairness for streams of the same
+    // 'group' (for WebTransport), but for H3 (and other non-WT streams) we
+    // tend to get better pageload performance by prioritizing by creation order.
+    //
+    // Two options are to walk the 'map' first, ignoring WebTransport
+    // streams, then process the unordered and ordered WebTransport
+    // streams.  The second is to have a sorted Vec for unfair streams (and
+    // use a normal iterator for that), and then chain the iterators for
+    // the unordered and ordered WebTranport streams.  The first works very
+    // well for H3, and for WebTransport nodes are visited twice on every
+    // processing loop.  The second adds insertion and removal costs, but
+    // avoids a CPU penalty for WebTransport streams.  For now we'll do #1.
+    //
     // So we use a sorted Vec<> for the regular streams (that's usually all of
     // them), and then a BTreeMap of an entry for each SendOrder value, and
     // for each of those entries a Vec of the stream_ids at that
@@ -1339,46 +1362,75 @@ impl SendStreams {
 
     pub fn insert(&mut self, id: StreamId, stream: SendStream) {
         self.map.insert(id, stream);
-	// This normally is only called when a new stream is created.  If
-	// so, because of how we allocate StreamIds, it should always have
-	// the largest value.  This means we can just append it to the
-	// regular vector.  However, if we were ever to change this
-	// invariant, things would break subtly.
-
-	// We could add assertions, or we can try to insert at the end and
-	// if not fall back to binary-search insertion
-	if matches!(self.regular.stream_ids().last(), Some(last) if id > *last) {
-	  self.regular.stream_ids().push(id);
-	} else {
-	  Self::insert_streamid(&mut self.regular.stream_ids(), &id);
-        }
     }
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
-	// don't grab stream here; causes borrow errors
-        let old_sendorder = self.map.get(&stream_id).unwrap().sendorder();
-	if old_sendorder != sendorder {
-	    // we have to remove it from the list it was in, and reinsert it with the new
-	    // sendorder key
-	    let mut group = if let Some(old) = old_sendorder {
-		self.sendordered.get_mut(&old).unwrap()
-            } else {
-		&mut self.regular
-	    };
-	    Self::remove_streamid(&mut group.stream_ids(), &stream_id);
-            self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
-	    if let Some(order) = sendorder {
-		group = self.sendordered.entry(order).or_default();
-	    } else {
-		group = &mut self.regular;
-	    }
-	    Self::insert_streamid(&mut group.stream_ids(), &stream_id);
-	    qtrace!(
-		"ordering of stream_ids: {:?}",
-		self.sendordered.values().collect::<Vec::<_>>()
-            );
-	}
-	Ok(())
+        if let Some(stream) = self.map.get_mut(&stream_id) {
+            // don't grab stream here; causes borrow errors
+            let old_sendorder = stream.sendorder();
+            if old_sendorder != sendorder {
+                // we have to remove it from the list it was in, and reinsert it with the new
+                // sendorder key
+                let mut group = if let Some(old) = old_sendorder {
+                    self.sendordered.get_mut(&old).unwrap()
+                } else {
+                    &mut self.regular
+                };
+                Self::remove_streamid(&mut group.stream_ids(), &stream_id);
+                self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
+                if let Some(order) = sendorder {
+                    group = self.sendordered.entry(order).or_default();
+                } else {
+                    group = &mut self.regular;
+                }
+                Self::insert_streamid(&mut group.stream_ids(), &stream_id);
+                qtrace!(
+                    "ordering of stream_ids: {:?}",
+                    self.sendordered.values().collect::<Vec::<_>>()
+                );
+            }
+            Ok(())
+        } else {
+            Err(Error::InvalidStreamId)
+        }
+    }
+
+    pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
+        if let Some(stream) = self.map.get_mut(&stream_id) {
+            let old_fair = stream.fair;
+            stream.set_fairness(make_fair);
+            if !old_fair && make_fair {
+                // move to the regular OrderGroup.  We must be called before SendOrder can be set
+                match stream.sendorder {
+                    None => {},
+                    Some(_) => panic!("Stream had sendOrder set before fairness!"),
+                }
+                // This normally is only called when a new stream is created.  If
+                // so, because of how we allocate StreamIds, it should always have
+                // the largest value.  This means we can just append it to the
+                // regular vector.  However, if we were ever to change this
+                // invariant, things would break subtly.
+
+                // To be safe we can try to insert at the end and if not
+                // fall back to binary-search insertion
+                if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
+                    self.regular.stream_ids().push(stream_id);
+                } else {
+                    Self::insert_streamid(&mut self.regular.stream_ids(), &stream_id);
+                }
+            } else if old_fair && !make_fair {
+                // remove from the OrderGroup
+                let group = if let Some(sendorder) = stream.sendorder {
+                    self.sendordered.get_mut(&sendorder).unwrap()
+                } else {
+                    &mut self.regular
+                };
+                Self::remove_streamid(&mut group.stream_ids(), &stream_id);
+            }
+            Ok(())
+        } else {
+            Err(Error::InvalidStreamId)
+        }
     }
 
     pub fn acked(&mut self, token: &SendStreamRecoveryToken) {
@@ -1413,43 +1465,66 @@ impl SendStreams {
 
     pub fn clear(&mut self) {
         self.map.clear();
-	self.sendordered.clear();
-	self.regular.stream_ids().clear();
+        self.sendordered.clear();
+        self.regular.stream_ids().clear();
     }
 
     pub fn remove_terminal(&mut self) {
-	Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
+        Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
     }
 
     fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut OrderGroup, sendordered: &mut BTreeMap<SendOrder, OrderGroup>) {
-	// Take refs to all the items we need to modify instead of &mut
-	// self to keept the compiler happy (if we use self.map.retain it
-	// gets upset due to borrows)
-	map.retain(|stream_id, stream| {
-	    if stream.is_terminal() {
-		match stream.sendorder() {
-		    None => Self::remove_streamid(regular.stream_ids(), &stream_id),
-		    Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap().stream_ids(), stream_id),
-		};
-		return false;
-	    }
-	    return true;
-	});
+        // Take refs to all the items we need to modify instead of &mut
+        // self to keep the compiler happy (if we use self.map.retain it
+        // gets upset due to borrows)
+        map.retain(|stream_id, stream| {
+            if stream.is_terminal() {
+                if stream.is_fair() {
+                    match stream.sendorder() {
+                        None => Self::remove_streamid(regular.stream_ids(), &stream_id),
+                        Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap().stream_ids(), stream_id),
+                    };
+                }
+                // if unfair, we're done
+                return false;
+            }
+            return true;
+        });
     }
 
     fn insert_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) {
-	match vec.binary_search(stream_id) {
-	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
-	    Err(pos) => vec.insert(pos, *stream_id),
-	}
+        match vec.binary_search(stream_id) {
+            Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
+            Err(pos) => vec.insert(pos, *stream_id),
+        }
     }
 
     fn remove_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) -> bool {
-	match vec.binary_search(stream_id) {
-	    Ok(pos) => { vec.remove(pos); },
-	    Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
-	}
-	true
+        match vec.binary_search(stream_id) {
+            Ok(pos) => { vec.remove(pos); },
+            Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
+        }
+        true
+    }
+
+    // return false if the builder is full and the caller should stop iterating
+    fn write_frames_with_stream(
+        priority: TransmissionPriority,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+        stream: &mut SendStream) -> bool {
+        if !stream.write_reset_frame(priority, builder, tokens, stats) {
+            stream.write_blocked_frame(priority, builder, tokens, stats);
+            if builder.is_full() {
+                return false;
+            }
+            stream.write_stream_frame(priority, builder, tokens, stats);
+            if builder.is_full() {
+                return false;
+            }
+        }
+        true
     }
 
     pub(crate) fn write_frames(
@@ -1461,41 +1536,56 @@ impl SendStreams {
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
         // WebTransport data (which is Normal) may have a SendOrder
-	// priority attached.  The spec states (6.3 write-chunk 6.1):
+        // priority attached.  The spec states (6.3 write-chunk 6.1):
+
+        // First, we send any streams without Fairness defined, with
+        // ordering defined by StreamId.  (Http3 streams used for
+        // e.g. pageload benefit from being processed in order of creation
+        // so the far side can start acting on a datum/request sooner. All
+        // WebTransport streams MUST have fairness set.)  Then we send
+        // streams with fairness set (including all WebTransport streams)
+        // as follows:
 
         // If stream.[[SendOrder]] is null then this sending MUST NOT
-	// starve except for flow control reasons or error.  If
-	// stream.[[SendOrder]] is not null then this sending MUST starve
-	// until all bytes queued for sending on WebTransportSendStreams
-	// with a non-null and higher [[SendOrder]], that are neither
-	// errored nor blocked by flow control, have been sent.
+        // starve except for flow control reasons or error.  If
+        // stream.[[SendOrder]] is not null then this sending MUST starve
+        // until all bytes queued for sending on WebTransportSendStreams
+        // with a non-null and higher [[SendOrder]], that are neither
+        // errored nor blocked by flow control, have been sent.
 
-	// So data without SendOrder goes first.   Then the highest priority
-	// SendOrdered streams.   Round-robining the data at the same priority
-	// isn't required (currently) by the spec, but would be good to do in the future.
-	//
-	// Fairness is implemented by a round-robining within a single
-	// sendorder/unordered vector.  We do this by recording where we
-	// stopped in the previous pass, and starting there the next pass.
-	// If we store an index into the vec, this means we can't use a
-	// chained iterator, since we want to retain our
-	// place-in-the-vector.  If we rotate the vector, that would let us use
-	// the chained iterator, but would require more expensive searches for
-	// insertion and removal (since the sorted order would be lost).
-	//
-	// Iterate OrderGroups, then iterate each group
-	let stream_ids = self.regular.iter_mut().chain(self.sendordered.values_mut().rev().flat_map(|group| group.iter_mut()));
-	for stream_id in stream_ids {
-	    let stream = self.map.get_mut(&stream_id).unwrap();
-            if !stream.write_reset_frame(priority, builder, tokens, stats) {
-                stream.write_blocked_frame(priority, builder, tokens, stats);
-		if builder.is_full() {
-                    return;
-		}
-                stream.write_stream_frame(priority, builder, tokens, stats);
-		if builder.is_full() {
-                    return;
-		}
+        // So data without SendOrder goes first.   Then the highest priority
+        // SendOrdered streams.
+        //
+        // Fairness is implemented by a round-robining within a single
+        // sendorder/unordered vector.  We do this by recording where we
+        // stopped in the previous pass, and starting there the next pass.
+        // If we store an index into the vec, this means we can't use a
+        // chained iterator, since we want to retain our
+        // place-in-the-vector.  If we rotate the vector, that would let us use
+        // the chained iterator, but would require more expensive searches for
+        // insertion and removal (since the sorted order would be lost).
+
+        // Iterate the map, but only those without fairness, then iterate
+        // OrderGroups, then iterate each group
+        qdebug!("processing streams...  unfair:");
+        for stream in self.map.values_mut() {
+            if !stream.is_fair() {
+                qdebug!("   {}", stream);
+                if !Self::write_frames_with_stream(priority, builder, tokens, stats, stream) {
+                    break;
+                }
+            }
+        }
+        qdebug!("fair streams:");
+        let stream_ids = self.regular.iter_mut().chain(self.sendordered.values_mut().rev().flat_map(|group| group.iter_mut()));
+        for stream_id in stream_ids {
+            match self.map.get_mut(&stream_id).unwrap().sendorder() {
+                Some(order) => qdebug!("   {} ({})", stream_id, order),
+                None => qdebug!("   None"),
+            }
+            if !Self::write_frames_with_stream(priority, builder, tokens, stats,
+                                               self.map.get_mut(&stream_id).unwrap()) {
+                break;
             }
         }
     }
@@ -1684,16 +1774,16 @@ mod tests {
         // Fill the buffer
         assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
-			 Some((0, x)) if x.len()==SEND_BUFFER_SIZE
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((0, x)) if x.len()==SEND_BUFFER_SIZE
+                         && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
         let one_byte_from_end = SEND_BUFFER_SIZE as u64 - 1;
         txb.mark_as_sent(0, one_byte_from_end as usize);
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 1
-			 && start == one_byte_from_end
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((start, x)) if x.len() == 1
+                         && start == one_byte_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
         // Mark all as sent. Get nothing
         txb.mark_as_sent(0, SEND_BUFFER_SIZE);
@@ -1702,18 +1792,18 @@ mod tests {
         // Mark as lost. Get it again
         txb.mark_as_lost(one_byte_from_end, 1);
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 1
-			 && start == one_byte_from_end
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((start, x)) if x.len() == 1
+                         && start == one_byte_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
         let five_bytes_from_end = SEND_BUFFER_SIZE as u64 - 5;
         txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 5
-			 && start == five_bytes_from_end
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((start, x)) if x.len() == 5
+                         && start == five_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
@@ -1722,9 +1812,9 @@ mod tests {
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 5
-			 && start == five_bytes_from_end
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((start, x)) if x.len() == 5
+                         && start == five_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
         assert_eq!(txb.retired, five_bytes_from_end);
         assert_eq!(txb.buffered(), 35);
 
@@ -1732,9 +1822,9 @@ mod tests {
         // when called again
         txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 30
-			 && start == SEND_BUFFER_SIZE as u64
-			 && x.iter().all(|ch| *ch == 2)));
+                         Some((start, x)) if x.len() == 30
+                         && start == SEND_BUFFER_SIZE as u64
+                         && x.iter().all(|ch| *ch == 2)));
     }
 
     #[test]
@@ -1746,8 +1836,8 @@ mod tests {
         // Fill the buffer
         assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
-			 Some((0, x)) if x.len()==SEND_BUFFER_SIZE
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((0, x)) if x.len()==SEND_BUFFER_SIZE
+                         && x.iter().all(|ch| *ch == 1)));
 
         // As above
         let forty_bytes_from_end = SEND_BUFFER_SIZE as u64 - 40;
@@ -1765,18 +1855,18 @@ mod tests {
         txb.mark_as_sent(forty_bytes_from_end, 10);
         let thirty_bytes_from_end = forty_bytes_from_end + 10;
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 30
-			 && start == thirty_bytes_from_end
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((start, x)) if x.len() == 30
+                         && start == thirty_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
         // Mark a range 'A' in second slice as sent. Should still return the same
         let range_a_start = SEND_BUFFER_SIZE as u64 + 30;
         let range_a_end = range_a_start + 10;
         txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 30
-			 && start == thirty_bytes_from_end
-			 && x.iter().all(|ch| *ch == 1)));
+                         Some((start, x)) if x.len() == 30
+                         && start == thirty_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
         // Ack entire first slice and into second slice
         let ten_bytes_past_end = SEND_BUFFER_SIZE as u64 + 10;
@@ -1784,17 +1874,17 @@ mod tests {
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 20
-			 && start == ten_bytes_past_end
-			 && x.iter().all(|ch| *ch == 2)));
+                         Some((start, x)) if x.len() == 20
+                         && start == ten_bytes_past_end
+                         && x.iter().all(|ch| *ch == 2)));
 
         txb.mark_as_sent(ten_bytes_past_end, 20);
 
         // Get bit after earlier marked range A
         assert!(matches!(txb.next_bytes(),
-			 Some((start, x)) if x.len() == 60
-			 && start == range_a_end
-			 && x.iter().all(|ch| *ch == 2)));
+                         Some((start, x)) if x.len() == 60
+                         && start == range_a_end
+                         && x.iter().all(|ch| *ch == 2)));
 
         // No more bytes.
         txb.mark_as_sent(range_a_end, 60);

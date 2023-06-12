@@ -545,12 +545,13 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
 
 trait SendStream: Stream {
     /// # Errors
-    /// Error my occure during sending data, e.g. protocol error, etc.
+    /// Error my occur during sending data, e.g. protocol error, etc.
     fn send(&mut self, conn: &mut Connection) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
     fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>);
+    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool);
     /// # Errors
     /// Error my occur during sending data, e.g. protocol error, etc.
     fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;

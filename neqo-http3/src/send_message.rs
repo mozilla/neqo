@@ -274,7 +274,11 @@ impl SendStream for SendMessage {
     fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) {
 	// Not relevant for SendMessage
     }
-    
+
+    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) {
+	// Not relevant for SendMessage
+    }
+
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
         self.state.fin()?;
         if !self.stream.has_buffered_data() {

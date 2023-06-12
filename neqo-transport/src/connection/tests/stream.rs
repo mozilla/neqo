@@ -135,11 +135,13 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
 	let id = client.stream_create(StreamType::UniDi).unwrap();
 	streams.push(id);
 	ordered.push((id, *sendorder));
-	client.streams.set_sendorder(id, *sendorder).ok();
+        // must be set before sendorder
+        client.streams.set_fairness(id, true).ok();
+        client.streams.set_sendorder(id, *sendorder).ok();
     }
     // Write some data to all the streams
     for stream_id in streams {
-	client.stream_send(stream_id, &[6; 100]).unwrap();
+        client.stream_send(stream_id, &[6; 100]).unwrap();
     }
 
     // Sending this much takes a few datagrams.

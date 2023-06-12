@@ -189,6 +189,10 @@ impl SendStream for WebTransportSendStream {
 	conn.stream_sendorder(self.stream_id, sendorder).ok();
     }
 
+    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) {
+	conn.stream_fairness(self.stream_id, fairness).ok();
+    }
+
     fn handle_stop_sending(&mut self, close_type: CloseType) {
         self.set_done(close_type);
     }

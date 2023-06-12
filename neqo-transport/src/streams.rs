@@ -262,7 +262,7 @@ impl Streams {
             }
         }
 
-	self.send.write_frames(priority, builder, tokens, stats);
+        self.send.write_frames(priority, builder, tokens, stats);
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
@@ -328,10 +328,10 @@ impl Streams {
     }
 
     pub fn cleanup_closed_streams(&mut self) {
-	// filter the list, removing closed streams
-	self.send.remove_terminal();
+        // filter the list, removing closed streams
+        self.send.remove_terminal();
 
-	let send = &self.send;
+        let send = &self.send;
         let (removed_bidi, removed_uni) = self.recv.clear_terminal(send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
@@ -414,6 +414,10 @@ impl Streams {
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
 	self.send.set_sendorder(stream_id, sendorder)
+    }
+
+    pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+	self.send.set_fairness(stream_id, fairness)
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
