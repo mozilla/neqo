@@ -1286,8 +1286,28 @@ impl<'a> OrderGroup {
     pub fn stream_ids(&mut self) -> &mut Vec<StreamId> {
         &mut self.vec
     }
-}
 
+    fn update_next(&mut self) -> usize {
+        let next = self.next;
+        self.next = (self.next + 1) % self.vec.len();
+        next
+    }
+
+    pub fn insert_streamid(&mut self, stream_id: &StreamId) {
+        match self.vec.binary_search(stream_id) {
+            Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
+            Err(pos) => self.vec.insert(pos, *stream_id),
+        }
+    }
+
+    pub fn remove_streamid(&mut self, stream_id: &StreamId) -> bool {
+        match self.vec.binary_search(stream_id) {
+            Ok(pos) => { self.vec.remove(pos); },
+            Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
+        }
+        true
+    }
+}
 
 impl<'a> Iterator for OrderGroupIter<'a> {
     type Item = StreamId;
@@ -1297,17 +1317,9 @@ impl<'a> Iterator for OrderGroupIter<'a> {
         if self.started_at == Some(self.group.next) || self.group.vec.is_empty() {
             return None;
         }
-        match self.started_at {
-            None => self.started_at = Some(self.group.next),
-            Some(_) => {},
-        }
-        let mut next = self.group.next + 1;
-        if next >= self.group.vec.len() {
-            next = 0;
-        }
-        let orig = self.group.next;
-        self.group.next = next;
-        return Some(self.group.vec[orig]);
+        self.started_at = self.started_at.or(Some(self.group.next));
+        let orig = self.group.update_next();
+        Some(self.group.vec[orig])
     }
 }
 
@@ -1376,14 +1388,14 @@ impl SendStreams {
                 } else {
                     &mut self.regular
                 };
-                Self::remove_streamid(&mut group.stream_ids(), &stream_id);
+                group.remove_streamid(&stream_id);
                 self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
                 if let Some(order) = sendorder {
                     group = self.sendordered.entry(order).or_default();
                 } else {
                     group = &mut self.regular;
                 }
-                Self::insert_streamid(&mut group.stream_ids(), &stream_id);
+                group.insert_streamid(&stream_id);
                 qtrace!(
                     "ordering of stream_ids: {:?}",
                     self.sendordered.values().collect::<Vec::<_>>()
@@ -1416,7 +1428,7 @@ impl SendStreams {
                 if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
                     self.regular.stream_ids().push(stream_id);
                 } else {
-                    Self::insert_streamid(&mut self.regular.stream_ids(), &stream_id);
+                    self.regular.insert_streamid(&stream_id);
                 }
             } else if old_fair && !make_fair {
                 // remove from the OrderGroup
@@ -1425,7 +1437,7 @@ impl SendStreams {
                 } else {
                     &mut self.regular
                 };
-                Self::remove_streamid(&mut group.stream_ids(), &stream_id);
+                group.remove_streamid(&stream_id);
             }
             Ok(())
         } else {
@@ -1481,8 +1493,8 @@ impl SendStreams {
             if stream.is_terminal() {
                 if stream.is_fair() {
                     match stream.sendorder() {
-                        None => Self::remove_streamid(regular.stream_ids(), &stream_id),
-                        Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap().stream_ids(), stream_id),
+                        None => regular.remove_streamid(&stream_id),
+                        Some(sendorder) => sendordered.get_mut(&sendorder).unwrap().remove_streamid(stream_id),
                     };
                 }
                 // if unfair, we're done
@@ -1490,21 +1502,6 @@ impl SendStreams {
             }
             return true;
         });
-    }
-
-    fn insert_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) {
-        match vec.binary_search(stream_id) {
-            Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
-            Err(pos) => vec.insert(pos, *stream_id),
-        }
-    }
-
-    fn remove_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) -> bool {
-        match vec.binary_search(stream_id) {
-            Ok(pos) => { vec.remove(pos); },
-            Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
-        }
-        true
     }
 
     // return false if the builder is full and the caller should stop iterating
@@ -1556,14 +1553,15 @@ impl SendStreams {
         // So data without SendOrder goes first.   Then the highest priority
         // SendOrdered streams.
         //
-        // Fairness is implemented by a round-robining within a single
-        // sendorder/unordered vector.  We do this by recording where we
-        // stopped in the previous pass, and starting there the next pass.
-        // If we store an index into the vec, this means we can't use a
-        // chained iterator, since we want to retain our
-        // place-in-the-vector.  If we rotate the vector, that would let us use
-        // the chained iterator, but would require more expensive searches for
-        // insertion and removal (since the sorted order would be lost).
+        // Fairness is implemented by a round-robining or "statefully
+        // iterating" within a single sendorder/unordered vector.  We do
+        // this by recording where we stopped in the previous pass, and
+        // starting there the next pass.  If we store an index into the
+        // vec, this means we can't use a chained iterator, since we want
+        // to retain our place-in-the-vector.  If we rotate the vector,
+        // that would let us use the chained iterator, but would require
+        // more expensive searches for insertion and removal (since the
+        // sorted order would be lost).
 
         // Iterate the map, but only those without fairness, then iterate
         // OrderGroups, then iterate each group
