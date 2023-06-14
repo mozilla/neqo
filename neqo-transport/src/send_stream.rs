@@ -1300,12 +1300,11 @@ impl<'a> OrderGroup {
         }
     }
 
-    pub fn remove_streamid(&mut self, stream_id: &StreamId) -> bool {
+    pub fn remove_streamid(&mut self, stream_id: &StreamId) {
         match self.vec.binary_search(stream_id) {
             Ok(pos) => { self.vec.remove(pos); },
             Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
         }
-        true
     }
 }
 
@@ -1377,6 +1376,13 @@ impl SendStreams {
     }
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
+	// check using non-mutable first so we can call set_fairness
+        if let Some(stream) = self.map.get(&stream_id) {
+	    // All sendordered streams are by definition fair since they're all WebTransport streams
+	    if !stream.fair {
+		self.set_fairness(stream_id, true)?;
+	    }
+	}
         if let Some(stream) = self.map.get_mut(&stream_id) {
             // don't grab stream here; causes borrow errors
             let old_sendorder = stream.sendorder();
@@ -1412,11 +1418,12 @@ impl SendStreams {
             let old_fair = stream.fair;
             stream.set_fairness(make_fair);
             if !old_fair && make_fair {
-                // move to the regular OrderGroup.  We must be called before SendOrder can be set
-                match stream.sendorder {
-                    None => {},
-                    Some(_) => panic!("Stream had sendOrder set before fairness!"),
-                }
+                // Move to the regular OrderGroup.
+
+                // We know sendorder can't have been set, since
+                // set_sendorder() will call this routine if it's not
+                // already set as fair.
+
                 // This normally is only called when a new stream is created.  If
                 // so, because of how we allocate StreamIds, it should always have
                 // the largest value.  This means we can just append it to the
