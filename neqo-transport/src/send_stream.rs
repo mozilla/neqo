@@ -1442,7 +1442,6 @@ impl SendStreams {
 
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
         let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
-
         let was_fair = stream.fair;
         stream.set_fairness(make_fair);
         if !was_fair && make_fair {
