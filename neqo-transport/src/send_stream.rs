@@ -674,6 +674,25 @@ impl SendStream {
         }
     }
 
+    // return false if the builder is full and the caller should stop iterating
+    pub fn write_frames_with_early_return(&mut self,
+        priority: TransmissionPriority,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats) -> bool {
+        if !self.write_reset_frame(priority, builder, tokens, stats) {
+            self.write_blocked_frame(priority, builder, tokens, stats);
+            if builder.is_full() {
+                return false;
+            }
+            self.write_stream_frame(priority, builder, tokens, stats);
+            if builder.is_full() {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn set_fairness(&mut self, make_fair: bool) {
         self.fair = make_fair;
     }
@@ -1272,7 +1291,7 @@ pub struct OrderGroupIter<'a> {
 }
 
 impl<'a> OrderGroup {
-    pub fn iter_mut(&mut self) -> OrderGroupIter {
+    pub fn iter(&mut self) -> OrderGroupIter {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
             self.next = 0;
@@ -1283,8 +1302,21 @@ impl<'a> OrderGroup {
         }
     }
 
-    pub fn stream_ids(&mut self) -> &mut Vec<StreamId> {
-        &mut self.vec
+    pub fn stream_ids(&self) -> &Vec<StreamId> {
+        &self.vec
+    }
+
+    pub fn clear(&mut self) {
+        self.vec.clear();
+    }
+
+    pub fn push(&mut self, stream_id: StreamId) {
+        self.vec.push(stream_id);
+    }
+
+    #[cfg(test)]
+    pub fn truncate(&mut self, position: usize) {
+        self.vec.truncate(position);
     }
 
     fn update_next(&mut self) -> usize {
@@ -1293,15 +1325,15 @@ impl<'a> OrderGroup {
         next
     }
 
-    pub fn insert_streamid(&mut self, stream_id: &StreamId) {
-        match self.vec.binary_search(stream_id) {
+    pub fn insert(&mut self, stream_id: StreamId) {
+        match self.vec.binary_search(&stream_id) {
             Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
-            Err(pos) => self.vec.insert(pos, *stream_id),
+            Err(pos) => self.vec.insert(pos, stream_id),
         }
     }
 
-    pub fn remove_streamid(&mut self, stream_id: &StreamId) {
-        match self.vec.binary_search(stream_id) {
+    pub fn remove(&mut self, stream_id: StreamId) {
+        match self.vec.binary_search(&stream_id) {
             Ok(pos) => { self.vec.remove(pos); },
             Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
         }
@@ -1375,33 +1407,27 @@ impl SendStreams {
         self.map.insert(id, stream);
     }
 
+    fn group_mut(&mut self, sendorder: Option<SendOrder>) -> &mut OrderGroup {
+        if let Some(order) = sendorder {
+            self.sendordered.entry(order).or_default()
+        } else {
+            &mut self.regular
+        }
+    }
+
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
-	// check using non-mutable first so we can call set_fairness
-        if let Some(stream) = self.map.get(&stream_id) {
-	    // All sendordered streams are by definition fair since they're all WebTransport streams
-	    if !stream.fair {
-		self.set_fairness(stream_id, true)?;
-	    }
-	}
+        self.set_fairness(stream_id, true)?;
         if let Some(stream) = self.map.get_mut(&stream_id) {
             // don't grab stream here; causes borrow errors
             let old_sendorder = stream.sendorder();
             if old_sendorder != sendorder {
                 // we have to remove it from the list it was in, and reinsert it with the new
                 // sendorder key
-                let mut group = if let Some(old) = old_sendorder {
-                    self.sendordered.get_mut(&old).unwrap()
-                } else {
-                    &mut self.regular
-                };
-                group.remove_streamid(&stream_id);
+                let mut group = self.group_mut(old_sendorder);
+                group.remove(stream_id);
                 self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
-                if let Some(order) = sendorder {
-                    group = self.sendordered.entry(order).or_default();
-                } else {
-                    group = &mut self.regular;
-                }
-                group.insert_streamid(&stream_id);
+                group = self.group_mut(sendorder);
+                group.insert(stream_id);
                 qtrace!(
                     "ordering of stream_ids: {:?}",
                     self.sendordered.values().collect::<Vec::<_>>()
@@ -1414,42 +1440,40 @@ impl SendStreams {
     }
 
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
-        if let Some(stream) = self.map.get_mut(&stream_id) {
-            let old_fair = stream.fair;
-            stream.set_fairness(make_fair);
-            if !old_fair && make_fair {
-                // Move to the regular OrderGroup.
+        let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
 
-                // We know sendorder can't have been set, since
-                // set_sendorder() will call this routine if it's not
-                // already set as fair.
+        let was_fair = stream.fair;
+        stream.set_fairness(make_fair);
+        if !was_fair && make_fair {
+            // Move to the regular OrderGroup.
 
-                // This normally is only called when a new stream is created.  If
-                // so, because of how we allocate StreamIds, it should always have
-                // the largest value.  This means we can just append it to the
-                // regular vector.  However, if we were ever to change this
-                // invariant, things would break subtly.
+            // We know sendorder can't have been set, since
+            // set_sendorder() will call this routine if it's not
+            // already set as fair.
 
-                // To be safe we can try to insert at the end and if not
-                // fall back to binary-search insertion
-                if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
-                    self.regular.stream_ids().push(stream_id);
-                } else {
-                    self.regular.insert_streamid(&stream_id);
-                }
-            } else if old_fair && !make_fair {
-                // remove from the OrderGroup
-                let group = if let Some(sendorder) = stream.sendorder {
-                    self.sendordered.get_mut(&sendorder).unwrap()
-                } else {
-                    &mut self.regular
-                };
-                group.remove_streamid(&stream_id);
+            // This normally is only called when a new stream is created.  If
+            // so, because of how we allocate StreamIds, it should always have
+            // the largest value.  This means we can just append it to the
+            // regular vector.  However, if we were ever to change this
+            // invariant, things would break subtly.
+
+            // To be safe we can try to insert at the end and if not
+            // fall back to binary-search insertion
+            if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
+                self.regular.push(stream_id);
+            } else {
+                self.regular.insert(stream_id);
             }
-            Ok(())
-        } else {
-            Err(Error::InvalidStreamId)
+        } else if was_fair && !make_fair {
+            // remove from the OrderGroup
+            let group = if let Some(sendorder) = stream.sendorder {
+                self.sendordered.get_mut(&sendorder).unwrap()
+            } else {
+                &mut self.regular
+            };
+            group.remove(stream_id);
         }
+        Ok(())
     }
 
     pub fn acked(&mut self, token: &SendStreamRecoveryToken) {
@@ -1485,14 +1509,14 @@ impl SendStreams {
     pub fn clear(&mut self) {
         self.map.clear();
         self.sendordered.clear();
-        self.regular.stream_ids().clear();
+        self.regular.clear();
     }
 
     pub fn remove_terminal(&mut self) {
-        Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
-    }
+        let map: &mut IndexMap<StreamId, SendStream> = &mut self.map;
+        let regular: &mut OrderGroup = &mut self.regular;
+        let sendordered: &mut BTreeMap<SendOrder, OrderGroup> = &mut self.sendordered;
 
-    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut OrderGroup, sendordered: &mut BTreeMap<SendOrder, OrderGroup>) {
         // Take refs to all the items we need to modify instead of &mut
         // self to keep the compiler happy (if we use self.map.retain it
         // gets upset due to borrows)
@@ -1500,8 +1524,8 @@ impl SendStreams {
             if stream.is_terminal() {
                 if stream.is_fair() {
                     match stream.sendorder() {
-                        None => regular.remove_streamid(&stream_id),
-                        Some(sendorder) => sendordered.get_mut(&sendorder).unwrap().remove_streamid(stream_id),
+                        None => regular.remove(*stream_id),
+                        Some(sendorder) => sendordered.get_mut(&sendorder).unwrap().remove(*stream_id),
                     };
                 }
                 // if unfair, we're done
@@ -1509,26 +1533,6 @@ impl SendStreams {
             }
             return true;
         });
-    }
-
-    // return false if the builder is full and the caller should stop iterating
-    fn write_frames_with_stream(
-        priority: TransmissionPriority,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
-        stats: &mut FrameStats,
-        stream: &mut SendStream) -> bool {
-        if !stream.write_reset_frame(priority, builder, tokens, stats) {
-            stream.write_blocked_frame(priority, builder, tokens, stats);
-            if builder.is_full() {
-                return false;
-            }
-            stream.write_stream_frame(priority, builder, tokens, stats);
-            if builder.is_full() {
-                return false;
-            }
-        }
-        true
     }
 
     pub(crate) fn write_frames(
@@ -1576,20 +1580,19 @@ impl SendStreams {
         for stream in self.map.values_mut() {
             if !stream.is_fair() {
                 qdebug!("   {}", stream);
-                if !Self::write_frames_with_stream(priority, builder, tokens, stats, stream) {
+                if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                     break;
                 }
             }
         }
         qdebug!("fair streams:");
-        let stream_ids = self.regular.iter_mut().chain(self.sendordered.values_mut().rev().flat_map(|group| group.iter_mut()));
+        let stream_ids = self.regular.iter().chain(self.sendordered.values_mut().rev().flat_map(|group| group.iter()));
         for stream_id in stream_ids {
             match self.map.get_mut(&stream_id).unwrap().sendorder() {
                 Some(order) => qdebug!("   {} ({})", stream_id, order),
                 None => qdebug!("   None"),
             }
-            if !Self::write_frames_with_stream(priority, builder, tokens, stats,
-                                               self.map.get_mut(&stream_id).unwrap()) {
+            if !self.map.get_mut(&stream_id).unwrap().write_frames_with_early_return(priority, builder, tokens, stats) {
                 break;
             }
         }

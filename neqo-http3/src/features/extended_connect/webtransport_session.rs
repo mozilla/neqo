@@ -486,12 +486,14 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
         self.borrow_mut().has_data_to_send()
     }
 
-    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) {
+    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) -> Res<()> {
 	// Not relevant on session
+	Ok(())
     }
 
-    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) {
+    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) -> Res<()> {
 	// Not relevant on session
+	Ok(())
     }
 
     fn stream_writable(&self) {}

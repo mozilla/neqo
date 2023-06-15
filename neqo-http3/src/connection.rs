@@ -1006,7 +1006,7 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         sendorder: Option<SendOrder>) -> Res<()> {
-        Ok(conn.stream_sendorder(stream_id, sendorder)?)
+        conn.stream_sendorder(stream_id, sendorder).map_err(|_| Error::InvalidStreamId)
     }
 
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
@@ -1019,7 +1019,7 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         fairness: bool) -> Res<()> {
-        Ok(conn.stream_fairness(stream_id, fairness)?)
+        conn.stream_fairness(stream_id, fairness).map_err(|_| Error::InvalidStreamId)
     }
 
     pub fn cancel_fetch(
@@ -1265,8 +1265,9 @@ impl Http3Connection {
         let stream_id = conn
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
-        // set outgoing WebTransport streams to be fair (share bandwidth)
-        conn.stream_fairness(stream_id, true).ok();
+        // Set outgoing WebTransport streams to be fair (share bandwidth)
+	// This really can't fail, panics if it does
+        conn.stream_fairness(stream_id, true).unwrap();
 
         self.webtransport_create_stream_internal(
             wt,

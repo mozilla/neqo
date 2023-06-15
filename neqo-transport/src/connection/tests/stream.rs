@@ -120,7 +120,6 @@ struct IdEntry {
     stream_id: StreamId,
 }
 
-#[cfg(test)]
 // tests stream sendorder priorization
 fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut client = default_client();
@@ -132,9 +131,9 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut ordered = Vec::new();
     let mut streams = Vec::<StreamId>::new();
     for sendorder in order_of_sendorder {
-	let id = client.stream_create(StreamType::UniDi).unwrap();
-	streams.push(id);
-	ordered.push((id, *sendorder));
+        let id = client.stream_create(StreamType::UniDi).unwrap();
+        streams.push(id);
+        ordered.push((id, *sendorder));
         // must be set before sendorder
         client.streams.set_fairness(id, true).ok();
         client.streams.set_sendorder(id, *sendorder).ok();
@@ -176,7 +175,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     // make sure everything now is in the same order, since we modified the order of
     // same-sendorder items to match the ordering of those we saw in reception
     for (i, (stream_id, _sendorder)) in ordered.iter().enumerate() {
-	assert_eq!(i, stream_ids[stream_id]);
+        assert_eq!(i, stream_ids[stream_id]);
     }
 }
 
@@ -202,88 +201,90 @@ fn sendorder_4() {
 }
 
 
-#[cfg(test)]
-// tests stream sendorder priorization
-fn fairness_test(stream_ids: &[StreamId], number_iterates: usize, truncate_to: usize, result_of_second_iteration: &[StreamId]) {
+// Tests stream sendorder priorization
+// Converts Vecs of u64's into StreamIds
+fn fairness_test<S, R, SI>(source: S, number_iterates: usize, truncate_to: usize, result_array: R)
+where
+    S: IntoIterator<Item = SI>,
+    R: IntoIterator<Item = SI> + std::fmt::Debug,
+    SI: Into<StreamId>, Vec<u64>: PartialEq<R>
+{
     // test the OrderGroup code used for fairness
     let mut group: OrderGroup = Default::default();
-    for stream_id in stream_ids {
-	match group.stream_ids().binary_search(stream_id) {
-	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
-	    Err(pos) => group.stream_ids().insert(pos, *stream_id),
-	}
+    for stream_id in source {
+        group.insert(stream_id.into());
     }
     {
-	let mut iterator1 = group.iter_mut();
-	// advance_by() would help here
-	let mut n = number_iterates;
-	while n > 0 {
-	    iterator1.next();
-	    n -= 1;
-	}
-	// let iterator1 go out of scope
+        let mut iterator1 = group.iter();
+        // advance_by() would help here
+        let mut n = number_iterates;
+        while n > 0 {
+            iterator1.next();
+            n -= 1;
+        }
+        // let iterator1 go out of scope
     }
-    group.stream_ids().truncate(truncate_to);
+    group.truncate(truncate_to);
 
-    let iterator2 = group.iter_mut();
-    let result: Vec<StreamId> = iterator2.collect();
-    assert_eq!(result, result_of_second_iteration);
+    let iterator2 = group.iter();
+    let result: Vec<u64> = iterator2.map(|id| id.as_u64()).collect();
+    assert_eq!(result, result_array);
 }
 
 #[test]
 fn ordergroup_0() {
     let source: [u64; 0] = [];
     let result: [u64; 0] = [];
-    fairness_test(&source.map(|x| StreamId(x)), 1, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 1, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_1() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [1, 2, 3, 4, 5, 0];
-    fairness_test(&source.map(|x| StreamId(x)), 1, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 1, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_2() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [2, 3, 4, 5, 0, 1];
-    fairness_test(&source.map(|x| StreamId(x)), 2, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 2, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_3() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [0, 1, 2, 3, 4, 5];
-    fairness_test(&source.map(|x| StreamId(x)), 10, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 10, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_4() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [0, 1, 2, 3, 4, 5];
-    fairness_test(&source.map(|x| StreamId(x)), 0, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 0, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_5() {
     let source: [u64; 1] = [0];
     let result: [u64; 1] = [0];
-    fairness_test(&source.map(|x| StreamId(x)), 1, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 1, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_6() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [5, 0, 1, 2, 3, 4];
-    fairness_test(&source.map(|x| StreamId(x)), 5, usize::MAX, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 5, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_7() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 3] = [0, 1, 2];
-    fairness_test(&source.map(|x| StreamId(x)), 5, 3, &result.map(|x| StreamId(x)));
+    fairness_test(&source, 5, 3, &result);
 }
 
 #[test]
