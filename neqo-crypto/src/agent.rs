@@ -370,7 +370,7 @@ impl SecretAgent {
     }
 
     // Ready this for connecting.
-    fn ready(&mut self, is_server: bool) -> Res<()> {
+    fn ready(&mut self, is_server: bool, grease: bool) -> Res<()> {
         secstatus_to_res(unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
@@ -388,7 +388,7 @@ impl SecretAgent {
         })?;
 
         self.now.bind(self.fd)?;
-        self.configure()?;
+        self.configure(grease)?;
         secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, ssl::PRBool::from(is_server)) })
     }
 
@@ -396,12 +396,12 @@ impl SecretAgent {
     ///
     /// # Errors
     /// If `set_version_range` fails.
-    fn configure(&mut self) -> Res<()> {
+    fn configure(&mut self, grease: bool) -> Res<()> {
         self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         self.set_option(ssl::Opt::OcspStapling, true)?;
-        if let Err(e) = self.set_option(ssl::Opt::Grease, true) {
+        if let Err(e) = self.set_option(ssl::Opt::Grease, grease) {
             // Until NSS supports greasing, it's OK to fail here.
             qinfo!([self], "Failed to enable greasing {:?}", e);
         }
@@ -821,12 +821,12 @@ impl Client {
     ///
     /// # Errors
     /// Errors returned if the socket can't be created or configured.
-    pub fn new(server_name: impl Into<String>) -> Res<Self> {
+    pub fn new(server_name: impl Into<String>, grease: bool) -> Res<Self> {
         let server_name = server_name.into();
         let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.as_bytes())?;
         secstatus_to_res(unsafe { ssl::SSL_SetURL(agent.fd, url.as_ptr()) })?;
-        agent.ready(false)?;
+        agent.ready(false, grease)?;
         let mut client = Self {
             agent,
             server_name,
@@ -1044,7 +1044,7 @@ impl Server {
             })?;
         }
 
-        agent.ready(true)?;
+        agent.ready(true, true)?;
         Ok(Self {
             agent,
             zero_rtt_check: None,
