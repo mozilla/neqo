@@ -1012,9 +1012,8 @@ impl Http3Connection {
     /// streams of the same sendOrder group (or the unordered group).  Unfair streams
     /// will give bandwidth preferentially to the lowest streamId with data to send.
     /// # Errors
-    /// Returns InvalidStreamId if the stream id doesn't exist
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
     pub fn stream_set_fairness(
-        &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
         fairness: bool) -> Res<()> {
