@@ -762,8 +762,7 @@ impl Http3Client {
     /// # Panics
     /// This cannot panic.
     pub fn webtransport_set_sendorder(&mut self, stream_id: StreamId, sendorder: SendOrder) -> Res<()> {
-	self.base_handler
-	    .stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
+	Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
     }
   
     /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
