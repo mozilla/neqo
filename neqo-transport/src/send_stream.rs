@@ -622,7 +622,7 @@ pub struct SendStream {
 
 impl Hash for SendStream {
     fn hash<H: Hasher>(&self, state: &mut H) {
-       self.stream_id.hash(state)
+        self.stream_id.hash(state)
     }
 }
 
@@ -669,17 +669,19 @@ impl SendStream {
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
         if !self.write_reset_frame(priority, builder, tokens, stats) {
-          self.write_blocked_frame(priority, builder, tokens, stats);
-          self.write_stream_frame(priority, builder, tokens, stats);
+            self.write_blocked_frame(priority, builder, tokens, stats);
+            self.write_stream_frame(priority, builder, tokens, stats);
         }
     }
 
     // return false if the builder is full and the caller should stop iterating
-    pub fn write_frames_with_early_return(&mut self,
+    pub fn write_frames_with_early_return(
+        &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
-        stats: &mut FrameStats) -> bool {
+        stats: &mut FrameStats,
+    ) -> bool {
         if !self.write_reset_frame(priority, builder, tokens, stats) {
             self.write_blocked_frame(priority, builder, tokens, stats);
             if builder.is_full() {
@@ -711,13 +713,10 @@ impl SendStream {
     }
 
     pub fn sendorder(&self) -> Option<SendOrder> {
-       self.sendorder
+        self.sendorder
     }
 
-    pub fn set_sendorder(
-        &mut self,
-        sendorder: Option<SendOrder>,
-    ) {
+    pub fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
     }
 
@@ -1334,7 +1333,9 @@ impl OrderGroup {
 
     pub fn remove(&mut self, stream_id: StreamId) {
         match self.vec.binary_search(&stream_id) {
-            Ok(pos) => { self.vec.remove(pos); },
+            Ok(pos) => {
+                self.vec.remove(pos);
+            }
             Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
         }
     }
@@ -1525,7 +1526,9 @@ impl SendStreams {
                 if stream.is_fair() {
                     match stream.sendorder() {
                         None => regular.remove(*stream_id),
-                        Some(sendorder) => sendordered.get_mut(&sendorder).unwrap().remove(*stream_id),
+                        Some(sendorder) => {
+                            sendordered.get_mut(&sendorder).unwrap().remove(*stream_id)
+                        }
                     };
                 }
                 // if unfair, we're done
@@ -1586,13 +1589,23 @@ impl SendStreams {
             }
         }
         qdebug!("fair streams:");
-        let stream_ids = self.regular.iter().chain(self.sendordered.values_mut().rev().flat_map(|group| group.iter()));
+        let stream_ids = self.regular.iter().chain(
+            self.sendordered
+                .values_mut()
+                .rev()
+                .flat_map(|group| group.iter()),
+        );
         for stream_id in stream_ids {
             match self.map.get_mut(&stream_id).unwrap().sendorder() {
                 Some(order) => qdebug!("   {} ({})", stream_id, order),
                 None => qdebug!("   None"),
             }
-            if !self.map.get_mut(&stream_id).unwrap().write_frames_with_early_return(priority, builder, tokens, stats) {
+            if !self
+                .map
+                .get_mut(&stream_id)
+                .unwrap()
+                .write_frames_with_early_return(priority, builder, tokens, stats)
+            {
                 break;
             }
         }

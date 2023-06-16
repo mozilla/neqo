@@ -13,7 +13,7 @@ use crate::{
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{Connection, StreamId, streams::SendOrder};
+use neqo_transport::{streams::SendOrder, Connection, StreamId};
 use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::min;

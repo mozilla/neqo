@@ -11,12 +11,12 @@ use super::{
 use crate::{
     events::ConnectionEvent,
     recv_stream::RECV_BUFFER_SIZE,
+    send_stream::OrderGroup,
     send_stream::{SendStreamState, SEND_BUFFER_SIZE},
+    streams::{SendOrder, StreamOrder},
     tparams::{self, TransportParameter},
     tracking::DEFAULT_ACK_PACKET_TOLERANCE,
-    Connection, ConnectionError, ConnectionParameters, Error, StreamType, StreamId,
-    streams::{StreamOrder, SendOrder},
-    send_stream::OrderGroup,
+    Connection, ConnectionError, ConnectionParameters, Error, StreamId, StreamType,
 };
 use std::collections::HashMap;
 
@@ -160,10 +160,15 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     }
     assert_eq!(*server.state(), State::Confirmed);
 
-    let stream_ids = server.events().filter_map(|evt| match evt {
-        ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
-        _ => None,
-    }).enumerate().map(|(a, b)| (b, a)).collect::<HashMap<_, _>>();
+    let stream_ids = server
+        .events()
+        .filter_map(|evt| match evt {
+            ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
+            _ => None,
+        })
+        .enumerate()
+        .map(|(a, b)| (b, a))
+        .collect::<HashMap<_, _>>();
 
     // streams should arrive in priority order, not order of creation, if sendorder prioritization
     // is working correctly
@@ -171,7 +176,14 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     // 'ordered' has the send order currently.  Re-sort it by sendorder, but
     // if two items from the same sendorder exist, secondarily sort by the ordering in
     // the stream_ids vector (HashMap<StreamId, index: usize>)
-    ordered.sort_unstable_by_key(|(stream_id, sendorder)| (StreamOrder { sendorder: *sendorder}, stream_ids[stream_id]));
+    ordered.sort_unstable_by_key(|(stream_id, sendorder)| {
+        (
+            StreamOrder {
+                sendorder: *sendorder,
+            },
+            stream_ids[stream_id],
+        )
+    });
     // make sure everything now is in the same order, since we modified the order of
     // same-sendorder items to match the ordering of those we saw in reception
     for (i, (stream_id, _sendorder)) in ordered.iter().enumerate() {
@@ -197,9 +209,17 @@ fn sendorder_3() {
 }
 #[test]
 fn sendorder_4() {
-    sendorder_test(&[Some(1), Some(2), Some(1), None, Some(3), Some(1), Some(3), None]);
+    sendorder_test(&[
+        Some(1),
+        Some(2),
+        Some(1),
+        None,
+        Some(3),
+        Some(1),
+        Some(3),
+        None,
+    ]);
 }
-
 
 // Tests stream sendorder priorization
 // Converts Vecs of u64's into StreamIds

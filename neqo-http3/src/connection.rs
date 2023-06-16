@@ -31,8 +31,8 @@ use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, Message
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{
-    AppError, Connection, ConnectionError, DatagramTracking, State, StreamId, StreamType,
-    ZeroRttState, streams::SendOrder,
+    streams::SendOrder, AppError, Connection, ConnectionError, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -737,7 +737,12 @@ impl Http3Connection {
                 }
                 // set incoming WebTransport streams to be fair (share bandwidth)
                 conn.stream_fairness(stream_id, true).ok();
-                qinfo!([self], "A new WebTransport stream {} for session {}.", stream_id, session_id);
+                qinfo!(
+                    [self],
+                    "A new WebTransport stream {} for session {}.",
+                    stream_id,
+                    session_id
+                );
             }
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
@@ -1004,8 +1009,10 @@ impl Http3Connection {
     pub fn stream_set_sendorder(
         conn: &mut Connection,
         stream_id: StreamId,
-        sendorder: Option<SendOrder>) -> Res<()> {
-        conn.stream_sendorder(stream_id, sendorder).map_err(|_| Error::InvalidStreamId)
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        conn.stream_sendorder(stream_id, sendorder)
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
@@ -1016,8 +1023,10 @@ impl Http3Connection {
     pub fn stream_set_fairness(
         conn: &mut Connection,
         stream_id: StreamId,
-        fairness: bool) -> Res<()> {
-        conn.stream_fairness(stream_id, fairness).map_err(|_| Error::InvalidStreamId)
+        fairness: bool,
+    ) -> Res<()> {
+        conn.stream_fairness(stream_id, fairness)
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     pub fn cancel_fetch(

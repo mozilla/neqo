@@ -17,7 +17,7 @@ use crate::{
 };
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
-use neqo_transport::{Connection, DatagramTracking, StreamId, streams::SendOrder};
+use neqo_transport::{streams::SendOrder, Connection, DatagramTracking, StreamId};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeSet;

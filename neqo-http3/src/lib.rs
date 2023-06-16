@@ -162,7 +162,7 @@ mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
 use neqo_transport::{send_stream::SendStreamStats, AppError, Connection, Error as TransportError};
-pub use neqo_transport::{Output, StreamId, streams::SendOrder};
+pub use neqo_transport::{streams::SendOrder, Output, StreamId};
 use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
@@ -550,8 +550,8 @@ trait SendStream: Stream {
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
-    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>)-> Res<()>;
-    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool)-> Res<()>;
+    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>) -> Res<()>;
+    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) -> Res<()>;
     /// # Errors
     /// Error my occur during sending data, e.g. protocol error, etc.
     fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;

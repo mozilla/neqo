@@ -18,8 +18,8 @@ use crate::{
     ConnectionEvents, Error, Res,
 };
 use neqo_common::{qtrace, qwarn, Role};
-use std::{cell::RefCell, rc::Rc};
 use std::cmp::Ordering;
+use std::{cell::RefCell, rc::Rc};
 
 pub type SendOrder = i64;
 
@@ -30,14 +30,14 @@ pub struct StreamOrder {
 
 // We want highest to lowest, with None being higher than any value
 impl Ord for StreamOrder {
-  fn cmp(&self, other: &Self) -> Ordering {
-    if self.sendorder.is_some() && other.sendorder.is_some() {
-      // We want reverse order (high to low) when both values are specified.
-      other.sendorder.cmp(&self.sendorder)
-    } else {
-      self.sendorder.cmp(&other.sendorder)
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.sendorder.is_some() && other.sendorder.is_some() {
+            // We want reverse order (high to low) when both values are specified.
+            other.sendorder.cmp(&self.sendorder)
+        } else {
+            self.sendorder.cmp(&other.sendorder)
+        }
     }
-  }
 }
 
 impl PartialOrd for StreamOrder {
@@ -53,7 +53,6 @@ impl PartialEq for StreamOrder {
 }
 
 impl Eq for StreamOrder {}
-
 
 pub struct Streams {
     role: Role,
@@ -413,11 +412,11 @@ impl Streams {
     }
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
-	self.send.set_sendorder(stream_id, sendorder)
+        self.send.set_sendorder(stream_id, sendorder)
     }
 
     pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
-	self.send.set_fairness(stream_id, fairness)
+        self.send.set_fairness(stream_id, fairness)
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
@@ -429,15 +428,13 @@ impl Streams {
                     StreamType::BiDi => tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
                 };
                 let send_limit = self.tps.borrow().remote().get_integer(send_limit_tp);
-		let stream = SendStream::new(
-                        new_id,
-                        send_limit,
-                        Rc::clone(&self.sender_fc),
-                        self.events.clone(),
-                    );
-                self.send.insert(
-                    new_id, stream,
+                let stream = SendStream::new(
+                    new_id,
+                    send_limit,
+                    Rc::clone(&self.sender_fc),
+                    self.events.clone(),
                 );
+                self.send.insert(new_id, stream);
 
                 if st == StreamType::BiDi {
                     // From the local perspective, this is a local- originated BiDi stream. From the

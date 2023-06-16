@@ -55,7 +55,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{Streams, SendOrder},
+    streams::{SendOrder, Streams},
     tparams::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
@@ -2955,15 +2955,11 @@ impl Connection {
     ) -> Res<()> {
         self.streams.set_sendorder(stream_id, sendorder)
     }
-  
+
     /// Set the Fairness of a stream
     /// # Errors
     /// Returns InvalidStreamId if the stream id doesn't exist
-    pub fn stream_fairness(
-        &mut self,
-        stream_id: StreamId,
-        fairness: bool,
-    ) -> Res<()> {
+    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
     }
 
