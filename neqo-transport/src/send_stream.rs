@@ -1298,14 +1298,14 @@ impl SendStreams {
             } else {
 		&mut self.regular
 	    };
-	    Self::remove_streamid(&mut vec, &stream_id);
+	    Self::remove_streamid(vec, &stream_id);
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
 	    if let Some(order) = sendorder {
 		vec = self.sendordered.entry(order).or_default();
 	    } else {
 		vec = &mut self.regular;
 	    }
-	    Self::insert_streamid(&mut vec, &stream_id);
+	    Self::insert_streamid(vec, &stream_id);
 	    qtrace!(
 		"ordering of stream_ids: {:?}",
 		self.sendordered.values().collect::<Vec::<_>>()
@@ -1361,12 +1361,12 @@ impl SendStreams {
 	map.retain(|stream_id, stream| {
 	    if stream.is_terminal() {
 		match stream.sendorder() {
-		    None => Self::remove_streamid(regular, &stream_id),
+		    None => Self::remove_streamid(regular, stream_id),
 		    Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap(), stream_id),
 		};
 		return false;
 	    }
-	    return true;
+	    true
 	});
     }
 
