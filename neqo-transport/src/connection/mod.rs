@@ -315,7 +315,7 @@ impl Connection {
         let dcid = ConnectionId::generate_initial();
         let mut c = Self::new(
             Role::Client,
-            Agent::from(Client::new(server_name.into())?),
+            Agent::from(Client::new(server_name.into(), conn_params.is_greasing())?),
             cid_generator,
             protocols,
             conn_params,
