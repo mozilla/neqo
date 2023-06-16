@@ -1005,7 +1005,6 @@ impl Http3Connection {
 	sendorder: Option<SendOrder>) -> Res<()> {
 	Ok(conn.stream_sendorder(stream_id, sendorder)?)
     }
-    }
 
     pub fn cancel_fetch(
         &mut self,

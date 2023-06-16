@@ -2955,7 +2955,6 @@ impl Connection {
     ) -> Res<()> {
 	self.streams.set_sendorder(stream_id, sendorder)
     }
-    }
 
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
