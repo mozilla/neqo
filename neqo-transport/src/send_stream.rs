@@ -1290,7 +1290,7 @@ pub struct OrderGroupIter<'a> {
     started_at: Option<usize>,
 }
 
-impl<'a> OrderGroup {
+impl OrderGroup {
     pub fn iter(&mut self) -> OrderGroupIter {
         // Ids may have been deleted since we last iterated
         if self.next >= self.vec.len() {
