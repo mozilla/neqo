@@ -237,56 +237,56 @@ where
 fn ordergroup_0() {
     let source: [u64; 0] = [];
     let result: [u64; 0] = [];
-    fairness_test(&source, 1, usize::MAX, &result);
+    fairness_test(source, 1, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_1() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [1, 2, 3, 4, 5, 0];
-    fairness_test(&source, 1, usize::MAX, &result);
+    fairness_test(source, 1, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_2() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [2, 3, 4, 5, 0, 1];
-    fairness_test(&source, 2, usize::MAX, &result);
+    fairness_test(source, 2, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_3() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [0, 1, 2, 3, 4, 5];
-    fairness_test(&source, 10, usize::MAX, &result);
+    fairness_test(source, 10, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_4() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [0, 1, 2, 3, 4, 5];
-    fairness_test(&source, 0, usize::MAX, &result);
+    fairness_test(source, 0, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_5() {
     let source: [u64; 1] = [0];
     let result: [u64; 1] = [0];
-    fairness_test(&source, 1, usize::MAX, &result);
+    fairness_test(source, 1, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_6() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 6] = [5, 0, 1, 2, 3, 4];
-    fairness_test(&source, 5, usize::MAX, &result);
+    fairness_test(source, 5, usize::MAX, &result);
 }
 
 #[test]
 fn ordergroup_7() {
     let source: [u64; 6] = [0, 1, 2, 3, 4, 5];
     let result: [u64; 3] = [0, 1, 2];
-    fairness_test(&source, 5, 3, &result);
+    fairness_test(source, 5, 3, &result);
 }
 
 #[test]
