@@ -203,11 +203,13 @@ fn sendorder_4() {
 
 // Tests stream sendorder priorization
 // Converts Vecs of u64's into StreamIds
-fn fairness_test<S, R, SI>(source: S, number_iterates: usize, truncate_to: usize, result_array: R)
+fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, result_array: R)
 where
-    S: IntoIterator<Item = SI>,
-    R: IntoIterator<Item = SI> + std::fmt::Debug,
-    SI: Into<StreamId>, Vec<u64>: PartialEq<R>
+    S: IntoIterator,
+    S::Item: Into<StreamId>,
+    R: IntoIterator + std::fmt::Debug,
+    R::Item: Into<StreamId>,
+    Vec<u64>: PartialEq<R>,
 {
     // test the OrderGroup code used for fairness
     let mut group: OrderGroup = Default::default();
