@@ -28,7 +28,7 @@ mod quic_datagrams;
 mod recovery;
 mod recv_stream;
 mod rtt;
-mod send_stream;
+pub mod send_stream;
 mod sender;
 pub mod server;
 mod stats;

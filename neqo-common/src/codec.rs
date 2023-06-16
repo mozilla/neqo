@@ -201,7 +201,7 @@ impl Encoder {
     /// # Panics
     /// When `v` is too large.
     #[must_use]
-    pub fn varint_len(v: u64) -> usize {
+    pub const fn varint_len(v: u64) -> usize {
         match () {
             _ if v < (1 << 6) => 1,
             _ if v < (1 << 14) => 2,
