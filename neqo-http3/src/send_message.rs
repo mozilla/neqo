@@ -272,13 +272,13 @@ impl SendStream for SendMessage {
     }
 
     fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) -> Res<()> {
-	// Not relevant for SendMessage
-	Ok(())
+        // Not relevant for SendMessage
+        Ok(())
     }
 
     fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) -> Res<()> {
-	// Not relevant for SendMessage
-	Ok(())
+        // Not relevant for SendMessage
+        Ok(())
     }
 
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
