@@ -203,7 +203,7 @@ fn sendorder_4() {
 
 // Tests stream sendorder priorization
 // Converts Vecs of u64's into StreamIds
-fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, result_array: R)
+fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, result_array: &R)
 where
     S: IntoIterator,
     S::Item: Into<StreamId>,
@@ -212,7 +212,7 @@ where
     Vec<u64>: PartialEq<R>,
 {
     // test the OrderGroup code used for fairness
-    let mut group: OrderGroup = Default::default();
+    let mut group: OrderGroup = OrderGroup::default();
     for stream_id in source {
         group.insert(stream_id.into());
     }
@@ -229,8 +229,8 @@ where
     group.truncate(truncate_to);
 
     let iterator2 = group.iter();
-    let result: Vec<u64> = iterator2.map(|id| id.as_u64()).collect();
-    assert_eq!(result, result_array);
+    let result: Vec<u64> = iterator2.map(StreamId::as_u64).collect();
+    assert_eq!(result, *result_array);
 }
 
 #[test]
