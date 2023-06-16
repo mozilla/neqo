@@ -621,7 +621,7 @@ pub struct SendStream {
 
 impl Hash for SendStream {
     fn hash<H: Hasher>(&self, state: &mut H) {
-       self.stream_id.hash(state)
+        self.stream_id.hash(state)
     }
 }
 
@@ -666,9 +666,9 @@ impl SendStream {
         stats: &mut FrameStats,
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
-	if !self.write_reset_frame(priority, builder, tokens, stats) {
-          self.write_blocked_frame(priority, builder, tokens, stats);
-          self.write_stream_frame(priority, builder, tokens, stats);
+        if !self.write_reset_frame(priority, builder, tokens, stats) {
+            self.write_blocked_frame(priority, builder, tokens, stats);
+            self.write_stream_frame(priority, builder, tokens, stats);
         }
     }
 
@@ -682,13 +682,10 @@ impl SendStream {
     }
 
     pub fn sendorder(&self) -> Option<SendOrder> {
-       self.sendorder
+        self.sendorder
     }
 
-    pub fn set_sendorder(
-        &mut self,
-	sendorder: Option<SendOrder>,
-    ) {
+    pub fn set_sendorder(&mut self, sendorder: Option<SendOrder>) {
         self.sendorder = sendorder;
     }
 
@@ -1272,46 +1269,46 @@ impl SendStreams {
 
     pub fn insert(&mut self, id: StreamId, stream: SendStream) {
         self.map.insert(id, stream);
-	// This normally is only called when a new stream is created.  If
-	// so, because of how we allocate StreamIds, it should always have
-	// the largest value.  This means we can just append it to the
-	// regular vector.  However, if we were ever to change this
-	// invariant, things would break subtly.
+        // This normally is only called when a new stream is created.  If
+        // so, because of how we allocate StreamIds, it should always have
+        // the largest value.  This means we can just append it to the
+        // regular vector.  However, if we were ever to change this
+        // invariant, things would break subtly.
 
-	// We could add assertions, or we can try to insert at the end and
-	// if not fall back to binary-search insertion
-	if matches!(self.regular.last(), Some(last) if id > *last) {
-	  self.regular.push(id);
-	} else {
-	  Self::insert_streamid(&mut self.regular, &id);
+        // We could add assertions, or we can try to insert at the end and
+        // if not fall back to binary-search insertion
+        if matches!(self.regular.last(), Some(last) if id > *last) {
+            self.regular.push(id);
+        } else {
+            Self::insert_streamid(&mut self.regular, &id);
         }
     }
 
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
-	// don't grab stream here; causes borrow errors
+        // don't grab stream here; causes borrow errors
         let old_sendorder = self.map.get(&stream_id).unwrap().sendorder();
-	if old_sendorder != sendorder {
-	    // we have to remove it from the list it was in, and reinsert it with the new
-	    // sendorder key
-	    let mut vec = if let Some(old) = old_sendorder {
-		self.sendordered.get_mut(&old).unwrap()
+        if old_sendorder != sendorder {
+            // we have to remove it from the list it was in, and reinsert it with the new
+            // sendorder key
+            let mut vec = if let Some(old) = old_sendorder {
+                self.sendordered.get_mut(&old).unwrap()
             } else {
-		&mut self.regular
-	    };
-	    Self::remove_streamid(vec, &stream_id);
+                &mut self.regular
+            };
+            Self::remove_streamid(vec, &stream_id);
             self.get_mut(stream_id).unwrap().set_sendorder(sendorder);
-	    if let Some(order) = sendorder {
-		vec = self.sendordered.entry(order).or_default();
-	    } else {
-		vec = &mut self.regular;
-	    }
-	    Self::insert_streamid(vec, &stream_id);
-	    qtrace!(
-		"ordering of stream_ids: {:?}",
-		self.sendordered.values().collect::<Vec::<_>>()
+            if let Some(order) = sendorder {
+                vec = self.sendordered.entry(order).or_default();
+            } else {
+                vec = &mut self.regular;
+            }
+            Self::insert_streamid(vec, &stream_id);
+            qtrace!(
+                "ordering of stream_ids: {:?}",
+                self.sendordered.values().collect::<Vec::<_>>()
             );
-	}
-	Ok(())
+        }
+        Ok(())
     }
 
     pub fn acked(&mut self, token: &SendStreamRecoveryToken) {
@@ -1346,43 +1343,51 @@ impl SendStreams {
 
     pub fn clear(&mut self) {
         self.map.clear();
-	self.sendordered.clear();
-	self.regular.clear();
+        self.sendordered.clear();
+        self.regular.clear();
     }
 
     pub fn remove_terminal(&mut self) {
-	Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
+        Self::remove_terminal_internal(&mut self.map, &mut self.regular, &mut self.sendordered);
     }
 
-    fn remove_terminal_internal(map: &mut IndexMap<StreamId, SendStream>, regular: &mut Vec<StreamId>, sendordered: &mut BTreeMap<SendOrder, Vec<StreamId>>) {
-	// Take refs to all the items we need to modify instead of &mut
-	// self to keept the compiler happy (if we use self.map.retain it
-	// gets upset due to borrows)
-	map.retain(|stream_id, stream| {
-	    if stream.is_terminal() {
-		match stream.sendorder() {
-		    None => Self::remove_streamid(regular, stream_id),
-		    Some(sendorder) => Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap(), stream_id),
-		};
-		return false;
-	    }
-	    true
-	});
+    fn remove_terminal_internal(
+        map: &mut IndexMap<StreamId, SendStream>,
+        regular: &mut Vec<StreamId>,
+        sendordered: &mut BTreeMap<SendOrder, Vec<StreamId>>,
+    ) {
+        // Take refs to all the items we need to modify instead of &mut
+        // self to keept the compiler happy (if we use self.map.retain it
+        // gets upset due to borrows)
+        map.retain(|stream_id, stream| {
+            if stream.is_terminal() {
+                match stream.sendorder() {
+                    None => Self::remove_streamid(regular, stream_id),
+                    Some(sendorder) => {
+                        Self::remove_streamid(sendordered.get_mut(&sendorder).unwrap(), stream_id)
+                    }
+                };
+                return false;
+            }
+            true
+        });
     }
 
     fn insert_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) {
-	match vec.binary_search(stream_id) {
-	    Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
-	    Err(pos) => vec.insert(pos, *stream_id),
-	}
+        match vec.binary_search(stream_id) {
+            Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
+            Err(pos) => vec.insert(pos, *stream_id),
+        }
     }
 
     fn remove_streamid(vec: &mut Vec<StreamId>, stream_id: &StreamId) -> bool {
-	match vec.binary_search(stream_id) {
-	    Ok(pos) => { vec.remove(pos); },
-	    Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
-	}
-	true
+        match vec.binary_search(stream_id) {
+            Ok(pos) => {
+                vec.remove(pos);
+            }
+            Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
+        }
+        true
     }
 
     // ordered iterator that iterates over the regular streams and then
@@ -1392,12 +1397,14 @@ impl SendStreams {
     // smallest-to-largest, and we want the opposite.
     #[allow(dead_code)]
     pub fn ordered_iter(&mut self) -> impl Iterator<Item = &StreamId> {
-	self.regular.iter().chain(self.sendordered.values().rev().flatten())
+        self.regular
+            .iter()
+            .chain(self.sendordered.values().rev().flatten())
     }
 
     #[allow(dead_code)]
     pub fn iter(&mut self) -> impl Iterator<Item = (&StreamId, &SendStream)> {
-      self.map.iter()
+        self.map.iter()
     }
 
     pub(crate) fn write_frames(
@@ -1409,32 +1416,35 @@ impl SendStreams {
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
         // WebTransport data (which is Normal) may have a SendOrder
-	// priority attached.  The spec states (6.3 write-chunk 6.1):
+        // priority attached.  The spec states (6.3 write-chunk 6.1):
 
         // If stream.[[SendOrder]] is null then this sending MUST NOT
-	// starve except for flow control reasons or error.  If
-	// stream.[[SendOrder]] is not null then this sending MUST starve
-	// until all bytes queued for sending on WebTransportSendStreams
-	// with a non-null and higher [[SendOrder]], that are neither
-	// errored nor blocked by flow control, have been sent.
+        // starve except for flow control reasons or error.  If
+        // stream.[[SendOrder]] is not null then this sending MUST starve
+        // until all bytes queued for sending on WebTransportSendStreams
+        // with a non-null and higher [[SendOrder]], that are neither
+        // errored nor blocked by flow control, have been sent.
 
-	// So data without SendOrder goes first.   Then the highest priority
-	// SendOrdered streams.   Round-robining the data at the same priority
-	// isn't required (currently) by the spec, but would be good to do in the future.
-	//
-	// iterator is in-line to avoid complaints from the compiler
-	let stream_ids = self.regular.iter().chain(self.sendordered.values().rev().flatten());
-	for stream_id in stream_ids {
-	    let stream = self.map.get_mut(stream_id).unwrap();
+        // So data without SendOrder goes first.   Then the highest priority
+        // SendOrdered streams.   Round-robining the data at the same priority
+        // isn't required (currently) by the spec, but would be good to do in the future.
+        //
+        // iterator is in-line to avoid complaints from the compiler
+        let stream_ids = self
+            .regular
+            .iter()
+            .chain(self.sendordered.values().rev().flatten());
+        for stream_id in stream_ids {
+            let stream = self.map.get_mut(stream_id).unwrap();
             if !stream.write_reset_frame(priority, builder, tokens, stats) {
                 stream.write_blocked_frame(priority, builder, tokens, stats);
-		if builder.is_full() {
+                if builder.is_full() {
                     return;
-		}
+                }
                 stream.write_stream_frame(priority, builder, tokens, stats);
-		if builder.is_full() {
+                if builder.is_full() {
                     return;
-		}
+                }
             }
         }
     }

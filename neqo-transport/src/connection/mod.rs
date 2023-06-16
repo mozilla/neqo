@@ -55,7 +55,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{Streams, SendOrder},
+    streams::{SendOrder, Streams},
     tparams::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
@@ -1911,7 +1911,7 @@ impl Connection {
             }
         }
 
-	// datagrams are best-effort and unreliable.  Let streams starve them for now
+        // datagrams are best-effort and unreliable.  Let streams starve them for now
         // Check if there is a Datagram to be written
         self.quic_datagrams
             .write_frames(builder, tokens, &mut self.stats.borrow_mut());
@@ -1951,8 +1951,8 @@ impl Connection {
 
         self.streams
             .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
-	if builder.is_full() {
-	    return Ok(());
+        if builder.is_full() {
+            return Ok(());
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2953,9 +2953,9 @@ impl Connection {
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
     ) -> Res<()> {
-	      self.streams.set_sendorder(stream_id, sendorder)
+        self.streams.set_sendorder(stream_id, sendorder)
     }
-  
+
     pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.streams.get_send_stream(stream_id).map(|s| s.stats())
     }

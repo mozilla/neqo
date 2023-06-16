@@ -31,8 +31,8 @@ use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, Message
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{
-    AppError, Connection, ConnectionError, DatagramTracking, State, StreamId, StreamType,
-    ZeroRttState, streams::SendOrder,
+    streams::SendOrder, AppError, Connection, ConnectionError, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -1001,8 +1001,9 @@ impl Http3Connection {
     pub fn stream_set_sendorder(
         conn: &mut Connection,
         stream_id: StreamId,
-	sendorder: Option<SendOrder>) -> Res<()> {
-	Ok(conn.stream_sendorder(stream_id, sendorder)?)
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        Ok(conn.stream_sendorder(stream_id, sendorder)?)
     }
 
     pub fn cancel_fetch(

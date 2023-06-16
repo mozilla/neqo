@@ -186,7 +186,7 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<i64>) {
-	conn.stream_sendorder(self.stream_id, sendorder).ok();
+        conn.stream_sendorder(self.stream_id, sendorder).ok();
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {

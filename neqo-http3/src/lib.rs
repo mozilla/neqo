@@ -162,7 +162,7 @@ mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
 use neqo_transport::{send_stream::SendStreamStats, AppError, Connection, Error as TransportError};
-pub use neqo_transport::{Output, StreamId, streams::SendOrder};
+pub use neqo_transport::{streams::SendOrder, Output, StreamId};
 use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
