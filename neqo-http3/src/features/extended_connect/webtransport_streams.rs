@@ -10,7 +10,7 @@ use crate::{
     SendStream, SendStreamEvents, Stream,
 };
 use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{send_stream::SendStreamStats, Connection, StreamId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -202,5 +202,30 @@ impl SendStream for WebTransportSendStream {
             self.set_done(CloseType::Done);
         }
         Ok(())
+    }
+
+    fn stats(&mut self, conn: &mut Connection) -> Res<SendStreamStats> {
+        const TYPE_LEN_UNI: usize = Encoder::varint_len(WEBTRANSPORT_UNI_STREAM);
+        const TYPE_LEN_BIDI: usize = Encoder::varint_len(WEBTRANSPORT_STREAM);
+
+        let stream_header_size = if self.stream_id.is_client_initiated() {
+            let id_len = if self.stream_id.is_uni() {
+                TYPE_LEN_UNI
+            } else {
+                TYPE_LEN_BIDI
+            };
+            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+        } else {
+            0
+        };
+
+        let subtract_non_app_bytes =
+            |count: u64| -> u64 { count.saturating_sub(stream_header_size) };
+
+        let stats = conn.stream_stats(self.stream_id)?;
+        let bytes_written = subtract_non_app_bytes(stats.bytes_written());
+        let bytes_sent = subtract_non_app_bytes(stats.bytes_sent());
+        let bytes_acked = subtract_non_app_bytes(stats.bytes_acked());
+        Ok(SendStreamStats::new(bytes_written, bytes_sent, bytes_acked))
     }
 }
