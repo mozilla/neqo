@@ -55,7 +55,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::Streams,
+    streams::{SendOrder, Streams},
     tparams::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
@@ -1911,9 +1911,13 @@ impl Connection {
             }
         }
 
+        // datagrams are best-effort and unreliable.  Let streams starve them for now
         // Check if there is a Datagram to be written
         self.quic_datagrams
             .write_frames(builder, tokens, &mut self.stats.borrow_mut());
+        if builder.is_full() {
+            return Ok(());
+        }
 
         let stats = &mut self.stats.borrow_mut().frame_tx;
 
@@ -2939,6 +2943,24 @@ impl Connection {
             .get_send_stream_mut(stream_id)?
             .set_priority(transmission, retransmission);
         Ok(())
+    }
+
+    /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
+    /// # Errors
+    /// Returns InvalidStreamId if the stream id doesn't exist
+    pub fn stream_sendorder(
+        &mut self,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        self.streams.set_sendorder(stream_id, sendorder)
+    }
+
+    /// Set the Fairness of a stream
+    /// # Errors
+    /// Returns InvalidStreamId if the stream id doesn't exist
+    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        self.streams.set_fairness(stream_id, fairness)
     }
 
     pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {

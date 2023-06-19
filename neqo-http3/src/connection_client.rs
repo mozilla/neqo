@@ -21,9 +21,9 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    send_stream::SendStreamStats, AppError, Connection, ConnectionEvent, ConnectionId,
-    ConnectionIdGenerator, DatagramTracking, Output, Stats as TransportStats, StreamId, StreamType,
-    Version, ZeroRttState,
+    send_stream::SendStreamStats, streams::SendOrder, AppError, Connection, ConnectionEvent,
+    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, Stats as TransportStats,
+    StreamId, StreamType, Version, ZeroRttState,
 };
 use std::{
     cell::RefCell,
@@ -753,6 +753,28 @@ impl Http3Client {
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         Ok(self.conn.max_datagram_size()?
             - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
+    }
+
+    /// Sets the `SendOrder` for a given stream
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// # Panics
+    /// This cannot panic.
+    pub fn webtransport_set_sendorder(
+        &mut self,
+        stream_id: StreamId,
+        sendorder: SendOrder,
+    ) -> Res<()> {
+        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
+    }
+
+    /// Sets the `Fairness` for a given stream
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// # Panics
+    /// This cannot panic.
+    pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
     }
 
     /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
