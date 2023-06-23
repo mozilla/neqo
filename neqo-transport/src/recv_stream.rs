@@ -578,12 +578,8 @@ impl RecvStream {
                 final_received,
                 final_read,
                 ..
-            } => {
-                let received = *final_received;
-                let read = *final_read;
-                RecvStreamStats::new(received, read)
             }
-            RecvStreamState::DataRead {
+            | RecvStreamState::DataRead {
                 final_received,
                 final_read,
             }
@@ -919,11 +915,11 @@ impl RecvStream {
             ..
         } = &mut self.state
         {
+            let received = *final_received;
+            let read = *final_read;
             if *final_size_reached {
                 // We already know the final_size of the stream therefore we
                 // do not need to wait for RESET.
-                let received = *final_received;
-                let read = *final_read;
                 self.set_state(RecvStreamState::ResetRecvd {
                     final_received: received,
                     final_read: read,
@@ -931,8 +927,6 @@ impl RecvStream {
             } else {
                 let fc_copy = mem::take(fc);
                 let session_fc_copy = mem::take(session_fc);
-                let received = *final_received;
-                let read = *final_read;
                 self.set_state(RecvStreamState::WaitForReset {
                     fc: fc_copy,
                     session_fc: session_fc_copy,
