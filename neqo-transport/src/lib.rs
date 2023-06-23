@@ -26,7 +26,7 @@ mod path;
 mod qlog;
 mod quic_datagrams;
 mod recovery;
-mod recv_stream;
+pub mod recv_stream;
 mod rtt;
 pub mod send_stream;
 mod sender;

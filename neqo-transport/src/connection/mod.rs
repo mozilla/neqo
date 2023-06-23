@@ -38,6 +38,7 @@ use crate::{
     },
 };
 
+use crate::recv_stream::RecvStreamStats;
 pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 use crate::{
     crypto::{Crypto, CryptoDxState, CryptoSpace},
@@ -2963,8 +2964,14 @@ impl Connection {
         self.streams.set_fairness(stream_id, fairness)
     }
 
-    pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
+    pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.streams.get_send_stream(stream_id).map(|s| s.stats())
+    }
+
+    pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+        let stream = self.streams.get_recv_stream_mut(stream_id)?;
+
+        Ok(stream.stats())
     }
 
     /// Send data on a stream.

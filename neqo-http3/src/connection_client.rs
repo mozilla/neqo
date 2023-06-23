@@ -21,9 +21,9 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    send_stream::SendStreamStats, streams::SendOrder, AppError, Connection, ConnectionEvent,
-    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, Stats as TransportStats,
-    StreamId, StreamType, Version, ZeroRttState,
+    recv_stream::RecvStreamStats, send_stream::SendStreamStats, streams::SendOrder, AppError,
+    Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking, Output,
+    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use std::{
     cell::RefCell,
@@ -783,6 +783,17 @@ impl Http3Client {
     pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.base_handler
             .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .stats(&mut self.conn)
+    }
+
+    /// Returns the current `RecvStreamStats` of a `WebTransportRecvStream`.
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+        self.base_handler
+            .recv_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
