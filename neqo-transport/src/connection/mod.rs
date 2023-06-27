@@ -1911,34 +1911,36 @@ impl Connection {
             }
         }
 
-        let stats = &mut self.stats.borrow_mut().frame_tx;
+        {
+            let stats = &mut self.stats.borrow_mut().frame_tx;
 
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
-        if builder.is_full() {
-            return Ok(());
-        }
+            self.streams
+                .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
+            if builder.is_full() {
+                return Ok(());
+            }
 
-        self.streams
-            .write_frames(TransmissionPriority::Important, builder, tokens, stats);
-        if builder.is_full() {
-            return Ok(());
-        }
+            self.streams
+                .write_frames(TransmissionPriority::Important, builder, tokens, stats);
+            if builder.is_full() {
+                return Ok(());
+            }
 
-        // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
-        self.cid_manager.write_frames(builder, tokens, stats)?;
-        if builder.is_full() {
-            return Ok(());
-        }
-        self.paths.write_frames(builder, tokens, stats)?;
-        if builder.is_full() {
-            return Ok(());
-        }
+            // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
+            self.cid_manager.write_frames(builder, tokens, stats)?;
+            if builder.is_full() {
+                return Ok(());
+            }
+            self.paths.write_frames(builder, tokens, stats)?;
+            if builder.is_full() {
+                return Ok(());
+            }
 
-        self.streams
-            .write_frames(TransmissionPriority::High, builder, tokens, stats);
-        if builder.is_full() {
-            return Ok(());
+            self.streams
+                .write_frames(TransmissionPriority::High, builder, tokens, stats);
+            if builder.is_full() {
+                return Ok(());
+            }
         }
 
         // Check if there is a Datagram to be written
@@ -1946,27 +1948,34 @@ impl Connection {
         // to after them (after Normal)
         self.quic_datagrams
             .write_frames(builder, tokens, &mut self.stats.borrow_mut());
-
-        self.streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
         if builder.is_full() {
             return Ok(());
         }
 
-        // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
-        // Both of these are only used for resumption and so can be relatively low priority.
-        self.crypto
-            .write_frame(PacketNumberSpace::ApplicationData, builder, tokens, stats)?;
-        if builder.is_full() {
-            return Ok(());
-        }
-        self.new_token.write_frames(builder, tokens, stats)?;
-        if builder.is_full() {
-            return Ok(());
-        }
+        {
+            let stats = &mut self.stats.borrow_mut().frame_tx;
 
-        self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, stats);
+            self.streams
+                .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
+            if builder.is_full() {
+                return Ok(());
+            }
+
+            // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
+            // Both of these are only used for resumption and so can be relatively low priority.
+            self.crypto
+                .write_frame(PacketNumberSpace::ApplicationData, builder, tokens, stats)?;
+            if builder.is_full() {
+                return Ok(());
+            }
+            self.new_token.write_frames(builder, tokens, stats)?;
+            if builder.is_full() {
+                return Ok(());
+            }
+
+            self.streams
+                .write_frames(TransmissionPriority::Low, builder, tokens, stats);
+        }
 
         #[cfg(test)]
         {
