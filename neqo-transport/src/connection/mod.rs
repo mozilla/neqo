@@ -1941,6 +1941,12 @@ impl Connection {
             if builder.is_full() {
                 return Ok(());
             }
+
+            self.streams
+                .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
+            if builder.is_full() {
+                return Ok(());
+            }
         }
 
         // Check if there is a Datagram to be written
@@ -1954,12 +1960,6 @@ impl Connection {
 
         {
             let stats = &mut self.stats.borrow_mut().frame_tx;
-
-            self.streams
-                .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
-            if builder.is_full() {
-                return Ok(());
-            }
 
             // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
             // Both of these are only used for resumption and so can be relatively low priority.
