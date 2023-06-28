@@ -6,41 +6,12 @@
 
 // The class implementing a QUIC connection.
 
-use std::{
-    cell::RefCell,
-    cmp::{max, min},
-    convert::TryFrom,
-    fmt::{self, Debug},
-    mem,
-    net::{IpAddr, SocketAddr},
-    ops::RangeInclusive,
-    rc::{Rc, Weak},
-    time::{Duration, Instant},
-};
-
-use smallvec::SmallVec;
-
-use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
-};
-use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
-};
-
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
-    frame,
-};
-
-pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
-use crate::{
     crypto::{Crypto, CryptoDxState, CryptoSpace},
     dump::*,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
@@ -65,6 +36,27 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
+use neqo_common::{
+    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+};
+use neqo_crypto::{
+    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
+    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
+    Server, ZeroRttChecker,
+};
+use smallvec::SmallVec;
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    convert::TryFrom,
+    fmt::{self, Debug},
+    mem,
+    net::{IpAddr, SocketAddr},
+    ops::RangeInclusive,
+    rc::{Rc, Weak},
+    time::{Duration, Instant},
+};
 
 mod idle;
 pub mod params;
@@ -73,12 +65,14 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
+pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
+pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
+pub use state::{ClosingFrame, State};
+
 use idle::IdleTimeout;
 use params::PreferredAddressConfig;
-pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
 use saved::SavedDatagrams;
 use state::StateSignaling;
-pub use state::{ClosingFrame, State};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
