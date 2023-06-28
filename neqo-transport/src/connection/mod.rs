@@ -1904,22 +1904,13 @@ impl Connection {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
     ) -> Res<()> {
+        let stats = &mut self.stats.borrow_mut().frame_tx;
         if self.role == Role::Server {
             if let Some(t) = self.state_signaling.write_done(builder)? {
                 tokens.push(t);
-                self.stats.borrow_mut().frame_tx.handshake_done += 1;
+                stats.handshake_done += 1;
             }
         }
-
-        // datagrams are best-effort and unreliable.  Let streams starve them for now
-        // Check if there is a Datagram to be written
-        self.quic_datagrams
-            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
-        if builder.is_full() {
-            return Ok(());
-        }
-
-        let stats = &mut self.stats.borrow_mut().frame_tx;
 
         self.streams
             .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
@@ -1951,6 +1942,13 @@ impl Connection {
 
         self.streams
             .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
+        if builder.is_full() {
+            return Ok(());
+        }
+
+        // Datagrams are best-effort and unreliable.  Let streams starve them for now.
+        self.quic_datagrams
+            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
         if builder.is_full() {
             return Ok(());
         }
