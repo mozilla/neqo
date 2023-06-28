@@ -36,6 +36,7 @@ use crate::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
+    frame,
 };
 
 use crate::recv_stream::RecvStreamStats;
@@ -1959,29 +1960,25 @@ impl Connection {
             return Ok(());
         }
 
+        let frame_stats = &mut stats.frame_tx;
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
         // Both of these are only used for resumption and so can be relatively low priority.
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
             builder,
             tokens,
-            &mut stats.frame_tx,
+            frame_stats,
         )?;
         if builder.is_full() {
             return Ok(());
         }
-        self.new_token
-            .write_frames(builder, tokens, &mut stats.frame_tx)?;
+        self.new_token.write_frames(builder, tokens, frame_stats)?;
         if builder.is_full() {
             return Ok(());
         }
 
-        self.streams.write_frames(
-            TransmissionPriority::Low,
-            builder,
-            tokens,
-            &mut stats.frame_tx,
-        );
+        self.streams
+            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
 
         #[cfg(test)]
         {
