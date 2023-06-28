@@ -1947,15 +1947,19 @@ impl Connection {
             if builder.is_full() {
                 return Ok(());
             }
+        }
 
-            // Check if there is a Datagram to be written
-            // Currently we're giving them priority over user streams; they could be moved
-            // to after them (after Normal)
-            self.quic_datagrams
-                .write_frames(builder, tokens, &mut self.stats);
-            if builder.is_full() {
-                return Ok(());
-            }
+        // Check if there is a Datagram to be written
+        // Currently we're giving them priority over user streams; they could be moved
+        // to after them (after Normal)
+        self.quic_datagrams
+            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
+        if builder.is_full() {
+            return Ok(());
+        }
+
+        {
+            let stats = &mut self.stats.borrow_mut().frame_tx;
 
             // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
             // Both of these are only used for resumption and so can be relatively low priority.
