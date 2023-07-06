@@ -21,9 +21,9 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    recv_stream::RecvStreamStats, send_stream::SendStreamStats, streams::SendOrder, AppError,
-    Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking, Output,
-    Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
+    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
+    StreamType, Version, ZeroRttState,
 };
 use std::{
     cell::RefCell,

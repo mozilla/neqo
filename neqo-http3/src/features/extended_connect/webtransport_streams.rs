@@ -10,9 +10,7 @@ use crate::{
     SendStream, SendStreamEvents, Stream,
 };
 use neqo_common::Encoder;
-use neqo_transport::{
-    recv_stream::RecvStreamStats, send_stream::SendStreamStats, Connection, StreamId,
-};
+use neqo_transport::{Connection, RecvStreamStats, SendStreamStats, StreamId};
 use std::cell::RefCell;
 use std::rc::Rc;
 

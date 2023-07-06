@@ -161,11 +161,10 @@ mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
-use neqo_transport::{
-    recv_stream::RecvStreamStats, send_stream::SendStreamStats, AppError, Connection,
-    Error as TransportError,
-};
 pub use neqo_transport::{streams::SendOrder, Output, StreamId};
+use neqo_transport::{
+    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
+};
 use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
