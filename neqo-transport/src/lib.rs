@@ -28,7 +28,7 @@ mod quic_datagrams;
 mod recovery;
 mod recv_stream;
 mod rtt;
-pub mod send_stream;
+mod send_stream;
 mod sender;
 pub mod server;
 mod stats;
@@ -53,8 +53,8 @@ pub use self::stats::Stats;
 pub use self::stream_id::{StreamId, StreamType};
 pub use self::version::Version;
 
-pub use self::recv_stream::RECV_BUFFER_SIZE;
-pub use self::send_stream::SEND_BUFFER_SIZE;
+pub use self::recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE};
+pub use self::send_stream::{SendStreamStats, SEND_BUFFER_SIZE};
 
 pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;

@@ -161,8 +161,10 @@ mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
-use neqo_transport::{send_stream::SendStreamStats, AppError, Connection, Error as TransportError};
 pub use neqo_transport::{streams::SendOrder, Output, StreamId};
+use neqo_transport::{
+    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
+};
 use std::fmt::Debug;
 
 use crate::priority::PriorityHandler;
@@ -469,6 +471,11 @@ trait RecvStream: Stream {
 
     fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
         None
+    }
+
+    /// This function is only implemented by `WebTransportRecvStream`.
+    fn stats(&mut self, _conn: &mut Connection) -> Res<RecvStreamStats> {
+        Err(Error::Unavailable)
     }
 }
 

@@ -6,6 +6,7 @@
 
 // The class implementing a QUIC connection.
 
+pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
@@ -24,6 +25,7 @@ use crate::{
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile},
+    recv_stream::RecvStreamStats,
     rtt::GRANULARITY,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -2966,8 +2968,14 @@ impl Connection {
         self.streams.set_fairness(stream_id, fairness)
     }
 
-    pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
+    pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.streams.get_send_stream(stream_id).map(|s| s.stats())
+    }
+
+    pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+        let stream = self.streams.get_recv_stream_mut(stream_id)?;
+
+        Ok(stream.stats())
     }
 
     /// Send data on a stream.
