@@ -38,6 +38,7 @@ use crate::{
     },
 };
 
+use crate::recv_stream::RecvStreamStats;
 pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 use crate::{
     crypto::{Crypto, CryptoDxState, CryptoSpace},
@@ -55,7 +56,7 @@ use crate::{
     rtt::GRANULARITY,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::Streams,
+    streams::{SendOrder, Streams},
     tparams::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
@@ -1914,6 +1915,7 @@ impl Connection {
         {
             let stats = &mut self.stats.borrow_mut().frame_tx;
 
+
             self.streams
                 .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
             if builder.is_full() {
@@ -2952,8 +2954,32 @@ impl Connection {
         Ok(())
     }
 
-    pub fn stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
+    /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
+    /// # Errors
+    /// Returns InvalidStreamId if the stream id doesn't exist
+    pub fn stream_sendorder(
+        &mut self,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        self.streams.set_sendorder(stream_id, sendorder)
+    }
+
+    /// Set the Fairness of a stream
+    /// # Errors
+    /// Returns InvalidStreamId if the stream id doesn't exist
+    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        self.streams.set_fairness(stream_id, fairness)
+    }
+
+    pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.streams.get_send_stream(stream_id).map(|s| s.stats())
+    }
+
+    pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+        let stream = self.streams.get_recv_stream_mut(stream_id)?;
+
+        Ok(stream.stats())
     }
 
     /// Send data on a stream.
