@@ -13,8 +13,8 @@ use neqo_common::event::Provider;
 use crate::{
     features::extended_connect::SessionCloseReason, Error, Header, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
-    SendStreamStats, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
-    WebTransportSessionAcceptAction,
+    RecvStreamStats, SendStreamStats, WebTransportEvent, WebTransportRequest,
+    WebTransportServerEvent, WebTransportSessionAcceptAction,
 };
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
@@ -313,6 +313,10 @@ impl WtTest {
 
     fn send_stream_stats(&mut self, wt_stream_id: StreamId) -> Result<SendStreamStats, Error> {
         self.client.webtransport_send_stream_stats(wt_stream_id)
+    }
+
+    fn recv_stream_stats(&mut self, wt_stream_id: StreamId) -> Result<RecvStreamStats, Error> {
+        self.client.webtransport_recv_stream_stats(wt_stream_id)
     }
 
     fn receive_data_client(
