@@ -12,11 +12,9 @@ use crate::events::{ConnectionEvent, OutgoingDatagramOutcome};
 use crate::frame::FRAME_TYPE_DATAGRAM;
 use crate::packet::PacketBuilder;
 use crate::quic_datagrams::MAX_QUIC_DATAGRAM;
-use crate::{Connection, ConnectionError, ConnectionParameters, Error};
+use crate::{Connection, ConnectionError, ConnectionParameters, Error, StreamType};
 use neqo_common::event::Provider;
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::rc::Rc;
+use std::{cell::RefCell, convert::TryFrom, mem, rc::Rc};
 use test_fixture::now;
 
 const DATAGRAM_LEN_MTU: u64 = 1310;
@@ -222,6 +220,47 @@ fn datagram_acked() {
         client.next_event().unwrap(),
         ConnectionEvent::OutgoingDatagramOutcome { id, outcome } if id == 1 && outcome == OutgoingDatagramOutcome::Acked
     ));
+}
+
+#[test]
+fn datagram_after_stream_data() {
+    let (mut client, mut server) = connect_datagram();
+
+    // Wriate a datagram first.
+    let _dgram_sent = client.stats().frame_tx.datagram;
+    assert_eq!(client.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)), Ok(()));
+
+    // Create a stream and send some data.
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, &[6; 100]).unwrap();
+
+    let mut datagrams = Vec::new();
+    let mut out = client.process_output(now());
+    while let Some(d) = out.dgram() {
+        datagrams.push(d);
+        out = client.process_output(now());
+    }
+
+    // Make the server receive data.
+    for (_, d) in datagrams.into_iter().enumerate() {
+        mem::drop(server.process(Some(d), now()));
+    }
+
+    let events: Vec<_> = server
+        .events()
+        .filter_map(|evt| match evt {
+            ConnectionEvent::RecvStreamReadable { .. } => Some(evt),
+            ConnectionEvent::Datagram { .. } => Some(evt),
+            _ => None,
+        })
+        .collect();
+
+    // Check if the server received stream data before datagram.
+    assert!(matches!(
+        events[0],
+        ConnectionEvent::RecvStreamReadable { .. }
+    ));
+    assert!(matches!(events[1], ConnectionEvent::Datagram { .. }));
 }
 
 #[test]
