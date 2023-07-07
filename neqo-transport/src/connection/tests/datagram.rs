@@ -249,8 +249,9 @@ fn datagram_after_stream_data() {
     let events: Vec<_> = server
         .events()
         .filter_map(|evt| match evt {
-            ConnectionEvent::RecvStreamReadable { .. } => Some(evt),
-            ConnectionEvent::Datagram { .. } => Some(evt),
+            ConnectionEvent::RecvStreamReadable { .. } | ConnectionEvent::Datagram { .. } => {
+                Some(evt)
+            }
             _ => None,
         })
         .collect();
