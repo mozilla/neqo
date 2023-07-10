@@ -12,7 +12,6 @@ use crate::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
-    frame,
 };
 
 use crate::recv_stream::RecvStreamStats;
@@ -71,7 +70,6 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
 pub use state::{ClosingFrame, State};
 
