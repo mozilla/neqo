@@ -228,7 +228,7 @@ fn datagram_acked() {
 fn send_packet_and_check_server_event(
     client: &mut Connection,
     server: &mut Connection,
-    event: ConnectionEvent,
+    event: &ConnectionEvent,
 ) {
     let out = client.process_output(now()).dgram();
     server.process_input(out.unwrap(), now());
@@ -243,7 +243,7 @@ fn send_packet_and_check_server_event(
         .collect();
     // We should only get one event - either RecvStreamReadable or Datagram.
     assert_eq!(events.len(), 1);
-    assert_eq!(mem::discriminant(&event), mem::discriminant(&events[0]));
+    assert_eq!(mem::discriminant(event), mem::discriminant(&events[0]));
 }
 
 #[test]
@@ -259,11 +259,11 @@ fn datagram_after_stream_data() {
     client.stream_send(stream_id, &[6; 1200]).unwrap();
 
     let desired_event = ConnectionEvent::RecvStreamReadable { stream_id };
-    send_packet_and_check_server_event(&mut client, &mut server, desired_event);
+    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent);
 
     let desired_event = ConnectionEvent::Datagram([].to_vec());
-    send_packet_and_check_server_event(&mut client, &mut server, desired_event);
+    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
@@ -287,11 +287,11 @@ fn datagram_before_stream_data() {
     assert_eq!(client.send_datagram(DATA_MTU, Some(1)), Ok(()));
 
     let desired_event = ConnectionEvent::Datagram([].to_vec());
-    send_packet_and_check_server_event(&mut client, &mut server, desired_event);
+    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     let desired_event = ConnectionEvent::RecvStreamReadable { stream_id };
-    send_packet_and_check_server_event(&mut client, &mut server, desired_event);
+    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
