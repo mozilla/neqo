@@ -6,30 +6,6 @@
 
 // The class implementing a QUIC connection.
 
-use std::{
-    cell::RefCell,
-    cmp::{max, min},
-    convert::TryFrom,
-    fmt::{self, Debug},
-    mem,
-    net::{IpAddr, SocketAddr},
-    ops::RangeInclusive,
-    rc::{Rc, Weak},
-    time::{Duration, Instant},
-};
-
-use smallvec::SmallVec;
-
-use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
-};
-use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
-};
-
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
@@ -65,6 +41,27 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
+use neqo_common::{
+    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+};
+use neqo_crypto::{
+    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
+    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
+    Server, ZeroRttChecker,
+};
+use smallvec::SmallVec;
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    convert::TryFrom,
+    fmt::{self, Debug},
+    mem,
+    net::{IpAddr, SocketAddr},
+    ops::RangeInclusive,
+    rc::{Rc, Weak},
+    time::{Duration, Instant},
+};
 
 mod idle;
 pub mod params;
@@ -73,12 +70,13 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
+pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
+pub use state::{ClosingFrame, State};
+
 use idle::IdleTimeout;
 use params::PreferredAddressConfig;
-pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
 use saved::SavedDatagrams;
 use state::StateSignaling;
-pub use state::{ClosingFrame, State};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -1905,71 +1903,79 @@ impl Connection {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
     ) -> Res<()> {
+        let stats = &mut self.stats.borrow_mut();
+        let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
             if let Some(t) = self.state_signaling.write_done(builder)? {
                 tokens.push(t);
-                self.stats.borrow_mut().frame_tx.handshake_done += 1;
+                frame_stats.handshake_done += 1;
             }
         }
 
-        // datagrams are best-effort and unreliable.  Let streams starve them for now
-        // Check if there is a Datagram to be written
-        self.quic_datagrams
-            .write_frames(builder, tokens, &mut self.stats.borrow_mut());
+        self.streams
+            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
         if builder.is_full() {
             return Ok(());
         }
 
-        let stats = &mut self.stats.borrow_mut().frame_tx;
-
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, stats);
-        if builder.is_full() {
-            return Ok(());
-        }
-
-        self.streams
-            .write_frames(TransmissionPriority::Important, builder, tokens, stats);
+        self.streams.write_frames(
+            TransmissionPriority::Important,
+            builder,
+            tokens,
+            frame_stats,
+        );
         if builder.is_full() {
             return Ok(());
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
-        self.cid_manager.write_frames(builder, tokens, stats)?;
+        self.cid_manager
+            .write_frames(builder, tokens, frame_stats)?;
         if builder.is_full() {
             return Ok(());
         }
-        self.paths.write_frames(builder, tokens, stats)?;
-        if builder.is_full() {
-            return Ok(());
-        }
-
-        self.streams
-            .write_frames(TransmissionPriority::High, builder, tokens, stats);
+        self.paths.write_frames(builder, tokens, frame_stats)?;
         if builder.is_full() {
             return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, stats);
+            .write_frames(TransmissionPriority::High, builder, tokens, frame_stats);
         if builder.is_full() {
             return Ok(());
         }
 
+        self.streams
+            .write_frames(TransmissionPriority::Normal, builder, tokens, frame_stats);
+        if builder.is_full() {
+            return Ok(());
+        }
+
+        // Datagrams are best-effort and unreliable.  Let streams starve them for now.
+        self.quic_datagrams.write_frames(builder, tokens, stats);
+        if builder.is_full() {
+            return Ok(());
+        }
+
+        let frame_stats = &mut stats.frame_tx;
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
         // Both of these are only used for resumption and so can be relatively low priority.
-        self.crypto
-            .write_frame(PacketNumberSpace::ApplicationData, builder, tokens, stats)?;
+        self.crypto.write_frame(
+            PacketNumberSpace::ApplicationData,
+            builder,
+            tokens,
+            frame_stats,
+        )?;
         if builder.is_full() {
             return Ok(());
         }
-        self.new_token.write_frames(builder, tokens, stats)?;
+        self.new_token.write_frames(builder, tokens, frame_stats)?;
         if builder.is_full() {
             return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, stats);
+            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
 
         #[cfg(test)]
         {

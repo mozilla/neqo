@@ -750,7 +750,6 @@ where
 #[allow(unused_variables)]
 mod tests {
     use super::*;
-    use std::mem;
 
     #[test]
     fn basic_tps() {
@@ -937,8 +936,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_neither() {
-        #[allow(clippy::drop_copy)]
-        mem::drop(PreferredAddress::new(None, None));
+        _ = PreferredAddress::new(None, None);
     }
 
     #[test]
