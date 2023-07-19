@@ -303,7 +303,7 @@ impl SendStream for SendMessage {
         Some(self)
     }
 
-    #[allow(clippy::drop_copy)]
+    #[allow(clippy::dropping_copy_types)]
     fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<()> {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
