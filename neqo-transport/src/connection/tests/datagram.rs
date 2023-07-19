@@ -17,7 +17,7 @@ use crate::{
     Connection, ConnectionError, ConnectionParameters, Error, StreamType,
 };
 use neqo_common::event::Provider;
-use std::{cell::RefCell, convert::TryFrom, mem, rc::Rc};
+use std::{cell::RefCell, convert::TryFrom, rc::Rc};
 use test_fixture::now;
 
 const DATAGRAM_LEN_MTU: u64 = 1310;
@@ -225,14 +225,13 @@ fn datagram_acked() {
     ));
 }
 
-fn send_packet_and_check_server_event(
+fn send_packet_and_get_server_event(
     client: &mut Connection,
     server: &mut Connection,
-    event: &ConnectionEvent,
-) {
+) -> ConnectionEvent {
     let out = client.process_output(now()).dgram();
     server.process_input(out.unwrap(), now());
-    let events: Vec<_> = server
+    let mut events: Vec<_> = server
         .events()
         .filter_map(|evt| match evt {
             ConnectionEvent::RecvStreamReadable { .. } | ConnectionEvent::Datagram { .. } => {
@@ -243,9 +242,11 @@ fn send_packet_and_check_server_event(
         .collect();
     // We should only get one event - either RecvStreamReadable or Datagram.
     assert_eq!(events.len(), 1);
-    assert_eq!(mem::discriminant(event), mem::discriminant(&events[0]));
+    events.remove(0)
 }
 
+/// Write a datagram that is big enough to fill a packet, but then see that
+/// normal priority stream data is sent first.
 #[test]
 fn datagram_after_stream_data() {
     let (mut client, mut server) = connect_datagram();
@@ -258,12 +259,18 @@ fn datagram_after_stream_data() {
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[6; 1200]).unwrap();
 
-    let desired_event = ConnectionEvent::RecvStreamReadable { stream_id };
-    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
+    assert!(
+        matches!(send_packet_and_get_server_event(&mut client, &mut server), ConnectionEvent::RecvStreamReadable { stream_id: s } if s == stream_id)
+    );
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent);
 
-    let desired_event = ConnectionEvent::Datagram([].to_vec());
-    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
+    if let ConnectionEvent::Datagram(data) =
+        &send_packet_and_get_server_event(&mut client, &mut server)
+    {
+        assert_eq!(data, DATA_MTU);
+    } else {
+        panic!();
+    }
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
@@ -286,12 +293,18 @@ fn datagram_before_stream_data() {
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(client.send_datagram(DATA_MTU, Some(1)), Ok(()));
 
-    let desired_event = ConnectionEvent::Datagram([].to_vec());
-    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
+    if let ConnectionEvent::Datagram(data) =
+        &send_packet_and_get_server_event(&mut client, &mut server)
+    {
+        assert_eq!(data, DATA_MTU);
+    } else {
+        panic!();
+    }
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
-    let desired_event = ConnectionEvent::RecvStreamReadable { stream_id };
-    send_packet_and_check_server_event(&mut client, &mut server, &desired_event);
+    assert!(
+        matches!(send_packet_and_get_server_event(&mut client, &mut server), ConnectionEvent::RecvStreamReadable { stream_id: s } if s == stream_id)
+    );
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
