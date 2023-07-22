@@ -16,7 +16,7 @@ neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 structopt = "0.3.7"
 url = "2.0"
-qlog = "0.4.0"
+qlog = "0.9.0"
 
 [features]
 default = ["deny-warnings"]

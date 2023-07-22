@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use qlog::{
-    self, CommonFields, Configuration, QlogStreamer, TimeUnits, Trace, VantagePoint,
+    self, CommonFields, Configuration, streamer::QlogStreamer, TraceSeq, VantagePoint,
     VantagePointType,
 };
 
@@ -55,11 +55,24 @@ impl NeqoQlog {
     /// If logging enabled, closure may generate an event to be logged.
     pub fn add_event<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Option<qlog::event::Event>,
+        F: FnOnce() -> Option<qlog::events::Event>,
     {
         self.add_event_with_stream(|s| {
             if let Some(evt) = f() {
                 s.add_event(evt)?;
+            }
+            Ok(())
+        });
+    }
+
+    /// If logging enabled, closure may generate an event to be logged.
+    pub fn add_event_data<F>(&mut self, f: F)
+    where
+        F: FnOnce() -> Option<qlog::events::EventData>,
+    {
+        self.add_event_with_stream(|s| {
+            if let Some(ev_data) = f() {
+                s.add_event_data_now(ev_data)?;
             }
             Ok(())
         });
@@ -99,8 +112,8 @@ impl Drop for NeqoQlogShared {
 }
 
 #[must_use]
-pub fn new_trace(role: Role) -> qlog::Trace {
-    Trace {
+pub fn new_trace(role: Role) -> qlog::TraceSeq {
+    TraceSeq {
         vantage_point: VantagePoint {
             name: Some(format!("neqo-{role}")),
             ty: match role {
@@ -112,8 +125,7 @@ pub fn new_trace(role: Role) -> qlog::Trace {
         title: Some(format!("neqo-{role} trace")),
         description: Some("Example qlog trace description".to_string()),
         configuration: Some(Configuration {
-            time_offset: Some("0".into()),
-            time_units: Some(TimeUnits::Us),
+            time_offset: Some(0.0),
             original_uris: None,
         }),
         common_fields: Some(CommonFields {
@@ -121,17 +133,9 @@ pub fn new_trace(role: Role) -> qlog::Trace {
             protocol_type: None,
             reference_time: {
                 let datetime = time::OffsetDateTime::now_utc();
-                datetime
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .ok() // This is expected to never fail.
+                Some(datetime.unix_timestamp() as f64)
             },
+            time_format: Some("relative".to_string()),
         }),
-        event_fields: vec![
-            "relative_time".to_string(),
-            "category".to_string(),
-            "event".to_string(),
-            "data".to_string(),
-        ],
-        events: Vec::new(),
     }
 }

@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use qlog::QlogStreamer;
+use qlog::{streamer::QlogStreamer, events::EventImportance};
 
 use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
@@ -698,7 +698,7 @@ fn client(
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
         let mut qlog_path = qlog_dir.to_path_buf();
-        let filename = format!("{}-{}.qlog", hostname, cid);
+        let filename = format!("{}-{}.sqlog", hostname, cid);
         qlog_path.push(filename);
 
         let f = OpenOptions::new()
@@ -714,6 +714,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
             None,
             std::time::Instant::now(),
             common::qlog::new_trace(Role::Client),
+            EventImportance::Base,
             Box::new(f),
         );
 
