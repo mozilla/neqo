@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Functions that handle capturing QLOG traces.
+
 use std::convert::TryFrom;
 
 use qlog::{self, event::Event, H3DataRecipient};
