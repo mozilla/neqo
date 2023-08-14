@@ -18,7 +18,6 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fmt::Debug;
-use std::mem;
 use std::rc::Rc;
 
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
@@ -302,7 +301,7 @@ impl SendStream for SendMessage {
         data_frame.encode(&mut enc);
         self.stream.buffer(enc.as_ref());
         self.stream.buffer(buf);
-        mem::drop(self.stream.send_buffer(conn)?);
+        _ = self.stream.send_buffer(conn)?;
         Ok(())
     }
 }

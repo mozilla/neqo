@@ -6,22 +6,26 @@
 
 // Transport parameters. See -transport section 7.3.
 
-use crate::cid::{
-    ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN,
+use crate::{
+    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    version::{Version, VersionConfig, WireVersion},
+    Error, Res,
 };
-use crate::version::{Version, VersionConfig, WireVersion};
-use crate::{Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
-use neqo_crypto::constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
-use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::{random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker};
+use neqo_crypto::{
+    constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
+    random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
+};
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    convert::TryFrom,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    rc::Rc,
+};
 
 pub type TransportParameterId = u64;
 macro_rules! tpids {
@@ -59,8 +63,8 @@ tpids! {
 
 #[derive(Clone, Debug, Copy)]
 pub struct PreferredAddress {
-    v4: Option<SocketAddr>,
-    v6: Option<SocketAddr>,
+    v4: Option<SocketAddrV4>,
+    v6: Option<SocketAddrV6>,
 }
 
 impl PreferredAddress {
@@ -69,33 +73,27 @@ impl PreferredAddress {
     /// # Panics
     /// If neither address is provided, or if either address is of the wrong type.
     #[must_use]
-    pub fn new(v4: Option<SocketAddr>, v6: Option<SocketAddr>) -> Self {
+    pub fn new(v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>) -> Self {
         assert!(v4.is_some() || v6.is_some());
-        if let Some(a) = v4 {
-            if let IpAddr::V4(addr) = a.ip() {
-                assert!(!addr.is_unspecified());
-            } else {
-                panic!("invalid address type for v4 address");
-            }
+        let v4 = v4.map(|a| {
+            assert!(!a.ip().is_unspecified());
             assert_ne!(a.port(), 0);
-        }
-        if let Some(a) = v6 {
-            if let IpAddr::V6(addr) = a.ip() {
-                assert!(!addr.is_unspecified());
-            } else {
-                panic!("invalid address type for v6 address");
-            }
+            SocketAddrV4::new(ip, a.port())
+        });
+        let v6 = v6.map(|a| {
+            assert!(!a.ip().is_unspecified());
             assert_ne!(a.port(), 0);
-        }
+            SocketAddrV6::new(ip, a.port(), 0, 0)
+        });
         Self { v4, v6 }
     }
 
     #[must_use]
-    pub fn ipv4(&self) -> Option<SocketAddr> {
+    pub fn ipv4(&self) -> Option<SocketAddrV4> {
         self.v4
     }
     #[must_use]
-    pub fn ipv6(&self) -> Option<SocketAddr> {
+    pub fn ipv6(&self) -> Option<SocketAddrV6> {
         self.v6
     }
 }
@@ -106,8 +104,8 @@ pub enum TransportParameter {
     Integer(u64),
     Empty,
     PreferredAddress {
-        v4: Option<SocketAddr>,
-        v6: Option<SocketAddr>,
+        v4: Option<SocketAddrV4>,
+        v6: Option<SocketAddrV6>,
         cid: ConnectionId,
         srt: [u8; 16],
     },
@@ -136,23 +134,13 @@ impl TransportParameter {
             Self::PreferredAddress { v4, v6, cid, srt } => {
                 enc.encode_vvec_with(|enc_inner| {
                     if let Some(v4) = v4 {
-                        debug_assert!(v4.is_ipv4());
-                        if let IpAddr::V4(a) = v4.ip() {
-                            enc_inner.encode(&a.octets()[..]);
-                        } else {
-                            unreachable!();
-                        }
+                        enc_inner.encode(&v4.ip().octets()[..]);
                         enc_inner.encode_uint(2, v4.port());
                     } else {
                         enc_inner.encode(&[0; 6]);
                     }
                     if let Some(v6) = v6 {
-                        debug_assert!(v6.is_ipv6());
-                        if let IpAddr::V6(a) = v6.ip() {
-                            enc_inner.encode(&a.octets()[..]);
-                        } else {
-                            unreachable!();
-                        }
+                        enc_inner.encode(&v6.ip().octets()[..]);
                         enc_inner.encode_uint(2, v6.port());
                     } else {
                         enc_inner.encode(&[0; 18]);
@@ -184,7 +172,7 @@ impl TransportParameter {
         let v4 = if v4port == 0 {
             None
         } else {
-            Some(SocketAddr::new(IpAddr::V4(v4ip), v4port))
+            Some(SocketAddrV4::new(v4ip, v4port))
         };
 
         // IPv6 address (mostly the same as v4)
@@ -197,7 +185,7 @@ impl TransportParameter {
         let v6 = if v6port == 0 {
             None
         } else {
-            Some(SocketAddr::new(IpAddr::V6(v6ip), v6port))
+            Some(SocketAddrV6::new(v6ip, v6port, 0, 0))
         };
         // Need either v4 or v6 to be present.
         if v4.is_none() && v6.is_none() {
