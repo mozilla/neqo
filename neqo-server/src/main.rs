@@ -7,24 +7,25 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use std::cell::RefCell;
-use std::cmp::min;
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
-use std::fs::OpenOptions;
-use std::io;
-use std::io::Read;
-use std::mem;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
-use std::process::exit;
-use std::rc::Rc;
-use std::str::FromStr;
-use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    cmp::min,
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fmt::{self, Display},
+    fs::OpenOptions,
+    io,
+    io::Read,
+    mem,
+    net::{SocketAddr, ToSocketAddrs},
+    path::PathBuf,
+    process::exit,
+    rc::Rc,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
-use mio::net::UdpSocket;
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
 use neqo_transport::ConnectionIdGenerator;
 use structopt::StructOpt;
@@ -279,6 +280,14 @@ impl QuicParameters {
         if v4.is_none() && v6.is_none() {
             None
         } else {
+            let v4 = v4.map(|v4| {
+                let SocketAddr::V4(v4) = v4 else { unreachable!(); };
+                v4
+            });
+            let v6 = v6.map(|v6| {
+                let SocketAddr::V6(v6) = v6 else { unreachable!(); };
+                v6
+            });
             Some(PreferredAddress::new(v4, v6))
         }
     }
