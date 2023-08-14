@@ -8,6 +8,12 @@ To run test HTTP/3 programs (neqo-client and neqo-server):
 * `./target/debug/neqo-server [::]:12345 --db ./test-fixture/db`
 * `./target/debug/neqo-client http://127.0.0.1:12345/`
 
+If a "Failure to load dynamic library" error happens at runtime, do
+```
+export LD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.so -print | head -1)")"
+```
+On a mac, use `DYLD_LIBRARY_PATH` instead.
+
 ## Faster Builds with Separate NSS/NSPR
 
 You can clone NSS (https://hg.mozilla.org/projects/nss) and NSPR
@@ -21,6 +27,18 @@ Note: If you did not compile NSS separately, you need to have mercurial (hg), in
 NSS builds require gyp, and ninja (or ninja-build) to be present also.
 
 ## Debugging Neqo
+
+### QUIC Logging
+
+Enable [QLOG](https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-main-schema/) with:
+
+```
+$ mkdir "$logdir"
+$ ./target/debug/neqo-server '[::]:12345' --db ./test-fixture/db --qlog-dir "$logdir"
+$ ./target/debug/neqo-client 'https://[::]:12345/' --qlog-dir "$logdir"
+```
+
+You may use https://qvis.quictools.info/ by uploading the QLOG files and visualize the flows.
 
 ### Using SSLKEYLOGFILE to decrypt Wireshark logs
 
@@ -49,44 +67,27 @@ Some examples:
 
 ### Trying In-development Neqo code in Gecko
 
-In a checked-out copy of Gecko source, set paths for the four Neqo crates to
-local versions in `netwerk/socket/neqo_glue/Cargo.toml`. For example, if Neqo
-was checked out to /home/alice/git/neqo, change:
+In a checked-out copy of Gecko source, set `[patches.*]` values for the four
+Neqo crates to local versions in the root `Cargo.toml`. For example, if Neqo
+was checked out to `/home/alice/git/neqo`, add the following lines to the root
+`Cargo.toml`.
 
 ```
-neqo-http3 = { tag = "v0.1.7", git = "https://github.com/mozilla/neqo" }
-neqo-transport = { tag = "v0.1.7", git = "https://github.com/mozilla/neqo" }
-neqo-common = { tag = "v0.1.7", git = "https://github.com/mozilla/neqo" }
-```
-
-to
-
-```
+[patch."https://github.com/mozilla/neqo"]
 neqo-http3 = { path = "/home/alice/git/neqo/neqo-http3" }
 neqo-transport = { path = "/home/alice/git/neqo/neqo-transport" }
 neqo-common = { path = "/home/alice/git/neqo/neqo-common" }
+neqo-qpack = { path = "/home/alice/git/neqo/neqo-qpack" }
+neqo-crypto = { path = "/home/alice/git/neqo/neqo-crypto" }
 ```
 
-and
+Then run the following:
 
 ```
-[dependencies.neqo-crypto]
-tag = "v0.1.7"
-git = "https://github.com/mozilla/neqo"
-default-features = false
-features = ["gecko"]
+./mach vendor rust
 ```
 
-to
-
-```
-[dependencies.neqo-crypto]
-path = "/home/alice/git/neqo/neqo-crypto"
-default-features = false
-features = ["gecko"]
-```
+Compile Gecko as usual with `./mach build`.
 
 Note: Using newer Neqo code with Gecko may also require changes (likely to `neqo_glue`) if
 something has changed.
-
-Compile Gecko as usual with `./mach build`.

@@ -749,7 +749,6 @@ where
 #[allow(unused_variables)]
 mod tests {
     use super::*;
-    use std::mem;
 
     #[test]
     fn basic_tps() {
@@ -917,20 +916,19 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_neither() {
-        #[allow(clippy::drop_copy)]
-        mem::drop(PreferredAddress::new(None, None));
+        _ = PreferredAddress::new(None, None);
     }
 
     #[test]
     #[should_panic]
     fn preferred_address_v4_unspecified() {
-        let _ = PreferredAddress::new(Some(SocketAddrV4::new(Ipv4Addr::from(0), 443)), None);
+        _ = PreferredAddress::new(Some(SocketAddrV4::new(Ipv4Addr::from(0), 443)), None);
     }
 
     #[test]
     #[should_panic]
     fn preferred_address_v4_zero_port() {
-        let _ = PreferredAddress::new(
+        _ = PreferredAddress::new(
             Some(SocketAddrV4::new(Ipv4Addr::from(0xc000_0201), 0)),
             None,
         );
@@ -939,13 +937,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_unspecified() {
-        let _ = PreferredAddress::new(None, Some(SocketAddrV6::new(Ipv6Addr::from(0), 443, 0, 0)));
+        _ = PreferredAddress::new(None, Some(SocketAddrV6::new(Ipv6Addr::from(0), 443, 0, 0)));
     }
 
     #[test]
     #[should_panic]
     fn preferred_address_v6_zero_port() {
-        let _ = PreferredAddress::new(None, Some(SocketAddrV6::new(Ipv6Addr::from(1), 0, 0, 0)));
+        _ = PreferredAddress::new(None, Some(SocketAddrV6::new(Ipv6Addr::from(1), 0, 0, 0)));
     }
 
     #[test]

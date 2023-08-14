@@ -120,7 +120,7 @@ impl<T> Timer<T> {
             for i in &self.items {
                 debug_assert!(i.is_empty());
             }
-            self.now = time - short_span;
+            self.now = time.checked_sub(short_span).unwrap();
             self.cursor = 0;
         }
 
@@ -151,10 +151,7 @@ impl<T> Timer<T> {
             return None;
         }
         let bucket = self.time_bucket(time);
-        let start_index = match self.items[bucket].binary_search_by_key(&time, TimerItem::time) {
-            Ok(idx) => idx,
-            Err(_) => return None,
-        };
+        let Ok(start_index) = self.items[bucket].binary_search_by_key(&time, TimerItem::time) else { return None };
         // start_index is just one of potentially many items with the same time.
         // Search backwards for a match, ...
         for i in (0..=start_index).rev() {
@@ -287,7 +284,8 @@ mod test {
         t.add(near_future, v);
         assert_eq!(near_future, t.next_time().expect("should return a value"));
         assert_eq!(
-            t.take_until(near_future - Duration::from_millis(1)).count(),
+            t.take_until(near_future.checked_sub(Duration::from_millis(1)).unwrap())
+                .count(),
             0
         );
         assert!(t

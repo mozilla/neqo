@@ -8,19 +8,23 @@
 
 #![deny(clippy::pedantic)]
 
-use std::cmp::min;
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::ops::{Index, IndexMut};
-use std::time::{Duration, Instant};
+use std::{
+    cmp::min,
+    collections::VecDeque,
+    convert::TryFrom,
+    ops::{Index, IndexMut},
+    time::{Duration, Instant},
+};
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
-use crate::packet::{PacketBuilder, PacketNumber, PacketType};
-use crate::recovery::RecoveryToken;
-use crate::stats::FrameStats;
-use crate::{Error, Res};
+use crate::{
+    packet::{PacketBuilder, PacketNumber, PacketType},
+    recovery::RecoveryToken,
+    stats::FrameStats,
+    Error, Res,
+};
 
 use smallvec::{smallvec, SmallVec};
 
@@ -590,10 +594,7 @@ impl RecvdPackets {
 
         builder.encode_varint(crate::frame::FRAME_TYPE_ACK);
         let mut iter = ranges.iter();
-        let first = match iter.next() {
-            Some(v) => v,
-            None => return, // Nothing to send.
-        };
+        let Some(first) = iter.next() else { return };
         builder.encode_varint(first.largest);
         stats.largest_acknowledged = first.largest;
         stats.ack += 1;
@@ -745,9 +746,11 @@ mod tests {
         AckTracker, Duration, Instant, PacketNumberSpace, PacketNumberSpaceSet, RecoveryToken,
         RecvdPackets, MAX_TRACKED_RANGES,
     };
-    use crate::frame::Frame;
-    use crate::packet::{PacketBuilder, PacketNumber};
-    use crate::stats::FrameStats;
+    use crate::{
+        frame::Frame,
+        packet::{PacketBuilder, PacketNumber},
+        stats::FrameStats,
+    };
     use lazy_static::lazy_static;
     use neqo_common::Encoder;
     use std::collections::HashSet;
@@ -880,7 +883,7 @@ mod tests {
     }
 
     fn write_frame(rp: &mut RecvdPackets) {
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let mut stats = FrameStats::default();
         let mut tokens = Vec::new();
         rp.write_frame(*NOW, &mut builder, &mut tokens, &mut stats);
@@ -1013,13 +1016,15 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
             .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
-        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
+        assert!(tracker
+            .ack_time(NOW.checked_sub(Duration::from_millis(1)).unwrap())
+            .is_some());
 
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
@@ -1039,13 +1044,17 @@ mod tests {
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
             .set_received(*NOW, 1, true);
-        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
+        assert!(tracker
+            .ack_time(NOW.checked_sub(Duration::from_millis(1)).unwrap())
+            .is_some());
 
         // Now drop that space.
         tracker.drop_space(PacketNumberSpace::Initial);
 
         assert!(tracker.get_mut(PacketNumberSpace::Initial).is_none());
-        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_none());
+        assert!(tracker
+            .ack_time(NOW.checked_sub(Duration::from_millis(1)).unwrap())
+            .is_none());
         tracker
             .write_frame(
                 PacketNumberSpace::Initial,
@@ -1070,9 +1079,11 @@ mod tests {
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
             .set_received(*NOW, 0, true);
-        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
+        assert!(tracker
+            .ack_time(NOW.checked_sub(Duration::from_millis(1)).unwrap())
+            .is_some());
 
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1100,9 +1111,11 @@ mod tests {
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
             .set_received(*NOW, 2, true);
-        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
+        assert!(tracker
+            .ack_time(NOW.checked_sub(Duration::from_millis(1)).unwrap())
+            .is_some());
 
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         builder.set_limit(32);
 
         let mut stats = FrameStats::default();
@@ -1118,7 +1131,7 @@ mod tests {
         assert_eq!(stats.ack, 1);
 
         let mut dec = builder.as_decoder();
-        let _ = dec.decode_byte().unwrap(); // Skip the short header.
+        _ = dec.decode_byte().unwrap(); // Skip the short header.
         let frame = Frame::decode(&mut dec).unwrap();
         if let Frame::Ack { ack_ranges, .. } = frame {
             assert_eq!(ack_ranges.len(), 0);

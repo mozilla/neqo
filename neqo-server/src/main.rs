@@ -233,6 +233,10 @@ struct QuicParameters {
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
 
+    #[structopt(long = "idle", default_value = "30")]
+    /// The idle timeout for connections, in seconds.
+    idle_timeout: u64,
+
     #[structopt(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
@@ -296,6 +300,7 @@ impl QuicParameters {
         let mut params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
+            .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control);
         if let Some(pa) = self.preferred_address() {
             params = params.preferred_address(pa);
@@ -733,10 +738,10 @@ impl ServersRunner {
                     if dgram.is_none() {
                         break;
                     }
-                    let _ = self.process(inx, dgram);
+                    _ = self.process(inx, dgram);
                 }
             } else {
-                let _ = self.process(inx, None);
+                _ = self.process(inx, None);
             }
             self.server.process_events(&self.args, self.args.now());
             if self.process(inx, None) {

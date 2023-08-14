@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{Http3Connection, Http3State};
+use crate::connection::{Http3Connection, Http3State, WebTransportSessionAcceptAction};
 use crate::frames::HFrame;
 use crate::recv_message::{RecvMessage, RecvMessageInfo};
 use crate::send_message::SendMessage;
@@ -142,7 +142,7 @@ impl Http3ServerHandler {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        accept: bool,
+        accept: &WebTransportSessionAcceptAction,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler.webtransport_session_accept(
@@ -241,7 +241,7 @@ impl Http3ServerHandler {
 
     fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
         qinfo!([self], "Connection error: {}.", err);
-        conn.close(now, err.code(), &format!("{}", err));
+        conn.close(now, err.code(), &format!("{err}"));
         self.base_handler.close(err.code());
         self.events
             .connection_state_change(self.base_handler.state());
@@ -251,7 +251,7 @@ impl Http3ServerHandler {
     fn check_connection_events(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
         qtrace!([self], "Check connection events.");
         while let Some(e) = conn.next_event() {
-            qdebug!([self], "check_connection_events - event {:?}.", e);
+            qdebug!([self], "check_connection_events - event {e:?}.");
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
                     self.base_handler.add_new_stream(stream_id);

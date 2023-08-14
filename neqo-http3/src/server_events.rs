@@ -6,7 +6,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::connection::Http3State;
+use crate::connection::{Http3State, WebTransportSessionAcceptAction};
 use crate::connection_server::Http3ServerHandler;
 use crate::{
     features::extended_connect::SessionCloseReason, Http3StreamInfo, Http3StreamType, Priority, Res,
@@ -245,7 +245,7 @@ impl WebTransportRequest {
     /// Respond to a `WebTransport` session request.
     /// # Errors
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&mut self, accept: bool) -> Res<()> {
+    pub fn response(&mut self, accept: &WebTransportSessionAcceptAction) -> Res<()> {
         qinfo!([self], "Set a response for a WebTransport session.");
         self.stream_handler
             .handler
@@ -378,6 +378,7 @@ pub enum WebTransportServerEvent {
     SessionClosed {
         session: WebTransportRequest,
         reason: SessionCloseReason,
+        headers: Option<Vec<Header>>,
     },
     NewStream(Http3OrWebTransportStream),
     Datagram {
@@ -541,9 +542,14 @@ impl Http3ServerEvents {
         &self,
         session: WebTransportRequest,
         reason: SessionCloseReason,
+        headers: Option<Vec<Header>>,
     ) {
         self.insert(Http3ServerEvent::WebTransport(
-            WebTransportServerEvent::SessionClosed { session, reason },
+            WebTransportServerEvent::SessionClosed {
+                session,
+                reason,
+                headers,
+            },
         ));
     }
 

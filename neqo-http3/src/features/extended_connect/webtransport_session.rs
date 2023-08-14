@@ -17,7 +17,7 @@ use crate::{
 };
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
-use neqo_transport::{Connection, DatagramTracking, StreamId};
+use neqo_transport::{streams::SendOrder, Connection, DatagramTracking, StreamId};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -214,6 +214,7 @@ impl WebTransportSession {
                 ExtendedConnectType::WebTransport,
                 self.session_id,
                 SessionCloseReason::from(close_type),
+                None,
             );
         }
     }
@@ -240,8 +241,9 @@ impl WebTransportSession {
                         self.session_id,
                         SessionCloseReason::Clean {
                             error: 0,
-                            message: "".to_string(),
+                            message: String::new(),
                         },
+                        Some(headers),
                     );
                     self.state = SessionState::Done;
                 }
@@ -264,8 +266,9 @@ impl WebTransportSession {
                             self.session_id,
                             SessionCloseReason::Clean {
                                 error: 0,
-                                message: "".to_string(),
+                                message: String::new(),
                             },
+                            Some(headers),
                         );
                         SessionState::Done
                     } else {
@@ -273,6 +276,7 @@ impl WebTransportSession {
                             ExtendedConnectType::WebTransport,
                             self.session_id,
                             status,
+                            headers,
                         );
                         SessionState::Active
                     }
@@ -281,6 +285,7 @@ impl WebTransportSession {
                         ExtendedConnectType::WebTransport,
                         self.session_id,
                         SessionCloseReason::Status(status),
+                        Some(headers),
                     );
                     SessionState::Done
                 };
@@ -345,6 +350,7 @@ impl WebTransportSession {
                 ExtendedConnectType::WebTransport,
                 self.session_id,
                 SessionCloseReason::Clean { error, message },
+                None,
             );
             self.state = if fin {
                 SessionState::Done
@@ -357,8 +363,9 @@ impl WebTransportSession {
                 self.session_id,
                 SessionCloseReason::Clean {
                     error: 0,
-                    message: "".to_string(),
+                    message: String::new(),
                 },
+                None,
             );
             self.state = SessionState::Done;
         }
@@ -477,6 +484,16 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
 
     fn has_data_to_send(&self) -> bool {
         self.borrow_mut().has_data_to_send()
+    }
+
+    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) -> Res<()> {
+        // Not relevant on session
+        Ok(())
+    }
+
+    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) -> Res<()> {
+        // Not relevant on session
+        Ok(())
     }
 
     fn stream_writable(&self) {}

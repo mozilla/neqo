@@ -15,21 +15,23 @@ use neqo_transport::{
     Error, Output, State, StreamId, StreamType,
 };
 
-use std::cell::RefCell;
-use std::cmp::min;
-use std::collections::HashSet;
-use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    cmp::min,
+    collections::HashSet,
+    mem,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    rc::Rc,
+};
 // use std::path::PathBuf;
-use std::str::FromStr;
-use std::string::ParseError;
-use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    str::FromStr,
+    string::ParseError,
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
 use structopt::StructOpt;
-#[macro_use]
-extern crate lazy_static;
 
 #[derive(Debug, StructOpt, Clone)]
 #[structopt(name = "neqo-interop", about = "A QUIC interop client.")]
@@ -65,7 +67,7 @@ fn emit_datagram(socket: &UdpSocket, d: Datagram) {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref TEST_TIMEOUT: Mutex<Duration> = Mutex::new(Duration::from_secs(5));
 }
 
@@ -703,7 +705,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Connection {
 
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
-    socket.connect(&peer).expect("Unable to connect UDP socket");
+    socket.connect(peer).expect("Unable to connect UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
     let remote_addr = peer.addr();

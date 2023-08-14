@@ -31,8 +31,8 @@ use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, Message
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{
-    AppError, Connection, ConnectionError, DatagramTracking, State, StreamId, StreamType,
-    ZeroRttState,
+    streams::SendOrder, AppError, Connection, ConnectionError, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -51,6 +51,20 @@ where
     pub target: &'t T,
     pub headers: &'b [Header],
     pub priority: Priority,
+}
+
+pub enum WebTransportSessionAcceptAction {
+    Accept,
+    Reject(Vec<Header>),
+}
+
+impl ::std::fmt::Display for WebTransportSessionAcceptAction {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        match self {
+            WebTransportSessionAcceptAction::Accept => f.write_str("Accept"),
+            WebTransportSessionAcceptAction::Reject(_) => f.write_str("Reject"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -218,7 +232,7 @@ possible if there is no buffered data.
 If a stream has buffered data it will be registered in the `streams_with_pending_data` queue and
 actual sending will be performed in the `process_sending` function call. (This is done in this way,
 i.e. data is buffered first and then sent, for 2 reasons: in this way, sending will happen in a
-single function,  therefore error handling and clean up is easier and the QUIIC layer may not be
+single function,  therefore error handling and clean up is easier and the QUIC layer may not be
 able to accept all data and being able to buffer data is required in any case.)
 
 The `send` and `send_data` functions may detect that the stream is closed and all outstanding data
@@ -612,7 +626,7 @@ impl Http3Connection {
         }
     }
 
-    /// This is called when 0RTT has been reseted to clear `send_streams`, `recv_streams` and settings.
+    /// This is called when 0RTT has been reset to clear `send_streams`, `recv_streams` and settings.
     pub fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
@@ -640,7 +654,7 @@ impl Http3Connection {
         let mut decoder = Decoder::new(datagram);
         let session = decoder
             .decode_varint()
-            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id)))
+            .and_then(|id| self.recv_streams.get_mut(&StreamId::from(id * 4)))
             .and_then(|stream| stream.webtransport());
         if let Some(s) = session {
             s.borrow_mut().datagram(decoder.decode_remainder().to_vec());
@@ -721,6 +735,14 @@ impl Http3Connection {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
                 }
+                // set incoming WebTransport streams to be fair (share bandwidth)
+                conn.stream_fairness(stream_id, true).ok();
+                qinfo!(
+                    [self],
+                    "A new WebTransport stream {} for session {}.",
+                    stream_id,
+                    session_id
+                );
             }
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
@@ -906,7 +928,7 @@ impl Http3Connection {
         );
 
         // Call immediately send so that at least headers get sent. This will make Firefox faster, since
-        // it can send request body immediatly in most cases and does not need to do a complete process loop.
+        // it can send request body immediately in most cases and does not need to do a complete process loop.
         self.send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
@@ -979,6 +1001,32 @@ impl Http3Connection {
         // Stream may be already be closed and we may get an error here, but we do not care.
         conn.stream_stop_sending(stream_id, error)?;
         Ok(())
+    }
+
+    /// Set the stream `SendOrder`.
+    /// # Errors
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
+    pub fn stream_set_sendorder(
+        conn: &mut Connection,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) -> Res<()> {
+        conn.stream_sendorder(stream_id, sendorder)
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
+    /// Set the stream Fairness.   Fair streams will share bandwidth with other
+    /// streams of the same sendOrder group (or the unordered group).  Unfair streams
+    /// will give bandwidth preferentially to the lowest streamId with data to send.
+    /// # Errors
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
+    pub fn stream_set_fairness(
+        conn: &mut Connection,
+        stream_id: StreamId,
+        fairness: bool,
+    ) -> Res<()> {
+        conn.stream_fairness(stream_id, fairness)
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     pub fn cancel_fetch(
@@ -1100,9 +1148,12 @@ impl Http3Connection {
         conn: &mut Connection,
         stream_id: StreamId,
         events: Box<dyn ExtendedConnectEvents>,
-        accept: bool,
+        accept_res: &WebTransportSessionAcceptAction,
     ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={}.", accept);
+        qtrace!(
+            "Respond to WebTransport session with accept={}.",
+            accept_res
+        );
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -1119,17 +1170,17 @@ impl Http3Connection {
 
         let send_stream = self.send_streams.get_mut(&stream_id);
 
-        match (send_stream, recv_stream, accept) {
+        match (send_stream, recv_stream, accept_res) {
             (None, None, _) => Err(Error::InvalidStreamId),
             (None, Some(_), _) | (Some(_), None, _) => {
                 // TODO this needs a better error
                 self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
                 Err(Error::InvalidStreamId)
             }
-            (Some(s), Some(_r), false) => {
+            (Some(s), Some(_r), WebTransportSessionAcceptAction::Reject(headers)) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
-                    .send_headers(&[Header::new(":status", "404")], conn)
+                    .send_headers(headers, conn)
                     .is_ok()
                 {
                     mem::drop(self.stream_close_send(conn, stream_id));
@@ -1140,7 +1191,7 @@ impl Http3Connection {
                 }
                 Ok(())
             }
-            (Some(s), Some(_r), true) => {
+            (Some(s), Some(_r), WebTransportSessionAcceptAction::Accept) => {
                 if s.http_stream()
                     .ok_or(Error::InvalidStreamId)?
                     .send_headers(&[Header::new(":status", "200")], conn)
@@ -1221,6 +1272,9 @@ impl Http3Connection {
         let stream_id = conn
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
+        // Set outgoing WebTransport streams to be fair (share bandwidth)
+        // This really can't fail, panics if it does
+        conn.stream_fairness(stream_id, true).unwrap();
 
         self.webtransport_create_stream_internal(
             wt,
@@ -1409,7 +1463,9 @@ impl Http3Connection {
                             qpack_changed = true;
                         }
                         HSettingType::BlockedStreams => qpack_changed = true,
-                        HSettingType::MaxHeaderListSize | HSettingType::EnableWebTransport => (),
+                        HSettingType::MaxHeaderListSize
+                        | HSettingType::EnableWebTransport
+                        | HSettingType::EnableH3Datagram => (),
                     }
                 }
                 if qpack_changed {

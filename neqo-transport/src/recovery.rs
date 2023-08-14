@@ -342,9 +342,7 @@ impl LossRecoverySpace {
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
         self.in_flight_outstanding = 0;
-        mem::take(&mut self.sent_packets)
-            .into_iter()
-            .map(|(_, v)| v)
+        mem::take(&mut self.sent_packets).into_values()
     }
 
     /// Remove the primary path marking on any packets this is tracking.
@@ -670,16 +668,13 @@ impl LossRecovery {
             largest_acked
         );
 
-        let space = self.spaces.get_mut(pn_space);
-        let space = if let Some(sp) = space {
-            sp
-        } else {
+        let Some(space) = self.spaces.get_mut(pn_space) else {
             qinfo!("ACK on discarded space");
             return (Vec::new(), Vec::new());
         };
 
         let (acked_packets, any_ack_eliciting) =
-            space.remove_acked(acked_ranges, &mut *self.stats.borrow_mut());
+            space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
         if acked_packets.is_empty() {
             // No new information.
             return (Vec::new(), Vec::new());
@@ -887,7 +882,7 @@ impl LossRecovery {
         self.pto_state
             .as_mut()
             .unwrap()
-            .count_pto(&mut *self.stats.borrow_mut());
+            .count_pto(&mut self.stats.borrow_mut());
 
         qlog::metrics_updated(
             &mut self.qlog,
