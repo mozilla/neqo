@@ -21,9 +21,9 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    send_stream::SendStreamStats, streams::SendOrder, AppError, Connection, ConnectionEvent,
-    ConnectionId, ConnectionIdGenerator, DatagramTracking, Output, Stats as TransportStats,
-    StreamId, StreamType, Version, ZeroRttState,
+    streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
+    DatagramTracking, Output, Rsend_stream::SendStreamStats, Stats as TransportStats, StreamId,
+    StreamType, Version, ZeroRttState,
 };
 use std::{
     cell::RefCell,
@@ -768,12 +768,33 @@ impl Http3Client {
         Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
     }
 
+
+    /// Sets the `Fairness` for a given stream
+    /// # Errors
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// # Panics
+    /// This cannot panic.
+    pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
+    }
+
     /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.base_handler
             .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .stats(&mut self.conn)
+    }
+
+    /// Returns the current `RecvStreamStats` of a `WebTransportRecvStream`.
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
+        self.base_handler
+            .recv_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)

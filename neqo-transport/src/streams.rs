@@ -415,6 +415,10 @@ impl Streams {
         self.send.set_sendorder(stream_id, sendorder)
     }
 
+    pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        self.send.set_fairness(stream_id, fairness)
+    }
+
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         match self.local_stream_limits.take_stream_id(st) {
             None => Err(Error::StreamLimitError),

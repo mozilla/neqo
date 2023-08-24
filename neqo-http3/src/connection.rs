@@ -626,7 +626,7 @@ impl Http3Connection {
         }
     }
 
-    /// This is called when 0RTT has been reseted to clear `send_streams`, `recv_streams` and settings.
+    /// This is called when 0RTT has been reset to clear `send_streams`, `recv_streams` and settings.
     pub fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
         if self.state == Http3State::ZeroRtt {
             self.state = Http3State::Initializing;
@@ -735,6 +735,14 @@ impl Http3Connection {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
                 }
+                // set incoming WebTransport streams to be fair (share bandwidth)
+                conn.stream_fairness(stream_id, true).ok();
+                qinfo!(
+                    [self],
+                    "A new WebTransport stream {} for session {}.",
+                    stream_id,
+                    session_id
+                );
             }
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
@@ -1003,7 +1011,22 @@ impl Http3Connection {
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
     ) -> Res<()> {
-        Ok(conn.stream_sendorder(stream_id, sendorder)?)
+        conn.stream_sendorder(stream_id, sendorder)
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
+    /// Set the stream Fairness.   Fair streams will share bandwidth with other
+    /// streams of the same sendOrder group (or the unordered group).  Unfair streams
+    /// will give bandwidth preferentially to the lowest streamId with data to send.
+    /// # Errors
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
+    pub fn stream_set_fairness(
+        conn: &mut Connection,
+        stream_id: StreamId,
+        fairness: bool,
+    ) -> Res<()> {
+        conn.stream_fairness(stream_id, fairness)
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     pub fn cancel_fetch(
@@ -1249,6 +1272,9 @@ impl Http3Connection {
         let stream_id = conn
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
+        // Set outgoing WebTransport streams to be fair (share bandwidth)
+        // This really can't fail, panics if it does
+        conn.stream_fairness(stream_id, true).unwrap();
 
         self.webtransport_create_stream_internal(
             wt,
