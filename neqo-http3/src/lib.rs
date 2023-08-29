@@ -163,7 +163,7 @@ mod stream_type_reader;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::{streams::SendOrder, Output, StreamId};
 use neqo_transport::{
-    AppError, Connection, Error as TransportError, send_stream::SendStreamStats,
+    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
 };
 use std::fmt::Debug;
 
@@ -399,7 +399,7 @@ impl From<AppError> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Self::TransportError(e) => Some(e),
             Self::QpackError(e) => Some(e),

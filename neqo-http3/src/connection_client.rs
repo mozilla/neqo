@@ -22,7 +22,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     streams::SendOrder, AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
-    DatagramTracking, Output, Rsend_stream::SendStreamStats, Stats as TransportStats, StreamId,
+    DatagramTracking, Output, RecvStreamStats, SendStreamStats, Stats as TransportStats, StreamId,
     StreamType, Version, ZeroRttState,
 };
 use std::{
@@ -767,7 +767,6 @@ impl Http3Client {
     ) -> Res<()> {
         Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
     }
-
 
     /// Sets the `Fairness` for a given stream
     /// # Errors

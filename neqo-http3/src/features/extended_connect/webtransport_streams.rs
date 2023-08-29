@@ -254,7 +254,7 @@ impl SendStream for WebTransportSendStream {
             0
         };
 
-        let stats = conn.send_stream_stats(self.stream_id)?;
+        let stats = conn.stream_stats(self.stream_id)?;
         if stream_header_size == 0 {
             return Ok(stats);
         }
