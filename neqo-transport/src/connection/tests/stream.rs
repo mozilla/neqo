@@ -310,7 +310,6 @@ fn ordergroup_7() {
     fairness_test(source, 5, 3, &result);
 }
 
-
 #[cfg(test)]
 #[test]
 // Send fin even if a peer closes a reomte bidi send stream before sending any data.
