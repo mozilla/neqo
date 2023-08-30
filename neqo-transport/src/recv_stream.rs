@@ -991,7 +991,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
+    #[allow(unknown_lints, clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
     fn recv_noncontiguous() {
         // Non-contiguous with the start, no data available.
         recv_ranges(&[10..20], 0);

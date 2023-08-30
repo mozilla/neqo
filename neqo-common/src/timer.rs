@@ -75,7 +75,7 @@ impl<T> Timer<T> {
     #[inline]
     #[allow(clippy::cast_possible_truncation)] // guarded by assertion
     fn delta(&self, time: Instant) -> usize {
-        // This really should use Instant::div_duration(), but it can't yet.
+        // This really should use Duration::div_duration_f??(), but it can't yet.
         ((time - self.now).as_nanos() / self.granularity.as_nanos()) as usize
     }
 
