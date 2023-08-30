@@ -399,6 +399,8 @@ impl Http3Client {
 
     /// Get the connection id, which is useful for disambiguating connections to
     /// the same origin.
+    /// # Panics
+    /// Never, because clients always have this field.
     #[must_use]
     pub fn connection_id(&self) -> &ConnectionId {
         self.conn.odcid().expect("Client always has odcid")
@@ -445,7 +447,9 @@ impl Http3Client {
             return Err(Error::InvalidState);
         }
         let mut dec = Decoder::from(token.as_ref());
-        let Some(settings_slice) = dec.decode_vvec() else { return Err(Error::InvalidResumptionToken) };
+        let Some(settings_slice) = dec.decode_vvec() else {
+            return Err(Error::InvalidResumptionToken);
+        };
         qtrace!([self], "  settings {}", hex_with_len(settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();

@@ -716,6 +716,8 @@ impl SecretAgent {
         Ok(*Pin::into_inner(records))
     }
 
+    /// # Panics
+    /// If setup fails.
     #[allow(unknown_lints, clippy::branches_sharing_code)]
     pub fn close(&mut self) {
         // It should be safe to close multiple times.
