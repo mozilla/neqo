@@ -445,7 +445,9 @@ impl Http3Client {
             return Err(Error::InvalidState);
         }
         let mut dec = Decoder::from(token.as_ref());
-        let Some(settings_slice) = dec.decode_vvec() else { return Err(Error::InvalidResumptionToken) };
+        let Some(settings_slice) = dec.decode_vvec() else {
+            return Err(Error::InvalidResumptionToken);
+        };
         qtrace!([self], "  settings {}", hex_with_len(settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
