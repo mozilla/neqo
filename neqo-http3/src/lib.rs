@@ -399,7 +399,7 @@ impl From<AppError> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
             Self::TransportError(e) => Some(e),
             Self::QpackError(e) => Some(e),
