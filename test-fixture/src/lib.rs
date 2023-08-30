@@ -124,6 +124,9 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     }
 }
 
+/// Create a new client.
+/// # Panics
+/// If this doesn't work.
 #[must_use]
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
@@ -158,6 +161,8 @@ pub fn default_server_h3() -> Connection {
 }
 
 /// Create a transport server with a configuration.
+/// # Panics
+/// If this doesn't work.
 #[must_use]
 pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
     fixture_init();
