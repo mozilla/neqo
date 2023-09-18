@@ -767,9 +767,9 @@ impl Http3Client {
     pub fn webtransport_set_sendorder(
         &mut self,
         stream_id: StreamId,
-        sendorder: SendOrder,
+        sendorder: Option<SendOrder>,
     ) -> Res<()> {
-        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, Some(sendorder))
+        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
     }
 
     /// Sets the `Fairness` for a given stream
