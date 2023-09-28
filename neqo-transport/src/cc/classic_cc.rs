@@ -494,7 +494,7 @@ mod tests {
     use super::{
         ClassicCongestionControl, WindowAdjustment, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH,
     };
-    use crate::cc::cubic::{Cubic, CUBIC_BETA_USIZE_DIVISOR, CUBIC_BETA_USIZE_QUOTIENT};
+    use crate::cc::cubic::{Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR};
     use crate::cc::new_reno::NewReno;
     use crate::cc::{
         CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
@@ -580,7 +580,7 @@ mod tests {
         );
         persistent_congestion_by_algorithm(
             CongestionControlAlgorithm::Cubic,
-            CWND_INITIAL * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR,
+            CWND_INITIAL * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
             lost_packets,
             persistent_expected,
         );
