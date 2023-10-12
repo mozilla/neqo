@@ -8,7 +8,11 @@
 
 use neqo_common::hex;
 use neqo_common::qlog::NeqoQlog;
-use qlog::events::{EventData, RawInfo, qpack::{QPackInstruction, QpackInstructionParsed}, qpack::QpackInstructionTypeName};
+use qlog::events::{
+    qpack::QpackInstructionTypeName,
+    qpack::{QPackInstruction, QpackInstructionParsed},
+    EventData, RawInfo,
+};
 
 pub fn qpack_read_insert_count_increment_instruction(
     qlog: &mut NeqoQlog,
@@ -21,10 +25,13 @@ pub fn qpack_read_insert_count_increment_instruction(
             payload_length: None,
             data: Some(hex(data)),
         };
-        let ev_data = EventData::QpackInstructionParsed(QpackInstructionParsed { instruction: QPackInstruction::InsertCountIncrementInstruction {
-            instruction_type: QpackInstructionTypeName::InsertCountIncrementInstruction,
-            increment,
-        }, raw: Some(raw) });
+        let ev_data = EventData::QpackInstructionParsed(QpackInstructionParsed {
+            instruction: QPackInstruction::InsertCountIncrementInstruction {
+                instruction_type: QpackInstructionTypeName::InsertCountIncrementInstruction,
+                increment,
+            },
+            raw: Some(raw),
+        });
 
         Some(ev_data)
     });

@@ -11,8 +11,11 @@ use std::ops::{Deref, RangeInclusive};
 use std::string::String;
 use std::time::Duration;
 
-use qlog::events::connectivity::{ConnectionStarted, ConnectionStateUpdated, ConnectionState};
-use qlog::events::quic::{AckedRanges, PacketSent, PacketHeader, PacketDropped, PacketLost, PacketReceived, MetricsUpdated, StreamType, ErrorSpace, QuicFrame};
+use qlog::events::connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated};
+use qlog::events::quic::{
+    AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
+    PacketReceived, PacketSent, QuicFrame, StreamType,
+};
 use qlog::events::{Event, EventData, RawInfo};
 
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
@@ -91,8 +94,8 @@ fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
             src_port: p.local_address().port().into(),
             dst_port: p.remote_address().port().into(),
             src_cid: Some(format!("{}", p.local_cid())),
-            dst_cid: Some(format!("{}", p.remote_cid())) });
-
+            dst_cid: Some(format!("{}", p.remote_cid())),
+        });
 
         Some(ev_data)
     })
@@ -100,19 +103,19 @@ fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
 
 pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
     qlog.add_event_data(|| {
-        let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated{
+        let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
             old: None,
             new: match new {
-            State::Init => ConnectionState::Attempted,
-            State::WaitInitial => ConnectionState::Attempted,
-            State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
-            State::Connected => ConnectionState::HandshakeCompleted,
-            State::Confirmed => ConnectionState::HandshakeConfirmed,
-            State::Closing { .. } => ConnectionState::Draining,
-            State::Draining { .. } => ConnectionState::Draining,
-            State::Closed { .. } => ConnectionState::Closed,
-        }});
-
+                State::Init => ConnectionState::Attempted,
+                State::WaitInitial => ConnectionState::Attempted,
+                State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
+                State::Connected => ConnectionState::HandshakeCompleted,
+                State::Confirmed => ConnectionState::HandshakeConfirmed,
+                State::Closing { .. } => ConnectionState::Draining,
+                State::Draining { .. } => ConnectionState::Draining,
+                State::Closed { .. } => ConnectionState::Closed,
+            },
+        });
 
         Some(ev_data)
     })
@@ -167,7 +170,8 @@ pub fn packet_sent(
 pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
     qlog.add_event_data(|| {
         // TODO: packet number is optional in the spec but qlog crate doesn't support that, so use a placeholder value of 0
-        let header = PacketHeader::with_type(to_qlog_pkt_type(payload.packet_type()), 0, None, None, None);
+        let header =
+            PacketHeader::with_type(to_qlog_pkt_type(payload.packet_type()), 0, None, None, None);
         let raw = RawInfo {
             length: None,
             payload_length: Some(payload.len() as u64),
@@ -189,7 +193,8 @@ pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
 pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
-            let header = PacketHeader::with_type(to_qlog_pkt_type(pkt.pt), pkt.pn, None, None, None);
+            let header =
+                PacketHeader::with_type(to_qlog_pkt_type(pkt.pt), pkt.pn, None, None, None);
 
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
@@ -211,7 +216,13 @@ pub fn packet_received(
     qlog.add_event_with_stream(|stream| {
         let mut d = Decoder::from(&payload[..]);
 
-        let header = PacketHeader::with_type(to_qlog_pkt_type(public_packet.packet_type()), payload.pn(), None, None, None);
+        let header = PacketHeader::with_type(
+            to_qlog_pkt_type(public_packet.packet_type()),
+            payload.pn(),
+            None,
+            None,
+            None,
+        );
         let raw = RawInfo {
             length: None,
             payload_length: Some(public_packet.len() as u64),
@@ -280,12 +291,8 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
         for metric in updated_metrics {
             match metric {
                 QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
-                QlogMetric::SmoothedRtt(v) => {
-                    smoothed_rtt = Some(v.as_secs_f32() * 1000.0)
-                }
-                QlogMetric::LatestRtt(v) => {
-                    latest_rtt = Some(v.as_secs_f32() * 1000.0)
-                }
+                QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
+                QlogMetric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
                 QlogMetric::RttVariance(v) => rtt_variance = Some(*v as f32),
                 QlogMetric::PtoCount(v) => pto_count = Some(u16::try_from(*v).unwrap()),
                 QlogMetric::CongestionWindow(v) => {
@@ -331,14 +338,22 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             let ranges =
                 Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges).ok();
 
-            let acked_ranges = ranges.map(|all| {
-                all.into_iter()
-                    .map(RangeInclusive::into_inner)
-                    .collect::<Vec<_>>()
-            }).and_then(|r| Some(AckedRanges::Double(r)));
+            let acked_ranges = ranges
+                .map(|all| {
+                    all.into_iter()
+                        .map(RangeInclusive::into_inner)
+                        .collect::<Vec<_>>()
+                })
+                .and_then(|r| Some(AckedRanges::Double(r)));
 
-            QuicFrame::Ack { ack_delay: Some(*ack_delay as f32 / 1000.0), acked_ranges, ect1: None, ect0: None, ce: None }
-        },
+            QuicFrame::Ack {
+                ack_delay: Some(*ack_delay as f32 / 1000.0),
+                acked_ranges,
+                ect1: None,
+                ect0: None,
+                ce: None,
+            }
+        }
         Frame::ResetStream {
             stream_id,
             application_error_code,
@@ -351,56 +366,71 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
         Frame::StopSending {
             stream_id,
             application_error_code,
-        } => QuicFrame::StopSending{stream_id: stream_id.as_u64(), error_code: *application_error_code},
-        Frame::Crypto { offset, data } => {
-            QuicFrame::Crypto{offset: *offset, length: data.len() as u64}
+        } => QuicFrame::StopSending {
+            stream_id: stream_id.as_u64(),
+            error_code: *application_error_code,
         },
-        Frame::NewToken { token } => QuicFrame::NewToken{
-            token: qlog::Token { ty: Some(qlog::TokenType::Retry), details: None, raw: Some(RawInfo {data: Some(hex(token)), length: Some(token.len() as u64), payload_length: None})}},
+        Frame::Crypto { offset, data } => QuicFrame::Crypto {
+            offset: *offset,
+            length: data.len() as u64,
+        },
+        Frame::NewToken { token } => QuicFrame::NewToken {
+            token: qlog::Token {
+                ty: Some(qlog::TokenType::Retry),
+                details: None,
+                raw: Some(RawInfo {
+                    data: Some(hex(token)),
+                    length: Some(token.len() as u64),
+                    payload_length: None,
+                }),
+            },
+        },
         Frame::Stream {
             fin,
             stream_id,
             offset,
             data,
             ..
-        } => QuicFrame::Stream{
+        } => QuicFrame::Stream {
             stream_id: stream_id.as_u64(),
             offset: *offset,
             length: data.len() as u64,
             fin: Some(*fin),
             raw: None,
         },
-        Frame::MaxData { maximum_data } => QuicFrame::MaxData{maximum: *maximum_data},
+        Frame::MaxData { maximum_data } => QuicFrame::MaxData {
+            maximum: *maximum_data,
+        },
         Frame::MaxStreamData {
             stream_id,
             maximum_stream_data,
-        } => QuicFrame::MaxStreamData{
+        } => QuicFrame::MaxStreamData {
             stream_id: stream_id.as_u64(),
             maximum: *maximum_stream_data,
         },
         Frame::MaxStreams {
             stream_type,
             maximum_streams,
-        } => QuicFrame::MaxStreams{
+        } => QuicFrame::MaxStreams {
             stream_type: match stream_type {
                 NeqoStreamType::BiDi => StreamType::Bidirectional,
                 NeqoStreamType::UniDi => StreamType::Unidirectional,
             },
             maximum: *maximum_streams,
         },
-        Frame::DataBlocked { data_limit } => QuicFrame::DataBlocked{limit: *data_limit},
+        Frame::DataBlocked { data_limit } => QuicFrame::DataBlocked { limit: *data_limit },
         Frame::StreamDataBlocked {
             stream_id,
             stream_data_limit,
-        } => QuicFrame::StreamDataBlocked{
+        } => QuicFrame::StreamDataBlocked {
             stream_id: stream_id.as_u64(),
             limit: *stream_data_limit,
         },
         Frame::StreamsBlocked {
             stream_type,
             stream_limit,
-        } => QuicFrame::StreamsBlocked{
-           stream_type: match stream_type {
+        } => QuicFrame::StreamsBlocked {
+            stream_type: match stream_type {
                 NeqoStreamType::BiDi => StreamType::Bidirectional,
                 NeqoStreamType::UniDi => StreamType::Unidirectional,
             },
@@ -411,23 +441,27 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             retire_prior,
             connection_id,
             stateless_reset_token,
-        } => QuicFrame::NewConnectionId{
+        } => QuicFrame::NewConnectionId {
             sequence_number: *sequence_number as u32,
             retire_prior_to: *retire_prior as u32,
             connection_id_length: Some(connection_id.len() as u8),
             connection_id: hex(connection_id),
             stateless_reset_token: Some(hex(stateless_reset_token)),
         },
-        Frame::RetireConnectionId { sequence_number } => {
-            QuicFrame::RetireConnectionId{sequence_number: *sequence_number as u32}
+        Frame::RetireConnectionId { sequence_number } => QuicFrame::RetireConnectionId {
+            sequence_number: *sequence_number as u32,
         },
-        Frame::PathChallenge { data } => QuicFrame::PathChallenge{data: Some(hex(data))},
-        Frame::PathResponse { data } => QuicFrame::PathResponse{data: Some(hex(data))},
+        Frame::PathChallenge { data } => QuicFrame::PathChallenge {
+            data: Some(hex(data)),
+        },
+        Frame::PathResponse { data } => QuicFrame::PathResponse {
+            data: Some(hex(data)),
+        },
         Frame::ConnectionClose {
             error_code,
             frame_type,
             reason_phrase,
-        } => QuicFrame::ConnectionClose{
+        } => QuicFrame::ConnectionClose {
             error_space: match error_code {
                 CloseError::Transport(_) => Some(ErrorSpace::TransportError),
                 CloseError::Application(_) => Some(ErrorSpace::ApplicationError),
@@ -438,8 +472,15 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             trigger_frame_type: Some(*frame_type),
         },
         Frame::HandshakeDone => QuicFrame::HandshakeDone,
-        Frame::AckFrequency { .. } => QuicFrame::Unknown{frame_type_value: None, raw_frame_type: frame.get_type(), raw: None},
-        Frame::Datagram { data, .. } => QuicFrame::Datagram { length: data.len() as u64, raw: None },
+        Frame::AckFrequency { .. } => QuicFrame::Unknown {
+            frame_type_value: None,
+            raw_frame_type: frame.get_type(),
+            raw: None,
+        },
+        Frame::Datagram { data, .. } => QuicFrame::Datagram {
+            length: data.len() as u64,
+            raw: None,
+        },
     }
 }
 

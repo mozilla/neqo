@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use qlog::{
-    self, CommonFields, Configuration, streamer::QlogStreamer, TraceSeq, VantagePoint,
+    self, streamer::QlogStreamer, CommonFields, Configuration, TraceSeq, VantagePoint,
     VantagePointType,
 };
 

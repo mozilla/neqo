@@ -492,7 +492,7 @@ impl HttpServer for SimpleServer {
                     stream
                         .send_headers(&[
                             Header::new(":status", "200"),
-                            Header::new("content-length", response.remaining),
+                            Header::new("content-length", response.remaining.to_string()),
                         ])
                         .unwrap();
                     response.send(&mut stream);

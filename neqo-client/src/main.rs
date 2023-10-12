@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use qlog::{streamer::QlogStreamer, events::EventImportance};
+use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
