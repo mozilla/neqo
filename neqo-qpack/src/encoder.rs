@@ -450,7 +450,7 @@ impl QPackEncoder {
         if !ref_entries.is_empty() {
             self.unacked_header_blocks
                 .entry(stream_id)
-                .or_insert_with(VecDeque::new)
+                .or_default()
                 .push_front(ref_entries);
             self.stats.dynamic_table_references += 1;
         }
