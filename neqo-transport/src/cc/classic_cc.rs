@@ -17,6 +17,8 @@ use crate::cc::MAX_DATAGRAM_SIZE;
 use crate::qlog::{self, QlogMetric};
 use crate::sender::PACING_BURST_SIZE;
 use crate::tracking::SentPacket;
+use ::qlog::events::quic::CongestionStateUpdated;
+use ::qlog::events::EventData;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -363,15 +365,17 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         if self.state != state {
             qdebug!([self], "state -> {:?}", state);
             let old_state = self.state;
-            self.qlog.add_event(|| {
+            self.qlog.add_event_data(|| {
                 // No need to tell qlog about exit from transient states.
                 if old_state.transient() {
                     None
                 } else {
-                    Some(::qlog::event::Event::congestion_state_updated(
-                        Some(old_state.to_qlog().to_owned()),
-                        state.to_qlog().to_owned(),
-                    ))
+                    let ev_data = EventData::CongestionStateUpdated(CongestionStateUpdated {
+                        old: Some(old_state.to_qlog().to_owned()),
+                        new: state.to_qlog().to_owned(),
+                        trigger: None,
+                    });
+                    Some(ev_data)
                 }
             });
             self.state = state;
