@@ -284,6 +284,18 @@ impl QuicParameters {
         if v4.is_none() && v6.is_none() {
             None
         } else {
+            let v4 = v4.map(|v4| {
+                let SocketAddr::V4(v4) = v4 else {
+                    unreachable!();
+                };
+                v4
+            });
+            let v6 = v6.map(|v6| {
+                let SocketAddr::V6(v6) = v6 else {
+                    unreachable!();
+                };
+                v6
+            });
             Some(PreferredAddress::new(v4, v6))
         }
     }
