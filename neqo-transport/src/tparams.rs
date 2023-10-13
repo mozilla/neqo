@@ -93,11 +93,15 @@ impl PreferredAddress {
         use std::net::SocketAddr;
 
         let v4 = v4.map(|v4| {
-            let SocketAddr::V4(v4) = v4 else { panic!("not v4"); };
+            let SocketAddr::V4(v4) = v4 else {
+                panic!("not v4");
+            };
             v4
         });
         let v6 = v6.map(|v6| {
-            let SocketAddr::V6(v6) = v6 else { panic!("not v6"); };
+            let SocketAddr::V6(v6) = v6 else {
+                panic!("not v6");
+            };
             v6
         });
         Self::new(v4, v6)

@@ -1702,8 +1702,8 @@ impl Connection {
             // be needed to work out how to get addresses from a different family.
             let prev = self.paths.primary().borrow().remote_address();
             let remote = match prev.ip() {
-                IpAddr::V4(_) => addr.ipv4().map(|a| SocketAddr::V4(a)),
-                IpAddr::V6(_) => addr.ipv6().map(|a| SocketAddr::V6(a)),
+                IpAddr::V4(_) => addr.ipv4().map(SocketAddr::V4),
+                IpAddr::V6(_) => addr.ipv6().map(SocketAddr::V6),
             };
 
             if let Some(remote) = remote {
