@@ -6,28 +6,34 @@
 
 // Functions that handle capturing QLOG traces.
 
-use std::convert::TryFrom;
-use std::ops::{Deref, RangeInclusive};
-use std::string::String;
-use std::time::Duration;
-
-use qlog::events::connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated};
-use qlog::events::quic::{
-    AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
-    PacketReceived, PacketSent, QuicFrame, StreamType,
+use std::{
+    convert::TryFrom,
+    ops::{Deref, RangeInclusive},
+    string::String,
+    time::Duration,
 };
-use qlog::events::{Event, EventData, RawInfo};
+
+use qlog::events::{
+    connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
+    quic::{
+        AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
+        PacketReceived, PacketSent, QuicFrame, StreamType,
+    },
+    Event, EventData, RawInfo,
+};
 
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 use smallvec::SmallVec;
 
-use crate::connection::State;
-use crate::frame::{CloseError, Frame};
-use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
-use crate::path::PathRef;
-use crate::stream_id::StreamType as NeqoStreamType;
-use crate::tparams::{self, TransportParametersHandler};
-use crate::tracking::SentPacket;
+use crate::{
+    connection::State,
+    frame::{CloseError, Frame},
+    packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket},
+    path::PathRef,
+    stream_id::StreamType as NeqoStreamType,
+    tparams::{self, TransportParametersHandler},
+    tracking::SentPacket,
+};
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
     qlog.add_event(|| {
@@ -338,13 +344,13 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             let ranges =
                 Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges).ok();
 
-            let acked_ranges = ranges
-                .map(|all| {
+            let acked_ranges = ranges.map(|all| {
+                AckedRanges::Double(
                     all.into_iter()
                         .map(RangeInclusive::into_inner)
-                        .collect::<Vec<_>>()
-                })
-                .and_then(|r| Some(AckedRanges::Double(r)));
+                        .collect::<Vec<_>>(),
+                )
+            });
 
             QuicFrame::Ack {
                 ack_delay: Some(*ack_delay as f32 / 1000.0),
