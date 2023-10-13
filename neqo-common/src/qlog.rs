@@ -4,10 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cell::RefCell;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    fmt,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use qlog::{
     self, streamer::QlogStreamer, CommonFields, Configuration, TraceSeq, VantagePoint,
@@ -132,8 +134,11 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
             group_id: None,
             protocol_type: None,
             reference_time: {
-                let datetime = time::OffsetDateTime::now_utc();
-                Some(datetime.unix_timestamp() as f64)
+                // It is better to allow this than deal with a conversion from i64 to f64.
+                // We can't do the obvious two-step conversion with f64::from(i32::try_from(...)),
+                // because that overflows earlier than is ideal.  This should be fine for a while.
+                #[allow(clippy::cast_precision_loss)]
+                Some(time::OffsetDateTime::now_utc().unix_timestamp() as f64)
             },
             time_format: Some("relative".to_string()),
         }),
