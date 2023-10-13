@@ -108,9 +108,10 @@ impl Debug for Pacer {
     }
 }
 
-#[cfg(tests)]
+#[cfg(test)]
 mod tests {
     use super::Pacer;
+    use std::time::Duration;
     use test_fixture::now;
 
     const RTT: Duration = Duration::from_millis(1000);
@@ -119,20 +120,51 @@ mod tests {
 
     #[test]
     fn even() {
-        let mut n = now();
-        let p = Pacer::new(n, PACKET, PACKET);
-        assert_eq!(p.next(RTT, CWND), None);
+        let n = now();
+        let mut p = Pacer::new(n, PACKET, PACKET);
+        assert_eq!(p.next(RTT, CWND), n);
         p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), Some(n + (RTT / 10)));
+        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
     #[test]
     fn backwards_in_time() {
-        let mut n = now();
-        let p = Pacer::new(n + RTT, PACKET, PACKET);
-        assert_eq!(p.next(RTT, CWND), None);
+        let n = now();
+        let mut p = Pacer::new(n + RTT, PACKET, PACKET);
+        assert_eq!(p.next(RTT, CWND), n + RTT);
         // Now spend some credit in the past using a time machine.
         p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), Some(n + (RTT / 10)));
+        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
+    }
+
+    #[test]
+    fn paced_small_cwnd() {
+        const MTU: usize = 1357;
+        const BURST_SIZE: usize = 2;
+        const SMALL_CWND: usize = 100 * MTU;
+        const SMALL_RTT: Duration = Duration::from_millis(20);
+        const INTERVAL: Duration = Duration::from_micros(30);
+
+        let mut n = now();
+        let mut p = Pacer::new(n, MTU * BURST_SIZE, MTU);
+
+        assert_eq!(p.next(SMALL_RTT, SMALL_CWND), n);
+
+        // The minimum timer wait time in necko is 1ms. This simulates
+        // the scenario where necko waits for 1ms before calling process_output.
+        n += Duration::from_millis(1);
+        p.spend(n, SMALL_RTT, SMALL_CWND, MTU);
+        assert!(p.next(SMALL_RTT, SMALL_CWND) <= n);
+
+        // The interval between each call to process_output is quite short,
+        // so the capacity in the pacer is incremented by only a small value.
+        n += INTERVAL;
+        p.spend(n, SMALL_RTT, SMALL_CWND, MTU);
+        assert!(p.next(SMALL_RTT, SMALL_CWND) <= n);
+
+        // The capacity will be smaller than MTU after calling spend below.
+        n += INTERVAL;
+        p.spend(n, SMALL_RTT, SMALL_CWND, MTU);
+        assert!(p.next(SMALL_RTT, SMALL_CWND) > n);
     }
 }
