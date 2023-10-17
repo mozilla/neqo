@@ -19,5 +19,4 @@ lazy_static = "1.3.0"
 test-fixture = { path = "../test-fixture" }
 
 [features]
-default = ["deny-warnings"]
 deny-warnings = []
