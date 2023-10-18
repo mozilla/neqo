@@ -329,7 +329,7 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
             Output::Datagram(dgram) => {
                 total_dgrams.push(dgram);
             }
-            Output::Callback(t) => {
+            Output::Callback(t) | Output::PacedCallback(t) => {
                 if cwnd(c) < ACK_ONLY_SIZE_LIMIT {
                     break;
                 }
@@ -361,7 +361,7 @@ fn increase_cwnd(
             Output::Datagram(dgram) => {
                 receiver.process_input(dgram, now + DEFAULT_RTT / 2);
             }
-            Output::Callback(t) => {
+            Output::Callback(t) | Output::PacedCallback(t) => {
                 if t < DEFAULT_RTT {
                     now += t;
                 } else {

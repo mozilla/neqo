@@ -404,7 +404,7 @@ fn process_loop(
                         break;
                     }
                 }
-                Output::Callback(duration) => {
+                Output::Callback(duration) | Output::PacedCallback(duration) => {
                     socket.set_read_timeout(Some(duration)).unwrap();
                     break;
                 }
@@ -1095,7 +1095,7 @@ mod old {
                             break;
                         }
                     }
-                    Output::Callback(duration) => {
+                    Output::Callback(duration) | Output::PacedCallback(duration) => {
                         socket.set_read_timeout(Some(duration)).unwrap();
                         break;
                     }

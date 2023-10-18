@@ -713,7 +713,7 @@ impl ServersRunner {
                 emit_packet(socket, dgram);
                 true
             }
-            Output::Callback(new_timeout) => {
+            Output::Callback(new_timeout) | Output::PacedCallback(new_timeout) => {
                 if let Some(to) = &self.timeout {
                     self.timer.cancel_timeout(to);
                 }

@@ -279,7 +279,7 @@ fn zero_rtt() {
         client.stream_send(client_stream, &[1, 2, 3]).unwrap();
         match client.process(None, now) {
             Output::Datagram(d) => d,
-            Output::Callback(t) => {
+            Output::Callback(t) | Output::PacedCallback(t) => {
                 // Pacing...
                 now += t;
                 client.process(None, now).dgram().unwrap()

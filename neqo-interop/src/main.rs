@@ -118,7 +118,7 @@ fn process_loop(
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
                     emit_datagram(&nctx.socket, dgram);
                 }
-                Output::Callback(duration) => {
+                Output::Callback(duration) | Output::PacedCallback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
                     break;
@@ -280,7 +280,7 @@ fn process_loop_h3(
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
                 Output::Datagram(dgram) => emit_datagram(&nctx.socket, dgram),
-                Output::Callback(duration) => {
+                Output::Callback(duration) | Output::PacedCallback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
                     break;

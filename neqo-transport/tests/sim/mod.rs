@@ -191,7 +191,7 @@ impl Simulator {
                         dgram = Some(d);
                         Active
                     }
-                    Output::Callback(delay) => {
+                    Output::Callback(delay) | Output::PacedCallback(delay) => {
                         qtrace!([self.name], " => callback {:?}", delay);
                         assert_ne!(delay, Duration::new(0, 0));
                         Waiting(now + delay)

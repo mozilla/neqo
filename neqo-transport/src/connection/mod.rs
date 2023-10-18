@@ -103,6 +103,9 @@ pub enum Output {
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
+    /// Like the Callback above, but this is used when the delay is requested by
+    /// the pacer.
+    PacedCallback(Duration),
 }
 
 impl Output {
@@ -128,6 +131,7 @@ impl Output {
     pub fn callback(&self) -> Duration {
         match self {
             Self::Callback(t) => *t,
+            Self::PacedCallback(t) => *t,
             _ => Duration::new(0, 0),
         }
     }
@@ -1013,7 +1017,13 @@ impl Connection {
                 State::Closing { timeout, .. } | State::Draining { timeout, .. } => {
                     Output::Callback(timeout.duration_since(now))
                 }
-                _ => Output::Callback(self.next_delay(now, paced)),
+                _ => {
+                    if paced {
+                        Output::PacedCallback(self.next_delay(now, true))
+                    } else {
+                        Output::Callback(self.next_delay(now, false))
+                    }
+                }
             },
         }
     }

@@ -164,7 +164,7 @@ fn repairing_loss() {
     for _ in 0..5 {
         match client.process_output(now) {
             Output::Datagram(d) => server.process_input(d, now),
-            Output::Callback(delay) => now += delay,
+            Output::Callback(delay) | Output::PacedCallback(delay) => now += delay,
             Output::None => unreachable!(),
         }
     }

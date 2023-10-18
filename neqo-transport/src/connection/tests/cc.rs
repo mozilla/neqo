@@ -407,7 +407,7 @@ fn pace() {
     assert_ne!(gap, Duration::new(0, 0));
     for _ in (1 + PACING_BURST_SIZE)..cwnd_packets(POST_HANDSHAKE_CWND) {
         match client.process_output(now) {
-            Output::Callback(t) => assert_eq!(t, gap),
+            Output::Callback(t) | Output::PacedCallback(t) => assert_eq!(t, gap),
             Output::Datagram(_) => {
                 // The last packet might not be paced.
                 count += 1;
