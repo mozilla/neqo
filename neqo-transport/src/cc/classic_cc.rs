@@ -21,6 +21,8 @@ use ::qlog::events::quic::CongestionStateUpdated;
 use ::qlog::events::EventData;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
+const UNUSED: usize = 0;
+
 pub const CWND_INITIAL_PKTS: usize = 10;
 pub const CWND_INITIAL: usize = const_min(
     CWND_INITIAL_PKTS * MAX_DATAGRAM_SIZE,
@@ -47,6 +49,9 @@ enum State {
 
 impl State {
     pub fn in_recovery(self) -> bool {
+        match () {
+            _ => {}
+        }
         matches!(self, Self::RecoveryStart | Self::Recovery)
     }
 
