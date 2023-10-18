@@ -22,7 +22,6 @@ mozbuild = {version = "0.1", optional = true}
 test-fixture = { path = "../test-fixture" }
 
 [features]
-default = ["deny-warnings"]
 deny-warnings = []
 gecko = ["mozbuild"]
 fuzzing = []

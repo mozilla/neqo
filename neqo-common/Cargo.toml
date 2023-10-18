@@ -15,7 +15,6 @@ qlog = "0.9.0"
 time = {version = "=0.3.23", features = ["formatting"]}
 
 [features]
-default = ["deny-warnings"]
 deny-warnings = []
 
 [target."cfg(windows)".dependencies.winapi]

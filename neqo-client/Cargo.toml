@@ -19,5 +19,4 @@ url = "2.0"
 qlog = "0.9.0"
 
 [features]
-default = ["deny-warnings"]
 deny-warnings = []

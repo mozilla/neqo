@@ -19,6 +19,5 @@ indexmap = "1.0"
 test-fixture = { path = "../test-fixture" }
 
 [features]
-default = ["deny-warnings"]
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]

@@ -23,6 +23,5 @@ enumset = "1.0.8"
 test-fixture = { path = "../test-fixture" }
 
 [features]
-default = ["deny-warnings"]
 deny-warnings = []
 fuzzing = ["neqo-transport/fuzzing", "neqo-crypto/fuzzing"]
