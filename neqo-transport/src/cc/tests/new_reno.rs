@@ -9,7 +9,7 @@
 
 use crate::cc::new_reno::NewReno;
 use crate::cc::{ClassicCongestionControl, CongestionControl, CWND_INITIAL, MAX_DATAGRAM_SIZE};
-use crate::packet::{PacketNumber, PacketType};
+use crate::packet::PacketType;
 use crate::tracking::SentPacket;
 use std::time::Duration;
 use test_fixture::now;
@@ -136,27 +136,27 @@ fn issue_1465() {
     let mut cc = ClassicCongestionControl::new(NewReno::default());
     let mut pn = 0;
     let mut now = now();
-    let next_packet = |pn: &mut PacketNumber, now| {
+    let mut next_packet = |now| {
         let p = SentPacket::new(
             PacketType::Short,
-            *pn,               // pn
+            pn,                // pn
             now,               // time_sent
             true,              // ack eliciting
             Vec::new(),        // tokens
             MAX_DATAGRAM_SIZE, // size
         );
-        *pn += 1;
+        pn += 1;
         p
     };
-    let send_next = |cc: &mut ClassicCongestionControl<NewReno>, pn: &mut PacketNumber, now| {
-        let p = next_packet(pn, now);
+    let mut send_next = |cc: &mut ClassicCongestionControl<NewReno>, now| {
+        let p = next_packet(now);
         cc.on_packet_sent(&p);
         p
     };
 
-    let p1 = send_next(&mut cc, &mut pn, now);
-    let p2 = send_next(&mut cc, &mut pn, now);
-    let p3 = send_next(&mut cc, &mut pn, now);
+    let p1 = send_next(&mut cc, now);
+    let p2 = send_next(&mut cc, now);
+    let p3 = send_next(&mut cc, now);
 
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_default(&cc);
@@ -186,14 +186,14 @@ fn issue_1465() {
     assert_eq!(cc.bytes_in_flight(), 0);
 
     // send out recovery packet and get it acked to get out of recovery state
-    let p4 = send_next(&mut cc, &mut pn, now);
+    let p4 = send_next(&mut cc, now);
     cc.on_packet_sent(&p4);
     now += RTT;
     cc.on_packets_acked(&[p4], RTT, now);
 
     // do the same as in the first rtt but now the bug appears
-    let p5 = send_next(&mut cc, &mut pn, now);
-    let p6 = send_next(&mut cc, &mut pn, now);
+    let p5 = send_next(&mut cc, now);
+    let p6 = send_next(&mut cc, now);
     now += RTT;
 
     let cur_cwnd = cc.cwnd();
