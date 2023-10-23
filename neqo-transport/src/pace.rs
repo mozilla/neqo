@@ -26,6 +26,8 @@ const PACER_SPEEDUP: usize = 2;
 
 /// A pacer that uses a leaky bucket.
 pub struct Pacer {
+    /// The timer accuracy
+    accuracy: Duration,
     /// The last update time.
     t: Instant,
     /// The maximum capacity, or burst size, in bytes.
@@ -49,7 +51,7 @@ impl Pacer {
     /// fraction of the maximum packet size, if not the packet size.
     pub fn new(now: Instant, m: usize, p: usize) -> Self {
         assert!(m >= p, "maximum capacity has to be at least one packet");
-        Self { t: now, m, c: m, p }
+        Self { accuracy: Duration::from_millis(15), t: now, m, c: m, p }
     }
 
     /// Determine when the next packet will be available based on the provided RTT
@@ -82,17 +84,34 @@ impl Pacer {
         // Increase the capacity by:
         //    `(now - self.t) * PACER_SPEEDUP * cwnd / rtt`
         // That is, the elapsed fraction of the RTT times rate that data is added.
-        let incr = now
-            .saturating_duration_since(self.t)
-            .as_nanos()
-            .saturating_mul(u128::try_from(cwnd * PACER_SPEEDUP).unwrap())
-            .checked_div(rtt.as_nanos())
-            .and_then(|i| usize::try_from(i).ok())
-            .unwrap_or(self.m);
 
-        // Add the capacity up to a limit of `self.m`, then subtract `count`.
-        self.c = min(self.m, (self.c + incr).saturating_sub(count));
-        self.t = now;
+        if now.saturating_duration_since(self.t) < self.accuracy && now < self.t {
+            // when called within timer accuracy, assume that we just want to continuously send
+            // This is the inverse of the function in `spend`:
+            // self.t + rtt * (self.m - self.c) / (PACER_SPEEDUP * cwnd)
+            let r = rtt.as_nanos();
+            let capacity_to_add = self.m.saturating_sub(self.c.saturating_sub(count));
+            let d = r.saturating_mul(u128::try_from(capacity_to_add).unwrap());
+            let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
+            let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
+            let nxt = self.t + w;
+            qtrace!([self], "next {}/{:?} wait {:?} = {:?}", cwnd, rtt, w, nxt);
+            self.t = nxt;
+            self.c = self.m;
+        } else {
+            let incr = now
+                .saturating_duration_since(self.t)
+                .as_nanos()
+                .saturating_mul(u128::try_from(cwnd * PACER_SPEEDUP).unwrap())
+                .checked_div(rtt.as_nanos())
+                .and_then(|i| usize::try_from(i).ok())
+                .unwrap_or(self.m);
+
+            // Add the capacity up to a limit of `self.m`, then subtract `count`.
+            self.c = min(self.m, (self.c + incr).saturating_sub(count));
+            self.t = now;
+
+        }
     }
 }
 
