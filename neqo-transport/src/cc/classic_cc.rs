@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use super::CongestionControl;
 
 use crate::cc::MAX_DATAGRAM_SIZE;
+use crate::packet::PacketNumber;
 use crate::qlog::{self, QlogMetric};
 use crate::sender::PACING_BURST_SIZE;
 use crate::tracking::SentPacket;
@@ -109,7 +110,7 @@ pub struct ClassicCongestionControl<T> {
     bytes_in_flight: usize,
     acked_bytes: usize,
     ssthresh: usize,
-    recovery_start: Option<Instant>,
+    recovery_start: Option<PacketNumber>,
 
     qlog: NeqoQlog,
 }
@@ -293,7 +294,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn on_packet_sent(&mut self, pkt: &SentPacket) {
         // Record the recovery time and exit any transient state.
         if self.state.transient() {
-            self.recovery_start = Some(pkt.time_sent);
+            self.recovery_start = Some(pkt.pn);
             self.state.update();
         }
 
@@ -443,7 +444,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // state and update the variable `self.recovery_start`. Before the
         // first recovery, all packets were sent after the recovery event,
         // allowing to reduce the cwnd on congestion events.
-        !self.state.transient() && self.recovery_start.map_or(true, |t| packet.time_sent >= t)
+        !self.state.transient() && self.recovery_start.map_or(true, |pn| packet.pn >= pn)
     }
 
     /// Handle a congestion event.
