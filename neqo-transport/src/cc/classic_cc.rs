@@ -163,7 +163,18 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         );
 
         let mut new_acked = 0;
-        for pkt in acked_pkts.iter().filter(|pkt| pkt.cc_outstanding()) {
+        for pkt in acked_pkts {
+            qinfo!(
+                "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}",
+                self,
+                pkt.pn,
+                pkt.size,
+                i32::from(!pkt.cc_outstanding()),
+                i32::from(pkt.lost())
+            );
+            if !pkt.cc_outstanding() {
+                continue;
+            }
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
@@ -183,10 +194,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
+            qinfo!("on_packets_acked this={:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
             return;
         }
-
-        qtrace!([self], "ACK received, acked_bytes = {}", self.acked_bytes);
 
         // Slow start, up to the slow start threshold.
         if self.congestion_window < self.ssthresh {
@@ -235,6 +245,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 QlogMetric::BytesInFlight(self.bytes_in_flight),
             ],
         );
+        qinfo!([self], "on_packets_acked this={:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
     }
 
     /// Update congestion controller state based on lost packets.
@@ -250,6 +261,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         for pkt in lost_packets.iter().filter(|pkt| pkt.cc_in_flight()) {
+            qinfo!(
+                "packet_lost this={:?}, pn={}, ps={}",
+                self,
+                pkt.pn,
+                pkt.size
+            );
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
         }
@@ -258,14 +275,19 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
 
-        qdebug!([self], "Pkts lost {}", lost_packets.len());
-
         let congestion = self.on_congestion_event(lost_packets.last().unwrap());
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
             lost_packets,
+        );
+        qinfo!(
+            "on_packets_lost this={:p}, bytes_in_flight={}, cwnd={}, state={:?}",
+            self,
+            self.bytes_in_flight,
+            self.congestion_window,
+            self.state
         );
         congestion || persistent_congestion
     }
@@ -302,12 +324,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         self.bytes_in_flight += pkt.size;
-        qdebug!(
-            [self],
-            "Pkt Sent len {}, bif {}, cwnd {}",
-            pkt.size,
-            self.bytes_in_flight,
-            self.congestion_window
+        qinfo!(
+            "packet_sent this={:p}, pn={}, ps={}",
+            self,
+            pkt.pn,
+            pkt.size
         );
         qlog::metrics_updated(
             &mut self.qlog,
