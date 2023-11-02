@@ -63,8 +63,13 @@ impl PacketSender {
         self.cc.cwnd_avail()
     }
 
-    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], min_rtt: Duration, now: Instant) {
-        self.cc.on_packets_acked(acked_pkts, min_rtt, now);
+    pub fn on_packets_acked(
+        &mut self,
+        acked_pkts: &[SentPacket],
+        min_rtt: Duration,
+        now: Instant,
+    ) -> bool {
+        self.cc.on_packets_acked(acked_pkts, min_rtt, now)
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.

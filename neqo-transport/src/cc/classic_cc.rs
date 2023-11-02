@@ -149,7 +149,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     }
 
     // Multi-packet version of OnPacketAckedCC
-    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], min_rtt: Duration, now: Instant) {
+    fn on_packets_acked(
+        &mut self,
+        acked_pkts: &[SentPacket],
+        min_rtt: Duration,
+        now: Instant,
+    ) -> bool {
         // Check whether we are app limited before acked packets are removed
         // from bytes_in_flight.
         let is_app_limited = self.app_limited();
@@ -163,6 +168,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
         );
 
+        let mut exiting_recovery = false;
         let mut new_acked = 0;
         for pkt in acked_pkts {
             qinfo!(
@@ -187,6 +193,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance);
+                exiting_recovery = true;
                 qlog::metrics_updated(&mut self.qlog, &[QlogMetric::InRecovery(false)]);
             }
 
@@ -196,7 +203,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
             qinfo!("on_packets_acked this={:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
-            return;
+            return exiting_recovery;
         }
 
         // Slow start, up to the slow start threshold.
@@ -247,6 +254,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             ],
         );
         qinfo!([self], "on_packets_acked this={:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
+        exiting_recovery
     }
 
     /// Update congestion controller state based on lost packets.
