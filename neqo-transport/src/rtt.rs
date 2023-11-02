@@ -146,6 +146,16 @@ impl RttEstimate {
         max(rtt * 9 / 8, GRANULARITY)
     }
 
+    /// Frin RFC9002 Section 6.1.2 Time Treshhold
+    /// Using `max(smoothed_rtt, latest_rtt)` protects from the two following cases:
+    //   * the latest RTT sample is lower than the smoothed RTT, perhaps due to reordering where the
+    //     acknowledgment encountered a shorter path;
+    //   * the latest RTT sample is higher than the smoothed RTT, perhaps due to a sustained
+    //     increase in the actual RTT, but the smoothed RTT has not yet caught up.
+    pub fn estimated_upper(&self) -> Duration {
+        max(self.latest_rtt, self.smoothed_rtt)
+    }
+
     pub fn first_sample_time(&self) -> Option<Instant> {
         self.first_sample_time
     }
