@@ -263,7 +263,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         for pkt in lost_packets.iter().filter(|pkt| pkt.cc_in_flight()) {
             qinfo!(
-                "packet_lost this={:?}, pn={}, ps={}",
+                "packet_lost this={:p}, pn={}, ps={}",
                 self,
                 pkt.pn,
                 pkt.size
