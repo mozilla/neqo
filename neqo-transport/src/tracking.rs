@@ -891,13 +891,17 @@ mod tests {
         assert!(rp.ack_now(*NOW, RTT));
     }
 
-    fn write_frame(rp: &mut RecvdPackets) {
+    fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let mut stats = FrameStats::default();
         let mut tokens = Vec::new();
-        rp.write_frame(*NOW, RTT, &mut builder, &mut tokens, &mut stats);
+        rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
         assert!(!tokens.is_empty());
         assert_eq!(stats.ack, 1);
+    }
+
+    fn write_frame(rp: &mut RecvdPackets) {
+        write_frame_at(rp, *NOW);
     }
 
     #[test]
@@ -908,8 +912,26 @@ mod tests {
 
         // Filling in behind the largest acknowledged causes immediate ACK.
         rp.set_received(*NOW, 0, true);
-        assert_eq!(Some(*NOW), rp.ack_time());
-        assert!(rp.ack_now(*NOW, RTT));
+        write_frame(&mut rp);
+
+        // Receiving the next packet won't elicit an ACK.
+        rp.set_received(*NOW, 2, true);
+        assert!(!rp.ack_now(*NOW, RTT))
+    }
+
+    #[test]
+    fn immediate_ack_after_rtt() {
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        rp.set_received(*NOW, 1, true);
+        write_frame(&mut rp);
+
+        // Filling in behind the largest acknowledged causes immediate ACK.
+        rp.set_received(*NOW, 0, true);
+        write_frame(&mut rp);
+
+        // A new packet ordinarily doesn't result in an ACK, but this time it does.
+        rp.set_received(*NOW + RTT, 2, true);
+        write_frame_at(&mut rp, *NOW + RTT);
     }
 
     #[test]
