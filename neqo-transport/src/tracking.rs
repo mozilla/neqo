@@ -916,7 +916,7 @@ mod tests {
 
         // Receiving the next packet won't elicit an ACK.
         rp.set_received(*NOW, 2, true);
-        assert!(!rp.ack_now(*NOW, RTT))
+        assert!(!rp.ack_now(*NOW, RTT));
     }
 
     #[test]
