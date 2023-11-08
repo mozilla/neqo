@@ -89,8 +89,8 @@ impl IdleTimeout {
         }
     }
 
-    pub fn expired(&self, now: Instant, pto: Duration) -> bool {
-        now >= self.expiry(now, pto, false)
+    pub fn expired(&self, now: Instant, pto: Duration, keep_alive: bool) -> bool {
+        now >= self.expiry(now, pto, keep_alive)
     }
 
     pub fn send_keep_alive(

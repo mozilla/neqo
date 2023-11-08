@@ -887,7 +887,8 @@ impl Connection {
         }
 
         let pto = self.pto();
-        if self.idle_timeout.expired(now, pto) {
+        let keep_alive = self.streams.need_keep_alive();
+        if self.idle_timeout.expired(now, pto, keep_alive) {
             qinfo!([self], "idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::IdleTimeout,
