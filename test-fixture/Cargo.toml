@@ -1,6 +1,6 @@
 [package]
 name = "test-fixture"
-version = "0.6.6"
+version = "0.6.7"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"
 rust-version = "1.65.0"
