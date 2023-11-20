@@ -7,19 +7,22 @@
 // Congestion control
 #![deny(clippy::pedantic)]
 
-use std::cmp::{max, min};
-use std::fmt::{self, Debug, Display};
-use std::time::{Duration, Instant};
+use std::{
+    cmp::{max, min},
+    fmt::{self, Debug, Display},
+    time::{Duration, Instant},
+};
 
 use super::CongestionControl;
 
-use crate::cc::MAX_DATAGRAM_SIZE;
-use crate::packet::PacketNumber;
-use crate::qlog::{self, QlogMetric};
-use crate::sender::PACING_BURST_SIZE;
-use crate::tracking::SentPacket;
-use ::qlog::events::quic::CongestionStateUpdated;
-use ::qlog::events::EventData;
+use crate::{
+    cc::MAX_DATAGRAM_SIZE,
+    packet::PacketNumber,
+    qlog::{self, QlogMetric},
+    sender::PACING_BURST_SIZE,
+    tracking::SentPacket,
+};
+use ::qlog::events::{quic::CongestionStateUpdated, EventData};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -439,7 +442,11 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                 continue;
             }
             if let Some(t) = start {
-                if p.time_sent.checked_duration_since(t).unwrap() > pc_period {
+                let elapsed = p
+                    .time_sent
+                    .checked_duration_since(t)
+                    .expect("time is monotonic");
+                if elapsed > pc_period {
                     qinfo!([self], "persistent congestion");
                     self.congestion_window = CWND_MIN;
                     self.acked_bytes = 0;
@@ -523,15 +530,19 @@ mod tests {
     use super::{
         ClassicCongestionControl, WindowAdjustment, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH,
     };
-    use crate::cc::cubic::{Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR};
-    use crate::cc::new_reno::NewReno;
-    use crate::cc::{
-        CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
+    use crate::{
+        cc::{
+            cubic::{Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR},
+            new_reno::NewReno,
+            CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
+        },
+        packet::{PacketNumber, PacketType},
+        tracking::SentPacket,
     };
-    use crate::packet::{PacketNumber, PacketType};
-    use crate::tracking::SentPacket;
-    use std::convert::TryFrom;
-    use std::time::{Duration, Instant};
+    use std::{
+        convert::TryFrom,
+        time::{Duration, Instant},
+    };
     use test_fixture::now;
 
     const PTO: Duration = Duration::from_millis(100);
@@ -952,7 +963,7 @@ mod tests {
 
     /// The code asserts on ordering errors.
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "time is monotonic")]
     fn persistent_congestion_unsorted_newreno() {
         let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
         assert!(!persistent_congestion_by_pto(
@@ -965,7 +976,7 @@ mod tests {
 
     /// The code asserts on ordering errors.
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "time is monotonic")]
     fn persistent_congestion_unsorted_cubic() {
         let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
         assert!(!persistent_congestion_by_pto(
