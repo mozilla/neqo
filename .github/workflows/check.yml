@@ -39,8 +39,6 @@ jobs:
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
-          python -v || true
-          brew search python || true
           brew install --force --overwrite ninja mercurial
           python3 -m pip install gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
