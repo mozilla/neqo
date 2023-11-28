@@ -27,7 +27,7 @@ impl Period {
     const MIN: Period = Period(1);
 
     #[cfg(windows)]
-    fn as_uint(self) -> UINT {
+    fn as_uint(&self) -> UINT {
         UINT::from(self.0)
     }
 
