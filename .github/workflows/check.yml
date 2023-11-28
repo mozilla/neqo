@@ -5,101 +5,108 @@ env:
 
 jobs:
   check:
-    name: Neqo Build and Test
-    runs-on: ubuntu-22.04
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+    name: Build & test
     strategy:
+      fail-fast: false
       matrix:
-        rust-toolchain: [stable, 1.65.0]
+        os: [ubuntu-latest, macos-latest] #, windows-latest]
+        rust-toolchain: [1.65.0, stable] #, beta]
+    runs-on: ${{ matrix.os }}
+    defaults:
+          run:
+            shell: ${{ matrix.os == 'windows-latest' && 'msys2 {0}' || 'bash' }}
 
     steps:
-      - name: Install Packages
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust-toolchain }}
+          components: rustfmt, clippy
+
+      - name: Install Rust tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest, cargo-llvm-cov
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         env:
           DEBIAN_FRONTEND: noninteractive
-          llvm_version: 14
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            clang \
-            coreutils \
-            curl \
-            git \
-            gyp \
-            libclang-dev \
-            libssl-dev \
-            lld \
-            llvm-"$llvm_version" \
-            llvm-"$llvm_version"-runtime \
-            make \
-            mercurial \
-            ninja-build \
-            pkg-config \
-            ssh \
-            zlib1g-dev \
-            --no-install-recommends
-          [ -d "/usr/lib/llvm-$llvm_version/lib" ]
-          echo "LIBCLANG_DIR=/usr/lib/llvm-$llvm_version/lib" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build
 
-      # Rust installation cribbed from Dockerfiles at https://github.com/rust-lang/docker-rust
-      - name: Install Rust
+      - name: Install dependencies (MacOS)
+        if: runner.os == 'MacOS'
         run: |
-          export RUSTUP_HOME=~/.rustup
-          export CARGO_HOME=~/.cargo
-          rustup_dir=`mktemp -d /tmp/rustup-XXXXX`
-          mkdir -p "$rustup_dir"
-          rustup_init="$rustup_dir/rustup-init"
-          rustup_url="https://static.rust-lang.org/rustup/archive/$rustup_version/$rustup_host/rustup-init"
-          curl -SsLf "$rustup_url" -o "$rustup_init"
-          echo "${rustup_hash} $rustup_init" | sha256sum -c -
-          chmod +x "$rustup_init"
-          "$rustup_init" -y -q --no-modify-path --profile minimal \
-            --default-toolchain ${{ matrix.rust-toolchain }} \
-            --default-host "$rustup_host" \
-            --component clippy --component rustfmt
-          rm -rf "$rustup_dir"
-          chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
-          "$CARGO_HOME/bin/rustup" default ${{ matrix.rust-toolchain }}
-          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
-          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
-        env:
-          rustup_version: 1.26.0
-          rustup_host: x86_64-unknown-linux-gnu
-          rustup_hash: 0b2f6c8f85a3d02fde2efc0ced4657869d73fccfce59defb4e8d29233116e6db
+          python -v || true
+          brew search python || true
+          brew install --force --overwrite ninja mercurial
+          python3 -m pip install gyp-next
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          install: nsinstall
+          path-type: inherit
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
       # (neqo-crypto/build.rs would also need to query pkg-config to get the
       # right build flags rather than building NSS.)
+      # We're also tweaking the NSS checkout for Windows builds.
       - name: Fetch NSS and NSPR
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+          git config --global core.autocrlf false
           git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+          sed -i.bak 's/-w44996//' "$NSS_DIR"/lib/sqlite/Makefile
           echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
           echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
         env:
           NSS_DIR: ${{ github.workspace }}/nss
           NSPR_DIR: ${{ github.workspace }}/nspr
 
-      - name: Build
-        run: cargo +${{ matrix.rust-toolchain }} build -v --tests
+      # - name: NSS build attempt (Windows)
+      #   if: runner.os == 'Windows'
+      #   run: |
+      #     make -C "$NSS_DIR" nss_build_all USE_64=1 NS_USE_GCC=1
 
-      - name: Run Tests
-        run: cargo +${{ matrix.rust-toolchain }} test -v
+      - name: Build
+        run: |
+          cargo +${{ matrix.rust-toolchain }} build -v --all-targets
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Release/lib" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/dist/Release/lib" >> "$GITHUB_ENV"
+
+      - name: Run tests
+        run: cargo +${{ matrix.rust-toolchain }} nextest run -v
         env:
-           LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
            RUST_BACKTRACE: 1
            RUST_LOG: neqo=debug
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
-        if: ${{ success() || failure() }}
+        if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
-        if: ${{ success() || failure() }}
+        run: cargo +${{ matrix.rust-toolchain }} clippy --tests -- -D warnings
+        if: success() || failure()
+
+      - name: Determine converage
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --all-targets --no-fail-fast --lcov --output-path lcov.info
+        env:
+           RUST_BACKTRACE: 1
+           RUST_LOG: neqo=debug
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: lcov.info
+          fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
