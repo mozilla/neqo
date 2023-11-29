@@ -13,8 +13,8 @@ jobs:
         rust-toolchain: [1.65.0, stable] #, beta]
     runs-on: ${{ matrix.os }}
     defaults:
-          run:
-            shell: ${{ matrix.os == 'windows-latest' && 'msys2 {0}' || 'bash' }}
+      run:
+        shell: ${{ matrix.os == 'windows-latest' && 'msys2 {0}' || 'bash' }}
 
     steps:
       - name: Install Rust
