@@ -238,6 +238,14 @@ pub struct Args {
     #[structopt(name = "ipv6-only", short = "6", long)]
     /// Connect only over IPv6
     ipv6_only: bool,
+
+    /// The test that this client will run. Currently, we only support "upload".
+    #[structopt(name = "test", long)]
+    test: Option<String>,
+
+    /// The request size that will be used for upload test.
+    #[structopt(name = "upload-size", long, default_value = "100")]
+    upload_size: usize,
 }
 
 impl Args {
@@ -443,17 +451,133 @@ fn process_loop(
     }
 }
 
-struct Handler<'a> {
-    streams: HashMap<StreamId, Option<File>>,
-    url_queue: VecDeque<Url>,
-    all_paths: Vec<PathBuf>,
-    args: &'a Args,
-    key_update: KeyUpdateState,
-    token: Option<ResumptionToken>,
+trait StreamHandler {
+    fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>);
+    fn process_data_readable(
+        &mut self,
+        stream_id: StreamId,
+        fin: bool,
+        data: Vec<u8>,
+        sz: usize,
+        output_read_data: bool,
+    ) -> Res<bool>;
+    fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId);
 }
 
-impl<'a> Handler<'a> {
-    fn download_urls(&mut self, client: &mut Http3Client) {
+enum StreamHandlerType {
+    Download,
+    Upload,
+}
+
+struct DownloadStreamHandler {
+    out_file: Option<File>,
+}
+
+impl StreamHandler for DownloadStreamHandler {
+    fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
+        if self.out_file.is_none() {
+            println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+        }
+    }
+
+    fn process_data_readable(
+        &mut self,
+        stream_id: StreamId,
+        fin: bool,
+        data: Vec<u8>,
+        sz: usize,
+        output_read_data: bool,
+    ) -> Res<bool> {
+        if let Some(out_file) = &mut self.out_file {
+            if sz > 0 {
+                out_file.write_all(&data[..sz])?;
+            }
+            return Ok(true);
+        } else if !output_read_data {
+            println!("READ[{}]: {} bytes", stream_id, sz);
+        } else if let Ok(txt) = String::from_utf8(data.clone()) {
+            println!("READ[{}]: {}", stream_id, txt);
+        } else {
+            println!("READ[{}]: 0x{}", stream_id, hex(&data));
+        }
+
+        if fin && self.out_file.is_none() {
+            println!("<FIN[{}]>", stream_id);
+        }
+
+        Ok(true)
+    }
+
+    fn process_data_writable(&mut self, _client: &mut Http3Client, _stream_id: StreamId) {}
+}
+
+struct UploadStreamHandler {
+    data: Vec<u8>,
+    offset: usize,
+    chunk_size: usize,
+    start: Instant,
+}
+
+impl StreamHandler for UploadStreamHandler {
+    fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
+        println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+    }
+
+    fn process_data_readable(
+        &mut self,
+        stream_id: StreamId,
+        _fin: bool,
+        data: Vec<u8>,
+        _sz: usize,
+        _output_read_data: bool,
+    ) -> Res<bool> {
+        if let Ok(txt) = String::from_utf8(data.clone()) {
+            let trimmed_txt = txt.trim_end_matches(char::from(0));
+            let parsed: usize = trimmed_txt.parse().unwrap();
+            if parsed == self.data.len() {
+                let upload_time = Instant::now().duration_since(self.start);
+                println!("Stream ID: {:?}, Upload time: {:?}", stream_id, upload_time);
+            }
+        } else {
+            panic!("Unexpected data [{}]: 0x{}", stream_id, hex(&data));
+        }
+        Ok(true)
+    }
+
+    fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
+        while self.offset < self.data.len() {
+            let end = self.offset + self.chunk_size.min(self.data.len() - self.offset);
+            let chunk = &self.data[self.offset..end];
+            match client.send_data(stream_id, chunk) {
+                Ok(amount) => {
+                    if amount == 0 {
+                        break;
+                    }
+                    self.offset += amount;
+                    if self.offset == self.data.len() {
+                        client.stream_close_send(stream_id).unwrap();
+                    }
+                }
+                Err(_) => break,
+            };
+        }
+    }
+}
+
+struct URLHandler<'a> {
+    url_queue: VecDeque<Url>,
+    streams: HashMap<StreamId, Box<dyn StreamHandler>>,
+    all_paths: Vec<PathBuf>,
+    handler_type: StreamHandlerType,
+    args: &'a Args,
+}
+
+impl<'a> URLHandler<'a> {
+    fn handler(&mut self, stream_id: &StreamId) -> Option<&mut Box<dyn StreamHandler>> {
+        self.streams.get_mut(stream_id)
+    }
+
+    fn process_urls(&mut self, client: &mut Http3Client) {
         loop {
             if self.url_queue.is_empty() {
                 break;
@@ -461,17 +585,13 @@ impl<'a> Handler<'a> {
             if self.streams.len() >= self.args.concurrency {
                 break;
             }
-            if !self.download_next(client) {
+            if !self.next_url(client) {
                 break;
             }
         }
     }
 
-    fn download_next(&mut self, client: &mut Http3Client) -> bool {
-        if self.key_update.needed() {
-            println!("Deferring requests until first key update");
-            return false;
-        }
+    fn next_url(&mut self, client: &mut Http3Client) -> bool {
         let url = self
             .url_queue
             .pop_front()
@@ -488,13 +608,21 @@ impl<'a> Handler<'a> {
                     "Successfully created stream id {} for {}",
                     client_stream_id, url
                 );
-                client
-                    .stream_close_send(client_stream_id)
-                    .expect("failed to close send stream");
 
-                let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
-
-                self.streams.insert(client_stream_id, out_file);
+                let handler: Box<dyn StreamHandler> = match self.handler_type {
+                    StreamHandlerType::Download => {
+                        let out_file =
+                            get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
+                        Box::new(DownloadStreamHandler { out_file })
+                    }
+                    StreamHandlerType::Upload => Box::new(UploadStreamHandler {
+                        data: vec![42; self.args.upload_size],
+                        offset: 0,
+                        chunk_size: 32768,
+                        start: Instant::now(),
+                    }),
+                };
+                self.streams.insert(client_stream_id, handler);
                 true
             }
             Err(Error::TransportError(TransportError::StreamLimitError))
@@ -509,24 +637,46 @@ impl<'a> Handler<'a> {
         }
     }
 
-    fn maybe_key_update(&mut self, c: &mut Http3Client) -> Res<()> {
-        self.key_update.maybe_update(|| c.initiate_key_update())?;
-        self.download_urls(c);
-        Ok(())
-    }
-
     fn done(&mut self) -> bool {
         self.streams.is_empty() && self.url_queue.is_empty()
     }
 
     fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId) -> bool {
         self.streams.remove(&stream_id);
-        self.download_urls(client);
+        self.process_urls(client);
         if self.done() {
             client.close(Instant::now(), 0, "kthxbye!");
             return false;
         }
         true
+    }
+}
+
+struct Handler<'a> {
+    url_handler: URLHandler<'a>,
+    key_update: KeyUpdateState,
+    token: Option<ResumptionToken>,
+    output_read_data: bool,
+}
+
+impl<'a> Handler<'a> {
+    pub fn new(
+        url_handler: URLHandler<'a>,
+        key_update: KeyUpdateState,
+        output_read_data: bool,
+    ) -> Self {
+        Self {
+            url_handler,
+            key_update,
+            token: None,
+            output_read_data,
+        }
+    }
+
+    fn maybe_key_update(&mut self, c: &mut Http3Client) -> Res<()> {
+        self.key_update.maybe_update(|| c.initiate_key_update())?;
+        self.url_handler.process_urls(c);
+        Ok(())
     }
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
@@ -541,11 +691,9 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    match self.streams.get(&stream_id) {
-                        Some(out_file) => {
-                            if out_file.is_none() {
-                                println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
-                            }
+                    match self.url_handler.handler(&stream_id) {
+                        Some(handler) => {
+                            handler.process_header_ready(stream_id, fin, headers);
                         }
                         None => {
                             println!("Data on unexpected stream: {}", stream_id);
@@ -553,38 +701,31 @@ impl<'a> Handler<'a> {
                         }
                     }
                     if fin {
-                        return Ok(self.on_stream_fin(client, stream_id));
+                        return Ok(self.url_handler.on_stream_fin(client, stream_id));
                     }
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     let mut stream_done = false;
-                    match self.streams.get_mut(&stream_id) {
+                    match self.url_handler.handler(&stream_id) {
                         None => {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
                         }
-                        Some(out_file) => loop {
+                        Some(handler) => loop {
                             let mut data = vec![0; 4096];
                             let (sz, fin) = client
                                 .read_data(Instant::now(), stream_id, &mut data)
                                 .expect("Read should succeed");
 
-                            if let Some(out_file) = out_file {
-                                if sz > 0 {
-                                    out_file.write_all(&data[..sz])?;
-                                }
-                            } else if !self.args.output_read_data {
-                                println!("READ[{}]: {} bytes", stream_id, sz);
-                            } else if let Ok(txt) = String::from_utf8(data.clone()) {
-                                println!("READ[{}]: {}", stream_id, txt);
-                            } else {
-                                println!("READ[{}]: 0x{}", stream_id, hex(&data));
-                            }
+                            handler.process_data_readable(
+                                stream_id,
+                                fin,
+                                data,
+                                sz,
+                                self.output_read_data,
+                            )?;
 
                             if fin {
-                                if out_file.is_none() {
-                                    println!("<FIN[{}]>", stream_id);
-                                }
                                 stream_done = true;
                                 break;
                             }
@@ -596,12 +737,24 @@ impl<'a> Handler<'a> {
                     }
 
                     if stream_done {
-                        return Ok(self.on_stream_fin(client, stream_id));
+                        return Ok(self.url_handler.on_stream_fin(client, stream_id));
+                    }
+                }
+                Http3ClientEvent::DataWritable { stream_id } => {
+                    match self.url_handler.handler(&stream_id) {
+                        None => {
+                            println!("Data on unexpected stream: {}", stream_id);
+                            return Ok(false);
+                        }
+                        Some(handler) => {
+                            handler.process_data_writable(client, stream_id);
+                            return Ok(true);
+                        }
                     }
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
-                    self.download_urls(client);
+                    self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
                 _ => {
@@ -629,8 +782,9 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
-fn client(
-    args: &Args,
+fn handle_test(
+    testcase: &String,
+    args: &mut Args,
     socket: &UdpSocket,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
@@ -638,6 +792,39 @@ fn client(
     urls: &[Url],
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
+    let key_update = KeyUpdateState(args.key_update);
+    match testcase.as_str() {
+        "upload" => {
+            let mut client =
+                create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
+                    .expect("failed to create client");
+            args.method = String::from("POST");
+            let url_handler = URLHandler {
+                url_queue: VecDeque::from(urls.to_vec()),
+                streams: HashMap::new(),
+                all_paths: Vec::new(),
+                handler_type: StreamHandlerType::Upload,
+                args,
+            };
+            let mut h = Handler::new(url_handler, key_update, args.output_read_data);
+            process_loop(&local_addr, socket, &mut client, &mut h)?;
+        }
+        _ => {
+            eprintln!("Unsupported test case: {}", testcase);
+            exit(127)
+        }
+    }
+
+    Ok(None)
+}
+
+fn create_http3_client(
+    args: &mut Args,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    hostname: &str,
+    resumption_token: Option<ResumptionToken>,
+) -> Res<Http3Client> {
     let mut transport = Connection::new_client(
         hostname,
         &[&args.alpn],
@@ -671,15 +858,43 @@ fn client(
             .expect("enable resumption");
     }
 
+    Ok(client)
+}
+
+fn client(
+    args: &mut Args,
+    socket: &UdpSocket,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    hostname: &str,
+    urls: &[Url],
+    resumption_token: Option<ResumptionToken>,
+) -> Res<Option<ResumptionToken>> {
+    let testcase = args.test.clone();
+    if let Some(testcase) = testcase {
+        return handle_test(
+            &testcase,
+            args,
+            socket,
+            local_addr,
+            remote_addr,
+            hostname,
+            urls,
+            resumption_token,
+        );
+    }
+
+    let mut client = create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
+        .expect("failed to create client");
     let key_update = KeyUpdateState(args.key_update);
-    let mut h = Handler {
-        streams: HashMap::new(),
+    let url_handler = URLHandler {
         url_queue: VecDeque::from(urls.to_vec()),
+        streams: HashMap::new(),
         all_paths: Vec::new(),
+        handler_type: StreamHandlerType::Download,
         args,
-        key_update,
-        token: None,
     };
+    let mut h = Handler::new(url_handler, key_update, args.output_read_data);
 
     process_loop(&local_addr, socket, &mut client, &mut h)?;
 
@@ -848,7 +1063,7 @@ fn main() -> Res<()> {
                 )?
             } else {
                 client(
-                    &args,
+                    &mut args,
                     &socket,
                     real_local,
                     remote_addr,
