@@ -9,8 +9,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest] #, windows-latest]
-        rust-toolchain: [1.65.0, stable] #, beta]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust-toolchain: [1.65.0] #, stable] #, beta]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -34,36 +34,34 @@ jobs:
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
-          brew install --force --overwrite ninja mercurial cargo-binstall || brew link --overwrite python@3.11
+          brew install ninja mercurial cargo-binstall
           # python3 -m pip install gyp-next
           # Above does not work, since pypi only has gyp 0.15.0, which is too old
           # for the homebrew python3. Install from source instead.
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           python3 -m pip install packaging
-          echo "$(python3 -m site --user-base)/bin" >> $GITHUB_PATH
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
 
-      - name: Install moztools (Windows)
+      - name: Use MSYS2 environment and install more dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          curl -L -o moztools.zip https://ftp.mozilla.org/pub/mozilla/libraries/win32/moztools-static.zip
-          unzip moztools.zip
-          mv moztools/bin/nsinstall.exe /usr/bin
-          rm -r moztools.zip moztools
-          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
+          echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
+          echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
+          python3 -m pip install git+https://github.com/nodejs/gyp-next
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Set up Windows build environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Rust tools
-        run: |
-          cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
+        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,27 +74,27 @@ jobs:
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
           git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
-          echo "NSS_DIR=$NSS_DIR" >> $GITHUB_ENV
-          echo "NSPR_DIR=$NSPR_DIR" >> $GITHUB_ENV
-          echo "NSS_JOBS=$NUMBER_OF_PROCESSORS" >> $GITHUB_ENV
+          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
+          echo "NSS_JOBS=$NUMBER_OF_PROCESSORS" >> "$GITHUB_ENV"
         env:
           NSS_DIR: ${{ github.workspace }}/nss
           NSPR_DIR: ${{ github.workspace }}/nspr
 
-      # Just here to have a convenient way to debug the build.
-      # Once this works, this step should be removed, since the actual build
-      # happens as part of neqo-crypto/build.rs.
-      - name: NSS build attempt (Windows)
-        if: 0 && runner.os == 'Windows'
+      - name: Set up environment for NSS build.sh (Windows)
+        if: runner.os == 'Windows'
         run: |
+          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
+          echo "GYP_MSVS_VERSION=2022" >> "$GITHUB_ENV"
+          echo "BASH=$SHELL" >> "$GITHUB_ENV"
+          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
-          cd "$NSS_DIR" && make -j "$NSS_JOBS" nss_build_all USE_64=1 NSS_DISABLE_GTESTS=1
 
       - name: Build
         run: |
           cargo +${{ matrix.rust-toolchain }} build -v --all-targets
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> $GITHUB_ENV
-          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
         env:
           RUST_BACKTRACE: 1
 
@@ -114,7 +112,7 @@ jobs:
         run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
         if: success() || failure()
 
-      - name: Determine converage
+      - name: Determine coverage
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --all-targets --no-fail-fast --lcov --output-path lcov.info
         env:
            RUST_BACKTRACE: 1
