@@ -1163,6 +1163,12 @@ impl Connection {
                 .get_versions_mut()
                 .set_initial(self.conn_params.get_versions().initial());
             mem::swap(self, &mut c);
+            qlog::client_version_information_negotiated(
+                &mut self.qlog,
+                self.conn_params.get_versions().all(),
+                supported,
+                version,
+            );
             Ok(())
         } else {
             qinfo!([self], "Version negotiation: failed with {:?}", supported);
@@ -2282,6 +2288,7 @@ impl Connection {
         qinfo!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, &self.paths.primary());
+        qlog::client_version_information_initiated(&mut self.qlog, self.conn_params.get_versions());
 
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial);

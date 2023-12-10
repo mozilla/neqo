@@ -10,3 +10,6 @@ members = [
   "neqo-interop",
   "test-fixture",
 ]
+
+[patch.crates-io]
+qlog = { git = "https://github.com/mxinden/quiche", branch = "type-to-importance" }

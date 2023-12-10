@@ -17,7 +17,7 @@ use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
         AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
-        PacketReceived, PacketSent, QuicFrame, StreamType,
+        PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
     },
     Event, EventData, RawInfo,
 };
@@ -33,6 +33,7 @@ use crate::{
     stream_id::StreamType as NeqoStreamType,
     tparams::{self, TransportParametersHandler},
     tracking::SentPacket,
+    version::{Version, VersionConfig, WireVersion},
 };
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
@@ -125,6 +126,44 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
 
         Some(ev_data)
     })
+}
+
+pub fn client_version_information_initiated(qlog: &mut NeqoQlog, version_config: &VersionConfig) {
+    qlog.add_event_data(|| {
+        let ev_data = EventData::VersionInformation(VersionInformation {
+            client_versions: Some(
+                version_config
+                    .all()
+                    .iter()
+                    .map(|v| format!("{:02x}", v.wire_version()))
+                    .collect(),
+            ),
+            server_versions: None,
+            chosen_version: Some(format!("{:02x}", version_config.initial().wire_version())),
+        });
+        Some(ev_data)
+    });
+}
+
+pub fn client_version_information_negotiated(
+    qlog: &mut NeqoQlog,
+    client: &[Version],
+    server: &[WireVersion],
+    chosen: Version,
+) {
+    qlog.add_event_data(|| {
+        let ev_data = EventData::VersionInformation(VersionInformation {
+            client_versions: Some(
+                client
+                    .iter()
+                    .map(|v| format!("{:02x}", v.wire_version()))
+                    .collect(),
+            ),
+            server_versions: Some(server.iter().map(|v| format!("{v:02x}")).collect()),
+            chosen_version: Some(format!("{:02x}", chosen.wire_version())),
+        });
+        Some(ev_data)
+    });
 }
 
 pub fn packet_sent(
