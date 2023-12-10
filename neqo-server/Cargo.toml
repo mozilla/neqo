@@ -17,7 +17,7 @@ regex = "1"
 mio = "0.6.17"
 mio-extras = "2.0.5"
 log = {version = "0.4.0", default-features = false}
-qlog = "0.9.0"
+qlog = "0.10.0"
 
 [features]
 deny-warnings = []
