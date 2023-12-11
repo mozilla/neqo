@@ -136,7 +136,7 @@ pub fn packet_sent(
 ) {
     qlog.add_event_with_stream(|stream| {
         let mut d = Decoder::from(body);
-        let header = PacketHeader::with_type(to_qlog_pkt_type(pt), pn, None, None, None);
+        let header = PacketHeader::with_type(to_qlog_pkt_type(pt), Some(pn), None, None, None);
         let raw = RawInfo {
             length: None,
             payload_length: Some(plen as u64),
@@ -175,9 +175,13 @@ pub fn packet_sent(
 
 pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
     qlog.add_event_data(|| {
-        // TODO: packet number is optional in the spec but qlog crate doesn't support that, so use a placeholder value of 0
-        let header =
-            PacketHeader::with_type(to_qlog_pkt_type(payload.packet_type()), 0, None, None, None);
+        let header = PacketHeader::with_type(
+            to_qlog_pkt_type(payload.packet_type()),
+            None,
+            None,
+            None,
+            None,
+        );
         let raw = RawInfo {
             length: None,
             payload_length: Some(payload.len() as u64),
@@ -200,7 +204,7 @@ pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
-                PacketHeader::with_type(to_qlog_pkt_type(pkt.pt), pkt.pn, None, None, None);
+                PacketHeader::with_type(to_qlog_pkt_type(pkt.pt), Some(pkt.pn), None, None, None);
 
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
@@ -224,7 +228,7 @@ pub fn packet_received(
 
         let header = PacketHeader::with_type(
             to_qlog_pkt_type(public_packet.packet_type()),
-            payload.pn(),
+            Some(payload.pn()),
             None,
             None,
             None,
