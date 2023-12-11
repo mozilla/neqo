@@ -10,7 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust-toolchain: [1.65.0] #, stable] #, beta]
+        # TODO: add beta (and nightly?) but don't fail the test if they fail
+        rust-toolchain: [1.65.0, stable]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
