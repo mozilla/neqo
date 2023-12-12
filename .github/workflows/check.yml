@@ -1,5 +1,12 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore: [ "*.md", "*.png", "*.svg", "LICENSE-*" ]
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore: [ "*.md", "*.png", "*.svg", "LICENSE-*" ]
+
 env:
   CARGO_TERM_COLOR: always
 
