@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [ "main" ]
     paths-ignore: [ "*.md", "*.png", "*.svg", "LICENSE-*" ]
-
 env:
   CARGO_TERM_COLOR: always
 
