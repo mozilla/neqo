@@ -32,7 +32,7 @@ impl Period {
     }
 
     #[cfg(target_os = "macos")]
-    fn scaled(&self, scale: f64) -> f64 {
+    fn scaled(self, scale: f64) -> f64 {
         scale * f64::from(self.0)
     }
 }
@@ -292,7 +292,7 @@ impl Time {
             if let Some(p) = self.active {
                 mac::set_realtime(p.scaled(self.scale));
             } else {
-                mac::set_thread_policy(self.deflt.clone());
+                mac::set_thread_policy(self.deflt);
             }
         }
 
