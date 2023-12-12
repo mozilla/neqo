@@ -16,6 +16,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher, ResumptionToken,
 };
+use neqo_helper::{bind, emit_datagram, recv_datagram};
 use neqo_http3::{
     self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
     Priority,
@@ -32,7 +33,8 @@ use std::{
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, ErrorKind, Write},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    os::fd::AsRawFd,
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -345,14 +347,6 @@ impl QuicParameters {
     }
 }
 
-fn emit_datagram(socket: &mio::net::UdpSocket, d: Datagram) -> io::Result<()> {
-    let sent = socket.send_to(&d[..], &d.destination())?;
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
-    }
-    Ok(())
-}
-
 fn get_output_file(
     url: &Url,
     output_dir: &Option<PathBuf>,
@@ -472,6 +466,29 @@ fn process_loop(
         if exiting {
             return Ok(client.state());
         }
+
+        let mut tos = 0;
+        let mut ttl = 0;
+        match recv_datagram(socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl) {
+            Err(ref err)
+                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted => {}
+            Err(err) => {
+                eprintln!("UDP error: {}", err);
+                exit(1)
+            }
+            Ok((sz, remote)) => {
+                if sz == buf.len() {
+                    eprintln!("Received more than {} bytes", buf.len());
+                    continue;
+                }
+                if sz > 0 {
+                    let d =
+                        Datagram::new_with_tos_and_ttl(remote, *local_addr, tos, ttl, &buf[..sz]);
+                    client.process_input(d, Instant::now());
+                    handler.maybe_key_update(client)?;
+                }
+            }
+        };
     }
 }
 
@@ -1046,7 +1063,7 @@ fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match UdpSocket::bind(&local_addr) {
+        let socket = match bind(local_addr) {
             Err(e) => {
                 eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
@@ -1129,13 +1146,15 @@ mod old {
         collections::{HashMap, VecDeque},
         fs::File,
         io::{ErrorKind, Write},
-        net::SocketAddr,
+        net::{SocketAddr, UdpSocket},
+        os::fd::AsRawFd,
         path::PathBuf,
         process::exit,
         rc::Rc,
         time::{Duration, Instant},
     };
 
+    use neqo_helper::recv_datagram;
     use url::Url;
 
     use super::{qlog_new, KeyUpdateState, Res};
@@ -1382,8 +1401,13 @@ mod old {
             'write: loop {
                 match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
+<<<<<<< HEAD
                         if let Err(e) = emit_datagram(socket, dgram) {
                             eprintln!("UDP write error: {e}");
+=======
+                        if let Err(e) = emit_datagram(socket.as_raw_fd(), dgram) {
+                            eprintln!("UDP write error: {}", e);
+>>>>>>> 0ac9f97f (Rollup)
                             client.close(Instant::now(), 0, e.to_string());
                             exiting = true;
                             break 'write;
@@ -1403,6 +1427,29 @@ mod old {
 
             if exiting {
                 return Ok(client.state().clone());
+            }
+
+            let mut tos = 0;
+            let mut ttl = 0;
+            match recv_datagram(socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl) {
+                Err(err) => {
+                    if err.kind() != ErrorKind::WouldBlock && err.kind() != ErrorKind::Interrupted {
+                        eprintln!("UDP error: {}", err);
+                        exit(1);
+                    }
+                }
+                Ok((sz, addr)) => {
+                    if sz == buf.len() {
+                        eprintln!("Received more than {} bytes", buf.len());
+                        continue;
+                    }
+                    if sz > 0 {
+                        let d =
+                            Datagram::new_with_tos_and_ttl(addr, *local_addr, tos, ttl, &buf[..sz]);
+                        client.process_input(d, Instant::now());
+                        handler.maybe_key_update(client)?;
+                    }
+                }
             }
         }
     }

@@ -14,6 +14,7 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-common = { path="./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
+neqo-helper = { path = "./../neqo-helper" }
 structopt = "0.3.7"
 url = "2.0"
 qlog = "0.11.0"

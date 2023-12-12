@@ -9,6 +9,7 @@
 
 use neqo_common::{event::Provider, hex, Datagram};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
+use neqo_helper::{bind, emit_datagram, recv_datagram};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
@@ -21,6 +22,7 @@ use std::{
     collections::HashSet,
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    os::fd::AsRawFd,
     rc::Rc,
 };
 // use std::path::PathBuf;
@@ -57,13 +59,6 @@ trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
     fn rewrite_out(&mut self, _dgram: &Datagram) -> Option<Datagram> {
         None
-    }
-}
-
-fn emit_datagram(socket: &UdpSocket, d: Datagram) {
-    let sent = socket.send(&d[..]).expect("Error sending datagram");
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
     }
 }
 
@@ -116,7 +111,10 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-                    emit_datagram(&nctx.socket, dgram);
+                    if let Err(e) = emit_datagram(nctx.socket.as_raw_fd(), dgram) {
+                        eprintln!("UDP write error: {}", e);
+                        continue;
+                    }
                 }
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
@@ -133,7 +131,10 @@ fn process_loop(
             return Ok(client.state().clone());
         }
 
-        let sz = match nctx.socket.recv(&mut buf[..]) {
+        let mut tos = 0;
+        let mut ttl = 0;
+        let (sz, _) = match recv_datagram(nctx.socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl)
+        {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
@@ -148,8 +149,19 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
+<<<<<<< HEAD
             let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
             client.process_input(&received, Instant::now());
+=======
+            let received = Datagram::new_with_tos_and_ttl(
+                nctx.remote_addr,
+                nctx.local_addr,
+                tos,
+                ttl,
+                &buf[..sz],
+            );
+            client.process_input(received, Instant::now());
+>>>>>>> 6671b12b (Rollup)
         }
     }
 }
@@ -279,7 +291,7 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&nctx.socket, dgram),
+                Output::Datagram(dgram) => emit_datagram(nctx.socket.as_raw_fd(), dgram).unwrap(),
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
@@ -294,7 +306,10 @@ fn process_loop_h3(
             return Ok(handler.h3.conn().state().clone());
         }
 
-        let sz = match nctx.socket.recv(&mut buf[..]) {
+        let mut tos = 0;
+        let mut ttl = 0;
+        let (sz, _) = match recv_datagram(nctx.socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl)
+        {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
@@ -309,7 +324,13 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            let received = Datagram::new_with_tos_and_ttl(
+                nctx.remote_addr,
+                nctx.local_addr,
+                tos,
+                ttl,
+                &buf[..sz],
+            );
             handler.h3.process_input(&received, Instant::now());
         }
     }
@@ -682,7 +703,13 @@ impl Handler for VnHandler {
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
         let mut payload = d[..].to_vec();
         payload[1] = 0x1a;
-        Some(Datagram::new(d.source(), d.destination(), payload))
+        Some(Datagram::new_with_tos_and_ttl(
+            d.source(),
+            d.destination(),
+            d.tos(),
+            d.ttl(),
+            payload,
+        ))
     }
 }
 
@@ -704,7 +731,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Connection {
 }
 
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
-    let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
+    let socket = bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(peer).expect("Unable to connect UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");

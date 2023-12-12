@@ -18,6 +18,7 @@ use std::{
     io::Read,
     mem,
     net::{SocketAddr, ToSocketAddrs},
+    os::fd::AsRawFd,
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -35,6 +36,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
 };
+use neqo_helper::{bind, emit_datagram, recv_datagram};
 use neqo_http3::{
     Error, Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
@@ -317,15 +319,6 @@ impl QuicParameters {
     }
 }
 
-fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
-    let sent = socket
-        .send_to(&out_dgram, &out_dgram.destination())
-        .expect("Error sending datagram");
-    if sent != out_dgram.len() {
-        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
-    }
-}
-
 fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
     let mut file_path = PathBuf::from("/www");
     file_path.push(filename.trim_matches(|p| p == '/'));
@@ -589,14 +582,17 @@ fn read_dgram(
     local_address: &SocketAddr,
 ) -> Result<Option<Datagram>, io::Error> {
     let buf = &mut [0u8; 2048];
-    let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
-        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
-        Err(err) => {
-            eprintln!("UDP recv error: {err:?}");
-            return Err(err);
-        }
-        Ok(res) => res,
-    };
+    let mut tos = 0;
+    let mut ttl = 0;
+    let (sz, remote_addr) =
+        match recv_datagram(socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl) {
+            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(err) => {
+                eprintln!("UDP recv error: {err:?}");
+                return Err(err);
+            }
+            Ok(res) => res,
+        };
 
     if sz == buf.len() {
         eprintln!("Might have received more than {} bytes", buf.len());
@@ -606,7 +602,13 @@ fn read_dgram(
         eprintln!("zero length datagram received?");
         Ok(None)
     } else {
-        Ok(Some(Datagram::new(remote_addr, *local_address, &buf[..sz])))
+        Ok(Some(Datagram::new_with_tos_and_ttl(
+            remote_addr,
+            *local_address,
+            tos,
+            ttl,
+            &buf[..sz],
+        )))
     }
 }
 
@@ -650,12 +652,12 @@ impl ServersRunner {
         }
 
         for (i, host) in self.hosts.iter().enumerate() {
-            let socket = match UdpSocket::bind(host) {
+            let socket = match bind(*host) {
                 Err(err) => {
                     eprintln!("Unable to bind UDP socket: {err}");
                     return Err(err);
                 }
-                Ok(s) => s,
+                Ok(s) => UdpSocket::from_socket(s)?,
             };
 
             let local_addr = match socket.local_addr() {
@@ -738,7 +740,9 @@ impl ServersRunner {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.find_socket(dgram.source());
-                emit_packet(socket, dgram);
+                if let Err(e) = emit_datagram(socket.as_raw_fd(), dgram) {
+                    eprintln!("UDP write error: {}", e);
+                }
                 true
             }
             Output::Callback(new_timeout) => {
