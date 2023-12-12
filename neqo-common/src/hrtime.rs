@@ -27,12 +27,12 @@ impl Period {
     const MIN: Period = Period(1);
 
     #[cfg(windows)]
-    fn as_uint(&self) -> UINT {
+    fn as_uint(self) -> UINT {
         UINT::from(self.0)
     }
 
     #[cfg(target_os = "macos")]
-    fn scaled(&self, scale: f64) -> f64 {
+    fn scaled(self, scale: f64) -> f64 {
         scale * f64::from(self.0)
     }
 }
@@ -119,13 +119,15 @@ mod mac {
     #[repr(C)]
     #[derive(Debug, Copy, Clone, Default)]
     pub struct thread_time_constraint_policy {
-        period: u32,
-        computation: u32,
-        constraint: u32,
+        period: f64,
+        computation: f64,
+        constraint: f64,
         preemptible: boolean_t,
     }
 
     const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
+
+    #[allow(clippy::cast_possible_truncation)]
     const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
         (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
             as mach_msg_type_number_t;
@@ -163,7 +165,7 @@ mod mac {
             thread_policy_set(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
-                addr_of_mut!(policy) as _, // horror!
+                addr_of_mut!(policy).cast(), // horror!
                 THREAD_TIME_CONSTRAINT_POLICY_COUNT,
             )
         };
@@ -181,9 +183,9 @@ mod mac {
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
         let policy = thread_time_constraint_policy {
-            period: base as u32, // Base interval
-            computation: (base * 0.5) as u32,
-            constraint: (base * 1.0) as u32,
+            period: base, // Base interval
+            computation: base * 0.5,
+            constraint: base,
             preemptible: 1,
         };
         set_thread_policy(policy);
@@ -198,7 +200,7 @@ mod mac {
             thread_policy_get(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
-                addr_of_mut!(policy) as _, // horror!
+                addr_of_mut!(policy).cast(), // horror!
                 &mut count,
                 &mut get_default,
             )
@@ -292,7 +294,7 @@ impl Time {
             if let Some(p) = self.active {
                 mac::set_realtime(p.scaled(self.scale));
             } else {
-                mac::set_thread_policy(self.deflt.clone());
+                mac::set_thread_policy(self.deflt);
             }
         }
 
