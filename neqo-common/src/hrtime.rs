@@ -119,14 +119,13 @@ mod mac {
     #[repr(C)]
     #[derive(Debug, Copy, Clone, Default)]
     pub struct thread_time_constraint_policy {
-        period: f64,
-        computation: f64,
-        constraint: f64,
+        period: u32,
+        computation: u32,
+        constraint: u32,
         preemptible: boolean_t,
     }
 
     const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
-
     #[allow(clippy::cast_possible_truncation)]
     const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
         (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
@@ -182,10 +181,11 @@ mod mac {
 
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let policy = thread_time_constraint_policy {
-            period: base, // Base interval
-            computation: base * 0.5,
-            constraint: base,
+            period: base as u32, // Base interval
+            computation: (base * 0.5) as u32,
+            constraint: (base * 1.0) as u32,
             preemptible: 1,
         };
         set_thread_policy(policy);
