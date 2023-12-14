@@ -358,7 +358,7 @@ fn invalid_current_version_client() {
     assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
-            tparams::VERSION_NEGOTIATION,
+            tparams::VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: OTHER_VERSION.wire_version(),
                 other: Version::all()
@@ -394,7 +394,7 @@ fn invalid_current_version_server() {
     assert!(!Version::default().is_compatible(OTHER_VERSION));
     server
         .set_local_tparam(
-            tparams::VERSION_NEGOTIATION,
+            tparams::VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: OTHER_VERSION.wire_version(),
                 other: vec![OTHER_VERSION.wire_version()],
@@ -420,7 +420,7 @@ fn no_compatible_version() {
     assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
-            tparams::VERSION_NEGOTIATION,
+            tparams::VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::default().wire_version(),
                 other: vec![OTHER_VERSION.wire_version()],

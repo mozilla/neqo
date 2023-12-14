@@ -55,10 +55,10 @@ tpids! {
     ACTIVE_CONNECTION_ID_LIMIT = 0x0e,
     INITIAL_SOURCE_CONNECTION_ID = 0x0f,
     RETRY_SOURCE_CONNECTION_ID = 0x10,
+    VERSION_INFORMATION = 0x11,
     GREASE_QUIC_BIT = 0x2ab2,
     MIN_ACK_DELAY = 0xff02_de1a,
     MAX_DATAGRAM_FRAME_SIZE = 0x0020,
-    VERSION_NEGOTIATION = 0xff73db,
 }
 
 #[derive(Clone, Debug)]
@@ -298,7 +298,7 @@ impl TransportParameter {
                 _ => return Err(Error::TransportParameterError),
             },
 
-            VERSION_NEGOTIATION => Self::decode_versions(&mut d)?,
+            VERSION_INFORMATION => Self::decode_versions(&mut d)?,
 
             // Skip.
             _ => return Ok(None),
@@ -450,7 +450,7 @@ impl TransportParameters {
         }
         let current = versions.initial().wire_version();
         self.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions { current, other },
         );
     }
@@ -458,7 +458,7 @@ impl TransportParameters {
     fn compatible_upgrade(&mut self, v: Version) {
         if let Some(TransportParameter::Versions {
             ref mut current, ..
-        }) = self.params.get_mut(&VERSION_NEGOTIATION)
+        }) = self.params.get_mut(&VERSION_INFORMATION)
         {
             *current = v.wire_version();
         } else {
@@ -543,7 +543,7 @@ impl TransportParameters {
     #[must_use]
     pub fn get_versions(&self) -> Option<(WireVersion, &[WireVersion])> {
         if let Some(TransportParameter::Versions { current, other }) =
-            self.params.get(&VERSION_NEGOTIATION)
+            self.params.get(&VERSION_INFORMATION)
         {
             Some((*current, other))
         } else {
@@ -1043,8 +1043,7 @@ mod tests {
     #[test]
     fn versions_encode_decode() {
         const ENCODED: &[u8] = &[
-            0x80, 0xff, 0x73, 0xdb, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x1a, 0x2a, 0x3a, 0x4a, 0x5a,
-            0x6a, 0x7a, 0x8a,
+            0x11, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x1a, 0x2a, 0x3a, 0x4a, 0x5a, 0x6a, 0x7a, 0x8a,
         ];
         let vn = TransportParameter::Versions {
             current: Version::Version1.wire_version(),
@@ -1052,12 +1051,12 @@ mod tests {
         };
 
         let mut enc = Encoder::new();
-        vn.encode(&mut enc, VERSION_NEGOTIATION);
+        vn.encode(&mut enc, VERSION_INFORMATION);
         assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
-        assert_eq!(id, VERSION_NEGOTIATION);
+        assert_eq!(id, VERSION_INFORMATION);
         assert_eq!(decoded, vn);
     }
 
@@ -1076,10 +1075,8 @@ mod tests {
 
     #[test]
     fn versions_zero() {
-        const ZERO1: &[u8] = &[0x80, 0xff, 0x73, 0xdb, 0x04, 0x00, 0x00, 0x00, 0x00];
-        const ZERO2: &[u8] = &[
-            0x80, 0xff, 0x73, 0xdb, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-        ];
+        const ZERO1: &[u8] = &[0x11, 0x04, 0x00, 0x00, 0x00, 0x00];
+        const ZERO2: &[u8] = &[0x11, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
 
         let mut dec = Decoder::from(&ZERO1);
         assert_eq!(
@@ -1097,7 +1094,7 @@ mod tests {
     fn versions_equal_0rtt() {
         let mut current = TransportParameters::default();
         current.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version(),
                 other: vec![0x1a2a_3a4a],
@@ -1112,7 +1109,7 @@ mod tests {
 
         // If the version matches, it's OK to use 0-RTT.
         remembered.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version(),
                 other: vec![0x5a6a_7a8a, 0x9aaa_baca],
@@ -1123,7 +1120,7 @@ mod tests {
 
         // An apparent "upgrade" is still cause to reject 0-RTT.
         remembered.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version() + 1,
                 other: vec![],
