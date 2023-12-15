@@ -110,7 +110,7 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-                    if let Err(e) = emit_datagram(nctx.socket.as_raw_fd(), dgram) {
+                    if let Err(e) = emit_datagram(nctx.socket.as_raw_fd(), &dgram) {
                         eprintln!("UDP write error: {}", e);
                         continue;
                     }
@@ -290,7 +290,7 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(nctx.socket.as_raw_fd(), dgram).unwrap(),
+                Output::Datagram(dgram) => emit_datagram(nctx.socket.as_raw_fd(), &dgram).unwrap(),
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();

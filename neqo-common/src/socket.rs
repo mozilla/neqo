@@ -7,7 +7,6 @@
 use std::{
     io::{self, Error, ErrorKind, IoSlice, IoSliceMut},
     net::{SocketAddr, UdpSocket},
-    process::exit,
 };
 
 use nix::{
@@ -26,12 +25,31 @@ use nix::{
 
 use crate::Datagram;
 
-// Bind a UDP socket and set some default socket options.
+/// Binds a UDP socket to the specified local address.
+///
+/// # Arguments
+///
+/// * `local_addr` - The local address to bind the socket to.
+///
+/// # Returns
+///
+/// The bound UDP socket.
+///
+/// # Panics
+///
+/// Panics if the UDP socket fails to bind to the specified local address or if various
+/// socket options cannot be set.
+///
+/// # Notes
+///
+/// This function binds the UDP socket to the specified local address and performs additional
+/// configuration on the socket, such as setting socket options to request TOS and TTL
+/// information for incoming packets.
+#[allow(clippy::missing_errors_doc)]
 pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
     let socket = match UdpSocket::bind(local_addr) {
         Err(e) => {
-            eprintln!("Unable to bind UDP socket: {e}");
-            exit(1)
+            panic!("Unable to bind UDP socket: {}", e);
         }
         Ok(s) => {
             // Don't let the host stack or network path fragment our IP packets
@@ -65,7 +83,22 @@ fn to_sockaddr(addr: SocketAddr) -> SockaddrStorage {
     SockaddrStorage::from(addr)
 }
 
-pub fn emit_datagram(fd: i32, d: Datagram) -> io::Result<()> {
+/// Send the UDP datagram on the specified socket.
+///
+/// # Arguments
+///
+/// * `fd` - The UDP socket to send the datagram on.
+/// * `d` - The datagram to send.
+///
+/// # Returns
+///
+/// An `io::Result` indicating whether the datagram was sent successfully.
+///
+/// # Panics
+///
+/// Panics if the `sendmsg` call fails.
+#[allow(clippy::missing_errors_doc)]
+pub fn emit_datagram(fd: i32, d: &Datagram) -> io::Result<()> {
     let iov = [IoSlice::new(&d[..])];
     let tos = i32::from(d.tos());
     let ttl = i32::from(d.ttl());
@@ -101,6 +134,26 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     }
 }
 
+/// Receive a UDP datagram on the specified socket.
+///
+/// # Arguments
+///
+/// * `fd` - The UDP socket to receive the datagram on.
+/// * `buf` - The buffer to receive the datagram into.
+/// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
+/// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
+///
+/// # Returns
+///
+/// An `io::Result` indicating the size of the received datagram.
+///
+/// # Errors
+///
+/// Returns an `io::ErrorKind::WouldBlock` error if the `recvmsg` call would block.
+///
+/// # Panics
+///
+/// Panics if the `recvmsg` call results in any result other than success, EAGAIN, or EINTR.
 pub fn recv_datagram(
     fd: i32,
     buf: &mut [u8],
@@ -115,16 +168,18 @@ pub fn recv_datagram(
         Err(e) if e == EAGAIN => Err(Error::new(ErrorKind::WouldBlock, e)),
         Err(e) if e == EINTR => Err(Error::new(ErrorKind::Interrupted, e)),
         Err(e) => {
-            eprintln!("UDP error: {}", e);
-            exit(1)
+            panic!("UDP error: {}", e);
         }
         Ok(res) => {
             for cmsg in res.cmsgs() {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 match cmsg {
-                    ControlMessageOwned::IpTos(t) => *tos = t as u8,
-                    ControlMessageOwned::Ipv6TClass(t) => *tos = t as u8,
-                    ControlMessageOwned::IpTtl(t) => *ttl = t as u8,
-                    ControlMessageOwned::Ipv6HopLimit(t) => *ttl = t as u8,
+                    ControlMessageOwned::IpTos(t) | ControlMessageOwned::Ipv6TClass(t) => {
+                        *tos = t as u8;
+                    }
+                    ControlMessageOwned::IpTtl(t) | ControlMessageOwned::Ipv6HopLimit(t) => {
+                        *ttl = t as u8;
+                    }
                     _ => unreachable!(),
                 };
             }

@@ -741,7 +741,7 @@ impl ServersRunner {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.find_socket(dgram.source());
-                if let Err(e) = emit_datagram(socket.as_raw_fd(), dgram) {
+                if let Err(e) = emit_datagram(socket.as_raw_fd(), &dgram) {
                     eprintln!("UDP write error: {}", e);
                 }
                 true
