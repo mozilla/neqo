@@ -15,6 +15,8 @@ pub mod hrtime;
 mod incrdecoder;
 pub mod log;
 pub mod qlog;
+#[cfg(feature = "socket")]
+pub mod socket;
 pub mod timer;
 
 pub use self::codec::{Decoder, Encoder};
@@ -23,6 +25,8 @@ pub use self::header::Header;
 pub use self::incrdecoder::{
     IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
+#[cfg(feature = "socket")]
+pub use self::socket::{bind, emit_datagram, recv_datagram};
 
 use std::fmt::Write;
 

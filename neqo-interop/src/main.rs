@@ -7,9 +7,8 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{event::Provider, hex, Datagram};
+use neqo_common::{bind, emit_datagram, event::Provider, hex, recv_datagram, Datagram};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
-use neqo_helper::{bind, emit_datagram, recv_datagram};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
