@@ -1403,10 +1403,14 @@ mod old {
                 match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
 <<<<<<< HEAD
+<<<<<<< HEAD
                         if let Err(e) = emit_datagram(socket, dgram) {
                             eprintln!("UDP write error: {e}");
 =======
                         if let Err(e) = emit_datagram(socket.as_raw_fd(), dgram) {
+=======
+                        if let Err(e) = emit_datagram(socket.as_raw_fd(), &dgram) {
+>>>>>>> 89debfe4 (Make clippy happy)
                             eprintln!("UDP write error: {}", e);
 >>>>>>> 0ac9f97f (Rollup)
                             client.close(Instant::now(), 0, e.to_string());
