@@ -24,13 +24,13 @@ use nix::{
     },
 };
 
-use neqo_common::Datagram;
+use crate::Datagram;
 
 // Bind a UDP socket and set some default socket options.
 pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
     let socket = match UdpSocket::bind(local_addr) {
         Err(e) => {
-            eprintln!("Unable to bind UDP socket: {}", e);
+            eprintln!("Unable to bind UDP socket: {e}");
             exit(1)
         }
         Ok(s) => {
@@ -67,8 +67,8 @@ fn to_sockaddr(addr: SocketAddr) -> SockaddrStorage {
 
 pub fn emit_datagram(fd: i32, d: Datagram) -> io::Result<()> {
     let iov = [IoSlice::new(&d[..])];
-    let tos = d.tos() as i32;
-    let ttl = d.ttl() as i32;
+    let tos = i32::from(d.tos());
+    let ttl = i32::from(d.ttl());
     let cmsgs = match d.destination() {
         SocketAddr::V4(..) => [IpTos(&tos), IpTtl(&ttl)],
         SocketAddr::V6(..) => [Ipv6TClass(&tos), Ipv6HopLimit(&ttl)],

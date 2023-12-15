@@ -10,7 +10,3 @@ members = [
   "neqo-interop",
   "test-fixture",
 ]
-
-[patch.crates-io]
-#nix = { path = "./../nix" }
-nix = { git = "https://github.com/larseggert/nix.git", branch = "feat-tos" }

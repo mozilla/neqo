@@ -16,10 +16,16 @@ time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+nix = { git = "https://github.com/larseggert/nix.git", branch = "feat-tos", features = [
+        "socket",
+        "net",
+        "uio",
+], optional = true }
 
 [features]
 deny-warnings = []
 ci = []
+socket = ["dep:nix"]
 
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"

@@ -11,12 +11,14 @@ use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
 
-use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
+use neqo_common::{
+    self as common, bind, emit_datagram, event::Provider, hex, qlog::NeqoQlog, recv_datagram,
+    Datagram, Role,
+};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher, ResumptionToken,
 };
-use neqo_helper::{bind, emit_datagram, recv_datagram};
 use neqo_http3::{
     self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
     Priority,
@@ -1154,12 +1156,11 @@ mod old {
         time::{Duration, Instant},
     };
 
-    use neqo_helper::recv_datagram;
     use url::Url;
 
     use super::{qlog_new, KeyUpdateState, Res};
     use mio::{Events, Poll};
-    use neqo_common::{event::Provider, Datagram};
+    use neqo_common::{event::Provider, recv_datagram, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
