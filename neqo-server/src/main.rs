@@ -548,12 +548,11 @@ impl HttpServer for SimpleServer {
                         *r += data.len();
                     }
                     if fin {
-                        if let Some(r) = self.posts.remove(&stream) {
-                            let msg = format!("{}", r).as_bytes().to_vec();
+                        if let Some(received) = self.posts.remove(&stream) {
+                            let msg = received.to_string().as_bytes().to_vec();
                             stream
                                 .send_headers(&[
                                     Header::new(":status", "200"),
-                                    Header::new("content-length", msg.len().to_string()),
                                 ])
                                 .unwrap();
                             stream.send_data(&msg).unwrap();

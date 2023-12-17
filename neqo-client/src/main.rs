@@ -469,6 +469,28 @@ enum StreamHandlerType {
     Upload,
 }
 
+impl StreamHandlerType {
+    fn make_handler(
+        handler_type: &Self,
+        url: &Url,
+        args: &Args,
+        all_paths: &mut Vec<PathBuf>,
+    ) -> Box<dyn StreamHandler> {
+        match handler_type {
+            Self::Download => {
+                let out_file = get_output_file(&url, &args.output_dir, all_paths);
+                Box::new(DownloadStreamHandler { out_file })
+            }
+            Self::Upload => Box::new(UploadStreamHandler {
+                data: vec![42; args.upload_size],
+                offset: 0,
+                chunk_size: 32768,
+                start: Instant::now(),
+            }),
+        }
+    }
+}
+
 struct DownloadStreamHandler {
     out_file: Option<File>,
 }
@@ -566,15 +588,15 @@ impl StreamHandler for UploadStreamHandler {
 
 struct URLHandler<'a> {
     url_queue: VecDeque<Url>,
-    streams: HashMap<StreamId, Box<dyn StreamHandler>>,
+    stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
     handler_type: StreamHandlerType,
     args: &'a Args,
 }
 
 impl<'a> URLHandler<'a> {
-    fn handler(&mut self, stream_id: &StreamId) -> Option<&mut Box<dyn StreamHandler>> {
-        self.streams.get_mut(stream_id)
+    fn stream_handler(&mut self, stream_id: &StreamId) -> Option<&mut Box<dyn StreamHandler>> {
+        self.stream_handlers.get_mut(stream_id)
     }
 
     fn process_urls(&mut self, client: &mut Http3Client) {
@@ -582,7 +604,7 @@ impl<'a> URLHandler<'a> {
             if self.url_queue.is_empty() {
                 break;
             }
-            if self.streams.len() >= self.args.concurrency {
+            if self.stream_handlers.len() >= self.args.concurrency {
                 break;
             }
             if !self.next_url(client) {
@@ -609,20 +631,13 @@ impl<'a> URLHandler<'a> {
                     client_stream_id, url
                 );
 
-                let handler: Box<dyn StreamHandler> = match self.handler_type {
-                    StreamHandlerType::Download => {
-                        let out_file =
-                            get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
-                        Box::new(DownloadStreamHandler { out_file })
-                    }
-                    StreamHandlerType::Upload => Box::new(UploadStreamHandler {
-                        data: vec![42; self.args.upload_size],
-                        offset: 0,
-                        chunk_size: 32768,
-                        start: Instant::now(),
-                    }),
-                };
-                self.streams.insert(client_stream_id, handler);
+                let handler: Box<dyn StreamHandler> = StreamHandlerType::make_handler(
+                    &self.handler_type,
+                    &url,
+                    self.args,
+                    &mut self.all_paths,
+                );
+                self.stream_handlers.insert(client_stream_id, handler);
                 true
             }
             Err(Error::TransportError(TransportError::StreamLimitError))
@@ -638,11 +653,11 @@ impl<'a> URLHandler<'a> {
     }
 
     fn done(&mut self) -> bool {
-        self.streams.is_empty() && self.url_queue.is_empty()
+        self.stream_handlers.is_empty() && self.url_queue.is_empty()
     }
 
     fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId) -> bool {
-        self.streams.remove(&stream_id);
+        self.stream_handlers.remove(&stream_id);
         self.process_urls(client);
         if self.done() {
             client.close(Instant::now(), 0, "kthxbye!");
@@ -691,7 +706,7 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    match self.url_handler.handler(&stream_id) {
+                    match self.url_handler.stream_handler(&stream_id) {
                         Some(handler) => {
                             handler.process_header_ready(stream_id, fin, headers);
                         }
@@ -706,7 +721,7 @@ impl<'a> Handler<'a> {
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     let mut stream_done = false;
-                    match self.url_handler.handler(&stream_id) {
+                    match self.url_handler.stream_handler(&stream_id) {
                         None => {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
@@ -741,7 +756,7 @@ impl<'a> Handler<'a> {
                     }
                 }
                 Http3ClientEvent::DataWritable { stream_id } => {
-                    match self.url_handler.handler(&stream_id) {
+                    match self.url_handler.stream_handler(&stream_id) {
                         None => {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
@@ -782,6 +797,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_test(
     testcase: &String,
     args: &mut Args,
@@ -801,7 +817,7 @@ fn handle_test(
             args.method = String::from("POST");
             let url_handler = URLHandler {
                 url_queue: VecDeque::from(urls.to_vec()),
-                streams: HashMap::new(),
+                stream_handlers: HashMap::new(),
                 all_paths: Vec::new(),
                 handler_type: StreamHandlerType::Upload,
                 args,
@@ -889,7 +905,7 @@ fn client(
     let key_update = KeyUpdateState(args.key_update);
     let url_handler = URLHandler {
         url_queue: VecDeque::from(urls.to_vec()),
-        streams: HashMap::new(),
+        stream_handlers: HashMap::new(),
         all_paths: Vec::new(),
         handler_type: StreamHandlerType::Download,
         args,
