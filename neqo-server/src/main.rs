@@ -544,16 +544,14 @@ impl HttpServer for SimpleServer {
                     data,
                     fin,
                 } => {
-                    if let Some(r) = self.posts.get_mut(&stream) {
-                        *r += data.len();
+                    if let Some(received) = self.posts.get_mut(&stream) {
+                        *received += data.len();
                     }
                     if fin {
                         if let Some(received) = self.posts.remove(&stream) {
                             let msg = received.to_string().as_bytes().to_vec();
                             stream
-                                .send_headers(&[
-                                    Header::new(":status", "200"),
-                                ])
+                                .send_headers(&[Header::new(":status", "200")])
                                 .unwrap();
                             stream.send_data(&msg).unwrap();
                             stream.stream_close_send().unwrap();

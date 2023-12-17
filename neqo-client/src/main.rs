@@ -478,7 +478,7 @@ impl StreamHandlerType {
     ) -> Box<dyn StreamHandler> {
         match handler_type {
             Self::Download => {
-                let out_file = get_output_file(&url, &args.output_dir, all_paths);
+                let out_file = get_output_file(url, &args.output_dir, all_paths);
                 Box::new(DownloadStreamHandler { out_file })
             }
             Self::Upload => Box::new(UploadStreamHandler {
