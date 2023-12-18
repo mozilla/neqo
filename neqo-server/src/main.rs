@@ -18,7 +18,6 @@ use std::{
     io::Read,
     mem,
     net::{SocketAddr, ToSocketAddrs},
-    os::fd::AsRawFd,
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -586,7 +585,7 @@ fn read_dgram(
     let mut tos = 0;
     let mut ttl = 0;
     let (sz, remote_addr) =
-        match recv_datagram(socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl) {
+        match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
             Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(err) => {
                 eprintln!("UDP recv error: {err:?}");
@@ -741,7 +740,7 @@ impl ServersRunner {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.find_socket(dgram.source());
-                if let Err(e) = emit_datagram(socket.as_raw_fd(), &dgram) {
+                if let Err(e) = emit_datagram(socket, &dgram) {
                     eprintln!("UDP write error: {}", e);
                 }
                 true

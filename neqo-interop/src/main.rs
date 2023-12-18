@@ -21,7 +21,6 @@ use std::{
     collections::HashSet,
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
-    os::fd::AsRawFd,
     rc::Rc,
 };
 // use std::path::PathBuf;
@@ -110,7 +109,7 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-                    if let Err(e) = emit_datagram(nctx.socket.as_raw_fd(), &dgram) {
+                    if let Err(e) = emit_datagram(&nctx.socket, &dgram) {
                         eprintln!("UDP write error: {}", e);
                         continue;
                     }
@@ -132,7 +131,7 @@ fn process_loop(
 
         let mut tos = 0;
         let mut ttl = 0;
-        let (sz, _) = match recv_datagram(nctx.socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl)
+        let (sz, _) = match recv_datagram(&nctx.socket, &mut buf[..], &mut tos, &mut ttl)
         {
             Ok(sz) => sz,
             Err(e) => {
@@ -290,7 +289,7 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(nctx.socket.as_raw_fd(), &dgram).unwrap(),
+                Output::Datagram(dgram) => emit_datagram(&nctx.socket, &dgram).unwrap(),
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
@@ -307,7 +306,7 @@ fn process_loop_h3(
 
         let mut tos = 0;
         let mut ttl = 0;
-        let (sz, _) = match recv_datagram(nctx.socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl)
+        let (sz, _) = match recv_datagram(&nctx.socket, &mut buf[..], &mut tos, &mut ttl)
         {
             Ok(sz) => sz,
             Err(e) => {

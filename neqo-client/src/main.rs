@@ -36,7 +36,6 @@ use std::{
     fs::{create_dir_all, File, OpenOptions},
     io::{self, ErrorKind, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
-    os::fd::AsRawFd,
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -446,8 +445,8 @@ fn process_loop(
         'write: loop {
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
-                    if let Err(e) = emit_datagram(socket, dgram) {
-                        eprintln!("UDP write error: {e}");
+                    if let Err(e) = emit_datagram(socket, &dgram) {
+                        eprintln!("UDP write error: {}", e);
                         client.close(Instant::now(), 0, e.to_string());
                         exiting = true;
                         break 'write;
@@ -471,7 +470,7 @@ fn process_loop(
 
         let mut tos = 0;
         let mut ttl = 0;
-        match recv_datagram(socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl) {
+        match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
             Err(ref err)
                 if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted => {}
             Err(err) => {
@@ -1149,7 +1148,6 @@ mod old {
         fs::File,
         io::{ErrorKind, Write},
         net::{SocketAddr, UdpSocket},
-        os::fd::AsRawFd,
         path::PathBuf,
         process::exit,
         rc::Rc,
@@ -1402,17 +1400,8 @@ mod old {
             'write: loop {
                 match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
-<<<<<<< HEAD
-<<<<<<< HEAD
-                        if let Err(e) = emit_datagram(socket, dgram) {
+                        if let Err(e) = emit_datagram(socket, &dgram) {
                             eprintln!("UDP write error: {e}");
-=======
-                        if let Err(e) = emit_datagram(socket.as_raw_fd(), dgram) {
-=======
-                        if let Err(e) = emit_datagram(socket.as_raw_fd(), &dgram) {
->>>>>>> 89debfe4 (Make clippy happy)
-                            eprintln!("UDP write error: {}", e);
->>>>>>> 0ac9f97f (Rollup)
                             client.close(Instant::now(), 0, e.to_string());
                             exiting = true;
                             break 'write;
@@ -1436,7 +1425,7 @@ mod old {
 
             let mut tos = 0;
             let mut ttl = 0;
-            match recv_datagram(socket.as_raw_fd(), &mut buf[..], &mut tos, &mut ttl) {
+            match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
                 Err(err) => {
                     if err.kind() != ErrorKind::WouldBlock && err.kind() != ErrorKind::Interrupted {
                         eprintln!("UDP error: {}", err);
