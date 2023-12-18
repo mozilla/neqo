@@ -584,15 +584,14 @@ fn read_dgram(
     let buf = &mut [0u8; 2048];
     let mut tos = 0;
     let mut ttl = 0;
-    let (sz, remote_addr) =
-        match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
-            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
-            Err(err) => {
-                eprintln!("UDP recv error: {err:?}");
-                return Err(err);
-            }
-            Ok(res) => res,
-        };
+    let (sz, remote_addr) = match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
+        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+        Err(err) => {
+            eprintln!("UDP recv error: {err:?}");
+            return Err(err);
+        }
+        Ok(res) => res,
+    };
 
     if sz == buf.len() {
         eprintln!("Might have received more than {} bytes", buf.len());
