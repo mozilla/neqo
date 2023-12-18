@@ -7,6 +7,7 @@
 use std::{
     io::{self, Error, ErrorKind, IoSlice, IoSliceMut},
     net::{SocketAddr, UdpSocket},
+    os::fd::AsRawFd,
 };
 
 use nix::{
@@ -24,6 +25,24 @@ use nix::{
 };
 
 use crate::Datagram;
+
+#[allow(clippy::module_name_repetitions)]
+pub trait SocketLike {
+    // don't use my name
+    fn raw_fd(&self) -> i32;
+}
+
+impl SocketLike for std::net::UdpSocket {
+    fn raw_fd(&self) -> i32 {
+        self.as_raw_fd()
+    }
+}
+
+impl SocketLike for mio::net::UdpSocket {
+    fn raw_fd(&self) -> i32 {
+        self.as_raw_fd()
+    }
+}
 
 /// Binds a UDP socket to the specified local address.
 ///
@@ -79,10 +98,6 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
     Ok(socket)
 }
 
-fn to_sockaddr(addr: SocketAddr) -> SockaddrStorage {
-    SockaddrStorage::from(addr)
-}
-
 /// Send the UDP datagram on the specified socket.
 ///
 /// # Arguments
@@ -98,7 +113,7 @@ fn to_sockaddr(addr: SocketAddr) -> SockaddrStorage {
 ///
 /// Panics if the `sendmsg` call fails.
 #[allow(clippy::missing_errors_doc)]
-pub fn emit_datagram(fd: i32, d: &Datagram) -> io::Result<()> {
+pub fn emit_datagram<S: SocketLike>(socket: &S, d: &Datagram) -> io::Result<()> {
     let iov = [IoSlice::new(&d[..])];
     let tos = i32::from(d.tos());
     let ttl = i32::from(d.ttl());
@@ -107,11 +122,11 @@ pub fn emit_datagram(fd: i32, d: &Datagram) -> io::Result<()> {
         SocketAddr::V6(..) => [Ipv6TClass(&tos), Ipv6HopLimit(&ttl)],
     };
     let sent = sendmsg(
-        fd,
+        socket.raw_fd(),
         &iov,
         &cmsgs,
         MsgFlags::empty(),
-        Some(&to_sockaddr(d.destination())),
+        Some(&SockaddrStorage::from(d.destination())),
     )
     .unwrap();
     if sent != d.len() {
@@ -154,8 +169,8 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
 /// # Panics
 ///
 /// Panics if the `recvmsg` call results in any result other than success, EAGAIN, or EINTR.
-pub fn recv_datagram(
-    fd: i32,
+pub fn recv_datagram<S: SocketLike>(
+    socket: &S,
     buf: &mut [u8],
     tos: &mut u8,
     ttl: &mut u8,
@@ -164,7 +179,7 @@ pub fn recv_datagram(
     let mut cmsg = cmsg_space!(u8, u8);
     let flags = MsgFlags::empty();
 
-    match recvmsg::<SockaddrStorage>(fd, &mut iov, Some(&mut cmsg), flags) {
+    match recvmsg::<SockaddrStorage>(socket.raw_fd(), &mut iov, Some(&mut cmsg), flags) {
         Err(e) if e == EAGAIN => Err(Error::new(ErrorKind::WouldBlock, e)),
         Err(e) if e == EINTR => Err(Error::new(ErrorKind::Interrupted, e)),
         Err(e) => {
