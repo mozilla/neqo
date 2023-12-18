@@ -94,9 +94,9 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
 /// # Panics
 ///
 /// Panics if the send call fails.
-/// 
+///
 /// # Notes
-/// 
+///
 /// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
 /// TODO: Figure out how to set TOS and TTL at least on Windows.
 #[allow(clippy::missing_errors_doc)]
