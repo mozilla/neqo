@@ -131,8 +131,7 @@ fn process_loop(
 
         let mut tos = 0;
         let mut ttl = 0;
-        let (sz, _) = match recv_datagram(&nctx.socket, &mut buf[..], &mut tos, &mut ttl)
-        {
+        let (sz, _) = match recv_datagram(&nctx.socket, &mut buf[..], &mut tos, &mut ttl) {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
@@ -306,8 +305,7 @@ fn process_loop_h3(
 
         let mut tos = 0;
         let mut ttl = 0;
-        let (sz, _) = match recv_datagram(&nctx.socket, &mut buf[..], &mut tos, &mut ttl)
-        {
+        let (sz, _) = match recv_datagram(&nctx.socket, &mut buf[..], &mut tos, &mut ttl) {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
