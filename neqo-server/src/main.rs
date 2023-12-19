@@ -420,6 +420,7 @@ struct SimpleServer {
     server: Http3Server,
     /// Progress writing to each stream.
     remaining_data: HashMap<StreamId, ResponseData>,
+    posts: HashMap<Http3OrWebTransportStream, usize>,
 }
 
 impl SimpleServer {
@@ -454,6 +455,7 @@ impl SimpleServer {
         Self {
             server,
             remaining_data: HashMap::new(),
+            posts: HashMap::new(),
         }
     }
 }
@@ -478,6 +480,17 @@ impl HttpServer for SimpleServer {
                     fin,
                 } => {
                     println!("Headers (request={} fin={}): {:?}", stream, fin, headers);
+
+                    let post = if let Some(method) = headers.iter().find(|&h| h.name() == ":method")
+                    {
+                        method.value() == "POST"
+                    } else {
+                        false
+                    };
+                    if post {
+                        self.posts.insert(stream, 0);
+                        continue;
+                    }
 
                     let mut response =
                         if let Some(path) = headers.iter().find(|&h| h.name() == ":path") {
@@ -515,17 +528,35 @@ impl HttpServer for SimpleServer {
                     }
                 }
                 Http3ServerEvent::DataWritable { mut stream } => {
-                    if let Some(remaining) = self.remaining_data.get_mut(&stream.stream_id()) {
-                        remaining.send(&mut stream);
-                        if remaining.done() {
-                            self.remaining_data.remove(&stream.stream_id());
-                            stream.stream_close_send().unwrap();
+                    if self.posts.get_mut(&stream).is_none() {
+                        if let Some(remaining) = self.remaining_data.get_mut(&stream.stream_id()) {
+                            remaining.send(&mut stream);
+                            if remaining.done() {
+                                self.remaining_data.remove(&stream.stream_id());
+                                stream.stream_close_send().unwrap();
+                            }
                         }
                     }
                 }
 
-                Http3ServerEvent::Data { stream, data, fin } => {
-                    println!("Data (request={} fin={}): {:?}", stream, fin, data);
+                Http3ServerEvent::Data {
+                    mut stream,
+                    data,
+                    fin,
+                } => {
+                    if let Some(received) = self.posts.get_mut(&stream) {
+                        *received += data.len();
+                    }
+                    if fin {
+                        if let Some(received) = self.posts.remove(&stream) {
+                            let msg = received.to_string().as_bytes().to_vec();
+                            stream
+                                .send_headers(&[Header::new(":status", "200")])
+                                .unwrap();
+                            stream.send_data(&msg).unwrap();
+                            stream.stream_close_send().unwrap();
+                        }
+                    }
                 }
                 _ => {}
             }
