@@ -385,45 +385,45 @@ mod test {
     /// A limit for when high resolution timers are disabled.
     const GENEROUS: Duration = Duration::from_millis(30);
 
+    fn measure_delay(d: Duration) -> Duration {
+        const RUNS: u32 = 30;
+        let mut lags = (0..RUNS)
+            .map(|_| {
+                let s = Instant::now();
+                sleep(d);
+                s.elapsed() - d
+            })
+            .collect::<Vec<_>>();
+        lags.sort();
+        let median = lags[lags.len() / 2];
+        println!("sleep({d:?}) \u{2192} \u{394}{median:?} (median, {RUNS} runs)");
+        median
+    }
+
     fn validate_delays(max_lag: Duration) -> Result<(), ()> {
-        const DELAYS: &[u64] = &[1, 2, 3, 5, 8, 10, 12, 15, 20, 25, 30];
+        const DELAYS: &[u64] = &[1, 2, 3, 5, 8, 13, 21, 34, 55];
         let durations = DELAYS.iter().map(|&d| Duration::from_millis(d));
 
-        let mut s = Instant::now();
         for d in durations {
-            sleep(d);
-            let e = Instant::now();
-            let actual = e - s;
-            let lag = actual - d;
-            println!("sleep({d:?}) \u{2192} {actual:?} \u{394}{lag:?}");
+            let lag = measure_delay(d);
             if lag > max_lag {
                 return Err(());
             }
-            s = Instant::now();
         }
         Ok(())
-    }
-
-    /// Validate the delays twice.  Sometimes the first run can stall.
-    /// Reliability in CI is more important than reliable timers.
-    fn check_delays(max_lag: Duration) {
-        if validate_delays(max_lag).is_err() {
-            sleep(Duration::from_millis(50));
-            validate_delays(max_lag).unwrap();
-        }
     }
 
     /// Note that you have to run this test alone or other tests will
     /// grab the high resolution timer and this will run faster.
     #[test]
     fn baseline() {
-        check_delays(GENEROUS);
+        validate_delays(GENEROUS).unwrap();
     }
 
     #[test]
     fn one_ms() {
         let _hrt = Time::get(ONE);
-        check_delays(ONE_AND_A_BIT);
+        validate_delays(ONE_AND_A_BIT).unwrap();
     }
 
     #[test]
@@ -450,16 +450,16 @@ mod test {
             one_ms();
         });
         let _hrt = Time::get(Duration::from_millis(4));
-        check_delays(Duration::from_millis(5));
+        validate_delays(Duration::from_millis(5)).unwrap();
         thr.join().unwrap();
     }
 
     #[test]
     fn update() {
         let mut hrt = Time::get(Duration::from_millis(4));
-        check_delays(Duration::from_millis(5));
+        validate_delays(Duration::from_millis(5)).unwrap();
         hrt.update(ONE);
-        check_delays(ONE_AND_A_BIT);
+        validate_delays(ONE_AND_A_BIT).unwrap();
     }
 
     #[test]
@@ -474,6 +474,6 @@ mod test {
     #[test]
     fn max() {
         let _hrt = Time::get(Duration::from_secs(1));
-        check_delays(GENEROUS);
+        validate_delays(GENEROUS).unwrap();
     }
 }
