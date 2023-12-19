@@ -398,8 +398,10 @@ mod test {
         let median = lags[lags.len() / 2];
         let min = lags.first().unwrap();
         let max = lags.last().unwrap();
-        println!("sleep({d:?}) \u{2192} \u{394} min {min:?}, median {median:?}, max {max:?} ({RUNS} runs)");
-        median
+        let q25 = lags[lags.len() / 4];
+        let q10 = lags[lags.len() / 10];
+        println!("sleep({d:?}) \u{2192} \u{394} min {min:?}, q10 {q25:?}, q25 {q25:?}, median {median:?}, max {max:?} ({RUNS} runs)");
+        q10
     }
 
     fn validate_delays(max_lag: Duration) -> Result<(), ()> {
