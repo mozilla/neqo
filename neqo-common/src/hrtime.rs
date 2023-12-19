@@ -396,7 +396,9 @@ mod test {
             .collect::<Vec<_>>();
         lags.sort();
         let median = lags[lags.len() / 2];
-        println!("sleep({d:?}) \u{2192} \u{394}{median:?} (median, {RUNS} runs)");
+        let min = lags.first().unwrap();
+        let max = lags.last().unwrap();
+        println!("sleep({d:?}) \u{2192} \u{394} min {min:?}, median {median:?}, max {max:?} ({RUNS} runs)");
         median
     }
 
