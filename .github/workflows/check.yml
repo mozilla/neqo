@@ -121,6 +121,7 @@ jobs:
         env:
           RUST_BACKTRACE: 1
           RUST_LOG: neqo=debug
+          DYLD_PRINT_LIBRARIES: true
 
       - name: libplds4
         run: |
