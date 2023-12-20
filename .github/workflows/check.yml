@@ -122,6 +122,11 @@ jobs:
           RUST_BACKTRACE: 1
           RUST_LOG: neqo=debug
 
+      - name: libplds4
+        run: |
+          find "${{ github.workspace }}" -ls | grep libplds4
+        if: success() || failure()
+
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
         if: success() || failure()
