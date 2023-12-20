@@ -109,6 +109,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
 
     // If we have tracing on, try to ensure that key data can be read.
     let insensitive_secret_ptr = if log::log_enabled!(log::Level::Trace) {
+        #[allow(clippy::useless_conversion)] // TODO: Remove when we bump the MSRV to 1.74.0.
         unsafe {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
@@ -126,6 +127,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     };
     assert_eq!(insensitive_secret_ptr.is_null(), public_ptr.is_null());
     let secret_ptr = if insensitive_secret_ptr.is_null() {
+        #[allow(clippy::useless_conversion)] // TODO: Remove when we bump the MSRV to 1.74.0.
         unsafe {
             p11::PK11_GenerateKeyPairWithOpFlags(
                 *slot,
