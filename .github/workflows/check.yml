@@ -8,6 +8,7 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   check:
@@ -113,19 +114,18 @@ jobs:
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
-        env:
-          RUST_BACKTRACE: 1
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+        run: |
+          env | sort
+          cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
         env:
-          RUST_BACKTRACE: 1
-          RUST_LOG: neqo=debug
           DYLD_PRINT_LIBRARIES: true
 
       - name: libplds4
         run: |
           find "${{ github.workspace }}" -ls | grep libplds4
+          find "$DYLD_LIBRARY_PATH" -ls
         if: success() || failure()
 
       - name: Check formatting
