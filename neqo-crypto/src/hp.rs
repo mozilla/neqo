@@ -100,7 +100,8 @@ impl HpKey {
 
         let res = match cipher {
             TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => {
-                #[allow(clippy::useless_conversion)] // TODO: Remove when we bump the MSRV to 1.74.0.
+                #[allow(clippy::useless_conversion)]
+                // TODO: Remove when we bump the MSRV to 1.74.0.
                 let context_ptr = unsafe {
                     PK11_CreateContextBySymKey(
                         mech,
