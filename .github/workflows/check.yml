@@ -68,7 +68,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Rust tools
-        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
+        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
           RUST_BACKTRACE: 1
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --all-targets --no-fail-fast --lcov --output-path lcov.info
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov test --all-targets --no-fail-fast --lcov --output-path lcov.info
         env:
           RUST_BACKTRACE: 1
           RUST_LOG: neqo=debug
