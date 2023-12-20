@@ -107,7 +107,11 @@ jobs:
           RUST_BACKTRACE: 1
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+        run: |
+          env
+          cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info || true
+          find ${{ github.workspace }} -ls | grep libplds4
+
         env:
           RUST_BACKTRACE: 1
           RUST_LOG: neqo=debug
