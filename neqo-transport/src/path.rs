@@ -56,7 +56,6 @@ pub type PathRef = Rc<RefCell<Path>>;
 #[derive(Debug, Default)]
 pub struct Paths {
     /// All of the paths.  All of these paths will be permanent.
-    #[allow(clippy::struct_field_names)]
     paths: Vec<PathRef>,
     /// This is the primary path.  This will only be `None` initially, so
     /// care needs to be taken regarding that only during the handshake.
