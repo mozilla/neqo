@@ -130,7 +130,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
 
 pub fn client_version_information_initiated(qlog: &mut NeqoQlog, version_config: &VersionConfig) {
     qlog.add_event_data(|| {
-        let ev_data = EventData::VersionInformation(VersionInformation {
+        Some(EventData::VersionInformation(VersionInformation {
             client_versions: Some(
                 version_config
                     .all()
@@ -140,8 +140,7 @@ pub fn client_version_information_initiated(qlog: &mut NeqoQlog, version_config:
             ),
             server_versions: None,
             chosen_version: Some(format!("{:02x}", version_config.initial().wire_version())),
-        });
-        Some(ev_data)
+        }))
     });
 }
 
@@ -152,7 +151,7 @@ pub fn client_version_information_negotiated(
     chosen: Version,
 ) {
     qlog.add_event_data(|| {
-        let ev_data = EventData::VersionInformation(VersionInformation {
+        Some(EventData::VersionInformation(VersionInformation {
             client_versions: Some(
                 client
                     .iter()
@@ -161,8 +160,7 @@ pub fn client_version_information_negotiated(
             ),
             server_versions: Some(server.iter().map(|v| format!("{v:02x}")).collect()),
             chosen_version: Some(format!("{:02x}", chosen.wire_version())),
-        });
-        Some(ev_data)
+        }))
     });
 }
 
