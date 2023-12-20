@@ -83,7 +83,6 @@ jobs:
           git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
           echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
           echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
-          echo "NSS_JOBS=$NUMBER_OF_PROCESSORS" >> "$GITHUB_ENV"
         env:
           NSS_DIR: ${{ github.workspace }}/nss
           NSPR_DIR: ${{ github.workspace }}/nspr
@@ -107,11 +106,7 @@ jobs:
           RUST_BACKTRACE: 1
 
       - name: Run tests and determine coverage
-        run: |
-          env
-          cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info || true
-          find ${{ github.workspace }} -ls | grep libplds4
-
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
         env:
           RUST_BACKTRACE: 1
           RUST_LOG: neqo=debug
