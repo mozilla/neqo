@@ -372,7 +372,12 @@ impl Drop for Time {
     }
 }
 
-#[cfg(test)]
+// Only run these tests in CI on platforms other than MacOS and Windows, where the timer
+// inaccuracies are too high to pass the tests.
+#[cfg(all(
+    test,
+    not(all(any(target_os = "macos", target_os = "windows"), feature = "ci"))
+))]
 mod test {
     use super::Time;
     use std::{

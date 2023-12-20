@@ -16,6 +16,7 @@ time = {version = "=0.3.23", features = ["formatting"]}
 
 [features]
 deny-warnings = []
+ci = []
 
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"
