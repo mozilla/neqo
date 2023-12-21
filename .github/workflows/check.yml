@@ -124,7 +124,7 @@ jobs:
             export DYLD_LIBRARY_PATH="${{ github.workspace }}/dist/Debug/lib"
             env | sort
           fi
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+          env DYLD_LIBRARY_PATH="${{ github.workspace }}/dist/Debug/lib" cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
