@@ -115,13 +115,15 @@ jobs:
           echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
-        # On MacOS runners, the DYLD_LIBRARY_PATH is sometimes not set for some reason.
-        # Work around this.
+        # On MacOS runners, the DYLD_LIBRARY_PATH is sometimes not set for some reason
+        # although we're adding it to GITHUB_ENV above. Try and recover from that.
       - name: Run tests and determine coverage
         run: |
-          env | grep LIBRARY
-          [ -n "$DYLD_LIBRARY_PATH" ] || export DYLD_LIBRARY_PATH="${{ github.workspace }}/dist/Debug/lib"
-          env | grep LIBRARY
+          if [ -z "$DYLD_LIBRARY_PATH" ]; then
+            echo "DYLD_LIBRARY_PATH is not set, setting it to ${{ github.workspace }}/dist/Debug/lib"
+            export DYLD_LIBRARY_PATH="${{ github.workspace }}/dist/Debug/lib"
+            env | sort
+          fi
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Check formatting
