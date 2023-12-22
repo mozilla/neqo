@@ -75,7 +75,7 @@ jobs:
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
-      - name: Set up Windows build environment
+      - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -99,7 +99,7 @@ jobs:
           NSS_DIR: ${{ github.workspace }}/nss
           NSPR_DIR: ${{ github.workspace }}/nspr
 
-      - name: Set up environment for NSS build.sh (Windows)
+      - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
         run: |
           echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
@@ -117,7 +117,7 @@ jobs:
       # On MacOS runners, setting various DYLD_* variables in the environment appears to
       # sometimes not take effect. This seems to be due to System Intergrity Protection (SIP):
       # https://briandfoy.github.io/macos-s-system-integrity-protection-sanitizes-your-environment/
-      # It's not clear why this happens only sometimes. Work around that by copying the
+      # It's not clear why this only happens sometimes. Work around that by copying the
       # libraries to /usr/local/lib.
       - name: Install libraries (MacOS)
         if: runner.os == 'MacOS'
