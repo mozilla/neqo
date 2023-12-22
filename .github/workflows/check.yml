@@ -112,18 +112,17 @@ jobs:
         run: |
           cargo +${{ matrix.rust-toolchain }} build -v --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
-          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
       # On MacOS runners, setting various DYLD_* variables in the environment appears to
-      # sometimes fail. This seems to be due to System Intergrity Protection (SIP):
+      # sometimes not take effect. This seems to be due to System Intergrity Protection (SIP):
       # https://briandfoy.github.io/macos-s-system-integrity-protection-sanitizes-your-environment/
       # It's not clear why this happens only sometimes. Work around that by copying the
-      # libraries to /usr/lib.
+      # libraries to /usr/local/lib.
       - name: Install libraries (MacOS)
         if: runner.os == 'MacOS'
-        run: sudo cp -av "${{ github.workspace }}/dist/Debug/lib/" /usr/local/lib/
-          
+        run: cp -av "${{ github.workspace }}/dist/Debug/lib/" /usr/local/lib/
+
       - name: Run tests and determine coverage
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
