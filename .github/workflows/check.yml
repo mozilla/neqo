@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  DYLD_FALLBACK_LIBRARY_PATH: "${{ github.workspace }}/dist/Debug/lib"
 
 jobs:
   check:
