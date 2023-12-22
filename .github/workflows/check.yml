@@ -124,7 +124,7 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           find "${{ github.workspace }}/dist/Debug" -ls
-          cp -v "${{ github.workspace }}/dist/Debug/lib/"* /usr/lib/
+          sudo cp -av "${{ github.workspace }}/dist/Debug/lib/" /usr/lib/
           
       - name: Run tests and determine coverage
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
