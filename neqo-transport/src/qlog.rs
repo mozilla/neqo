@@ -17,7 +17,7 @@ use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
         AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
-        PacketReceived, PacketSent, QuicFrame, StreamType,
+        PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
     },
     Event, EventData, RawInfo,
 };
@@ -33,6 +33,7 @@ use crate::{
     stream_id::StreamType as NeqoStreamType,
     tparams::{self, TransportParametersHandler},
     tracking::SentPacket,
+    version::Version,
 };
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
@@ -125,6 +126,21 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
 
         Some(ev_data)
     })
+}
+
+pub fn server_version_information_failed(qlog: &mut NeqoQlog, server: &[Version], client: Version) {
+    qlog.add_event_data(|| {
+        Some(EventData::VersionInformation(VersionInformation {
+            client_versions: Some(vec![format!("{:02x}", client.wire_version())]),
+            server_versions: Some(
+                server
+                    .iter()
+                    .map(|v| format!("{:02x}", v.wire_version()))
+                    .collect(),
+            ),
+            chosen_version: None,
+        }))
+    });
 }
 
 pub fn packet_sent(

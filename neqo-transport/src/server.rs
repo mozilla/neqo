@@ -489,20 +489,30 @@ impl Server {
             params,
         );
 
-        if let Ok(mut c) = sconn {
-            self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
-            let c = Rc::new(RefCell::new(ServerConnectionState {
-                c,
-                last_timer: now,
-                active_attempt: Some(attempt_key.clone()),
-            }));
-            cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
-            let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
-            debug_assert!(previous_attempt.is_none());
-            self.process_connection(c, Some(dgram), now)
-        } else {
-            qwarn!([self], "Unable to create connection");
-            None
+        match sconn {
+            Ok(mut c) => {
+                self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
+                let c = Rc::new(RefCell::new(ServerConnectionState {
+                    c,
+                    last_timer: now,
+                    active_attempt: Some(attempt_key.clone()),
+                }));
+                cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
+                let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
+                debug_assert!(previous_attempt.is_none());
+                self.process_connection(c, Some(dgram), now)
+            }
+            Err(e) => {
+                qwarn!([self], "Unable to create connection");
+                if e == crate::Error::VersionNegotiation {
+                    crate::qlog::server_version_information_failed(
+                        &mut self.create_qlog_trace(&attempt_key),
+                        self.conn_params.get_versions().all(),
+                        initial.version,
+                    )
+                }
+                None
+            }
         }
     }
 
@@ -578,6 +588,18 @@ impl Server {
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
             );
+
+            crate::qlog::server_version_information_failed(
+                &mut self.create_qlog_trace(&AttemptKey {
+                    remote_address: dgram.source(),
+                    odcid: packet.dcid().into(),
+                }),
+                self.conn_params.get_versions().all(),
+                packet
+                    .version()
+                    .expect("version on `OtherVersion` and `Initial` to be set"),
+            );
+
             return Some(Datagram::new(dgram.destination(), dgram.source(), vn));
         }
 
