@@ -1,9 +1,9 @@
 [package]
 name = "neqo-transport"
-version = "0.6.7"
+version = "0.6.8"
 authors = ["EKR <ekr@rtfm.com>", "Andy Grover <agrover@mozilla.com>"]
 edition = "2018"
-rust-version = "1.65.0"
+rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
