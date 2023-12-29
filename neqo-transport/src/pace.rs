@@ -5,7 +5,6 @@
 // except according to those terms.
 
 // Pacer
-#![deny(clippy::pedantic)]
 
 use neqo_common::qtrace;
 

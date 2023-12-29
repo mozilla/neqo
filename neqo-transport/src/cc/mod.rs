@@ -5,7 +5,6 @@
 // except according to those terms.
 
 // Congestion control
-#![deny(clippy::pedantic)]
 
 use crate::{path::PATH_MTU_V6, tracking::SentPacket, Error};
 use neqo_common::qlog::NeqoQlog;

@@ -116,7 +116,7 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings -D clippy::pedantic
         if: success() || failure()
 
       - name: Upload coverage reports to Codecov

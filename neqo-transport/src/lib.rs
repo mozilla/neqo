@@ -6,6 +6,18 @@
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
+#![deny(clippy::pedantic)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::return_self_not_must_use)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::single_match_else)]
+#![allow(clippy::if_not_else)]
+#![allow(clippy::match_wild_err_arm)]
 
 use neqo_common::qinfo;
 use neqo_crypto::Error as CryptoError;
@@ -176,7 +188,7 @@ impl From<std::num::TryFromIntError> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::CryptoError(e) => Some(e),
             _ => None,
@@ -186,7 +198,7 @@ impl ::std::error::Error for Error {
 
 impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Transport error: {:?}", self)
+        write!(f, "Transport error: {self:?}")
     }
 }
 
@@ -202,7 +214,7 @@ impl ConnectionError {
     pub fn app_code(&self) -> Option<AppError> {
         match self {
             Self::Application(e) => Some(*e),
-            _ => None,
+            Self::Transport(_) => None,
         }
     }
 }

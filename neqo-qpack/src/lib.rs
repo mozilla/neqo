@@ -5,7 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 // This is because of Encoder and Decoder structs. TODO: think about a better namings for crate and structs.
 #![allow(clippy::module_name_repetitions)]
 

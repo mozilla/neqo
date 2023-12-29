@@ -5,7 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 // Bindgen auto generated code
 // won't adhere to the clippy rules below
 #![allow(clippy::module_name_repetitions)]

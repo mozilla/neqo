@@ -206,7 +206,7 @@ impl StateSignaling {
             debug_assert!(false, "StateSignaling must be in Idle state.");
             return;
         }
-        *self = Self::HandshakeDone
+        *self = Self::HandshakeDone;
     }
 
     pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Res<Option<RecoveryToken>> {

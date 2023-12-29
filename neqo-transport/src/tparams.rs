@@ -440,7 +440,7 @@ impl TransportParameters {
         let rbuf = random(4);
         let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
-        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a0a0a;
+        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
         for &v in versions.all() {
             if role == Role::Client && !versions.initial().is_compatible(v) {
@@ -584,7 +584,7 @@ impl TransportParametersHandler {
     pub fn set_version(&mut self, version: Version) {
         debug_assert_eq!(self.role, Role::Client);
         self.versions.set_initial(version);
-        self.local.set_versions(self.role, &self.versions)
+        self.local.set_versions(self.role, &self.versions);
     }
 
     pub fn remote(&self) -> &TransportParameters {
@@ -726,16 +726,12 @@ where
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
-        let tpslice = if let Some(v) = dec.decode_vvec() {
-            v
-        } else {
+        let Some(tpslice) = dec.decode_vvec() else {
             qinfo!("0-RTT: token code error");
             return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
-        let remembered = if let Ok(v) = TransportParameters::decode(&mut dec_tp) {
-            v
-        } else {
+        let Ok(remembered) = TransportParameters::decode(&mut dec_tp) else {
             qinfo!("0-RTT: transport parameter decode error");
             return ZeroRttCheckResult::Fail;
         };

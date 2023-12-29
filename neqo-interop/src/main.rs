@@ -6,6 +6,7 @@
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
+#![deny(clippy::pedantic)]
 
 use neqo_common::{event::Provider, hex, Datagram};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};

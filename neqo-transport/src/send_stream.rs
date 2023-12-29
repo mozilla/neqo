@@ -260,7 +260,7 @@ impl RangeTracker {
 
         // Create final chunk if anything remains of the new range
         if tmp_len > 0 {
-            v.push((tmp_off, tmp_len, new_state))
+            v.push((tmp_off, tmp_len, new_state));
         }
 
         v
@@ -312,7 +312,7 @@ impl RangeTracker {
             self.used.insert(sub_off, (sub_len, sub_state));
         }
 
-        self.coalesce_acked_from_zero()
+        self.coalesce_acked_from_zero();
     }
 
     fn unmark_range(&mut self, off: u64, len: usize) {
@@ -443,7 +443,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
-        self.ranges.mark_range(offset, len, RangeState::Sent)
+        self.ranges.mark_range(offset, len, RangeState::Sent);
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
@@ -463,7 +463,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
-        self.ranges.unmark_range(offset, len)
+        self.ranges.unmark_range(offset, len);
     }
 
     /// Forget about anything that was marked as sent.
@@ -622,7 +622,7 @@ pub struct SendStream {
 
 impl Hash for SendStream {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.stream_id.hash(state)
+        self.stream_id.hash(state);
     }
 }
 
@@ -751,7 +751,7 @@ impl SendStream {
                 final_written,
                 ..
             } => *final_retired + *final_written,
-            _ => 0,
+            SendStreamState::Ready { .. } => 0,
         }
     }
 
@@ -763,7 +763,7 @@ impl SendStream {
             SendStreamState::DataRecvd { retired, .. } => *retired,
             SendStreamState::ResetSent { final_retired, .. }
             | SendStreamState::ResetRecvd { final_retired, .. } => *final_retired,
-            _ => 0,
+            SendStreamState::Ready { .. } => 0,
         }
     }
 
@@ -909,7 +909,7 @@ impl SendStream {
             | SendStreamState::Send { .. }
             | SendStreamState::DataSent { .. }
             | SendStreamState::DataRecvd { .. } => {
-                qtrace!([self], "Reset acked while in {} state?", self.state.name())
+                qtrace!([self], "Reset acked while in {} state?", self.state.name());
             }
             SendStreamState::ResetSent {
                 final_retired,
@@ -1023,7 +1023,7 @@ impl SendStream {
             } => {
                 send_buf.mark_as_acked(offset, len);
                 if self.avail() > 0 {
-                    self.conn_events.send_stream_writable(self.stream_id)
+                    self.conn_events.send_stream_writable(self.stream_id);
                 }
             }
             SendStreamState::DataSent {
@@ -1101,7 +1101,7 @@ impl SendStream {
             let stream_was_blocked = fc.available() == 0;
             fc.update(limit);
             if stream_was_blocked && self.avail() > 0 {
-                self.conn_events.send_stream_writable(self.stream_id)
+                self.conn_events.send_stream_writable(self.stream_id);
             }
         }
     }
@@ -1161,9 +1161,8 @@ impl SendStream {
             if atomic {
                 self.send_blocked_if_space_needed(buf.len());
                 return Ok(0);
-            } else {
-                &buf[..self.avail()]
             }
+            &buf[..self.avail()]
         } else {
             buf
         };
@@ -1484,7 +1483,7 @@ impl SendStreams {
 
     pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.map.get_mut(&id) {
-            ss.reset_acked()
+            ss.reset_acked();
         }
     }
 
@@ -1526,7 +1525,7 @@ impl SendStreams {
                     match stream.sendorder() {
                         None => regular.remove(*stream_id),
                         Some(sendorder) => {
-                            sendordered.get_mut(&sendorder).unwrap().remove(*stream_id)
+                            sendordered.get_mut(&sendorder).unwrap().remove(*stream_id);
                         }
                     };
                 }
@@ -1611,7 +1610,7 @@ impl SendStreams {
     }
 
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
-        for (id, ss) in self.map.iter_mut() {
+        for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
                 remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)

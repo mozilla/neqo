@@ -202,7 +202,7 @@ impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
     }
 }
 
-/// An RandomConnectionIdGenerator produces connection IDs of
+/// An [`RandomConnectionIdGenerator`] produces connection IDs of
 /// a fixed length and random content.  No effort is made to
 /// prevent collisions.
 pub struct RandomConnectionIdGenerator {
@@ -513,7 +513,6 @@ impl ConnectionIdManager {
     }
 
     fn write_entry(
-        &mut self,
         entry: &ConnectionIdEntry<[u8; 16]>,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
@@ -548,7 +547,7 @@ impl ConnectionIdManager {
         }
 
         while let Some(entry) = self.lost_new_connection_id.pop() {
-            if self.write_entry(&entry, builder, stats)? {
+            if Self::write_entry(&entry, builder, stats)? {
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             } else {
                 // This shouldn't happen often.
@@ -573,7 +572,7 @@ impl ConnectionIdManager {
                     .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
 
                 let entry = ConnectionIdEntry::new(seqno, cid, srt);
-                debug_assert!(self.write_entry(&entry, builder, stats)?);
+                debug_assert!(Self::write_entry(&entry, builder, stats)?);
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             }
         }

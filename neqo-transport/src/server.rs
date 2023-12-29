@@ -278,7 +278,7 @@ impl Server {
                     self.timers.add(next, Rc::clone(&c));
                 }
             }
-            _ => {
+            Output::None => {
                 self.remove_timer(&c);
             }
         }
@@ -332,9 +332,7 @@ impl Server {
                     dgram.source(),
                     now,
                 );
-                let token = if let Ok(t) = res {
-                    t
-                } else {
+                let Ok(token) = res else {
                     qerror!([self], "unable to generate token, dropping packet");
                     return None;
                 };
@@ -387,7 +385,7 @@ impl Server {
 
     fn create_qlog_trace(&self, attempt_key: &AttemptKey) -> NeqoQlog {
         if let Some(qlog_dir) = &self.qlog_dir {
-            let mut qlog_path = qlog_dir.to_path_buf();
+            let mut qlog_path = qlog_dir.clone();
 
             qlog_path.push(format!("{}.qlog", attempt_key.odcid));
 
@@ -539,12 +537,9 @@ impl Server {
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
         let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
-        let (packet, _remainder) = match res {
-            Ok(res) => res,
-            _ => {
-                qtrace!([self], "Discarding {:?}", dgram);
-                return None;
-            }
+        let Ok((packet, _remainder)) = res else {
+            qtrace!([self], "Discarding {:?}", dgram);
+            return None;
         };
 
         // Finding an existing connection. Should be the most common case.
@@ -687,7 +682,7 @@ impl ActiveConnectionRef {
 impl std::hash::Hash for ActiveConnectionRef {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let ptr: *const _ = self.c.as_ref();
-        ptr.hash(state)
+        ptr.hash(state);
     }
 }
 

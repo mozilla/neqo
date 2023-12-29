@@ -5,7 +5,6 @@
 // except according to those terms.
 
 // Tracking of some useful statistics.
-#![deny(clippy::pedantic)]
 
 use crate::packet::PacketNumber;
 use neqo_common::qinfo;

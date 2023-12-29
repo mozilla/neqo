@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::missing_errors_doc)]
+
 use crate::constants::{Cipher, Version};
 use crate::err::{sec::SEC_ERROR_BAD_DATA, Error, Res};
 use crate::p11::SymKey;

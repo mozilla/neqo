@@ -13,7 +13,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    dump::*,
+    dump::dump_packet,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -66,7 +66,9 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
+pub use crate::send_stream::{
+    RetransmissionPriority, SendStream, SendStreamStats, TransmissionPriority,
+};
 pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
 pub use state::{ClosingFrame, State};
 
@@ -419,7 +421,7 @@ impl Connection {
             #[cfg(test)]
             test_frame_writer: None,
         };
-        c.stats.borrow_mut().init(format!("{}", c));
+        c.stats.borrow_mut().init(format!("{c}"));
         Ok(c)
     }
 
@@ -464,8 +466,8 @@ impl Connection {
     }
 
     /// Get the original destination connection id for this connection. This
-    /// will always be present for Role::Client but not if Role::Server is in
-    /// State::Init.
+    /// will always be present for [`Role::Client`] but not if [`Role::Server`] is in
+    /// [`State::Init`].
     pub fn odcid(&self) -> Option<&ConnectionId> {
         self.original_destination_cid.as_ref()
     }
@@ -655,8 +657,11 @@ impl Connection {
         );
         let mut dec = Decoder::from(token.as_ref());
 
-        let version =
-            Version::try_from(dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)? as u32)?;
+        let version = dec
+            .decode_uint(4)
+            .ok_or(Error::InvalidResumptionToken)
+            .map(|v| WireVersion::try_from(v).expect("u32 to fit 4 bytes"))
+            .map(Version::try_from)??;
         qtrace!([self], "  version {:?}", version);
         if !self.conn_params.get_versions().all().contains(&version) {
             return Err(Error::DisabledVersion);
@@ -815,7 +820,7 @@ impl Connection {
     ) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
-            let msg = format!("{:?}", v);
+            let msg = format!("{v:?}");
             #[cfg(not(debug_assertions))]
             let msg = "";
             let error = ConnectionError::Transport(v.clone());
@@ -998,7 +1003,7 @@ impl Connection {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
-            (State::Init, Role::Server) | (State::WaitInitial, Role::Server) => {
+            (State::Init | State::WaitInitial, Role::Server) => {
                 return Output::None;
             }
             _ => {
@@ -1230,7 +1235,7 @@ impl Connection {
                     self.tps.borrow_mut().local.set_bytes(
                         tparams::ORIGINAL_DESTINATION_CONNECTION_ID,
                         packet.dcid().to_vec(),
-                    )
+                    );
                 }
             }
             (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
@@ -1265,8 +1270,7 @@ impl Connection {
                 self.handle_retry(packet, now);
                 return Ok(PreprocessResult::Next);
             }
-            (PacketType::Handshake, State::WaitInitial, Role::Client)
-            | (PacketType::Short, State::WaitInitial, Role::Client) => {
+            (PacketType::Handshake | PacketType::Short, State::WaitInitial, Role::Client) => {
                 // This packet can't be processed now, but it could be a sign
                 // that Initial packets were lost.
                 // Resend Initial CRYPTO frames immediately a few times just
@@ -1279,9 +1283,7 @@ impl Connection {
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                 }
             }
-            (PacketType::VersionNegotiation, ..)
-            | (PacketType::Retry, ..)
-            | (PacketType::OtherVersion, ..) => {
+            (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
                 self.stats
                     .borrow_mut()
                     .pkt_dropped(format!("{:?}", packet.packet_type()));
@@ -1844,12 +1846,9 @@ impl Connection {
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
         for space in PacketNumberSpace::iter() {
-            let (cspace, tx) =
-                if let Some(crypto) = self.crypto.states.select_tx_mut(self.version, *space) {
-                    crypto
-                } else {
-                    continue;
-                };
+            let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+                continue;
+            };
 
             let path = close.path().borrow();
             let (_, mut builder) = Self::build_packet_header(
@@ -2132,12 +2131,9 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let (cspace, tx) =
-                if let Some(crypto) = self.crypto.states.select_tx_mut(self.version, *space) {
-                    crypto
-                } else {
-                    continue;
-                };
+            let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+                continue;
+            };
 
             let header_start = encoder.len();
             let (pt, mut builder) = Self::build_packet_header(
@@ -2905,7 +2901,7 @@ impl Connection {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-            qlog::connection_state_updated(&mut self.qlog, &self.state)
+            qlog::connection_state_updated(&mut self.qlog, &self.state);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
@@ -2974,7 +2970,9 @@ impl Connection {
     }
 
     pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
-        self.streams.get_send_stream(stream_id).map(|s| s.stats())
+        self.streams
+            .get_send_stream(stream_id)
+            .map(SendStream::stats)
     }
 
     pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
@@ -3093,13 +3091,11 @@ impl Connection {
             return Err(Error::NotAvailable);
         }
         let version = self.version();
-        let (cspace, tx) = if let Some(crypto) = self
+        let Some((cspace, tx)) = self
             .crypto
             .states
             .select_tx(self.version, PacketNumberSpace::ApplicationData)
-        {
-            crypto
-        } else {
+        else {
             return Err(Error::NotAvailable);
         };
         let path = self.paths.primary_fallible().ok_or(Error::NotAvailable)?;

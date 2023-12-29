@@ -74,15 +74,15 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
 
         // This event occurs very early, so just mark the time as 0.0.
         Some(Event::with_time(0.0, ev_data))
-    })
+    });
 }
 
 pub fn server_connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
-    connection_started(qlog, path)
+    connection_started(qlog, path);
 }
 
 pub fn client_connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
-    connection_started(qlog, path)
+    connection_started(qlog, path);
 }
 
 fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
@@ -104,7 +104,7 @@ fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
@@ -112,8 +112,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
         let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
             old: None,
             new: match new {
-                State::Init => ConnectionState::Attempted,
-                State::WaitInitial => ConnectionState::Attempted,
+                State::Init | State::WaitInitial => ConnectionState::Attempted,
                 State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                 State::Connected => ConnectionState::HandshakeCompleted,
                 State::Confirmed => ConnectionState::HandshakeConfirmed,
@@ -124,7 +123,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 pub fn packet_sent(
@@ -170,7 +169,7 @@ pub fn packet_sent(
         });
 
         stream.add_event_data_now(ev_data)
-    })
+    });
 }
 
 pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
@@ -197,7 +196,7 @@ pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
@@ -215,7 +214,7 @@ pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
             stream.add_event_data_now(ev_data)?;
         }
         Ok(())
-    })
+    });
 }
 
 pub fn packet_received(
@@ -264,7 +263,7 @@ pub fn packet_received(
         });
 
         stream.add_event_data_now(ev_data)
-    })
+    });
 }
 
 #[allow(dead_code)]
@@ -306,7 +305,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
                 QlogMetric::RttVariance(v) => rtt_variance = Some(*v as f32),
                 QlogMetric::PtoCount(v) => pto_count = Some(u16::try_from(*v).unwrap()),
                 QlogMetric::CongestionWindow(v) => {
-                    congestion_window = Some(u64::try_from(*v).unwrap())
+                    congestion_window = Some(u64::try_from(*v).unwrap());
                 }
                 QlogMetric::BytesInFlight(v) => bytes_in_flight = Some(u64::try_from(*v).unwrap()),
                 QlogMetric::SsThresh(v) => ssthresh = Some(u64::try_from(*v).unwrap()),
@@ -330,7 +329,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 // Helper functions

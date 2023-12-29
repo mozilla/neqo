@@ -269,7 +269,7 @@ impl Streams {
             StreamRecoveryToken::Stream(st) => self.send.lost(st),
             StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_lost(*stream_id),
             StreamRecoveryToken::StreamDataBlocked { stream_id, limit } => {
-                self.send.blocked_lost(*stream_id, *limit)
+                self.send.blocked_lost(*stream_id, *limit);
             }
             StreamRecoveryToken::MaxStreamData {
                 stream_id,
@@ -294,10 +294,10 @@ impl Streams {
                 self.remote_stream_limits[*stream_type].frame_lost(*max_streams);
             }
             StreamRecoveryToken::DataBlocked(limit) => {
-                self.sender_fc.borrow_mut().frame_lost(*limit)
+                self.sender_fc.borrow_mut().frame_lost(*limit);
             }
             StreamRecoveryToken::MaxData(maximum_data) => {
-                self.receiver_fc.borrow_mut().frame_lost(*maximum_data)
+                self.receiver_fc.borrow_mut().frame_lost(*maximum_data);
             }
         }
     }

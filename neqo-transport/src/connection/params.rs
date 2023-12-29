@@ -40,7 +40,7 @@ pub enum PreferredAddressConfig {
     Address(PreferredAddress),
 }
 
-/// ConnectionParameters use for setting intitial value for QUIC parameters.
+/// `ConnectionParameters` use for setting intitial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
 #[derive(Debug, Clone)]

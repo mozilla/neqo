@@ -28,15 +28,12 @@ pub fn dump_packet(
         return;
     }
 
-    let mut s = String::from("");
+    let mut s = String::new();
     let mut d = Decoder::from(payload);
     while d.remaining() > 0 {
-        let f = match Frame::decode(&mut d) {
-            Ok(f) => f,
-            Err(_) => {
-                s.push_str(" [broken]...");
-                break;
-            }
+        let Ok(f) = Frame::decode(&mut d) else {
+            s.push_str(" [broken]...");
+            break;
         };
         if let Some(x) = f.dump() {
             write!(&mut s, "\n  {} {}", dir, &x).unwrap();

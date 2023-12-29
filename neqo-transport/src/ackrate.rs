@@ -5,7 +5,6 @@
 // except according to those terms.
 
 // Management of the peer's ack rate.
-#![deny(clippy::pedantic)]
 
 use crate::connection::params::ACK_RATIO_SCALE;
 use crate::frame::FRAME_TYPE_ACK_FREQUENCY;
