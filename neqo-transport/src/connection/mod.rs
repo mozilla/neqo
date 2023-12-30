@@ -67,7 +67,9 @@ mod state;
 pub mod test_internal;
 
 pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
-pub use params::{ConnectionParameters, ACK_RATIO_SCALE};
+pub use params::ConnectionParameters;
+#[cfg(test)]
+pub use params::ACK_RATIO_SCALE;
 pub use state::{ClosingFrame, State};
 
 use idle::IdleTimeout;
