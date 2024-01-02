@@ -126,8 +126,8 @@ jobs:
         run: sudo cp -av "${{ github.workspace }}/dist/Debug/lib/" /usr/local/lib/
 
       # On MacOS runners, even after copying the libraries to /usr/local/lib, two CHACHA20-related
-      # tests fail when the environment has been treated by SIP. Detect if that has happened and
-      # skip those two tests in this case.
+      # tests fail when the environment has been treated by SIP. Detect if that has happened 
+      # using DYLD_FALLBACK_LIBRARY_PATH as a canary and skip those two tests in this case.
       - name: Run tests and determine coverage
         run: |
           env | grep DYLD
