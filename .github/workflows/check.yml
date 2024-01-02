@@ -125,6 +125,9 @@ jobs:
 
       - name: Run tests and determine coverage
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+        env:
+          DYLD_PRINT_ENV: 1
+          DYLD_PRINT_LIBRARIES: 1         
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
