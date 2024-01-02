@@ -19,13 +19,7 @@ jobs:
         rust-toolchain: [1.70.0, stable]
         ignore_clippy_errors: [false]
         include:
-          - os: ubuntu
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-          - os: macos
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-          - os: windows
+          - os: [ubuntu, macos, windows]
             rust-toolchain: beta
             ignore_clippy_errors: true
     runs-on: ${{ matrix.os }}-latest
