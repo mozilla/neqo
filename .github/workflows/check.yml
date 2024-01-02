@@ -19,7 +19,7 @@ jobs:
         rust-toolchain: [1.70.0, stable]
         ignore_clippy_errors: [false]
         include:
-          - os: []
+          - os: 
             rust-toolchain: beta # Also nightly?
             ignore_clippy_errors: true
     runs-on: ${{ matrix.os }}
