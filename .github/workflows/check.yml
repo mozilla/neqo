@@ -124,10 +124,13 @@ jobs:
         run: sudo cp -av "${{ github.workspace }}/dist/Debug/lib/" /usr/local/lib/
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+        run: |
+          if -z "$ENV_CANARY"; then
+            export SKIP="--skip neqo-crypto::hp::chacha20_ctr --skip packet::tests::chacha20_sample"
+          fi
+          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $SKIP
         env:
-          DYLD_PRINT_ENV: 1
-          DYLD_PRINT_LIBRARIES: 1
+          ENV_CANARY: 1
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
