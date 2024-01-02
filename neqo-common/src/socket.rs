@@ -79,7 +79,7 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
     Ok(socket)
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+#[cfg(posix_socket)]
 pub fn emit_datagram_posix<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> usize {
     let iov = [IoSlice::new(&d[..])];
     let tos = i32::from(d.tos());
@@ -98,7 +98,7 @@ pub fn emit_datagram_posix<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> 
     .unwrap()
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+#[cfg(not(posix_socket))]
 pub fn emit_datagram_generic<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> usize {
     // Use the default `UdpSocket::send_to` implementation for non-POSIX platforms.
     // This also means we don't set the TOS and TTL values.
@@ -126,9 +126,9 @@ pub fn emit_datagram_generic<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -
 /// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
 /// TODO: Figure out how to set TOS and TTL at least on Windows.
 pub fn emit_datagram<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
-    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+    #[cfg(posix_s)]
     let sent = emit_datagram_posix(socket, d);
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+    #[cfg(not(posix_socket))]
     let sent = emit_datagram_generic(socket, d);
     if sent != d.len() {
         eprintln!("Unable to send all {} bytes of datagram", d.len());
@@ -150,7 +150,7 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+#[cfg(posix_s)]
 fn recv_datagram_posix<S: AsRawFd>(
     socket: &S,
     buf: &mut [u8],
@@ -184,7 +184,7 @@ fn recv_datagram_posix<S: AsRawFd>(
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+#[cfg(not(posix_socket))]
 fn recv_datagram_generic<S: AsRawFd>(
     socket: &S,
     buf: &mut [u8],
@@ -228,8 +228,8 @@ pub fn recv_datagram<S: AsRawFd>(
     tos: &mut u8,
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
-    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+    #[cfg(posix_s)]
     return recv_datagram_posix(socket, buf, tos, ttl);
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+    #[cfg(not(posix_socket))]
     return recv_datagram(socket, buf, tos, ttl);
 }
