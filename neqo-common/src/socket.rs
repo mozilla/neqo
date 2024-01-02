@@ -46,7 +46,6 @@ use crate::Datagram;
 /// This function binds the UDP socket to the specified local address and performs additional
 /// configuration on the socket, such as setting socket options to request TOS and TTL
 /// information for incoming packets.
-#[allow(clippy::missing_errors_doc)]
 pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
     let socket = match UdpSocket::bind(local_addr) {
         Err(e) => {
@@ -73,11 +72,38 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
                 SocketAddr::V4(..) => setsockopt(&s, IpRecvTtl, &true),
                 SocketAddr::V6(..) => setsockopt(&s, Ipv6RecvHopLimit, &true),
             };
-            assert!(res.is_ok());
+            debug_assert!(res.is_ok());
             s
         }
     };
     Ok(socket)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+pub fn emit_datagram_posix<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> usize {
+    let iov = [IoSlice::new(&d[..])];
+    let tos = i32::from(d.tos());
+    let ttl = i32::from(d.ttl());
+    let cmsgs = match d.destination() {
+        SocketAddr::V4(..) => [IpTos(&tos), IpTtl(&ttl)],
+        SocketAddr::V6(..) => [Ipv6TClass(&tos), Ipv6HopLimit(&ttl)],
+    };
+    sendmsg(
+        socket.as_raw_fd(),
+        &iov,
+        &cmsgs,
+        MsgFlags::empty(),
+        Some(&SockaddrStorage::from(d.destination())),
+    )
+    .unwrap()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+pub fn emit_datagram_generic<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> usize {
+    // Use the default `UdpSocket::send_to` implementation for non-POSIX platforms.
+    // This also means we don't set the TOS and TTL values.
+    let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
+    sock.send_to(&d[..], d.destination()).unwrap()
 }
 
 /// Send the UDP datagram on the specified socket.
@@ -99,34 +125,11 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
 ///
 /// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
 /// TODO: Figure out how to set TOS and TTL at least on Windows.
-#[allow(clippy::missing_errors_doc)]
 pub fn emit_datagram<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
-    let sent;
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-    {
-        let iov = [IoSlice::new(&d[..])];
-        let tos = i32::from(d.tos());
-        let ttl = i32::from(d.ttl());
-        let cmsgs = match d.destination() {
-            SocketAddr::V4(..) => [IpTos(&tos), IpTtl(&ttl)],
-            SocketAddr::V6(..) => [Ipv6TClass(&tos), Ipv6HopLimit(&ttl)],
-        };
-        sent = sendmsg(
-            socket.as_raw_fd(),
-            &iov,
-            &cmsgs,
-            MsgFlags::empty(),
-            Some(&SockaddrStorage::from(d.destination())),
-        )
-        .unwrap();
-    }
+    let sent = emit_datagram_posix(socket, d);
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
-    {
-        // Use the default `UdpSocket::send_to` implementation for non-POSIX platforms.
-        // This also means we don't set the TOS and TTL values.
-        let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
-        sent = sock.send_to(&d[..], d.destination()).unwrap();
-    }
+    let sent = emit_datagram_generic(socket, d);
     if sent != d.len() {
         eprintln!("Unable to send all {} bytes of datagram", d.len());
     }
@@ -145,6 +148,53 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
         }
         _ => unreachable!(),
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn recv_datagram_posix<S: AsRawFd>(
+    socket: &S,
+    buf: &mut [u8],
+    tos: &mut u8,
+    ttl: &mut u8,
+) -> io::Result<(usize, SocketAddr)> {
+    let mut iov = [IoSliceMut::new(buf)];
+    let mut cmsg = cmsg_space!(u8, u8);
+    let flags = MsgFlags::empty();
+
+    match recvmsg::<SockaddrStorage>(socket.as_raw_fd(), &mut iov, Some(&mut cmsg), flags) {
+        Err(e) if e == EAGAIN => Err(Error::new(ErrorKind::WouldBlock, e)),
+        Err(e) if e == EINTR => Err(Error::new(ErrorKind::Interrupted, e)),
+        Err(e) => panic!("UDP error: {}", e),
+        Ok(res) => {
+            for cmsg in res.cmsgs() {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                // All valid values fit in u8.
+                match cmsg {
+                    ControlMessageOwned::IpTos(t) | ControlMessageOwned::Ipv6TClass(t) => {
+                        *tos = t as u8;
+                    }
+                    ControlMessageOwned::IpTtl(t) | ControlMessageOwned::Ipv6HopLimit(t) => {
+                        *ttl = t as u8;
+                    }
+                    _ => unreachable!(),
+                };
+            }
+            Ok((res.bytes, to_socket_addr(&res.address.unwrap())))
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+fn recv_datagram_generic<S: AsRawFd>(
+    socket: &S,
+    buf: &mut [u8],
+    tos: &mut u8,
+    ttl: &mut u8,
+) -> io::Result<(usize, SocketAddr)> {
+    // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
+    *tos = *ttl = 0xff;
+    let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
+    sock.recv_from(&mut buf[..])
 }
 
 /// Receive a UDP datagram on the specified socket.
@@ -179,39 +229,7 @@ pub fn recv_datagram<S: AsRawFd>(
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-    {
-        let mut iov = [IoSliceMut::new(buf)];
-        let mut cmsg = cmsg_space!(u8, u8);
-        let flags = MsgFlags::empty();
-
-        match recvmsg::<SockaddrStorage>(socket.as_raw_fd(), &mut iov, Some(&mut cmsg), flags) {
-            Err(e) if e == EAGAIN => Err(Error::new(ErrorKind::WouldBlock, e)),
-            Err(e) if e == EINTR => Err(Error::new(ErrorKind::Interrupted, e)),
-            Err(e) => {
-                panic!("UDP error: {}", e);
-            }
-            Ok(res) => {
-                for cmsg in res.cmsgs() {
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    match cmsg {
-                        ControlMessageOwned::IpTos(t) | ControlMessageOwned::Ipv6TClass(t) => {
-                            *tos = t as u8;
-                        }
-                        ControlMessageOwned::IpTtl(t) | ControlMessageOwned::Ipv6HopLimit(t) => {
-                            *ttl = t as u8;
-                        }
-                        _ => unreachable!(),
-                    };
-                }
-                Ok((res.bytes, to_socket_addr(&res.address.unwrap())))
-            }
-        }
-    }
+    return recv_datagram_posix(socket, buf, tos, ttl);
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
-    {
-        // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
-        *tos = *ttl = 0xff;
-        let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
-        sock.recv_from(&mut buf[..])
-    }
+    return recv_datagram(socket, buf, tos, ttl);
 }
