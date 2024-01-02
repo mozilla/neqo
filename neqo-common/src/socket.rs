@@ -140,6 +140,7 @@ pub fn emit_datagram<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> io::Re
     Ok(())
 }
 
+#[cfg(posix_socket)]
 fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     match addr.family().unwrap() {
         AddressFamily::Inet => {
@@ -236,5 +237,5 @@ pub fn recv_datagram<S: AsRawFd>(
     #[cfg(posix_socket)]
     return recv_datagram_posix(socket, buf, tos, ttl);
     #[cfg(not(posix_socket))]
-    return recv_datagram(socket, buf, tos, ttl);
+    return recv_datagram_generic(socket, buf, tos, ttl);
 }
