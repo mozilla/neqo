@@ -134,7 +134,7 @@ jobs:
           echo "$DYLD_FALLBACK_LIBRARY_PATH"
           if [ -z "$DYLD_FALLBACK_LIBRARY_PATH" ]; then
             echo "DYLD_FALLBACK_LIBRARY_PATH not set, skipping some tests"
-            export SKIP="--skip chacha20_ctr --skip chacha20_sample"
+            export SKIP="-- --skip chacha20_ctr --skip chacha20_sample"
           fi
           echo $SKIP
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $SKIP
