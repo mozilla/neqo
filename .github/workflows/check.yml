@@ -15,13 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu, macos, windows]
         rust-toolchain: [1.70.0, stable, beta]
         ignore_clippy_errors: [false]
-        # include:
-        #   - rust-toolchain: beta # Also nightly?
-        #     ignore_clippy_errors: true
-    runs-on: ${{ matrix.os }}
+        include:
+          - rust-toolchain: beta # Also nightly?
+            ignore_clippy_errors: true
+    runs-on: ${{ matrix.os }}-latest
     defaults:
       run:
         shell: bash
