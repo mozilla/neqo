@@ -59,7 +59,7 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
                 SocketAddr::V4(..) => setsockopt(&s, IpDontFrag, &true),
                 SocketAddr::V6(..) => setsockopt(&s, Ipv6DontFrag, &true),
             };
-            assert!(res.is_ok());
+            debug_assert!(res.is_ok());
             // Request IPv4 type-of-service (TOS) and IPv6 traffic class
             // information for all incoming packets.
             let res = match local_addr {
