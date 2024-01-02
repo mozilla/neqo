@@ -9,13 +9,15 @@ use std::io::{Error, ErrorKind, IoSlice, IoSliceMut};
 use std::{
     io::{self},
     net::{SocketAddr, UdpSocket},
-    os::fd::{AsRawFd, FromRawFd},
+    os::fd::AsRawFd,
 };
 
+#[cfg(not(posix_socket))]
+use nix::sys::socket::{recvfrom, sendto};
 use nix::sys::socket::{
     setsockopt,
     sockopt::{IpDontFrag, IpRecvTos, IpRecvTtl, Ipv6DontFrag, Ipv6RecvHopLimit, Ipv6RecvTClass},
-    AddressFamily, SockaddrLike, SockaddrStorage,
+    AddressFamily, MsgFlags, SockaddrLike, SockaddrStorage,
 };
 #[cfg(posix_socket)]
 use nix::{
@@ -24,7 +26,7 @@ use nix::{
     sys::socket::{
         recvmsg, sendmsg,
         ControlMessage::{IpTos, IpTtl, Ipv6HopLimit, Ipv6TClass},
-        ControlMessageOwned, MsgFlags,
+        ControlMessageOwned,
     },
 };
 
@@ -84,7 +86,7 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
 }
 
 #[cfg(posix_socket)]
-pub fn emit_datagram_posix<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> usize {
+pub fn emit_datagram_posix<S: AsRawFd>(socket: &S, d: &Datagram) -> usize {
     let iov = [IoSlice::new(&d[..])];
     let tos = i32::from(d.tos());
     let ttl = i32::from(d.ttl());
@@ -103,11 +105,16 @@ pub fn emit_datagram_posix<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> 
 }
 
 #[cfg(not(posix_socket))]
-pub fn emit_datagram_generic<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> usize {
+pub fn emit_datagram_generic<S: AsRawFd>(socket: &S, d: &Datagram) -> usize {
     // Use the default `UdpSocket::send_to` implementation for non-POSIX platforms.
     // This also means we don't set the TOS and TTL values.
-    let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
-    sock.send_to(&d[..], d.destination()).unwrap()
+    sendto(
+        socket.as_raw_fd(),
+        &d[..],
+        &SockaddrStorage::from(d.destination()),
+        MsgFlags::empty(),
+    )
+    .unwrap()
 }
 
 /// Send the UDP datagram on the specified socket.
@@ -129,7 +136,7 @@ pub fn emit_datagram_generic<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -
 ///
 /// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
 /// TODO: Figure out how to set TOS and TTL at least on Windows.
-pub fn emit_datagram<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
+pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
     #[cfg(posix_socket)]
     let sent = emit_datagram_posix(socket, d);
     #[cfg(not(posix_socket))]
@@ -140,7 +147,7 @@ pub fn emit_datagram<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> io::Re
     Ok(())
 }
 
-#[cfg(posix_socket)]
+// #[cfg(posix_socket)]
 fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     match addr.family().unwrap() {
         AddressFamily::Inet => {
@@ -199,8 +206,9 @@ fn recv_datagram_generic<S: AsRawFd>(
     // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
     *tos = 0xff;
     *ttl = 0xff;
-    let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
-    sock.recv_from(&mut buf[..])
+    recvfrom(socket.as_raw_fd(), &mut buf[..])
+        .map(|(n, addr)| (n, to_socket_addr(&addr.unwrap())))
+        .map_err(|e| e.into())
 }
 
 /// Receive a UDP datagram on the specified socket.
