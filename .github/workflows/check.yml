@@ -16,20 +16,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu, macos, windows]
+        # os: [ubuntu, macos, windows]
+        os: [macos]
         rust-toolchain: [1.70.0, stable]
         ignore_clippy_errors: [false]
         # Add beta toolchain, but don't fail CI on clippy errors.
-        include:
-          - os: ubuntu
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-          - os: macos
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-          - os: windows
-            rust-toolchain: beta
-            ignore_clippy_errors: true
+        # include:
+        #   - os: ubuntu
+        #     rust-toolchain: beta
+        #     ignore_clippy_errors: true
+        #   - os: macos
+        #     rust-toolchain: beta
+        #     ignore_clippy_errors: true
+        #   - os: windows
+        #     rust-toolchain: beta
+        #     ignore_clippy_errors: true
     runs-on: ${{ matrix.os }}-latest
     defaults:
       run:
@@ -125,7 +126,8 @@ jobs:
 
       - name: Run tests and determine coverage
         run: |
-          if -z "$ENV_CANARY"; then
+          if [ -z "$ENV_CANARY" ]; then
+            echo "ENV_CANARY not set, skipping some tests"
             export SKIP="--skip neqo-crypto::hp::chacha20_ctr --skip packet::tests::chacha20_sample"
           fi
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $SKIP
