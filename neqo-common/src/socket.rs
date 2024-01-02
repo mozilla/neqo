@@ -4,28 +4,27 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(posix_socket)]
+use std::io::{Error, ErrorKind, IoSlice, IoSliceMut};
 use std::{
     io::{self},
     net::{SocketAddr, UdpSocket},
-};
-#[cfg(posix_socket)]
-use std::{
-    io::{Error, ErrorKind, IoSlice, IoSliceMut},
     os::fd::{AsRawFd, FromRawFd},
 };
 
+use nix::sys::socket::{
+    setsockopt,
+    sockopt::{IpDontFrag, IpRecvTos, IpRecvTtl, Ipv6DontFrag, Ipv6RecvHopLimit, Ipv6RecvTClass},
+    AddressFamily, SockaddrLike, SockaddrStorage,
+};
 #[cfg(posix_socket)]
 use nix::{
     cmsg_space,
     errno::Errno::{EAGAIN, EINTR},
     sys::socket::{
-        recvmsg, sendmsg, setsockopt,
-        sockopt::{
-            IpDontFrag, IpRecvTos, IpRecvTtl, Ipv6DontFrag, Ipv6RecvHopLimit, Ipv6RecvTClass,
-        },
-        AddressFamily,
+        recvmsg, sendmsg,
         ControlMessage::{IpTos, IpTtl, Ipv6HopLimit, Ipv6TClass},
-        ControlMessageOwned, MsgFlags, SockaddrLike, SockaddrStorage,
+        ControlMessageOwned, MsgFlags,
     },
 };
 
@@ -197,7 +196,8 @@ fn recv_datagram_generic<S: AsRawFd>(
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
     // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
-    *tos = *ttl = 0xff;
+    *tos = 0xff;
+    *ttl = 0xff;
     let sock = unsafe { UdpSocket::from_raw_fd(socket.as_raw_fd()) };
     sock.recv_from(&mut buf[..])
 }
