@@ -130,7 +130,7 @@ jobs:
       # using DYLD_FALLBACK_LIBRARY_PATH as a canary and skip those two tests in this case.
       - name: Run tests and determine coverage
         run: |
-          env | grep DYLD
+          env | grep DYLD || true
           echo "$DYLD_FALLBACK_LIBRARY_PATH"
           if [ -z "$DYLD_FALLBACK_LIBRARY_PATH" ]; then
             echo "DYLD_FALLBACK_LIBRARY_PATH not set, skipping some tests"
