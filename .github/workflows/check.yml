@@ -126,9 +126,11 @@ jobs:
 
       - name: Run tests and determine coverage
         run: |
+          env | sort
+          echo "$ENV_CANARY"
           if [ -z "$ENV_CANARY" ]; then
             echo "ENV_CANARY not set, skipping some tests"
-            export SKIP="--skip neqo-crypto::hp::chacha20_ctr --skip packet::tests::chacha20_sample"
+            export SKIP="--skip chacha20_ctr --skip chacha20_sample"
           fi
           echo $SKIP
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $SKIP
