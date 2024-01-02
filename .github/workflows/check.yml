@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu, macos, windows]
-        rust-toolchain: [1.70.0, stable, beta]
+        rust-toolchain: [1.70.0, stable]
         ignore_clippy_errors: [false]
         include:
           - rust-toolchain: beta # Also nightly?
