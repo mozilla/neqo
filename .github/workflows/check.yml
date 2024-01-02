@@ -18,8 +18,15 @@ jobs:
         os: [ubuntu, macos, windows]
         rust-toolchain: [1.70.0, stable]
         ignore_clippy_errors: [false]
+        # Add beta toolchain, but don't fail CI on clippy errors.
         include:
-          - os: [ubuntu, macos, windows]
+          - os: ubuntu
+            rust-toolchain: beta
+            ignore_clippy_errors: true
+          - os: macos
+            rust-toolchain: beta
+            ignore_clippy_errors: true
+          - os: windows
             rust-toolchain: beta
             ignore_clippy_errors: true
     runs-on: ${{ matrix.os }}-latest
