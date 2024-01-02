@@ -20,7 +20,9 @@ mod classic_cc;
 mod cubic;
 mod new_reno;
 
-pub use classic_cc::{ClassicCongestionControl, CWND_INITIAL, CWND_INITIAL_PKTS, CWND_MIN};
+pub use classic_cc::ClassicCongestionControl;
+#[cfg(test)]
+pub use classic_cc::{CWND_INITIAL, CWND_INITIAL_PKTS, CWND_MIN};
 pub use cubic::Cubic;
 pub use new_reno::NewReno;
 

@@ -39,9 +39,9 @@ const EXPONENTIAL_GROWTH_REDUCTION: f64 = 2.0;
 /// This has the effect of reducing larger values to `1<<53`.
 /// If you have a congestion window that large, something is probably wrong.
 fn convert_to_f64(v: usize) -> f64 {
-    let mut f_64 = f64::try_from(u32::try_from(v >> 21).unwrap_or(u32::MAX)).unwrap();
+    let mut f_64 = f64::from(u32::try_from(v >> 21).unwrap_or(u32::MAX));
     f_64 *= 2_097_152.0; // f_64 <<= 21
-    f_64 += f64::try_from(u32::try_from(v & 0x1f_ffff).unwrap()).unwrap();
+    f_64 += f64::from(u32::try_from(v & 0x1f_ffff).unwrap());
     f_64
 }
 

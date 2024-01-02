@@ -50,7 +50,7 @@ impl QPackDecoder {
             send_buf,
             local_stream_id: None,
             max_table_size: qpack_settings.max_table_size_decoder,
-            max_blocked_streams: usize::try_from(qpack_settings.max_blocked_streams).unwrap(),
+            max_blocked_streams: usize::from(qpack_settings.max_blocked_streams),
             blocked_streams: Vec::new(),
             stats: Stats::default(),
         }

@@ -156,7 +156,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     assert_eq!(*client.state(), State::Confirmed);
 
     qdebug!("---- server receives");
-    for (_, d) in datagrams.into_iter().enumerate() {
+    for d in datagrams {
         let out = server.process(Some(d), now());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
     }

@@ -76,9 +76,7 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
 }
 
 fn expected_tcp_acks(cwnd_rtt_start: usize) -> u64 {
-    (f64::try_from(i32::try_from(cwnd_rtt_start).unwrap()).unwrap()
-        / MAX_DATAGRAM_SIZE_F64
-        / CUBIC_ALPHA)
+    (f64::from(i32::try_from(cwnd_rtt_start).unwrap()) / MAX_DATAGRAM_SIZE_F64 / CUBIC_ALPHA)
         .round() as u64
 }
 
