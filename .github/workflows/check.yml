@@ -113,6 +113,7 @@ jobs:
         run: |
           cargo +${{ matrix.rust-toolchain }} build -v --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
       # On MacOS runners, setting various DYLD_* variables in the environment appears to
@@ -127,15 +128,13 @@ jobs:
       - name: Run tests and determine coverage
         run: |
           env | sort
-          echo "$ENV_CANARY"
-          if [ -z "$ENV_CANARY" ]; then
-            echo "ENV_CANARY not set, skipping some tests"
+          echo "$DYLD_FALLBACK_LIBRARY_PATH"
+          if [ -z "$DYLD_FALLBACK_LIBRARY_PATH" ]; then
+            echo "DYLD_FALLBACK_LIBRARY_PATH not set, skipping some tests"
             export SKIP="--skip chacha20_ctr --skip chacha20_sample"
           fi
           echo $SKIP
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $SKIP
-        env:
-          ENV_CANARY: 1
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
