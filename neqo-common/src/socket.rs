@@ -5,11 +5,16 @@
 // except according to those terms.
 
 use std::{
-    io::{self, Error, ErrorKind, IoSlice, IoSliceMut},
+    io::{self},
     net::{SocketAddr, UdpSocket},
+};
+#[cfg(posix_socket)]
+use std::{
+    io::{Error, ErrorKind, IoSlice, IoSliceMut},
     os::fd::{AsRawFd, FromRawFd},
 };
 
+#[cfg(posix_socket)]
 use nix::{
     cmsg_space,
     errno::Errno::{EAGAIN, EINTR},
@@ -126,7 +131,7 @@ pub fn emit_datagram_generic<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -
 /// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
 /// TODO: Figure out how to set TOS and TTL at least on Windows.
 pub fn emit_datagram<S: AsRawFd + FromRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
-    #[cfg(posix_s)]
+    #[cfg(posix_socket)]
     let sent = emit_datagram_posix(socket, d);
     #[cfg(not(posix_socket))]
     let sent = emit_datagram_generic(socket, d);
@@ -150,7 +155,7 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     }
 }
 
-#[cfg(posix_s)]
+#[cfg(posix_socket)]
 fn recv_datagram_posix<S: AsRawFd>(
     socket: &S,
     buf: &mut [u8],
@@ -228,7 +233,7 @@ pub fn recv_datagram<S: AsRawFd>(
     tos: &mut u8,
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
-    #[cfg(posix_s)]
+    #[cfg(posix_socket)]
     return recv_datagram_posix(socket, buf, tos, ttl);
     #[cfg(not(posix_socket))]
     return recv_datagram(socket, buf, tos, ttl);
