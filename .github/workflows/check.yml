@@ -1,11 +1,11 @@
 name: CI
 on:
   push:
-    branches: [ "main" ]
-    paths-ignore: [ "*.md", "*.png", "*.svg", "LICENSE-*" ]
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
-    branches: [ "main" ]
-    paths-ignore: [ "*.md", "*.png", "*.svg", "LICENSE-*" ]
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
 
@@ -16,8 +16,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # TODO: add beta (and nightly?) but don't fail the test if they fail
         rust-toolchain: [1.70.0, stable]
+        ignore_clippy_errors: [false]
+        include:
+          - rust-toolchain: beta # Also nightly?
+            ignore_clippy_errors: true
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -118,6 +121,7 @@ jobs:
       - name: Clippy
         run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
         if: success() || failure()
+        continue-on-error: ${{ matrix.ignore_clippy_errors }}
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
