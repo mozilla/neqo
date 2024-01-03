@@ -14,7 +14,7 @@ neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 structopt = "0.3.7"
 regex = "1"
-mio = "0.6.17"
+mio = "0.8.10"
 mio-extras = "2.0.5"
 log = {version = "0.4.0", default-features = false}
 qlog = "0.11.0"
