@@ -111,6 +111,7 @@ jobs:
 
       - name: Build
         run: |
+          env | grep NSS || true
           cargo +${{ matrix.rust-toolchain }} build -v --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
@@ -123,7 +124,7 @@ jobs:
       # libraries to /usr/local/lib.
       - name: Install libraries (MacOS)
         if: runner.os == 'MacOS'
-        run: sudo cp -av "${{ github.workspace }}/dist/Debug/lib/" /usr/local/lib/
+        run: sudo cp -av "${{ github.workspace }}/dist/Debug/" /usr/local
 
       # On MacOS runners, even after copying the libraries to /usr/local/lib, two CHACHA20-related
       # tests fail when the environment has been treated by SIP. Detect if that has happened 
@@ -131,13 +132,14 @@ jobs:
       - name: Run tests and determine coverage
         run: |
           env | grep DYLD || true
+          env | grep NSS || true
           echo "$DYLD_FALLBACK_LIBRARY_PATH"
           if [ -z "$DYLD_FALLBACK_LIBRARY_PATH" ]; then
             echo "DYLD_FALLBACK_LIBRARY_PATH not set, skipping some tests"
-            export SKIP="-- --skip 'test(chacha20_ctr) | test(chacha20_sample)'"
+            export FILTER="--filter-expr 'not test(chacha20_ctr) & not test (chacha20_sample)'"
+            echo $FILTER
           fi
-          echo $SKIP
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $SKIP
+          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $FILTER
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
