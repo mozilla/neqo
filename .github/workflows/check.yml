@@ -39,6 +39,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
+      # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
+      # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
+      # from the build directory. This seems to always be the case on the macos-13 runner, but
+      # not consistently on macos-latest.
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
@@ -100,38 +104,13 @@ jobs:
 
       - name: Build
         run: |
-          env | grep NSS || true
           cargo +${{ matrix.rust-toolchain }} build -v --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
-      # On MacOS runners, setting various DYLD_* variables in the environment appears to
-      # sometimes not take effect. This seems to be due to System Integrity Protection (SIP):
-      # https://briandfoy.github.io/macos-s-system-integrity-protection-sanitizes-your-environment/
-      # It's not clear why this only happens sometimes. Work around that by copying the
-      # libraries to /usr/local/lib.
-      - name: Install libraries (MacOS)
-        if: runner.os == 'MacOSXXX'
-        run: |
-          csrutil status
-          sudo cp -avf "${{ github.workspace }}/dist/Debug/lib" "${{ github.workspace }}/dist/Debug/include" /usr/local
-
-      # On MacOS runners, even after copying the libraries to /usr/local/lib, two CHACHA20-related
-      # tests fail when the environment has been treated by SIP. Detect if that has happened 
-      # using DYLD_FALLBACK_LIBRARY_PATH as a canary and skip those two tests in this case.
       - name: Run tests and determine coverage
-        run: |
-          csrutil status
-          env | grep DYLD || true
-          env | grep NSS || true
-          # echo "$DYLD_FALLBACK_LIBRARY_PATH"
-          # if [ -z "$DYLD_FALLBACK_LIBRARY_PATH" ]; then
-          #   echo "DYLD_FALLBACK_LIBRARY_PATH not set, skipping some tests"
-          #   export FILTER="--filter-expr 'not test(chacha20_ctr) & not test (chacha20_sample)'"
-          #   echo $FILTER
-          # fi
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info $FILTER
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
@@ -140,10 +119,7 @@ jobs:
       - name: Clippy
         run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain != 'beta' }}
-        env:
-          CONTINUE: ${{ matrix.rust-toolchain != 'beta' }}
-          JSON: ${{ fromJSON(matrix.rust-toolchain != 'beta') }}
+        continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
