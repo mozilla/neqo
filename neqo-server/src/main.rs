@@ -578,7 +578,7 @@ impl HttpServer for SimpleServer {
 }
 
 fn read_dgram(
-    socket: &mut UdpSocket,
+    socket: &UdpSocket,
     local_address: &SocketAddr,
 ) -> Result<Option<Datagram>, io::Error> {
     let buf = &mut [0u8; 2048];
@@ -724,7 +724,7 @@ impl ServersRunner {
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(&mut self, addr: SocketAddr) -> &mut UdpSocket {
+    fn find_socket(&mut self, addr: SocketAddr) -> &UdpSocket {
         let (first, rest) = self.sockets.split_first_mut().unwrap();
         rest.iter_mut()
             .find(|s| {
