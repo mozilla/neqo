@@ -139,7 +139,7 @@ jobs:
       - name: Clippy
         run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain }} != beta
+        continue-on-error: ${{ matrix.rust-toolchain != 'beta' }}
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
