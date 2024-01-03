@@ -118,7 +118,7 @@ jobs:
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
       # On MacOS runners, setting various DYLD_* variables in the environment appears to
-      # sometimes not take effect. This seems to be due to System Intergrity Protection (SIP):
+      # sometimes not take effect. This seems to be due to System Integrity Protection (SIP):
       # https://briandfoy.github.io/macos-s-system-integrity-protection-sanitizes-your-environment/
       # It's not clear why this only happens sometimes. Work around that by copying the
       # libraries to /usr/local/lib.
