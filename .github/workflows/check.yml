@@ -16,22 +16,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # os: [ubuntu, macos, windows]
-        os: [macos]
+        # os: [ubuntu-latest, macos-13, windows-latest]
+        os: [macos-13]
         rust-toolchain: [1.70.0, stable]
         ignore_clippy_errors: [false]
         # Add beta toolchain, but don't fail CI on clippy errors.
         include:
-          # - os: ubuntu
+          # - os: ubuntu-latest
           #   rust-toolchain: beta
           #   ignore_clippy_errors: true
-          - os: macos
+          - os: macos-13
             rust-toolchain: beta
             ignore_clippy_errors: true
-          # - os: windows
+          # - os: windows-latest
           #   rust-toolchain: beta
           #   ignore_clippy_errors: true
-    runs-on: ${{ matrix.os }}-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
@@ -126,9 +126,7 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           csrutil status
-          csrutil disable
-          csrutil status
-          sudo cp -avf "${{ github.workspace }}/dist/Debug/" /usr/local
+          sudo cp -avf "${{ github.workspace }}/dist/Debug/lib" "${{ github.workspace }}/dist/Debug/include" /usr/local
 
       # On MacOS runners, even after copying the libraries to /usr/local/lib, two CHACHA20-related
       # tests fail when the environment has been treated by SIP. Detect if that has happened 
