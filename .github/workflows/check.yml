@@ -8,6 +8,7 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   check:
@@ -15,21 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu, macos, windows]
-        rust-toolchain: [1.70.0, stable]
-        ignore_clippy_errors: [false]
-        # Add beta toolchain, but don't fail CI on clippy errors.
-        include:
-          - os: ubuntu
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-          - os: macos
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-          - os: windows
-            rust-toolchain: beta
-            ignore_clippy_errors: true
-    runs-on: ${{ matrix.os }}-latest
+        os: [ubuntu-latest, macos-13, windows-latest]
+        rust-toolchain: [1.70.0, stable, beta]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
@@ -49,9 +38,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
+      # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
+      # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
+      # from the build directory and avoid various other test failures. This seems to always be
+      # the case on any macos-13 runner, but not consistently on macos-latest (which is currently
+      # macos-12, FWIW).
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
+          csrutil status | grep disabled
           brew install ninja mercurial cargo-binstall
           # python3 -m pip install gyp-next
           # Above does not work, since pypi only has gyp 0.15.0, which is too old
@@ -74,12 +69,12 @@ jobs:
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
-      - name: Set up Windows build environment
+      - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Rust tools
-        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov
+        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -98,7 +93,7 @@ jobs:
           NSS_DIR: ${{ github.workspace }}/nss
           NSPR_DIR: ${{ github.workspace }}/nspr
 
-      - name: Set up environment for NSS build.sh (Windows)
+      - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
         run: |
           echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
@@ -111,16 +106,11 @@ jobs:
         run: |
           cargo +${{ matrix.rust-toolchain }} build -v --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
-        env:
-          RUST_BACKTRACE: 1
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov test --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
-        env:
-          RUST_BACKTRACE: 1
-          RUST_LOG: neqo=debug
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
@@ -129,7 +119,7 @@ jobs:
       - name: Clippy
         run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
         if: success() || failure()
-        continue-on-error: ${{ matrix.ignore_clippy_errors }}
+        continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
