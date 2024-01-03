@@ -16,8 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # os: [ubuntu-latest, macos-13, windows-latest]
-        os: [macos-13]
+        os: [ubuntu-latest, macos-13, windows-latest]
         rust-toolchain: [1.70.0, stable, beta]
     runs-on: ${{ matrix.os }}
     defaults:
@@ -41,8 +40,9 @@ jobs:
 
       # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
       # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
-      # from the build directory. This seems to always be the case on the macos-13 runner, but
-      # not consistently on macos-latest.
+      # from the build directory and avoid various other test failures. This seems to always be
+      # the case on any macos-13 runner, but not consistently on macos-latest (which is currently
+      # macos-12, FWIW).
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
