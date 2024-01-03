@@ -126,6 +126,8 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           csrutil status
+          csrutil disable
+          csrutil status
           sudo cp -avf "${{ github.workspace }}/dist/Debug/" /usr/local
 
       # On MacOS runners, even after copying the libraries to /usr/local/lib, two CHACHA20-related
