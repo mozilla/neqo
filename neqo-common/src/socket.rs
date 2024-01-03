@@ -4,29 +4,29 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(posix_socket)]
-use std::io::{Error, ErrorKind, IoSlice, IoSliceMut};
 use std::{
     io::{self},
     net::{SocketAddr, UdpSocket},
+};
+
+#[cfg(posix_socket)]
+use std::{
+    io::{Error, ErrorKind, IoSlice, IoSliceMut},
     os::fd::AsRawFd,
 };
 
-#[cfg(not(posix_socket))]
-use nix::sys::socket::{recvfrom, sendto};
 use nix::sys::socket::{
     setsockopt,
     sockopt::{IpDontFrag, IpRecvTos, IpRecvTtl, Ipv6DontFrag, Ipv6RecvHopLimit, Ipv6RecvTClass},
-    AddressFamily, MsgFlags, SockaddrLike, SockaddrStorage,
 };
 #[cfg(posix_socket)]
 use nix::{
     cmsg_space,
     errno::Errno::{EAGAIN, EINTR},
     sys::socket::{
-        recvmsg, sendmsg,
+        recvmsg, sendmsg, AddressFamily,
         ControlMessage::{IpTos, IpTtl, Ipv6HopLimit, Ipv6TClass},
-        ControlMessageOwned,
+        ControlMessageOwned, MsgFlags, SockaddrLike, SockaddrStorage,
     },
 };
 
@@ -86,7 +86,7 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
 }
 
 #[cfg(posix_socket)]
-pub fn emit_datagram_posix<S: AsRawFd>(socket: &S, d: &Datagram) -> usize {
+pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
     let iov = [IoSlice::new(&d[..])];
     let tos = i32::from(d.tos());
     let ttl = i32::from(d.ttl());
@@ -94,27 +94,29 @@ pub fn emit_datagram_posix<S: AsRawFd>(socket: &S, d: &Datagram) -> usize {
         SocketAddr::V4(..) => [IpTos(&tos), IpTtl(&ttl)],
         SocketAddr::V6(..) => [Ipv6TClass(&tos), Ipv6HopLimit(&ttl)],
     };
-    sendmsg(
+    let sent = sendmsg(
         socket.as_raw_fd(),
         &iov,
         &cmsgs,
         MsgFlags::empty(),
         Some(&SockaddrStorage::from(d.destination())),
     )
-    .unwrap()
+    .unwrap();
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
+    }
+    Ok(())
 }
 
 #[cfg(not(posix_socket))]
-pub fn emit_datagram_generic<S: AsRawFd>(socket: &S, d: &Datagram) -> usize {
+pub fn emit_datagram(socket: &UdpSocket, d: &Datagram) -> io::Result<()> {
     // Use the default `UdpSocket::send_to` implementation for non-POSIX platforms.
     // This also means we don't set the TOS and TTL values.
-    sendto(
-        socket.as_raw_fd(),
-        &d[..],
-        &SockaddrStorage::from(d.destination()),
-        MsgFlags::empty(),
-    )
-    .unwrap()
+    let sent = socket.send_to(&d[..], d.destination()).unwrap();
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
+    }
+    Ok(())
 }
 
 /// Send the UDP datagram on the specified socket.
@@ -136,18 +138,18 @@ pub fn emit_datagram_generic<S: AsRawFd>(socket: &S, d: &Datagram) -> usize {
 ///
 /// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
 /// TODO: Figure out how to set TOS and TTL at least on Windows.
-pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
-    #[cfg(posix_socket)]
-    let sent = emit_datagram_posix(socket, d);
-    #[cfg(not(posix_socket))]
-    let sent = emit_datagram_generic(socket, d);
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
-    }
-    Ok(())
-}
+// pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
+//     #[cfg(posix_socket)]
+//     let sent = emit_datagram_posix(socket, d);
+//     #[cfg(not(posix_socket))]
+//     let sent = emit_datagram_generic(socket, d);
+//     if sent != d.len() {
+//         eprintln!("Unable to send all {} bytes of datagram", d.len());
+//     }
+//     Ok(())
+// }
 
-// #[cfg(posix_socket)]
+#[cfg(posix_socket)]
 fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     match addr.family().unwrap() {
         AddressFamily::Inet => {
@@ -163,7 +165,7 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
 }
 
 #[cfg(posix_socket)]
-fn recv_datagram_posix<S: AsRawFd>(
+pub fn recv_datagram<S: AsRawFd>(
     socket: &S,
     buf: &mut [u8],
     tos: &mut u8,
@@ -197,53 +199,51 @@ fn recv_datagram_posix<S: AsRawFd>(
 }
 
 #[cfg(not(posix_socket))]
-fn recv_datagram_generic<S: AsRawFd>(
-    socket: &S,
+pub fn recv_datagram(
+    socket: &UdpSocket,
     buf: &mut [u8],
     tos: &mut u8,
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
-    // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
     *tos = 0xff;
     *ttl = 0xff;
-    recvfrom(socket.as_raw_fd(), &mut buf[..])
-        .map(|(n, addr)| (n, to_socket_addr(&addr.unwrap())))
-        .map_err(|e| e.into())
+    // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
+    socket.recv_from(&mut buf[..])
 }
 
-/// Receive a UDP datagram on the specified socket.
-///
-/// # Arguments
-///
-/// * `fd` - The UDP socket to receive the datagram on.
-/// * `buf` - The buffer to receive the datagram into.
-/// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
-/// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
-///
-/// # Returns
-///
-/// An `io::Result` indicating the size of the received datagram.
-///
-/// # Errors
-///
-/// Returns an `io::ErrorKind::WouldBlock` error if the `recvmsg` call would block.
-///
-/// # Panics
-///
-/// Panics if the `recvmsg` call results in any result other than success, EAGAIN, or EINTR.
-///
-/// # Notes
-///
-/// On non-POSIX platforms, TOS and TTL will be set to 0xff to indicate they were not retrieved
-/// from the packet. TODO: Figure out how to retrieve TOS and TTL at least on Windows.
-pub fn recv_datagram<S: AsRawFd>(
-    socket: &S,
-    buf: &mut [u8],
-    tos: &mut u8,
-    ttl: &mut u8,
-) -> io::Result<(usize, SocketAddr)> {
-    #[cfg(posix_socket)]
-    return recv_datagram_posix(socket, buf, tos, ttl);
-    #[cfg(not(posix_socket))]
-    return recv_datagram_generic(socket, buf, tos, ttl);
-}
+// / Receive a UDP datagram on the specified socket.
+// /
+// / # Arguments
+// /
+// / * `fd` - The UDP socket to receive the datagram on.
+// / * `buf` - The buffer to receive the datagram into.
+// / * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
+// / * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
+// /
+// / # Returns
+// /
+// / An `io::Result` indicating the size of the received datagram.
+// /
+// / # Errors
+// /
+// / Returns an `io::ErrorKind::WouldBlock` error if the `recvmsg` call would block.
+// /
+// / # Panics
+// /
+// / Panics if the `recvmsg` call results in any result other than success, EAGAIN, or EINTR.
+// /
+// / # Notes
+// /
+// / On non-POSIX platforms, TOS and TTL will be set to 0xff to indicate they were not retrieved
+// / from the packet. TODO: Figure out how to retrieve TOS and TTL at least on Windows.
+// pub fn recv_datagram<S: AsRawFd>(
+//     socket: &S,
+//     buf: &mut [u8],
+//     tos: &mut u8,
+//     ttl: &mut u8,
+// ) -> io::Result<(usize, SocketAddr)> {
+//     #[cfg(posix_socket)]
+//     return recv_datagram_posix(socket, buf, tos, ttl);
+//     #[cfg(not(posix_socket))]
+//     return recv_datagram_generic(socket, buf, tos, ttl);
+// }
