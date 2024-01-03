@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
+use mio::{net::UdpSocket, Events, Interest, Poll, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
 use neqo_transport::ConnectionIdGenerator;
 use structopt::StructOpt;
@@ -319,7 +319,7 @@ impl QuicParameters {
 
 fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
     let sent = socket
-        .send_to(&out_dgram, &out_dgram.destination())
+        .send_to(&out_dgram, out_dgram.destination())
         .expect("Error sending datagram");
     if sent != out_dgram.len() {
         eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
@@ -650,7 +650,7 @@ impl ServersRunner {
         }
 
         for (i, host) in self.hosts.iter().enumerate() {
-            let socket = match UdpSocket::bind(host) {
+            let socket = match UdpSocket::bind(*host) {
                 Err(err) => {
                     eprintln!("Unable to bind UDP socket: {err}");
                     return Err(err);
@@ -673,18 +673,18 @@ impl ServersRunner {
             };
             println!("Server waiting for connection on: {local_addr:?}{also_v4}");
 
-            self.poll.register(
-                &socket,
+            self.poll.registry().register(
+                &mut socket,
                 Token(i),
-                Ready::readable() | Ready::writable(),
-                PollOpt::edge(),
+                Interest::READABLE | Interest::WRITABLE,
             )?;
 
             self.sockets.push(socket);
         }
 
         self.poll
-            .register(&self.timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
+            .registry()
+            .register(&mut self.timer, TIMER_TOKEN, Interest::READABLE)?;
 
         Ok(())
     }
@@ -816,7 +816,7 @@ impl ServersRunner {
                 if event.token() == TIMER_TOKEN {
                     self.process_timeout()?;
                 } else {
-                    if !event.readiness().is_readable() {
+                    if !event.is_readable() {
                         continue;
                     }
                     self.process_datagrams_and_events(event.token().0, true)?;

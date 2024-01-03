@@ -9,14 +9,14 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
-neqo-common = { path="./../neqo-common" }
+neqo-common = { path = "./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 structopt = "0.3.7"
 regex = "1"
-mio = "0.8.10"
+mio = { version = "0.8.10", features = ["net", "os-poll"] }
 mio-extras = "2.0.5"
-log = {version = "0.4.0", default-features = false}
+log = { version = "0.4.0", default-features = false }
 qlog = "0.11.0"
 
 [features]
