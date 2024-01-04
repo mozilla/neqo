@@ -21,6 +21,7 @@ nix = { git = "https://github.com/larseggert/nix.git", branch = "feat-tos", feat
         "net",
         "uio",
 ], optional = true }
+mio = "0.6.17"
 
 [features]
 deny-warnings = []

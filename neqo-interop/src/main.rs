@@ -288,7 +288,12 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&nctx.socket, &dgram).unwrap(),
+                Output::Datagram(dgram) => {
+                    if let Err(e) = emit_datagram(&nctx.socket, &dgram) {
+                        eprintln!("UDP write error: {}", e);
+                        break;
+                    }
+                }
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
