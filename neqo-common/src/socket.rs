@@ -6,7 +6,7 @@
 
 use std::{
     io::{self},
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
 };
 
 #[cfg(posix_socket)]
@@ -22,7 +22,6 @@ use nix::sys::socket::{
 #[cfg(posix_socket)]
 use nix::{
     cmsg_space,
-    errno::Errno::{EAGAIN, EINTR},
     sys::socket::{
         recvmsg, sendmsg, AddressFamily,
         ControlMessage::{IpTos, IpTtl, Ipv6HopLimit, Ipv6TClass},
@@ -32,30 +31,36 @@ use nix::{
 
 use crate::Datagram;
 
-/// Binds a UDP socket to the specified local address.
+/// Binds a `std::net::UdpSocket` socket to the specified local address.
 ///
 /// # Arguments
 ///
-/// * `local_addr` - The local address to bind the socket to.
+/// * `local_addr` - The local `SocketAddr` to bind the socket to.
 ///
 /// # Returns
 ///
 /// The bound UDP socket.
 ///
+/// # Errors
+///
+/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address.
+///
 /// # Panics
 ///
-/// Panics if the UDP socket fails to bind to the specified local address or if various
-/// socket options cannot be set.
+/// Panics if the UDP socket fails to bind to the specified local address.
 ///
 /// # Notes
 ///
-/// This function binds the UDP socket to the specified local address and performs additional
-/// configuration on the socket, such as setting socket options to request TOS and TTL
-/// information for incoming packets.
-pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
-    let socket = match UdpSocket::bind(local_addr) {
+/// This function binds the UDP socket to the specified local address. It also tries to
+/// perform additional configuration on the socket, such as setting socket options to
+/// request TOS and TTL information for incoming packets. If that additional configuration
+/// fails, the function will still return.
+///
+pub fn bind(local_addr: SocketAddr) -> io::Result<std::net::UdpSocket> {
+    match std::net::UdpSocket::bind(local_addr) {
         Err(e) => {
-            panic!("Unable to bind UDP socket: {}", e);
+            eprintln!("Unable to bind UDP socket: {e}");
+            Err(e)
         }
         Ok(s) => {
             // Don't let the host stack or network path fragment our IP packets
@@ -79,14 +84,57 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<UdpSocket> {
                 SocketAddr::V6(..) => setsockopt(&s, Ipv6RecvHopLimit, &true),
             };
             debug_assert!(res.is_ok());
-            s
+            Ok(s)
         }
-    };
-    Ok(socket)
+    }
+}
+
+pub trait UdpIo {
+    /// Send the UDP datagram on the specified socket.
+    ///
+    /// # Arguments
+    ///
+    /// * `d` - The datagram to send.
+    ///
+    /// # Returns
+    ///
+    /// An `io::Result` indicating whether the datagram was sent successfully.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` if the UDP socket fails to send the datagram.
+    ///
+    fn send(&self, d: &Datagram) -> io::Result<usize>;
+
+    /// Receive a UDP datagram on the specified socket.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf` - The buffer to receive the datagram into.
+    /// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
+    /// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
+    ///
+    /// # Returns
+    ///
+    /// An `io::Result` indicating the size of the received datagram and the source address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` if the UDP socket fails to receive the datagram.
+    ///
+    fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)>;
+}
+
+fn emit_result(result: io::Result<usize>, len: usize) -> usize {
+    let sent = result.unwrap();
+    if sent != len {
+        eprintln!("Only able to send {sent}/{len} bytes of datagram");
+    }
+    sent
 }
 
 #[cfg(posix_socket)]
-pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
+fn emit_datagram_posix<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<usize> {
     let iov = [IoSlice::new(&d[..])];
     let tos = i32::from(d.tos());
     let ttl = i32::from(d.ttl());
@@ -94,60 +142,17 @@ pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
         SocketAddr::V4(..) => [IpTos(&tos), IpTtl(&ttl)],
         SocketAddr::V6(..) => [Ipv6TClass(&tos), Ipv6HopLimit(&ttl)],
     };
-    let sent = sendmsg(
+    match sendmsg(
         socket.as_raw_fd(),
         &iov,
         &cmsgs,
         MsgFlags::empty(),
         Some(&SockaddrStorage::from(d.destination())),
-    )
-    .unwrap();
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
+    ) {
+        Ok(res) => Ok(res),
+        Err(e) => Err(Error::from_raw_os_error(e as i32)),
     }
-    Ok(())
 }
-
-#[cfg(not(posix_socket))]
-pub fn emit_datagram(socket: &UdpSocket, d: &Datagram) -> io::Result<()> {
-    // Use the default `UdpSocket::send_to` implementation for non-POSIX platforms.
-    // This also means we don't set the TOS and TTL values.
-    let sent = socket.send_to(&d[..], d.destination()).unwrap();
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
-    }
-    Ok(())
-}
-
-/// Send the UDP datagram on the specified socket.
-///
-/// # Arguments
-///
-/// * `fd` - The UDP socket to send the datagram on.
-/// * `d` - The datagram to send.
-///
-/// # Returns
-///
-/// An `io::Result` indicating whether the datagram was sent successfully.
-///
-/// # Panics
-///
-/// Panics if the send call fails.
-///
-/// # Notes
-///
-/// On non-POSIX platforms, TOS and TTL will not be sent and hence revert to the system default.
-/// TODO: Figure out how to set TOS and TTL at least on Windows.
-// pub fn emit_datagram<S: AsRawFd>(socket: &S, d: &Datagram) -> io::Result<()> {
-//     #[cfg(posix_socket)]
-//     let sent = emit_datagram_posix(socket, d);
-//     #[cfg(not(posix_socket))]
-//     let sent = emit_datagram_generic(socket, d);
-//     if sent != d.len() {
-//         eprintln!("Unable to send all {} bytes of datagram", d.len());
-//     }
-//     Ok(())
-// }
 
 #[cfg(posix_socket)]
 fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
@@ -164,8 +169,25 @@ fn to_socket_addr(addr: &SockaddrStorage) -> SocketAddr {
     }
 }
 
+/// Use `recvmsg` to receive a UDP datagram and its metadata on the specified socket.
+///
+/// # Arguments
+///
+/// * `socket` - The UDP socket to receive the datagram on.
+/// * `buf` - The buffer to receive the datagram into.
+/// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
+/// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
+///
+/// # Returns
+///
+/// An `io::Result` indicating the size of the received datagram and the source address.
+///
+/// # Errors
+///
+/// Returns an `io::Error` if the UDP socket fails to receive the datagram.
+///
 #[cfg(posix_socket)]
-pub fn recv_datagram<S: AsRawFd>(
+pub fn recv_datagram_posix<S: AsRawFd>(
     socket: &S,
     buf: &mut [u8],
     tos: &mut u8,
@@ -176,9 +198,7 @@ pub fn recv_datagram<S: AsRawFd>(
     let flags = MsgFlags::empty();
 
     match recvmsg::<SockaddrStorage>(socket.as_raw_fd(), &mut iov, Some(&mut cmsg), flags) {
-        Err(e) if e == EAGAIN => Err(Error::new(ErrorKind::WouldBlock, e)),
-        Err(e) if e == EINTR => Err(Error::new(ErrorKind::Interrupted, e)),
-        Err(e) => panic!("UDP error: {}", e),
+        Err(e) => Err(Error::from_raw_os_error(e as i32)),
         Ok(res) => {
             for cmsg in res.cmsgs() {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -193,57 +213,109 @@ pub fn recv_datagram<S: AsRawFd>(
                     _ => unreachable!(),
                 };
             }
-            Ok((res.bytes, to_socket_addr(&res.address.unwrap())))
+            let Some(addr) = res.address else {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "Unable to retrieve source address from datagram",
+                ));
+            };
+            Ok((res.bytes, to_socket_addr(&addr)))
         }
     }
 }
 
-#[cfg(not(posix_socket))]
-pub fn recv_datagram(
-    socket: &UdpSocket,
+impl UdpIo for std::net::UdpSocket {
+    #[cfg(posix_socket)]
+    fn send(&self, d: &Datagram) -> io::Result<usize> {
+        let res = emit_result(emit_datagram_posix(self, d), d.len());
+        Ok(res)
+    }
+
+    #[cfg(not(posix_socket))]
+    fn send(&self, d: &Datagram) -> io::Result<usize> {
+        let res = emit_result(self.send_to(&d[..], d.destination()), d.len());
+        Ok(res)
+    }
+
+    #[cfg(posix_socket)]
+    fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)> {
+        recv_datagram_posix(self, buf, tos, ttl)
+    }
+
+    #[cfg(not(posix_socket))]
+    fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)> {
+        *tos = 0xff;
+        *ttl = 0xff;
+        self.recv_from(&mut buf[..])
+    }
+}
+
+impl UdpIo for mio::net::UdpSocket {
+    #[cfg(posix_socket)]
+    fn send(&self, d: &Datagram) -> io::Result<usize> {
+        let res = emit_result(emit_datagram_posix(self, d), d.len());
+        Ok(res)
+    }
+    #[cfg(not(posix_socket))]
+    fn send(&self, d: &Datagram) -> io::Result<usize> {
+        let res = emit_result(self.send_to(&d[..], &d.destination()), d.len());
+        Ok(res)
+    }
+
+    #[cfg(posix_socket)]
+    fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)> {
+        recv_datagram_posix(self, buf, tos, ttl)
+    }
+
+    #[cfg(not(posix_socket))]
+    fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)> {
+        *tos = 0xff;
+        *ttl = 0xff;
+        self.recv_from(&mut buf[..])
+    }
+}
+
+/// Send the UDP datagram on the specified socket.
+/// 
+/// # Arguments
+/// 
+/// * `socket` - The UDP socket to send the datagram on.
+/// * `d` - The datagram to send.
+/// 
+/// # Returns
+/// 
+/// An `io::Result` indicating whether the datagram was sent successfully.
+/// 
+/// # Errors
+/// 
+/// Returns an `io::Error` if the UDP socket fails to send the datagram.
+/// 
+pub fn emit_datagram<S: UdpIo>(socket: &S, d: &Datagram) -> io::Result<usize> {
+    socket.send(d)
+}
+
+/// Receive a UDP datagram on the specified socket.
+/// 
+/// # Arguments
+/// 
+/// * `socket` - The UDP socket to receive the datagram on.
+/// * `buf` - The buffer to receive the datagram into.
+/// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
+/// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
+/// 
+/// # Returns
+/// 
+/// An `io::Result` indicating the size of the received datagram and the source address.
+/// 
+/// # Errors
+/// 
+/// Returns an `io::Error` if the UDP socket fails to receive the datagram.
+/// 
+pub fn recv_datagram<S: UdpIo>(
+    socket: &S,
     buf: &mut [u8],
     tos: &mut u8,
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
-    *tos = 0xff;
-    *ttl = 0xff;
-    // Use the default `UdpSocket::recv_from` implementation for non-POSIX platforms.
-    socket.recv_from(&mut buf[..])
+    socket.recv(buf, tos, ttl)
 }
-
-// / Receive a UDP datagram on the specified socket.
-// /
-// / # Arguments
-// /
-// / * `fd` - The UDP socket to receive the datagram on.
-// / * `buf` - The buffer to receive the datagram into.
-// / * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
-// / * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
-// /
-// / # Returns
-// /
-// / An `io::Result` indicating the size of the received datagram.
-// /
-// / # Errors
-// /
-// / Returns an `io::ErrorKind::WouldBlock` error if the `recvmsg` call would block.
-// /
-// / # Panics
-// /
-// / Panics if the `recvmsg` call results in any result other than success, EAGAIN, or EINTR.
-// /
-// / # Notes
-// /
-// / On non-POSIX platforms, TOS and TTL will be set to 0xff to indicate they were not retrieved
-// / from the packet. TODO: Figure out how to retrieve TOS and TTL at least on Windows.
-// pub fn recv_datagram<S: AsRawFd>(
-//     socket: &S,
-//     buf: &mut [u8],
-//     tos: &mut u8,
-//     ttl: &mut u8,
-// ) -> io::Result<(usize, SocketAddr)> {
-//     #[cfg(posix_socket)]
-//     return recv_datagram_posix(socket, buf, tos, ttl);
-//     #[cfg(not(posix_socket))]
-//     return recv_datagram_generic(socket, buf, tos, ttl);
-// }
