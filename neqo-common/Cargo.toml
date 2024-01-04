@@ -24,12 +24,12 @@ nix = { git = "https://github.com/larseggert/nix.git", branch = "feat-tos", feat
         "net",
         "uio",
 ], optional = true }
-mio = "0.6.17"
+mio = { version = "0.6.17", optional = true }
 
 [features]
 deny-warnings = []
 ci = []
-socket = ["dep:nix"]
+socket = ["dep:nix", "dep:mio"]
 
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"
