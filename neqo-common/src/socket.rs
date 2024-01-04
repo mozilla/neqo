@@ -15,15 +15,15 @@ use std::{
     os::fd::AsRawFd,
 };
 
-use nix::sys::socket::{
-    setsockopt,
-    sockopt::{IpDontFrag, IpRecvTos, IpRecvTtl, Ipv6DontFrag, Ipv6RecvHopLimit, Ipv6RecvTClass},
-};
 #[cfg(posix_socket)]
 use nix::{
     cmsg_space,
     sys::socket::{
-        recvmsg, sendmsg, AddressFamily,
+        recvmsg, sendmsg, setsockopt,
+        sockopt::{
+            IpDontFrag, IpRecvTos, IpRecvTtl, Ipv6DontFrag, Ipv6RecvHopLimit, Ipv6RecvTClass,
+        },
+        AddressFamily,
         ControlMessage::{IpTos, IpTtl, Ipv6HopLimit, Ipv6TClass},
         ControlMessageOwned, MsgFlags, SockaddrLike, SockaddrStorage,
     },
@@ -31,7 +31,33 @@ use nix::{
 
 use crate::Datagram;
 
-/// Binds a `std::net::UdpSocket` socket to the specified local address.
+#[cfg(posix_socket)]
+fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
+    // Don't let the host stack or network path fragment our IP packets
+    // (RFC9000, Section 14).
+    let res = match local_addr {
+        SocketAddr::V4(..) => setsockopt(&s, IpDontFrag, &true),
+        SocketAddr::V6(..) => setsockopt(&s, Ipv6DontFrag, &true),
+    };
+    debug_assert!(res.is_ok());
+    // Request IPv4 type-of-service (TOS) and IPv6 traffic class
+    // information for all incoming packets.
+    let res = match local_addr {
+        SocketAddr::V4(..) => setsockopt(&s, IpRecvTos, &true),
+        SocketAddr::V6(..) => setsockopt(&s, Ipv6RecvTClass, &true),
+    };
+    debug_assert!(res.is_ok());
+    // Request IPv4 time-to-live (TTL) and IPv6 hop count
+    // information for all incoming packets.
+    let res = match local_addr {
+        SocketAddr::V4(..) => setsockopt(&s, IpRecvTtl, &true),
+        SocketAddr::V6(..) => setsockopt(&s, Ipv6RecvHopLimit, &true),
+    };
+    debug_assert!(res.is_ok());
+}
+
+/// Binds a `std::net::UdpSocket` socket to the specified local address and sets it to
+/// non-blocking mode.
 ///
 /// # Arguments
 ///
@@ -43,11 +69,8 @@ use crate::Datagram;
 ///
 /// # Errors
 ///
-/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address.
-///
-/// # Panics
-///
-/// Panics if the UDP socket fails to bind to the specified local address.
+/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address
+/// or if the socket fails to be set to non-blocking mode.
 ///
 /// # Notes
 ///
@@ -63,27 +86,12 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<std::net::UdpSocket> {
             Err(e)
         }
         Ok(s) => {
-            // Don't let the host stack or network path fragment our IP packets
-            // (RFC9000, Section 14).
-            let res = match local_addr {
-                SocketAddr::V4(..) => setsockopt(&s, IpDontFrag, &true),
-                SocketAddr::V6(..) => setsockopt(&s, Ipv6DontFrag, &true),
-            };
-            debug_assert!(res.is_ok());
-            // Request IPv4 type-of-service (TOS) and IPv6 traffic class
-            // information for all incoming packets.
-            let res = match local_addr {
-                SocketAddr::V4(..) => setsockopt(&s, IpRecvTos, &true),
-                SocketAddr::V6(..) => setsockopt(&s, Ipv6RecvTClass, &true),
-            };
-            assert!(res.is_ok());
-            // Request IPv4 time-to-live (TTL) and IPv6 hop count
-            // information for all incoming packets.
-            let res = match local_addr {
-                SocketAddr::V4(..) => setsockopt(&s, IpRecvTtl, &true),
-                SocketAddr::V6(..) => setsockopt(&s, Ipv6RecvHopLimit, &true),
-            };
-            debug_assert!(res.is_ok());
+            if let Err(e) = s.set_nonblocking(true) {
+                eprintln!("Unable to set UDP socket to non-blocking mode: {e}");
+                return Err(e);
+            }
+            #[cfg(posix_socket)]
+            configure_sockopts(&s, local_addr);
             Ok(s)
         }
     }
@@ -276,41 +284,41 @@ impl UdpIo for mio::net::UdpSocket {
 }
 
 /// Send the UDP datagram on the specified socket.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `socket` - The UDP socket to send the datagram on.
 /// * `d` - The datagram to send.
-/// 
+///
 /// # Returns
-/// 
+///
 /// An `io::Result` indicating whether the datagram was sent successfully.
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an `io::Error` if the UDP socket fails to send the datagram.
-/// 
+///
 pub fn emit_datagram<S: UdpIo>(socket: &S, d: &Datagram) -> io::Result<usize> {
     socket.send(d)
 }
 
 /// Receive a UDP datagram on the specified socket.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `socket` - The UDP socket to receive the datagram on.
 /// * `buf` - The buffer to receive the datagram into.
 /// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
 /// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
-/// 
+///
 /// # Returns
-/// 
+///
 /// An `io::Result` indicating the size of the received datagram and the source address.
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an `io::Error` if the UDP socket fails to receive the datagram.
-/// 
+///
 pub fn recv_datagram<S: UdpIo>(
     socket: &S,
     buf: &mut [u8],
