@@ -278,7 +278,7 @@ impl Server {
                     self.timers.add(next, Rc::clone(&c));
                 }
             }
-            _ => {
+            Output::None => {
                 self.remove_timer(&c);
             }
         }

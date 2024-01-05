@@ -202,7 +202,7 @@ impl ConnectionError {
     pub fn app_code(&self) -> Option<AppError> {
         match self {
             Self::Application(e) => Some(*e),
-            _ => None,
+            Self::Transport(_) => None,
         }
     }
 }
