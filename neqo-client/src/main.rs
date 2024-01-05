@@ -78,7 +78,7 @@ impl From<neqo_transport::Error> for ClientError {
 
 impl Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {:?}", self)?;
+        write!(f, "Error: {self:?}")?;
         Ok(())
     }
 }
@@ -370,7 +370,7 @@ fn get_output_file(
             return None;
         }
 
-        eprintln!("Saving {} to {:?}", url, out_path);
+        eprintln!("Saving {url} to {out_path:?}");
 
         if let Some(parent) = out_path.parent() {
             create_dir_all(parent).ok()?;
@@ -416,7 +416,7 @@ fn process_loop(
                     break 'read
                 }
                 Err(ref err) => {
-                    eprintln!("UDP error: {}", err);
+                    eprintln!("UDP error: {err}");
                     exit(1);
                 }
                 Ok((sz, remote)) => {
@@ -446,7 +446,7 @@ fn process_loop(
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     if let Err(e) = emit_datagram(socket, dgram) {
-                        eprintln!("UDP write error: {}", e);
+                        eprintln!("UDP write error: {e}");
                         client.close(Instant::now(), 0, e.to_string());
                         exiting = true;
                         break 'write;
@@ -517,7 +517,7 @@ struct DownloadStreamHandler {
 impl StreamHandler for DownloadStreamHandler {
     fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
         if self.out_file.is_none() {
-            println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+            println!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
         }
     }
 
@@ -535,15 +535,15 @@ impl StreamHandler for DownloadStreamHandler {
             }
             return Ok(true);
         } else if !output_read_data {
-            println!("READ[{}]: {} bytes", stream_id, sz);
+            println!("READ[{stream_id}]: {sz} bytes");
         } else if let Ok(txt) = String::from_utf8(data.clone()) {
-            println!("READ[{}]: {}", stream_id, txt);
+            println!("READ[{stream_id}]: {txt}");
         } else {
             println!("READ[{}]: 0x{}", stream_id, hex(&data));
         }
 
         if fin && self.out_file.is_none() {
-            println!("<FIN[{}]>", stream_id);
+            println!("<FIN[{stream_id}]>");
         }
 
         Ok(true)
@@ -561,7 +561,7 @@ struct UploadStreamHandler {
 
 impl StreamHandler for UploadStreamHandler {
     fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
-        println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+        println!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
     }
 
     fn process_data_readable(
@@ -577,7 +577,7 @@ impl StreamHandler for UploadStreamHandler {
             let parsed: usize = trimmed_txt.parse().unwrap();
             if parsed == self.data.len() {
                 let upload_time = Instant::now().duration_since(self.start);
-                println!("Stream ID: {:?}, Upload time: {:?}", stream_id, upload_time);
+                println!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
             }
         } else {
             panic!("Unexpected data [{}]: 0x{}", stream_id, hex(&data));
@@ -645,10 +645,7 @@ impl<'a> URLHandler<'a> {
             Priority::default(),
         ) {
             Ok(client_stream_id) => {
-                println!(
-                    "Successfully created stream id {} for {}",
-                    client_stream_id, url
-                );
+                println!("Successfully created stream id {client_stream_id} for {url}");
 
                 let handler: Box<dyn StreamHandler> = StreamHandlerType::make_handler(
                     &self.handler_type,
@@ -730,7 +727,7 @@ impl<'a> Handler<'a> {
                             handler.process_header_ready(stream_id, fin, headers);
                         }
                         None => {
-                            println!("Data on unexpected stream: {}", stream_id);
+                            println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
                         }
                     }
@@ -742,7 +739,7 @@ impl<'a> Handler<'a> {
                     let mut stream_done = false;
                     match self.url_handler.stream_handler(&stream_id) {
                         None => {
-                            println!("Data on unexpected stream: {}", stream_id);
+                            println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
                         }
                         Some(handler) => loop {
@@ -777,7 +774,7 @@ impl<'a> Handler<'a> {
                 Http3ClientEvent::DataWritable { stream_id } => {
                     match self.url_handler.stream_handler(&stream_id) {
                         None => {
-                            println!("Data on unexpected stream: {}", stream_id);
+                            println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
                         }
                         Some(handler) => {
@@ -792,7 +789,7 @@ impl<'a> Handler<'a> {
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
                 _ => {
-                    println!("Unhandled event {:?}", event);
+                    println!("Unhandled event {event:?}");
                 }
             }
         }
@@ -846,7 +843,7 @@ fn handle_test(
             process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
         }
         _ => {
-            eprintln!("Unsupported test case: {}", testcase);
+            eprintln!("Unsupported test case: {testcase}");
             exit(127)
         }
     }
@@ -952,7 +949,7 @@ fn client(
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
         let mut qlog_path = qlog_dir.to_path_buf();
-        let filename = format!("{}-{}.sqlog", hostname, cid);
+        let filename = format!("{hostname}-{cid}.sqlog");
         qlog_path.push(filename);
 
         let f = OpenOptions::new()
@@ -1024,22 +1021,20 @@ fn main() -> Res<()> {
     for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
-            eprintln!("Opaque origin {:?}", x);
+            eprintln!("Opaque origin {x:?}");
             None
         }
     }) {
-        let remote_addr = format!("{}:{}", host, port)
-            .to_socket_addrs()?
-            .find(|addr| {
-                !matches!(
-                    (addr, args.ipv4_only, args.ipv6_only),
-                    (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
-                )
-            });
+        let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
+            !matches!(
+                (addr, args.ipv4_only, args.ipv6_only),
+                (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
+            )
+        });
         let remote_addr = match remote_addr {
             Some(a) => a,
             None => {
-                eprintln!("No compatible address found for: {}", host);
+                eprintln!("No compatible address found for: {host}");
                 exit(1);
             }
         };
@@ -1051,7 +1046,7 @@ fn main() -> Res<()> {
 
         let socket = match UdpSocket::bind(&local_addr) {
             Err(e) => {
-                eprintln!("Unable to bind UDP socket: {}", e);
+                eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
             }
             Ok(s) => s,
@@ -1073,7 +1068,7 @@ fn main() -> Res<()> {
             remote_addr,
         );
 
-        let hostname = format!("{}", host);
+        let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
         let mut remaining = &urls[..];
         let mut first = true;
@@ -1084,8 +1079,7 @@ fn main() -> Res<()> {
                 remaining = &remaining[1..];
                 if args.resume && first && remaining.is_empty() {
                     println!(
-                        "Error: resumption to {} cannot work without at least 2 URLs.",
-                        hostname
+                        "Error: resumption to {hostname} cannot work without at least 2 URLs."
                     );
                     exit(127);
                 }
@@ -1188,7 +1182,7 @@ mod old {
                 .expect("download_next called with empty queue");
             match client.stream_create(StreamType::BiDi) {
                 Ok(client_stream_id) => {
-                    println!("Created stream {} for {}", client_stream_id, url);
+                    println!("Created stream {client_stream_id} for {url}");
                     let req = format!("GET {}\r\n", url.path());
                     _ = client
                         .stream_send(client_stream_id, req.as_bytes())
@@ -1200,7 +1194,7 @@ mod old {
                     true
                 }
                 Err(e @ Error::StreamLimitError) | Err(e @ Error::ConnectionState) => {
-                    println!("Cannot create stream {:?}", e);
+                    println!("Cannot create stream {e:?}");
                     self.url_queue.push_front(url);
                     false
                 }
@@ -1228,7 +1222,7 @@ mod old {
                 if let Some(out_file) = maybe_out_file {
                     out_file.write_all(&data[..sz])?;
                 } else if !output_read_data {
-                    println!("READ[{}]: {} bytes", stream_id, sz);
+                    println!("READ[{stream_id}]: {sz} bytes");
                 } else {
                     println!(
                         "READ[{}]: {}",
@@ -1252,7 +1246,7 @@ mod old {
             let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
             match &mut maybe_maybe_out_file {
                 None => {
-                    println!("Data on unexpected stream: {}", stream_id);
+                    println!("Data on unexpected stream: {stream_id}");
                     return Ok(false);
                 }
                 Some(maybe_out_file) => {
@@ -1265,7 +1259,7 @@ mod old {
 
                     if fin_recvd {
                         if maybe_out_file.is_none() {
-                            println!("<FIN[{}]>", stream_id);
+                            println!("<FIN[{stream_id}]>");
                         }
                         self.streams.remove(&stream_id);
                         self.download_urls(client);
@@ -1302,13 +1296,13 @@ mod old {
                         };
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
-                        println!("stream {} writable", stream_id)
+                        println!("stream {stream_id} writable")
                     }
                     ConnectionEvent::SendStreamComplete { stream_id } => {
-                        println!("stream {} complete", stream_id);
+                        println!("stream {stream_id} complete");
                     }
                     ConnectionEvent::SendStreamCreatable { stream_type } => {
-                        println!("stream {:?} creatable", stream_type);
+                        println!("stream {stream_type:?} creatable");
                         if stream_type == StreamType::BiDi {
                             self.download_urls(client);
                         }
@@ -1316,7 +1310,7 @@ mod old {
                     ConnectionEvent::StateChange(State::WaitInitial)
                     | ConnectionEvent::StateChange(State::Handshaking)
                     | ConnectionEvent::StateChange(State::Connected) => {
-                        println!("{:?}", event);
+                        println!("{event:?}");
                         self.download_urls(client);
                     }
                     ConnectionEvent::StateChange(State::Confirmed) => {
@@ -1326,7 +1320,7 @@ mod old {
                         self.token = Some(token);
                     }
                     _ => {
-                        println!("Unhandled event {:?}", event);
+                        println!("Unhandled event {event:?}");
                     }
                 }
             }
@@ -1360,7 +1354,7 @@ mod old {
                         break 'read
                     }
                     Err(ref err) => {
-                        eprintln!("UDP error: {}", err);
+                        eprintln!("UDP error: {err}");
                         exit(1);
                     }
                     Ok((sz, remote)) => {
@@ -1387,7 +1381,7 @@ mod old {
                 match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
                         if let Err(e) = emit_datagram(socket, dgram) {
-                            eprintln!("UDP write error: {}", e);
+                            eprintln!("UDP write error: {e}");
                             client.close(Instant::now(), 0, e.to_string());
                             exiting = true;
                             break 'write;

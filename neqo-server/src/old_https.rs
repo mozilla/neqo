@@ -158,7 +158,7 @@ impl Http09Server {
             }
             Some(path) => {
                 let path = path.as_str();
-                eprintln!("Path = '{}'", path);
+                eprintln!("Path = '{path}'");
                 if args.qns_test.is_some() {
                     qns_read_response(path)
                 } else {
@@ -173,7 +173,7 @@ impl Http09Server {
     fn stream_writable(&mut self, stream_id: StreamId, conn: &mut ActiveConnectionRef) {
         match self.write_state.get_mut(&stream_id) {
             None => {
-                eprintln!("Unknown stream {}, ignoring event", stream_id);
+                eprintln!("Unknown stream {stream_id}, ignoring event");
             }
             Some(stream_state) => {
                 stream_state.writable = true;
@@ -186,7 +186,7 @@ impl Http09Server {
                     *offset += sent;
                     self.server.add_to_waiting(conn.clone());
                     if *offset == data.len() {
-                        eprintln!("Sent {} on {}, closing", sent, stream_id);
+                        eprintln!("Sent {sent} on {stream_id}, closing");
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();
                         self.write_state.remove(&stream_id);
                     } else {
@@ -211,7 +211,7 @@ impl HttpServer for Http09Server {
                     None => break,
                     Some(e) => e,
                 };
-                eprintln!("Event {:?}", event);
+                eprintln!("Event {event:?}");
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
                         self.write_state
@@ -231,7 +231,7 @@ impl HttpServer for Http09Server {
                     }
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamComplete { .. } => (),
-                    e => eprintln!("unhandled event {:?}", e),
+                    e => eprintln!("unhandled event {e:?}"),
                 }
             }
         }
