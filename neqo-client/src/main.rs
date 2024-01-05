@@ -408,7 +408,9 @@ fn process_loop(
 
         let mut datagrams: Vec<Datagram> = Vec::new();
         'read: loop {
-            match socket.recv_from(&mut buf[..]) {
+            let mut tos = 0;
+            let mut ttl = 0;
+            match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
                 Err(ref err)
                     if err.kind() == ErrorKind::WouldBlock
                         || err.kind() == ErrorKind::Interrupted =>
@@ -425,7 +427,13 @@ fn process_loop(
                         break 'read;
                     }
                     if sz > 0 {
-                        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                        let d = Datagram::new_with_tos_and_ttl(
+                            remote,
+                            *local_addr,
+                            tos,
+                            ttl,
+                            &buf[..sz],
+                        );
                         datagrams.push(d);
                     }
                 }
@@ -1366,7 +1374,9 @@ mod old {
             )?;
 
             'read: loop {
-                match socket.recv_from(&mut buf[..]) {
+                let mut tos = 0;
+                let mut ttl = 0;
+                match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
                     Err(ref err)
                         if err.kind() == ErrorKind::WouldBlock
                             || err.kind() == ErrorKind::Interrupted =>
@@ -1383,7 +1393,13 @@ mod old {
                             break 'read;
                         }
                         if sz > 0 {
-                            let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                            let d = Datagram::new_with_tos_and_ttl(
+                                remote,
+                                *local_addr,
+                                tos,
+                                ttl,
+                                &buf[..sz],
+                            );
                             client.process_input(&d, Instant::now());
                             handler.maybe_key_update(client)?;
                         }
