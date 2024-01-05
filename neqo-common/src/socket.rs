@@ -56,7 +56,8 @@ fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
     debug_assert!(res.is_ok());
 }
 
-/// Binds a `std::net::UdpSocket` socket to the specified local address.
+/// Binds a `std::net::UdpSocket` socket to the specified local address and sets it to
+/// non-blocking mode.
 ///
 /// # Arguments
 ///
@@ -68,7 +69,8 @@ fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
 ///
 /// # Errors
 ///
-/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address.
+/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address
+/// or if the socket fails to be set to non-blocking mode.
 ///
 /// # Notes
 ///
@@ -84,6 +86,10 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<std::net::UdpSocket> {
             Err(e)
         }
         Ok(s) => {
+            if let Err(e) = s.set_nonblocking(true) {
+                eprintln!("Unable to set UDP socket to non-blocking mode: {e}");
+                return Err(e);
+            }
             #[cfg(posix_socket)]
             configure_sockopts(&s, local_addr);
             Ok(s)
@@ -343,13 +349,22 @@ mod test {
     }
 
     fn test_io(sock_addr: SocketAddr) {
+        // We reconfigure the sockets to blocking mode for this test, so we don't have to poll.
         let server = match bind(sock_addr) {
-            Ok(s) => s,
+            Ok(s) => {
+                s.set_nonblocking(false)
+                    .expect("Unable to set server socket to blocking mode");
+                s
+            }
             Err(e) => panic!("{}", e),
         };
 
         let client = match bind(sock_addr) {
-            Ok(s) => s,
+            Ok(s) => {
+                s.set_nonblocking(false)
+                    .expect("Unable to set client socket to blocking mode");
+                s
+            }
             Err(e) => panic!("{}", e),
         };
 
