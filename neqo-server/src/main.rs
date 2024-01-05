@@ -85,7 +85,7 @@ impl From<neqo_transport::Error> for ServerError {
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error: {:?}", self)?;
+        write!(f, "Error: {self:?}")?;
         Ok(())
     }
 }
@@ -343,7 +343,7 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
                     Some(data)
                 }
                 Err(e) => {
-                    eprintln!("Error reading data: {:?}", e);
+                    eprintln!("Error reading data: {e:?}");
                     None
                 }
             }
@@ -479,7 +479,7 @@ impl HttpServer for SimpleServer {
                     headers,
                     fin,
                 } => {
-                    println!("Headers (request={} fin={}): {:?}", stream, fin, headers);
+                    println!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     let post = if let Some(method) = headers.iter().find(|&h| h.name() == ":method")
                     {
@@ -592,7 +592,7 @@ fn read_dgram(
     let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
         Err(err) => {
-            eprintln!("UDP recv error: {:?}", err);
+            eprintln!("UDP recv error: {err:?}");
             return Err(err);
         }
         Ok(res) => res,
@@ -652,7 +652,7 @@ impl ServersRunner {
         for (i, host) in self.hosts.iter().enumerate() {
             let socket = match UdpSocket::bind(host) {
                 Err(err) => {
-                    eprintln!("Unable to bind UDP socket: {}", err);
+                    eprintln!("Unable to bind UDP socket: {err}");
                     return Err(err);
                 }
                 Ok(s) => s,
@@ -660,7 +660,7 @@ impl ServersRunner {
 
             let local_addr = match socket.local_addr() {
                 Err(err) => {
-                    eprintln!("Socket local address not bound: {}", err);
+                    eprintln!("Socket local address not bound: {err}");
                     return Err(err);
                 }
                 Ok(s) => s,
@@ -671,10 +671,7 @@ impl ServersRunner {
             } else {
                 " as well as V4"
             };
-            println!(
-                "Server waiting for connection on: {:?}{}",
-                local_addr, also_v4
-            );
+            println!("Server waiting for connection on: {local_addr:?}{also_v4}");
 
             self.poll.register(
                 &socket,
