@@ -828,6 +828,15 @@ impl Http3Client {
         self.process_http3(now);
     }
 
+    pub fn process_multiple_input(&mut self, dgrams: Vec<Datagram>, now: Instant) {
+        qtrace!([self], "Process multiple datagrams, len={}", dgrams.len());
+        if dgrams.is_empty() {
+            return;
+        }
+        self.conn.process_multiple_input(dgrams, now);
+        self.process_http3(now);
+    }
+
     /// This should not be used because it gives access to functionalities that may disrupt the
     /// proper functioning of the HTTP/3 session.
     /// Only used by `neqo-interop`.

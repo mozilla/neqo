@@ -403,22 +403,21 @@ fn process_loop(
     loop {
         poll.poll(
             &mut events,
-            if timeout.is_some() {
-                timeout
-            } else {
-                Some(Duration::from_millis(0))
-            },
+            timeout.or_else(|| Some(Duration::from_millis(0))),
         )?;
 
+        let mut datagrams: Vec<Datagram> = Vec::new();
         'read: loop {
             match socket.recv_from(&mut buf[..]) {
+                Err(ref err)
+                    if err.kind() == ErrorKind::WouldBlock
+                        || err.kind() == ErrorKind::Interrupted =>
+                {
+                    break 'read
+                }
                 Err(ref err) => {
-                    if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted {
-                        break 'read;
-                    }
-
                     eprintln!("UDP error: {}", err);
-                    exit(1)
+                    exit(1);
                 }
                 Ok((sz, remote)) => {
                     if sz == buf.len() {
@@ -427,11 +426,14 @@ fn process_loop(
                     }
                     if sz > 0 {
                         let d = Datagram::new(remote, *local_addr, &buf[..sz]);
-                        client.process_input(d, Instant::now());
-                        handler.maybe_key_update(client)?;
+                        datagrams.push(d);
                     }
                 }
             };
+        }
+        if !datagrams.is_empty() {
+            client.process_multiple_input(datagrams, Instant::now());
+            handler.maybe_key_update(client)?;
         }
 
         if let Http3State::Closed(..) = client.state() {
@@ -1346,23 +1348,20 @@ mod old {
         loop {
             poll.poll(
                 &mut events,
-                if timeout.is_some() {
-                    timeout
-                } else {
-                    Some(Duration::from_millis(0))
-                },
+                timeout.or_else(|| Some(Duration::from_millis(0))),
             )?;
 
             'read: loop {
                 match socket.recv_from(&mut buf[..]) {
-                    Err(ref err) => {
+                    Err(ref err)
                         if err.kind() == ErrorKind::WouldBlock
-                            || err.kind() == ErrorKind::Interrupted
-                        {
-                            break 'read;
-                        }
+                            || err.kind() == ErrorKind::Interrupted =>
+                    {
+                        break 'read
+                    }
+                    Err(ref err) => {
                         eprintln!("UDP error: {}", err);
-                        exit(1)
+                        exit(1);
                     }
                     Ok((sz, remote)) => {
                         if sz == buf.len() {

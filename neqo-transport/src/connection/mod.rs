@@ -921,6 +921,19 @@ impl Connection {
         self.streams.cleanup_closed_streams();
     }
 
+    /// Process new input datagrams on the connection.
+    pub fn process_multiple_input(&mut self, dgrams: Vec<Datagram>, now: Instant) {
+        if dgrams.is_empty() {
+            return;
+        }
+
+        for d in dgrams {
+            self.input(d, now, now);
+        }
+        self.process_saved(now);
+        self.streams.cleanup_closed_streams();
+    }
+
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant, paced: bool) -> Duration {
         qtrace!([self], "Get callback delay {:?}", now);
