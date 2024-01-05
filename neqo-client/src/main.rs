@@ -1036,12 +1036,9 @@ fn main() -> Res<()> {
                     (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
                 )
             });
-        let remote_addr = match remote_addr {
-            Some(a) => a,
-            None => {
-                eprintln!("No compatible address found for: {}", host);
-                exit(1);
-            }
+        let Some(remote_addr) = remote_addr else {
+            eprintln!("No compatible address found for: {}", host);
+            exit(1);
         };
 
         let local_addr = match remote_addr {

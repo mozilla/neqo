@@ -138,9 +138,7 @@ impl Http09Server {
             data
         };
 
-        let msg = if let Ok(s) = std::str::from_utf8(&buf[..]) {
-            s
-        } else {
+        let Ok(msg) = std::str::from_utf8(&buf[..]) else {
             self.save_partial(stream_id, buf, conn);
             return;
         };
