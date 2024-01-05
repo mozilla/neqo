@@ -652,12 +652,12 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state.name())
+                qtrace!("data received when we are in state {}", self.state.name());
             }
         }
 
         if !already_data_ready && (self.data_ready() || self.needs_to_inform_app_about_fin()) {
-            self.conn_events.recv_stream_readable(self.stream_id)
+            self.conn_events.recv_stream_readable(self.stream_id);
         }
 
         Ok(())
@@ -837,7 +837,7 @@ impl RecvStream {
                     err,
                     final_received: received,
                     final_read: read,
-                })
+                });
             }
             RecvStreamState::DataRecvd {
                 fc,

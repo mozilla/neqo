@@ -235,7 +235,7 @@ impl ConnectionEvents {
     where
         F: Fn(&ConnectionEvent) -> bool,
     {
-        self.events.borrow_mut().retain(|evt| !f(evt))
+        self.events.borrow_mut().retain(|evt| !f(evt));
     }
 }
 

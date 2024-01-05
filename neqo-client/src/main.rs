@@ -1234,7 +1234,7 @@ mod old {
                         "READ[{}]: {}",
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
-                    )
+                    );
                 }
                 if fin {
                     return Ok(true);
@@ -1302,7 +1302,7 @@ mod old {
                         };
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
-                        println!("stream {} writable", stream_id)
+                        println!("stream {} writable", stream_id);
                     }
                     ConnectionEvent::SendStreamComplete { stream_id } => {
                         println!("stream {} complete", stream_id);

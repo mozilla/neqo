@@ -658,7 +658,7 @@ mod tests {
             application_error_code: 0x77,
         };
 
-        just_dec(&f, "053F4077")
+        just_dec(&f, "053F4077");
     }
 
     #[test]

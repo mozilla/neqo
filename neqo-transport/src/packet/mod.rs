@@ -241,7 +241,7 @@ impl PacketBuilder {
 
     /// Adjust the limit to ensure that no more data is added.
     pub fn mark_full(&mut self) {
-        self.limit = self.encoder.len()
+        self.limit = self.encoder.len();
     }
 
     /// Mark the packet as needing padding (or not).
