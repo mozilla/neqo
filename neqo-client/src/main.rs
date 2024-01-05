@@ -35,7 +35,7 @@ use std::{
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, ErrorKind, Write},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -1069,7 +1069,7 @@ fn main() -> Res<()> {
                 eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
             }
-            Ok(s) => s,
+            Ok(s) => UdpSocket::from_socket(s)?,
         };
 
         let poll = Poll::new()?;
@@ -1147,7 +1147,7 @@ mod old {
         collections::{HashMap, VecDeque},
         fs::File,
         io::{ErrorKind, Write},
-        net::{SocketAddr, UdpSocket},
+        net::SocketAddr,
         path::PathBuf,
         process::exit,
         rc::Rc,
