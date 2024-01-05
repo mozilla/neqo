@@ -56,8 +56,7 @@ fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
     debug_assert!(res.is_ok());
 }
 
-/// Binds a `std::net::UdpSocket` socket to the specified local address and sets it to
-/// non-blocking mode.
+/// Binds a `std::net::UdpSocket` socket to the specified local address.
 ///
 /// # Arguments
 ///
@@ -69,8 +68,7 @@ fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
 ///
 /// # Errors
 ///
-/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address
-/// or if the socket fails to be set to non-blocking mode.
+/// Returns an `io::Error` if the UDP socket fails to bind to the specified local address.
 ///
 /// # Notes
 ///
@@ -86,10 +84,6 @@ pub fn bind(local_addr: SocketAddr) -> io::Result<std::net::UdpSocket> {
             Err(e)
         }
         Ok(s) => {
-            if let Err(e) = s.set_nonblocking(true) {
-                eprintln!("Unable to set UDP socket to non-blocking mode: {e}");
-                return Err(e);
-            }
             #[cfg(posix_socket)]
             configure_sockopts(&s, local_addr);
             Ok(s)
@@ -326,4 +320,95 @@ pub fn recv_datagram<S: UdpIo>(
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
     socket.recv(buf, tos, ttl)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{bind, emit_datagram, recv_datagram, Datagram, IpTosEcn};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+    const ADDR_V4: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
+    const ADDR_V6: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+    const ADDR_V4_INVALID: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 1);
+    const ADDR_V6_INVALID: Ipv6Addr = Ipv6Addr::new(1, 0, 0, 0, 0, 0, 0, 0);
+    const SOCK_V4: SocketAddr = SocketAddr::new(IpAddr::V4(ADDR_V4), 0);
+    const SOCK_V6: SocketAddr = SocketAddr::new(IpAddr::V6(ADDR_V6), 0);
+
+    fn test_bind(sock_addr: SocketAddr) {
+        assert!(bind(sock_addr).is_ok());
+    }
+
+    fn test_bind_fail(sock_addr: SocketAddr) {
+        assert!(bind(sock_addr).is_err());
+    }
+
+    fn test_io(sock_addr: SocketAddr) {
+        let server = match bind(sock_addr) {
+            Ok(s) => s,
+            Err(e) => panic!("{}", e),
+        };
+
+        let client = match bind(sock_addr) {
+            Ok(s) => s,
+            Err(e) => panic!("{}", e),
+        };
+
+        let d = Datagram::new_with_tos_and_ttl(
+            client.local_addr().unwrap(),
+            server.local_addr().unwrap(),
+            IpTosEcn::Ce as u8,
+            16,
+            [0x42; 16],
+        );
+
+        let res = emit_datagram(&client, &d);
+        assert!(res.is_ok());
+
+        let mut buf = [0; 16];
+        let mut tos = 0;
+        let mut ttl = 0;
+        let res = recv_datagram(&server, &mut buf, &mut tos, &mut ttl);
+        assert!(res.is_ok());
+        #[cfg(posix_socket)]
+        // On non-POSIX platforms, the TOS byte will usually always be 0 on RX, so don't check it there.
+        assert_eq!(tos, IpTosEcn::Ce as u8);
+        // MacOS has a kernel bug that prevents setting the TTL via CMSG, so just check that it is not 0.
+        assert_ne!(ttl, 0);
+        assert_eq!(buf, [0x42; 16]);
+
+        drop(client);
+        drop(server);
+    }
+
+    #[test]
+    fn test_bind_v4() {
+        test_bind(SOCK_V4);
+    }
+
+    #[test]
+    fn test_bind_v6() {
+        test_bind(SOCK_V6);
+    }
+
+    #[test]
+    fn test_bind_fail_v4() {
+        const INVAL_V4: SocketAddr = SocketAddr::new(IpAddr::V4(ADDR_V4_INVALID), 0);
+        test_bind_fail(INVAL_V4);
+    }
+
+    #[test]
+    fn test_bind_fail_v6() {
+        const INVAL_V6: SocketAddr = SocketAddr::new(IpAddr::V6(ADDR_V6_INVALID), 0);
+        test_bind_fail(INVAL_V6);
+    }
+
+    #[test]
+    fn test_io_v4() {
+        test_io(SOCK_V4);
+    }
+
+    #[test]
+    fn test_io_v6() {
+        test_io(SOCK_V6);
+    }
 }
