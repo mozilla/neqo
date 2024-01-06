@@ -55,7 +55,7 @@ fn remember_smoothed_rtt() {
     let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
     now += RTT1 / 2;
-    client.process_input(ticket.unwrap(), now);
+    client.process_input(&ticket.unwrap(), now);
     let token = get_tokens(&mut client).pop().unwrap();
 
     let mut client = default_client();
@@ -122,7 +122,7 @@ fn two_tickets_on_timer() {
     let pkt = send_something(&mut server, now());
 
     // process() will return an ack first
-    assert!(client.process(Some(pkt), now()).dgram().is_some());
+    assert!(client.process(Some(&pkt), now()).dgram().is_some());
     // We do not have a ResumptionToken event yet, because NEW_TOKEN was not sent.
     assert_eq!(get_tokens(&mut client).len(), 0);
 
@@ -163,7 +163,7 @@ fn two_tickets_with_new_token() {
     server.send_ticket(now(), &[]).expect("send ticket2");
     let pkt = send_something(&mut server, now());
 
-    client.process_input(pkt, now());
+    client.process_input(&pkt, now());
     let mut all_tokens = get_tokens(&mut client);
     assert_eq!(all_tokens.len(), 2);
     let token1 = all_tokens.pop().unwrap();
@@ -184,7 +184,7 @@ fn take_token() {
 
     server.send_ticket(now(), &[]).unwrap();
     let dgram = server.process(None, now()).dgram();
-    client.process_input(dgram.unwrap(), now());
+    client.process_input(&dgram.unwrap(), now());
 
     // There should be no ResumptionToken event here.
     let tokens = get_tokens(&mut client);

@@ -203,7 +203,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     };
     while !is_done(a) {
         _ = maybe_authenticate(a);
-        let d = a.process(datagram, now());
+        let d = a.process(datagram.as_ref(), now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);
     }

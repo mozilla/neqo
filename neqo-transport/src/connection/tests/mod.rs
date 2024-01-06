@@ -168,7 +168,7 @@ fn handshake(
     while !is_done(a) {
         _ = maybe_authenticate(a);
         let had_input = input.is_some();
-        let output = a.process(input, now).dgram();
+        let output = a.process(input.as_ref(), now).dgram();
         assert!(had_input || output.is_some());
         input = output;
         qtrace!("handshake: t += {:?}", rtt / 2);
@@ -176,7 +176,7 @@ fn handshake(
         mem::swap(&mut a, &mut b);
     }
     if let Some(d) = input {
-        a.process_input(d, now);
+        a.process_input(&d, now);
     }
     now
 }
@@ -237,7 +237,7 @@ fn exchange_ticket(
     server.send_ticket(now, &[]).expect("can send ticket");
     let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
-    client.process_input(ticket.unwrap(), now);
+    client.process_input(&ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
     get_tokens(client).pop().expect("should have token")
 }
@@ -257,8 +257,8 @@ fn force_idle(
     let c1 = send_something(client, now);
     let c2 = send_something(client, now);
     now += rtt / 2;
-    server.process_input(c2, now);
-    server.process_input(c1, now);
+    server.process_input(&c2, now);
+    server.process_input(&c1, now);
 
     // Now do the same for the server.  (The ACK is in the first one.)
     qtrace!("force_idle: send reordered server packets");
@@ -266,17 +266,20 @@ fn force_idle(
     let s2 = send_something(server, now);
     now += rtt / 2;
     // Delivering s2 first at the client causes it to want to ACK.
-    client.process_input(s2, now);
+    client.process_input(&s2, now);
     // Delivering s1 should not have the client change its mind about the ACK.
-    let ack = client.process(Some(s1), now).dgram();
-    assert!(ack.is_some());
+    let ack = client.process(Some(&s1), now);
+    assert!(ack.as_dgram_ref().is_some());
     let idle_timeout = min(
         client.conn_params.get_idle_timeout(),
         server.conn_params.get_idle_timeout(),
     );
     assert_eq!(client.process_output(now), Output::Callback(idle_timeout));
     now += rtt / 2;
-    assert_eq!(server.process(ack, now), Output::Callback(idle_timeout));
+    assert_eq!(
+        server.process(ack.as_dgram_ref(), now),
+        Output::Callback(idle_timeout)
+    );
     now
 }
 
@@ -359,7 +362,7 @@ fn increase_cwnd(
         let pkt = sender.process_output(now);
         match pkt {
             Output::Datagram(dgram) => {
-                receiver.process_input(dgram, now + DEFAULT_RTT / 2);
+                receiver.process_input(&dgram, now + DEFAULT_RTT / 2);
             }
             Output::Callback(t) => {
                 if t < DEFAULT_RTT {
@@ -376,7 +379,7 @@ fn increase_cwnd(
     now += DEFAULT_RTT / 2;
     let ack = receiver.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
-    sender.process_input(ack.unwrap(), now);
+    sender.process_input(&ack.unwrap(), now);
     now
 }
 
@@ -395,7 +398,7 @@ where
     let in_dgrams = in_dgrams.into_iter();
     qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
     for dgram in in_dgrams {
-        dest.process_input(dgram, now);
+        dest.process_input(&dgram, now);
     }
 
     loop {
@@ -461,7 +464,7 @@ fn induce_persistent_congestion(
 
     // An ACK for the third PTO causes persistent congestion.
     let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
-    client.process_input(s_ack, now);
+    client.process_input(&s_ack, now);
     assert_eq!(cwnd(client), CWND_MIN);
     now
 }
@@ -542,7 +545,7 @@ fn send_and_receive(
     now: Instant,
 ) -> Option<Datagram> {
     let dgram = send_something(sender, now);
-    receiver.process(Some(dgram), now).dgram()
+    receiver.process(Some(&dgram), now).dgram()
 }
 
 fn get_tokens(client: &mut Connection) -> Vec<ResumptionToken> {
