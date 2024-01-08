@@ -144,3 +144,66 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
         }),
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::{new_trace, NeqoQlog};
+    use crate::Role;
+    use qlog::{
+        events::{Event, EventImportance},
+        streamer::QlogStreamer,
+    };
+    use std::io::Cursor;
+
+    // TODO: Find event with less info.
+    const EVENT_DATA: qlog::events::EventData =
+        qlog::events::EventData::MetricsUpdated(qlog::events::quic::MetricsUpdated {
+            min_rtt: Some(1.0),
+            smoothed_rtt: Some(1.0),
+            latest_rtt: Some(1.0),
+            rtt_variance: Some(1.0),
+            pto_count: Some(1),
+            congestion_window: Some(1234),
+            bytes_in_flight: Some(5678),
+            ssthresh: None,
+            packets_in_flight: None,
+            pacing_rate: None,
+        });
+
+    fn test_new_enabled_qlog() -> NeqoQlog {
+        let c = Cursor::new(Vec::new());
+        let streamer = QlogStreamer::new(
+            qlog::QLOG_VERSION.to_string(),
+            Some("Example qlog".to_string()),
+            Some("Example qlog description".to_string()),
+            None,
+            std::time::Instant::now(),
+            new_trace(Role::Client),
+            EventImportance::Base,
+            Box::new(c),
+        );
+
+        let log = NeqoQlog::enabled(streamer, "test");
+        assert!(log.is_ok());
+        log.unwrap()
+    }
+
+    #[test]
+    fn test_new_trace() {
+        test_new_enabled_qlog();
+    }
+
+    #[test]
+    fn test_add_event() {
+        let mut log = test_new_enabled_qlog();
+        log.add_event(|| Some(Event::with_time(0.0, EVENT_DATA)));
+        // TODO: Find a way to validate log contents.
+    }
+
+    #[test]
+    fn test_add_event_data() {
+        let mut log = test_new_enabled_qlog();
+        log.add_event_data(|| Some(EVENT_DATA));
+        // TODO: Find a way to validate log contents.
+    }
+}
