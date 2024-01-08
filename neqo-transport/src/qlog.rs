@@ -175,8 +175,8 @@ pub fn packet_sent(
         let mut d = Decoder::from(body);
         let header = PacketHeader::with_type(to_qlog_pkt_type(pt), Some(pn), None, None, None);
         let raw = RawInfo {
-            length: None,
-            payload_length: Some(plen as u64),
+            length: Some(plen as u64),
+            payload_length: None,
             data: None,
         };
 
@@ -210,18 +210,18 @@ pub fn packet_sent(
     });
 }
 
-pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
+pub fn packet_dropped(qlog: &mut NeqoQlog, public_packet: &PublicPacket) {
     qlog.add_event_data(|| {
         let header = PacketHeader::with_type(
-            to_qlog_pkt_type(payload.packet_type()),
+            to_qlog_pkt_type(public_packet.packet_type()),
             None,
             None,
             None,
             None,
         );
         let raw = RawInfo {
-            length: None,
-            payload_length: Some(payload.len() as u64),
+            length: Some(public_packet.len() as u64),
+            payload_length: None,
             data: None,
         };
 
@@ -271,8 +271,8 @@ pub fn packet_received(
             None,
         );
         let raw = RawInfo {
-            length: None,
-            payload_length: Some(public_packet.len() as u64),
+            length: Some(public_packet.len() as u64),
+            payload_length: None,
             data: None,
         };
 
