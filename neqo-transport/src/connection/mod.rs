@@ -1147,12 +1147,12 @@ impl Connection {
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
     fn save_datagram(&mut self, cspace: CryptoSpace, d: &Datagram, remaining: usize, now: Instant) {
-        if remaining < d.len() {
-            let d = Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..]);
-            self.saved_datagrams.save(cspace, d, now);
+        let d = if remaining < d.len() {
+            Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..])
         } else {
-            self.saved_datagrams.save(cspace, d.clone(), now);
+            d.clone()
         };
+        self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
     }
 
