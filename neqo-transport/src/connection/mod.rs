@@ -1151,7 +1151,6 @@ impl Connection {
             let d = Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..]);
             self.saved_datagrams.save(cspace, d, now);
         } else {
-            // TODO: Sane?
             self.saved_datagrams.save(cspace, d.clone(), now);
         };
         self.stats.borrow_mut().saved_datagrams += 1;
