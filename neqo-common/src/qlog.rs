@@ -155,55 +155,57 @@ mod test {
     };
     use std::io::Cursor;
 
-    // TODO: Find event with less info.
-    const EVENT_DATA: qlog::events::EventData =
-        qlog::events::EventData::MetricsUpdated(qlog::events::quic::MetricsUpdated {
-            min_rtt: Some(1.0),
-            smoothed_rtt: Some(1.0),
-            latest_rtt: Some(1.0),
-            rtt_variance: Some(1.0),
-            pto_count: Some(1),
-            congestion_window: Some(1234),
-            bytes_in_flight: Some(5678),
-            ssthresh: None,
-            packets_in_flight: None,
-            pacing_rate: None,
+    const EV_DATA: qlog::events::EventData =
+        qlog::events::EventData::SpinBitUpdated(qlog::events::connectivity::SpinBitUpdated {
+            state: true,
         });
 
-    fn test_new_enabled_qlog() -> NeqoQlog {
-        let c = Cursor::new(Vec::new());
+    const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";
+    const EXPECTED_LOG_EVENT: &str = "\u{1e}{\"time\":0.0,\"name\":\"connectivity:spin_bit_updated\",\"data\":{\"state\":true}}\n";
+
+    fn new_neqo_qlog() -> NeqoQlog {
+        let mut trace = new_trace(Role::Client);
+        // Set reference time to 0.0 for testing.
+        trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+
         let streamer = QlogStreamer::new(
             qlog::QLOG_VERSION.to_string(),
-            Some("Example qlog".to_string()),
-            Some("Example qlog description".to_string()),
+            None,
+            None,
             None,
             std::time::Instant::now(),
-            new_trace(Role::Client),
+            trace,
             EventImportance::Base,
-            Box::new(c),
+            Box::new(Cursor::new(Vec::new())),
         );
-
-        let log = NeqoQlog::enabled(streamer, "test");
+        let log = NeqoQlog::enabled(streamer, "");
         assert!(log.is_ok());
         log.unwrap()
     }
 
+    fn log_contents(log: &NeqoQlog) -> String {
+        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe {
+            std::mem::transmute(log.inner.borrow_mut().as_mut().unwrap().streamer.writer())
+        };
+        String::from_utf8(w.as_ref().get_ref().clone()).unwrap()
+    }
+
     #[test]
-    fn test_new_trace() {
-        test_new_enabled_qlog();
+    fn test_new_neqo_qlog() {
+        let log = new_neqo_qlog();
+        assert_eq!(log_contents(&log), EXPECTED_LOG_HEADER);
     }
 
     #[test]
     fn test_add_event() {
-        let mut log = test_new_enabled_qlog();
-        log.add_event(|| Some(Event::with_time(0.0, EVENT_DATA)));
-        // TODO: Find a way to validate log contents.
-    }
-
-    #[test]
-    fn test_add_event_data() {
-        let mut log = test_new_enabled_qlog();
-        log.add_event_data(|| Some(EVENT_DATA));
-        // TODO: Find a way to validate log contents.
+        let mut log = new_neqo_qlog();
+        log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
+        assert_eq!(
+            log_contents(&log),
+            format!(
+                "{EXPECTED_LOG_HEADER}{}",
+                EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
+            )
+        );
     }
 }
