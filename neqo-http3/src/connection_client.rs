@@ -828,12 +828,12 @@ impl Http3Client {
         self.process_http3(now);
     }
 
-    pub fn process_multiple_input<'a>(
-        &mut self,
-        // TODO: Need ExactSizeIterator for qtrace below. Worth the type restriction?
-        dgrams: impl ExactSizeIterator<Item = &'a Datagram>,
-        now: Instant,
-    ) {
+    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let dgrams = dgrams.into_iter();
         qtrace!([self], "Process multiple datagrams, len={}", dgrams.len());
         if dgrams.len() == 0 {
             return;

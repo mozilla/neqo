@@ -924,13 +924,13 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_multiple_input<'a>(
-        &mut self,
-        dgrams: impl IntoIterator<Item = &'a Datagram>,
-        now: Instant,
-    ) {
-        let mut dgrams = dgrams.into_iter().peekable();
-        if dgrams.peek().is_none() {
+    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let dgrams = dgrams.into_iter();
+        if dgrams.len() == 0 {
             return;
         }
 

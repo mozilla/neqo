@@ -432,7 +432,7 @@ fn process_loop(
             };
         }
         if !datagrams.is_empty() {
-            client.process_multiple_input(datagrams.iter(), Instant::now());
+            client.process_multiple_input(&datagrams, Instant::now());
             handler.maybe_key_update(client)?;
         }
 
