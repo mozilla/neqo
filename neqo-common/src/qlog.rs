@@ -184,7 +184,10 @@ mod test {
     }
 
     fn log_contents(log: &NeqoQlog) -> String {
+        // TODO: Figure out a way to make this less ugly.
+        #[allow(clippy::borrowed_box)]
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe {
+            #[allow(clippy::transmute_ptr_to_ptr)]
             std::mem::transmute(log.inner.borrow_mut().as_mut().unwrap().streamer.writer())
         };
         String::from_utf8(w.as_ref().get_ref().clone()).unwrap()
