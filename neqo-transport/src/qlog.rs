@@ -19,7 +19,7 @@ use qlog::events::{
         AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
         PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
     },
-    Event, EventData, RawInfo,
+    EventData, RawInfo,
 };
 
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
@@ -37,7 +37,7 @@ use crate::{
 };
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
-    qlog.add_event(|| {
+    qlog.add_event_data(|| {
         let remote = tph.remote();
         let ev_data = EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
@@ -552,69 +552,4 @@ fn to_qlog_pkt_type(ptype: PacketType) -> qlog::events::quic::PacketType {
         PacketType::VersionNegotiation => qlog::events::quic::PacketType::VersionNegotiation,
         PacketType::OtherVersion => qlog::events::quic::PacketType::Unknown,
     }
-}
-
-#[cfg(test)]
-mod test {
-    // #[test]
-    // fn test_qlog() {
-    //     // Adapted from https://github.com/cloudflare/quiche/blob/master/qlog/README.md
-    //     let mut trace = qlog::Trace::new(
-    //         qlog::VantagePoint {
-    //             name: Some("Test vantage point".to_string()),
-    //             ty: qlog::VantagePointType::Client,
-    //             flow: None,
-    //         },
-    //         Some("Test trace".to_string()),
-    //         Some("Test trace description".to_string()),
-    //         Some(qlog::Configuration {
-    //             time_offset: Some(0.0),
-    //             original_uris: None,
-    //         }),
-    //         None,
-    //     );
-
-    //     let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
-    //     let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
-
-    //     let pkt_hdr = qlog::events::quic::PacketHeader::new(
-    //         qlog::events::quic::PacketType::Initial,
-    //         Some(0),          // packet_number
-    //         None,             // flags
-    //         None,             // token
-    //         None,             // length
-    //         Some(0x00000001), // version
-    //         Some(&scid),
-    //         Some(&dcid),
-    //     );
-
-    //     let frames = vec![qlog::events::quic::QuicFrame::Crypto {
-    //         offset: 0,
-    //         length: 0,
-    //     }];
-
-    //     let raw = qlog::events::RawInfo {
-    //         length: Some(1251),
-    //         payload_length: Some(1224),
-    //         data: None,
-    //     };
-
-    //     let event_data = qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
-    //         header: pkt_hdr,
-    //         frames: Some(frames.into()),
-    //         is_coalesced: None,
-    //         retry_token: None,
-    //         stateless_reset_token: None,
-    //         supported_versions: None,
-    //         raw: Some(raw),
-    //         datagram_id: None,
-    //         trigger: None,
-    //         send_at_time: None,
-    //     });
-
-    //     trace.push_event(qlog::events::Event::with_time(0.0, event_data));
-
-    //     let json = serde_json::to_string_pretty(&trace).unwrap();
-    //     println!("{}", json);
-    // }
 }
