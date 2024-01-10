@@ -2645,7 +2645,7 @@ impl Connection {
                     &data
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto.streams.inbound_frame(space, offset, data);
+                self.crypto.streams.inbound_frame(space, offset, data)?;
                 if self.crypto.streams.data_ready(space) {
                     let mut buf = Vec::new();
                     let read = self.crypto.streams.read_to_end(space, &mut buf);
