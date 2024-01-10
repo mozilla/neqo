@@ -12,8 +12,9 @@ mod common;
 use common::{
     apply_header_protection, decode_initial_header, initial_aead_and_hp, remove_header_protection,
 };
-use neqo_common::{Datagram, Decoder, Role};
-use neqo_transport::{ConnectionParameters, State, Version};
+use neqo_common::{Datagram, Decoder, Encoder, Role};
+use neqo_transport::{ConnectionError, ConnectionParameters, Error, State, Version};
+use std::convert::TryFrom;
 use test_fixture::{self, default_client, default_server, new_client, now, split_datagram};
 
 #[test]
@@ -124,4 +125,77 @@ fn reorder_server_initial() {
 
     client.process_input(done.unwrap(), now());
     assert_eq!(*client.state(), State::Confirmed);
+}
+
+/// Overflow the crypto buffer.
+#[test]
+fn overflow_crypto() {
+    let mut client = new_client(
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+    );
+    let mut server = default_server();
+
+    let client_initial = client.process_output(now()).dgram();
+    let (_, client_dcid, _, _) =
+        decode_initial_header(client_initial.as_ref().unwrap(), Role::Client);
+    let client_dcid = client_dcid.to_owned();
+
+    let server_packet = server.process(client_initial, now()).dgram();
+    let (server_initial, _) = split_datagram(server_packet.as_ref().unwrap());
+
+    // Now decrypt the server packet to get AEAD and HP instances.
+    // We won't be using the packet, but making new ones.
+    let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
+    let (_, server_dcid, server_scid, _) = decode_initial_header(&server_initial, Role::Server);
+
+    // Send in 100 packets, each with 1000 bytes of crypto frame data each,
+    // eventually this will overrun the buffer we keep for crypto data.
+    let mut payload = Encoder::with_capacity(1024);
+    for pn in 0..100_u64 {
+        payload.truncate(0);
+        payload
+            .encode_varint(0x06_u64) // CRYPTO frame type.
+            .encode_varint(pn * 1000 + 1) // offset
+            .encode_varint(1000_u64); // length
+        let plen = payload.len();
+        payload.pad_to(plen + 1000, 44);
+
+        let mut packet = Encoder::with_capacity(1200);
+        packet
+            .encode_byte(0xc1) // Initial with packet number length of 2.
+            .encode_uint(4, Version::Version1.wire_version())
+            .encode_vec(1, server_dcid)
+            .encode_vec(1, server_scid)
+            .encode_vvec(&[]) // token
+            .encode_varint(u64::try_from(2 + payload.len() + aead.expansion()).unwrap()); // length
+        let pn_offset = packet.len();
+        packet.encode_uint(2, pn);
+
+        let mut packet = Vec::from(packet);
+        let header = packet.clone();
+        packet.resize(header.len() + payload.len() + aead.expansion(), 0);
+        aead.encrypt(pn, &header, payload.as_ref(), &mut packet[header.len()..])
+            .unwrap();
+        apply_header_protection(&hp, &mut packet, pn_offset..(pn_offset + 2));
+        packet.resize(1200, 0); // Initial has to be 1200 bytes!
+
+        let dgram = Datagram::new(
+            server_initial.source(),
+            server_initial.destination(),
+            packet,
+        );
+        client.process_input(dgram, now());
+        if let State::Closing { error, .. } = client.state() {
+            assert!(
+                matches!(
+                    error,
+                    ConnectionError::Transport(Error::CryptoBufferExceeded),
+                ),
+                "the connection need to abort on crypto buffer"
+            );
+            assert!(pn > 64, "at least 64000 bytes of data is buffered");
+            return;
+        }
+    }
+    panic!("Was not able to overflow the crypto buffer");
 }
