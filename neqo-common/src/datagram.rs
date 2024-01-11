@@ -7,12 +7,15 @@
 use std::net::SocketAddr;
 use std::ops::Deref;
 
+use enum_map::Enum;
+
 use crate::hex_with_len;
 
 // ECN (Explicit Congestion Notification) codepoints mapped to the
 // lower 2 bits of the TOS field.
 // https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Enum)]
+#[repr(u8)]
 pub enum IpTosEcn {
     NotEct = 0b00, // Not-ECT (Not ECN-Capable Transport) [RFC3168]
     Ect1 = 0b01,   // ECT(1) (ECN-Capable Transport(1))[1] [RFC8311][RFC Errata 5399][RFC9331]
@@ -20,9 +23,32 @@ pub enum IpTosEcn {
     Ce = 0b11,     // CE (Congestion Experienced) [RFC3168]
 }
 
+impl From<u8> for IpTosEcn {
+    fn from(v: u8) -> Self {
+        match v & 0b11 {
+            0b00 => IpTosEcn::NotEct,
+            0b01 => IpTosEcn::Ect1,
+            0b10 => IpTosEcn::Ect0,
+            0b11 => IpTosEcn::Ce,
+            _ => unreachable!(),
+        }
+    }
+}
+impl std::fmt::Debug for IpTosEcn {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            IpTosEcn::NotEct => f.write_str("Not-ECT"),
+            IpTosEcn::Ect1 => f.write_str("ECT(1)"),
+            IpTosEcn::Ect0 => f.write_str("ECT(0)"),
+            IpTosEcn::Ce => f.write_str("CE"),
+        }
+    }
+}
+
 // DiffServ Codepoints, mapped to the upper six bits of the TOS field.
 // https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
 pub enum IpTosDscp {
     Cs0 = 0b0000_0000,        // [RFC2474]
     Cs1 = 0b0010_0000,        // [RFC2474]

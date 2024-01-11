@@ -16,20 +16,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::{
+    frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
     stats::FrameStats,
     Error, Res,
 };
 
+use enum_map::{Enum, EnumMap};
 use smallvec::{smallvec, SmallVec};
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum)]
 pub enum PacketNumberSpace {
     Initial,
     Handshake,
@@ -382,6 +384,8 @@ pub struct RecvdPackets {
     /// Whether we are ignoring packets that arrive out of order
     /// for the purposes of generating immediate acknowledgment.
     ignore_order: bool,
+    /// The counts of different ECN marks that have been received.
+    ecn_count: EnumMap<IpTosEcn, u64>,
 }
 
 impl RecvdPackets {
@@ -399,7 +403,13 @@ impl RecvdPackets {
             unacknowledged_count: 0,
             unacknowledged_tolerance: DEFAULT_ACK_PACKET_TOLERANCE,
             ignore_order: false,
+            ecn_count: EnumMap::default(),
         }
+    }
+
+    /// Increase the ECN count for the given mark by one.
+    pub fn inc_ecn_count(&mut self, ecn: IpTosEcn) {
+        self.ecn_count[ecn] += 1;
     }
 
     /// Get the time at which the next ACK should be sent.
@@ -550,7 +560,7 @@ impl RecvdPackets {
         }
     }
 
-    /// Generate an ACK frame for this packet number space.
+    /// Generate an `ACK` or `ACK_ECN` frame for this packet number space.
     ///
     /// Unlike other frame generators this doesn't modify the underlying instance
     /// to track what has been sent. This only clears the delayed ACK timer.
@@ -598,7 +608,15 @@ impl RecvdPackets {
             .cloned()
             .collect::<Vec<_>>();
 
-        builder.encode_varint(crate::frame::FRAME_TYPE_ACK);
+        let have_ecn_counts = self.ecn_count[IpTosEcn::Ect0] > 0
+            || self.ecn_count[IpTosEcn::Ect1] > 0
+            || self.ecn_count[IpTosEcn::Ce] > 0;
+
+        builder.encode_varint(if have_ecn_counts {
+            FRAME_TYPE_ACK_ECN
+        } else {
+            FRAME_TYPE_ACK
+        });
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
         builder.encode_varint(first.largest);
@@ -620,6 +638,12 @@ impl RecvdPackets {
             builder.encode_varint(last - r.largest - 2); // Gap
             builder.encode_varint(r.len() - 1); // Range
             last = r.smallest;
+        }
+
+        if have_ecn_counts {
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ect0]);
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ect1]);
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ce]);
         }
 
         // We've sent an ACK, reset the timer.
