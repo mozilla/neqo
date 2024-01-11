@@ -767,7 +767,7 @@ mod tests {
         let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
         assert_eq!(tps, tps2);
 
-        println!("TPS = {:?}", tps);
+        println!("TPS = {tps:?}");
         assert_eq!(tps2.get_integer(IDLE_TIMEOUT), 0); // Default
         assert_eq!(tps2.get_integer(MAX_ACK_DELAY), 25); // Default
         assert_eq!(tps2.get_integer(ACTIVE_CONNECTION_ID_LIMIT), 2); // Default
