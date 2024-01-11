@@ -406,6 +406,9 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             ack_delay,
             first_ack_range,
             ack_ranges,
+            ect0_count,
+            ect1_count,
+            ce_count,
         } => {
             let ranges =
                 Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges).ok();
@@ -421,9 +424,9 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             QuicFrame::Ack {
                 ack_delay: Some(*ack_delay as f32 / 1000.0),
                 acked_ranges,
-                ect1: None,
-                ect0: None,
-                ce: None,
+                ect1: Some(*ect0_count),
+                ect0: Some(*ect1_count),
+                ce: Some(*ce_count),
             }
         }
         Frame::ResetStream {
