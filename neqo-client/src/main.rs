@@ -493,7 +493,7 @@ fn process_loop(
                 if sz > 0 {
                     let d =
                         Datagram::new_with_tos_and_ttl(remote, *local_addr, tos, ttl, &buf[..sz]);
-                    client.process_input(d, Instant::now());
+                    client.process_input(&d, Instant::now());
                     handler.maybe_key_update(client)?;
                 }
             }
@@ -1456,7 +1456,7 @@ mod old {
                     if sz > 0 {
                         let d =
                             Datagram::new_with_tos_and_ttl(addr, *local_addr, tos, ttl, &buf[..sz]);
-                        client.process_input(d, Instant::now());
+                        client.process_input(&d, Instant::now());
                         handler.maybe_key_update(client)?;
                     }
                 }
