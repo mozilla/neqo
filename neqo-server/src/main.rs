@@ -651,7 +651,7 @@ impl ServersRunner {
         }
 
         for (i, host) in self.hosts.iter().enumerate() {
-            let socket = match bind(*host) {
+            let socket = match bind(host) {
                 Err(err) => {
                     eprintln!("Unable to bind UDP socket: {err}");
                     return Err(err);

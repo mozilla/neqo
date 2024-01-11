@@ -32,7 +32,7 @@ use nix::{
 use crate::Datagram;
 
 #[cfg(posix_socket)]
-fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
+fn configure_sockopts(s: &std::net::UdpSocket, local_addr: &SocketAddr) {
     // Don't let the host stack or network path fragment our IP packets
     // (RFC9000, Section 14).
     let res = match local_addr {
@@ -79,7 +79,7 @@ fn configure_sockopts(s: &std::net::UdpSocket, local_addr: SocketAddr) {
 /// request TOS and TTL information for incoming packets. If that additional configuration
 /// fails, the function will still return.
 ///
-pub fn bind(local_addr: SocketAddr) -> io::Result<std::net::UdpSocket> {
+pub fn bind(local_addr: &SocketAddr) -> io::Result<std::net::UdpSocket> {
     match std::net::UdpSocket::bind(local_addr) {
         Err(e) => {
             eprintln!("Unable to bind UDP socket: {e}");
@@ -337,18 +337,18 @@ mod test {
     const ADDR_V6: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
     const ADDR_V4_INVALID: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 1);
     const ADDR_V6_INVALID: Ipv6Addr = Ipv6Addr::new(1, 0, 0, 0, 0, 0, 0, 0);
-    const SOCK_V4: SocketAddr = SocketAddr::new(IpAddr::V4(ADDR_V4), 0);
-    const SOCK_V6: SocketAddr = SocketAddr::new(IpAddr::V6(ADDR_V6), 0);
+    const SOCK_V4: &SocketAddr = &SocketAddr::new(IpAddr::V4(ADDR_V4), 0);
+    const SOCK_V6: &SocketAddr = &SocketAddr::new(IpAddr::V6(ADDR_V6), 0);
 
-    fn test_bind(sock_addr: SocketAddr) {
+    fn test_bind(sock_addr: &SocketAddr) {
         assert!(bind(sock_addr).is_ok());
     }
 
-    fn test_bind_fail(sock_addr: SocketAddr) {
+    fn test_bind_fail(sock_addr: &SocketAddr) {
         assert!(bind(sock_addr).is_err());
     }
 
-    fn test_io(sock_addr: SocketAddr) {
+    fn test_io(sock_addr: &SocketAddr) {
         // We reconfigure the sockets to blocking mode for this test, so we don't have to poll.
         let server = match bind(sock_addr) {
             Ok(s) => {
@@ -407,13 +407,13 @@ mod test {
 
     #[test]
     fn test_bind_fail_v4() {
-        const INVAL_V4: SocketAddr = SocketAddr::new(IpAddr::V4(ADDR_V4_INVALID), 0);
+        const INVAL_V4: &SocketAddr = &SocketAddr::new(IpAddr::V4(ADDR_V4_INVALID), 0);
         test_bind_fail(INVAL_V4);
     }
 
     #[test]
     fn test_bind_fail_v6() {
-        const INVAL_V6: SocketAddr = SocketAddr::new(IpAddr::V6(ADDR_V6_INVALID), 0);
+        const INVAL_V6: &SocketAddr = &SocketAddr::new(IpAddr::V6(ADDR_V6_INVALID), 0);
         test_bind_fail(INVAL_V6);
     }
 

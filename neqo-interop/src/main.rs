@@ -727,7 +727,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Connection {
 }
 
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
-    let socket = bind(peer.bind()).expect("Unable to bind UDP socket");
+    let socket = bind(&peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(peer).expect("Unable to connect UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
