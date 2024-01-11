@@ -118,7 +118,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
                 State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                 State::Connected => ConnectionState::HandshakeCompleted,
                 State::Confirmed => ConnectionState::HandshakeConfirmed,
-                State::Closing { .. } => ConnectionState::Draining,
+                State::Closing { .. } => ConnectionState::Closing,
                 State::Draining { .. } => ConnectionState::Draining,
                 State::Closed { .. } => ConnectionState::Closed,
             },

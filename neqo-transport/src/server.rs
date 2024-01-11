@@ -259,7 +259,7 @@ impl Server {
     fn process_connection(
         &mut self,
         c: StateRef,
-        dgram: Option<Datagram>,
+        dgram: Option<&Datagram>,
         now: Instant,
     ) -> Option<Datagram> {
         qtrace!([self], "Process connection {:?}", c);
@@ -278,7 +278,7 @@ impl Server {
                     self.timers.add(next, Rc::clone(&c));
                 }
             }
-            _ => {
+            Output::None => {
                 self.remove_timer(&c);
             }
         }
@@ -310,7 +310,7 @@ impl Server {
     fn handle_initial(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram,
+        dgram: &Datagram,
         now: Instant,
     ) -> Option<Datagram> {
         qdebug!([self], "Handle initial");
@@ -364,7 +364,7 @@ impl Server {
     fn connection_attempt(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram,
+        dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
     ) -> Option<Datagram> {
@@ -465,7 +465,7 @@ impl Server {
         &mut self,
         attempt_key: AttemptKey,
         initial: InitialDetails,
-        dgram: Datagram,
+        dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
     ) -> Option<Datagram> {
@@ -511,7 +511,7 @@ impl Server {
     /// receives a connection ID from the server.
     fn handle_0rtt(
         &mut self,
-        dgram: Datagram,
+        dgram: &Datagram,
         dcid: ConnectionId,
         now: Instant,
     ) -> Option<Datagram> {
@@ -533,7 +533,7 @@ impl Server {
         }
     }
 
-    fn process_input(&mut self, dgram: Datagram, now: Instant) -> Option<Datagram> {
+    fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Option<Datagram> {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -629,7 +629,7 @@ impl Server {
         }
     }
 
-    pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let out = if let Some(d) = dgram {
             self.process_input(d, now)
         } else {

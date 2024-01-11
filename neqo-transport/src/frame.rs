@@ -368,7 +368,7 @@ impl<'a> Frame<'a> {
             )),
             Self::Padding => None,
             Self::Datagram { data, .. } => Some(format!("Datagram {{ len: {} }}", data.len())),
-            _ => Some(format!("{:?}", self)),
+            _ => Some(format!("{self:?}")),
         }
     }
 

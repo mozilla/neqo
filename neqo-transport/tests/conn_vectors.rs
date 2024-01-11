@@ -267,7 +267,7 @@ fn process_client_initial(v: Version, packet: &[u8]) {
 
     let dgram = Datagram::new(addr(), addr(), packet);
     assert_eq!(*server.state(), State::Init);
-    let out = server.process(Some(dgram), now());
+    let out = server.process(Some(&dgram), now());
     assert_eq!(*server.state(), State::Handshaking);
     assert!(out.dgram().is_some());
 }
