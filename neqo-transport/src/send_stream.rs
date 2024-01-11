@@ -751,7 +751,7 @@ impl SendStream {
                 final_written,
                 ..
             } => *final_retired + *final_written,
-            _ => 0,
+            SendStreamState::Ready { .. } => 0,
         }
     }
 
@@ -763,7 +763,7 @@ impl SendStream {
             SendStreamState::DataRecvd { retired, .. } => *retired,
             SendStreamState::ResetSent { final_retired, .. }
             | SendStreamState::ResetRecvd { final_retired, .. } => *final_retired,
-            _ => 0,
+            SendStreamState::Ready { .. } => 0,
         }
     }
 

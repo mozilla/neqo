@@ -40,7 +40,7 @@ fn receive_stream() {
     assert_eq!(MESSAGE.len(), client.stream_send(id, MESSAGE).unwrap());
     let dgram = client.process_output(now()).dgram();
 
-    server.process_input(dgram.unwrap(), now());
+    server.process_input(&dgram.unwrap(), now());
     assert_eq!(
         server
             .stream_priority(
@@ -82,7 +82,7 @@ fn relative() {
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
-    server.process_input(dgram.unwrap(), now());
+    server.process_input(&dgram.unwrap(), now());
 
     // The "id_normal" stream will get a `NewStream` event, but no data.
     for e in server.events() {
@@ -113,7 +113,7 @@ fn reprioritize() {
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
-    server.process_input(dgram.unwrap(), now());
+    server.process_input(&dgram.unwrap(), now());
 
     // The "id_normal" stream will get a `NewStream` event, but no data.
     for e in server.events() {
@@ -132,7 +132,7 @@ fn reprioritize() {
         )
         .unwrap();
     let dgram = client.process_output(now()).dgram();
-    server.process_input(dgram.unwrap(), now());
+    server.process_input(&dgram.unwrap(), now());
 
     for e in server.events() {
         if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
@@ -163,7 +163,7 @@ fn repairing_loss() {
     let _lost = client.process_output(now).dgram();
     for _ in 0..5 {
         match client.process_output(now) {
-            Output::Datagram(d) => server.process_input(d, now),
+            Output::Datagram(d) => server.process_input(&d, now),
             Output::Callback(delay) => now += delay,
             Output::None => unreachable!(),
         }
@@ -176,9 +176,9 @@ fn repairing_loss() {
     let id_normal = client.stream_create(StreamType::UniDi).unwrap();
     fill_stream(&mut client, id_normal);
 
-    let dgram = client.process(ack, now).dgram();
+    let dgram = client.process(ack.as_ref(), now).dgram();
     assert_eq!(client.stats().lost, 1); // Client should have noticed the loss.
-    server.process_input(dgram.unwrap(), now);
+    server.process_input(&dgram.unwrap(), now);
 
     // Only the low priority stream has data as the retransmission of the data from
     // the lost packet is now more important than new data from the high priority stream.
@@ -194,7 +194,7 @@ fn repairing_loss() {
     // the retransmitted data into a second packet, it will also contain data from the
     // normal priority stream.
     let dgram = client.process_output(now).dgram();
-    server.process_input(dgram.unwrap(), now);
+    server.process_input(&dgram.unwrap(), now);
     assert!(server.events().any(
         |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == id_normal),
     ));
@@ -209,8 +209,8 @@ fn critical() {
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that critical streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram, now).dgram();
-    client.process_input(dgram.unwrap(), now);
+    let dgram = server.process(dgram.as_ref(), now).dgram();
+    client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
 
     let id = server.stream_create(StreamType::UniDi).unwrap();
@@ -237,8 +237,8 @@ fn critical() {
     assert_eq!(stats_after.handshake_done, 0);
 
     // Complete the handshake.
-    let dgram = client.process(dgram, now).dgram();
-    server.process_input(dgram.unwrap(), now);
+    let dgram = client.process(dgram.as_ref(), now).dgram();
+    server.process_input(&dgram.unwrap(), now);
 
     // Critical beats everything but HANDSHAKE_DONE.
     let stats_before = server.stats().frame_tx;
@@ -260,8 +260,8 @@ fn important() {
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that important streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram, now).dgram();
-    client.process_input(dgram.unwrap(), now);
+    let dgram = server.process(dgram.as_ref(), now).dgram();
+    client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
 
     let id = server.stream_create(StreamType::UniDi).unwrap();
@@ -289,8 +289,8 @@ fn important() {
     assert_eq!(stats_after.stream, stats_before.stream + 1);
 
     // Complete the handshake.
-    let dgram = client.process(dgram, now).dgram();
-    server.process_input(dgram.unwrap(), now);
+    let dgram = client.process(dgram.as_ref(), now).dgram();
+    server.process_input(&dgram.unwrap(), now);
 
     // Important beats everything but flow control.
     let stats_before = server.stats().frame_tx;
@@ -313,8 +313,8 @@ fn high_normal() {
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that important streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram, now).dgram();
-    client.process_input(dgram.unwrap(), now);
+    let dgram = server.process(dgram.as_ref(), now).dgram();
+    client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
 
     let id = server.stream_create(StreamType::UniDi).unwrap();
@@ -342,8 +342,8 @@ fn high_normal() {
     assert_eq!(stats_after.stream, stats_before.stream + 1);
 
     // Complete the handshake.
-    let dgram = client.process(dgram, now).dgram();
-    server.process_input(dgram.unwrap(), now);
+    let dgram = client.process(dgram.as_ref(), now).dgram();
+    server.process_input(&dgram.unwrap(), now);
 
     // High or Normal doesn't beat NEW_CONNECTION_ID,
     // but they beat CRYPTO/NEW_TOKEN.

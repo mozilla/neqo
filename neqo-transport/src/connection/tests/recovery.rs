@@ -63,7 +63,7 @@ fn pto_works_basic() {
     let out = client.process(None, now);
 
     let stream_before = server.stats().frame_rx.stream;
-    server.process_input(out.dgram().unwrap(), now);
+    server.process_input(&out.dgram().unwrap(), now);
     assert_eq!(server.stats().frame_rx.stream, stream_before + 2);
 }
 
@@ -88,7 +88,7 @@ fn pto_works_full_cwnd() {
     // Both datagrams contain one or more STREAM frames.
     for d in dgrams {
         let stream_before = server.stats().frame_rx.stream;
-        server.process_input(d, now);
+        server.process_input(&d, now);
         assert!(server.stats().frame_rx.stream > stream_before);
     }
 }
@@ -114,32 +114,32 @@ fn pto_works_ping() {
     assert_eq!(cb, GRANULARITY * 2);
 
     // Process these by server, skipping pkt0
-    let srv0 = server.process(Some(pkt1), now).dgram();
+    let srv0 = server.process(Some(&pkt1), now).dgram();
     assert!(srv0.is_some()); // ooo, ack client pkt1
 
     now += Duration::from_millis(20);
 
     // process pkt2 (immediate ack because last ack was more than an RTT ago; RTT=0)
-    let srv1 = server.process(Some(pkt2), now).dgram();
+    let srv1 = server.process(Some(&pkt2), now).dgram();
     assert!(srv1.is_some()); // this is now dropped
 
     now += Duration::from_millis(20);
     // process pkt3 (acked for same reason)
-    let srv2 = server.process(Some(pkt3), now).dgram();
+    let srv2 = server.process(Some(&pkt3), now).dgram();
     // ack client pkt 2 & 3
     assert!(srv2.is_some());
 
     // client processes ack
-    let pkt4 = client.process(srv2, now).dgram();
+    let pkt4 = client.process(srv2.as_ref(), now).dgram();
     // client resends data from pkt0
     assert!(pkt4.is_some());
 
     // server sees ooo pkt0 and generates immediate ack
-    let srv3 = server.process(Some(pkt0), now).dgram();
+    let srv3 = server.process(Some(&pkt0), now).dgram();
     assert!(srv3.is_some());
 
     // Accept the acknowledgment.
-    let pkt5 = client.process(srv3, now).dgram();
+    let pkt5 = client.process(srv3.as_ref(), now).dgram();
     assert!(pkt5.is_none());
 
     now += Duration::from_millis(70);
@@ -149,7 +149,7 @@ fn pto_works_ping() {
     assert_eq!(client.stats().frame_tx.ping, client_pings + 1);
 
     let server_pings = server.stats().frame_rx.ping;
-    server.process_input(pkt6.unwrap(), now);
+    server.process_input(&pkt6.unwrap(), now);
     assert_eq!(server.stats().frame_rx.ping, server_pings + 1);
 }
 
@@ -183,14 +183,14 @@ fn pto_initial() {
 
     // Server process the first initial pkt.
     let mut server = default_server();
-    let out = server.process(pkt1, now).dgram();
+    let out = server.process(pkt1.as_ref(), now).dgram();
     assert!(out.is_some());
 
     // Client receives ack for the first initial packet as well a Handshake packet.
     // After the handshake packet the initial keys and the crypto stream for the initial
     // packet number space will be discarded.
     // Here only an ack for the Handshake packet will be sent.
-    let out = client.process(out, now).dgram();
+    let out = client.process(out.as_ref(), now).dgram();
     assert!(out.is_some());
 
     // We do not have PTO for the resent initial packet any more, but
@@ -216,10 +216,10 @@ fn pto_handshake_complete() {
     assert_eq!(cb, Duration::from_millis(300));
 
     now += HALF_RTT;
-    let pkt = server.process(pkt, now).dgram();
+    let pkt = server.process(pkt.as_ref(), now).dgram();
 
     now += HALF_RTT;
-    let pkt = client.process(pkt, now).dgram();
+    let pkt = client.process(pkt.as_ref(), now).dgram();
 
     let cb = client.process(None, now).callback();
     // The client now has a single RTT estimate (20ms), so
@@ -227,7 +227,7 @@ fn pto_handshake_complete() {
     assert_eq!(cb, HALF_RTT * 6);
 
     now += HALF_RTT;
-    let pkt = server.process(pkt, now).dgram();
+    let pkt = server.process(pkt.as_ref(), now).dgram();
     assert!(pkt.is_none());
 
     now += HALF_RTT;
@@ -276,8 +276,8 @@ fn pto_handshake_complete() {
     // This should remove the 1-RTT PTO from messing this test up.
     let server_acks = server.stats().frame_tx.ack;
     let server_done = server.stats().frame_tx.handshake_done;
-    server.process_input(pkt3_1rtt.unwrap(), now);
-    let ack = server.process(pkt1, now).dgram();
+    server.process_input(&pkt3_1rtt.unwrap(), now);
+    let ack = server.process(pkt1.as_ref(), now).dgram();
     assert!(ack.is_some());
     assert_eq!(server.stats().frame_tx.ack, server_acks + 2);
     assert_eq!(server.stats().frame_tx.handshake_done, server_done + 1);
@@ -287,12 +287,12 @@ fn pto_handshake_complete() {
     // Note that these don't include 1-RTT packets, because 1-RTT isn't send on PTO.
     let dropped_before1 = server.stats().dropped_rx;
     let server_frames = server.stats().frame_rx.all;
-    server.process_input(pkt2.unwrap(), now);
+    server.process_input(&pkt2.unwrap(), now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before1);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
     let dropped_before2 = server.stats().dropped_rx;
-    server.process_input(pkt3_hs, now);
+    server.process_input(&pkt3_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before2);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
@@ -300,7 +300,7 @@ fn pto_handshake_complete() {
 
     // Let the client receive the ACK.
     // It should now be wait to acknowledge the HANDSHAKE_DONE.
-    let cb = client.process(ack, now).callback();
+    let cb = client.process(ack.as_ref(), now).callback();
     // The default ack delay is the RTT divided by the default ACK ratio of 4.
     let expected_ack_delay = HALF_RTT * 2 / 4;
     assert_eq!(cb, expected_ack_delay);
@@ -329,14 +329,14 @@ fn pto_handshake_frames() {
     now += Duration::from_millis(10);
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
-    let pkt = server.process(pkt.dgram(), now);
+    let pkt = server.process(pkt.as_dgram_ref(), now);
 
     now += Duration::from_millis(10);
     qdebug!("---- client: cert verification");
-    let pkt = client.process(pkt.dgram(), now);
+    let pkt = client.process(pkt.as_dgram_ref(), now);
 
     now += Duration::from_millis(10);
-    mem::drop(server.process(pkt.dgram(), now));
+    mem::drop(server.process(pkt.as_dgram_ref(), now));
 
     now += Duration::from_millis(10);
     client.authenticated(AuthenticationStatus::Ok, now);
@@ -359,7 +359,7 @@ fn pto_handshake_frames() {
 
     now += Duration::from_millis(10);
     let crypto_before = server.stats().frame_rx.crypto;
-    server.process_input(pkt2.unwrap(), now);
+    server.process_input(&pkt2.unwrap(), now);
     assert_eq!(server.stats().frame_rx.crypto, crypto_before + 1);
 }
 
@@ -381,7 +381,7 @@ fn handshake_ack_pto() {
     let c1 = client.process(None, now).dgram();
 
     now += RTT / 2;
-    let s1 = server.process(c1, now).dgram();
+    let s1 = server.process(c1.as_ref(), now).dgram();
     assert!(s1.is_some());
     let s2 = server.process(None, now).dgram();
     assert!(s1.is_some());
@@ -389,8 +389,8 @@ fn handshake_ack_pto() {
     // Now let the client have the Initial, but drop the first coalesced Handshake packet.
     now += RTT / 2;
     let (initial, _) = split_datagram(&s1.unwrap());
-    client.process_input(initial, now);
-    let c2 = client.process(s2, now).dgram();
+    client.process_input(&initial, now);
+    let c2 = client.process(s2.as_ref(), now).dgram();
     assert!(c2.is_some()); // This is an ACK.  Drop it.
     let delay = client.process(None, now).callback();
     assert_eq!(delay, RTT * 3);
@@ -405,7 +405,7 @@ fn handshake_ack_pto() {
 
     now += RTT / 2;
     let ping_before = server.stats().frame_rx.ping;
-    server.process_input(c3.unwrap(), now);
+    server.process_input(&c3.unwrap(), now);
     assert_eq!(server.stats().frame_rx.ping, ping_before + 1);
 
     pto_counts[0] = 1;
@@ -413,13 +413,13 @@ fn handshake_ack_pto() {
 
     // Now complete the handshake as cheaply as possible.
     let dgram = server.process(None, now).dgram();
-    client.process_input(dgram.unwrap(), now);
+    client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
     let dgram = client.process(None, now).dgram();
     assert_eq!(*client.state(), State::Connected);
-    let dgram = server.process(dgram, now).dgram();
+    let dgram = server.process(dgram.as_ref(), now).dgram();
     assert_eq!(*server.state(), State::Confirmed);
-    client.process_input(dgram.unwrap(), now);
+    client.process_input(&dgram.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
 
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -440,7 +440,7 @@ fn loss_recovery_crash() {
     assert!(ack.is_some());
 
     // Have the server process the ACK.
-    let cb = server.process(ack, now).callback();
+    let cb = server.process(ack.as_ref(), now).callback();
     assert!(cb > Duration::from_secs(0));
 
     // Now we leap into the future.  The server should regard the first
@@ -484,13 +484,13 @@ fn ack_after_pto() {
 
     // The client is now after a PTO, but if it receives something
     // that demands acknowledgment, it will send just the ACK.
-    let ack = client.process(Some(dgram), now).dgram();
+    let ack = client.process(Some(&dgram), now).dgram();
     assert!(ack.is_some());
 
     // Make sure that the packet only contained an ACK frame.
     let all_frames_before = server.stats().frame_rx.all;
     let ack_before = server.stats().frame_rx.ack;
-    server.process_input(ack.unwrap(), now);
+    server.process_input(&ack.unwrap(), now);
     assert_eq!(server.stats().frame_rx.all, all_frames_before + 1);
     assert_eq!(server.stats().frame_rx.ack, ack_before + 1);
 }
@@ -511,7 +511,7 @@ fn lost_but_kept_and_lr_timer() {
 
     // At t=RTT/2 the server receives the packet and ACKs it.
     now += RTT / 2;
-    let ack = server.process(Some(p2), now).dgram();
+    let ack = server.process(Some(&p2), now).dgram();
     assert!(ack.is_some());
     // The client also sends another two packets (p3, p4), again losing the first.
     let _p3 = send_something(&mut client, now);
@@ -520,14 +520,14 @@ fn lost_but_kept_and_lr_timer() {
     // At t=RTT the client receives the ACK and goes into timed loss recovery.
     // The client doesn't call p1 lost at this stage, but it will soon.
     now += RTT / 2;
-    let res = client.process(ack, now);
+    let res = client.process(ack.as_ref(), now);
     // The client should be on a loss recovery timer as p1 is missing.
     let lr_timer = res.callback();
     // Loss recovery timer should be RTT/8, but only check for 0 or >=RTT/2.
     assert_ne!(lr_timer, Duration::from_secs(0));
     assert!(lr_timer < (RTT / 2));
     // The server also receives and acknowledges p4, again sending an ACK.
-    let ack = server.process(Some(p4), now).dgram();
+    let ack = server.process(Some(&p4), now).dgram();
     assert!(ack.is_some());
 
     // At t=RTT*3/2 the client should declare p1 to be lost.
@@ -537,7 +537,7 @@ fn lost_but_kept_and_lr_timer() {
     assert!(res.dgram().is_some());
     // When the client processes the ACK, it should engage the
     // loss recovery timer for p3, not p1 (even though it still tracks p1).
-    let res = client.process(ack, now);
+    let res = client.process(ack.as_ref(), now);
     let lr_timer2 = res.callback();
     assert_eq!(lr_timer, lr_timer2);
 }
@@ -560,7 +560,7 @@ fn loss_time_past_largest_acked() {
     // Start the handshake.
     let c_in = client.process(None, now).dgram();
     now += RTT / 2;
-    let s_hs1 = server.process(c_in, now).dgram();
+    let s_hs1 = server.process(c_in.as_ref(), now).dgram();
 
     // Get some spare server handshake packets for the client to ACK.
     // This involves a time machine, so be a little cautious.
@@ -583,7 +583,7 @@ fn loss_time_past_largest_acked() {
     // to generate an ack-eliciting packet.  For that, we use the Finished message.
     // Reordering delivery ensures that the later packet is also acknowledged.
     now += RTT / 2;
-    let c_hs1 = client.process(s_hs1, now).dgram();
+    let c_hs1 = client.process(s_hs1.as_ref(), now).dgram();
     assert!(c_hs1.is_some()); // This comes first, so it's useless.
     maybe_authenticate(&mut client);
     let c_hs2 = client.process(None, now).dgram();
@@ -592,17 +592,17 @@ fn loss_time_past_largest_acked() {
     // The we need the outstanding packet to be sent after the
     // application data packet, so space these out a tiny bit.
     let _p1 = send_something(&mut client, now + INCR);
-    let c_hs3 = client.process(s_hs2, now + (INCR * 2)).dgram();
+    let c_hs3 = client.process(s_hs2.as_ref(), now + (INCR * 2)).dgram();
     assert!(c_hs3.is_some()); // This will be left outstanding.
-    let c_hs4 = client.process(s_hs3, now + (INCR * 3)).dgram();
+    let c_hs4 = client.process(s_hs3.as_ref(), now + (INCR * 3)).dgram();
     assert!(c_hs4.is_some()); // This will be acknowledged.
 
     // Process c_hs2 and c_hs4, but skip c_hs3.
     // Then get an ACK for the client.
     now += RTT / 2;
     // Deliver c_hs4 first, but don't generate a packet.
-    server.process_input(c_hs4.unwrap(), now);
-    let s_ack = server.process(c_hs2, now).dgram();
+    server.process_input(&c_hs4.unwrap(), now);
+    let s_ack = server.process(c_hs2.as_ref(), now).dgram();
     assert!(s_ack.is_some());
     // This includes an ACK, but it also includes HANDSHAKE_DONE,
     // which we need to remove because that will cause the Handshake loss
@@ -611,7 +611,7 @@ fn loss_time_past_largest_acked() {
 
     // Now the client should start its loss recovery timer based on the ACK.
     now += RTT / 2;
-    let c_ack = client.process(Some(s_hs_ack), now).dgram();
+    let c_ack = client.process(Some(&s_hs_ack), now).dgram();
     assert!(c_ack.is_none());
     // The client should now have the loss recovery timer active.
     let lr_time = client.process(None, now).callback();
@@ -636,12 +636,12 @@ fn trickle(sender: &mut Connection, receiver: &mut Connection, mut count: usize,
     while count > 0 {
         qdebug!("trickle: remaining={}", count);
         assert_eq!(sender.stream_send(id, &[9]).unwrap(), 1);
-        let dgram = sender.process(maybe_ack, now).dgram();
+        let dgram = sender.process(maybe_ack.as_ref(), now).dgram();
 
-        maybe_ack = receiver.process(dgram, now).dgram();
+        maybe_ack = receiver.process(dgram.as_ref(), now).dgram();
         count -= usize::from(maybe_ack.is_some());
     }
-    sender.process_input(maybe_ack.unwrap(), now);
+    sender.process_input(&maybe_ack.unwrap(), now);
 }
 
 /// Ensure that a PING frame is sent with ACK sometimes.
@@ -757,7 +757,7 @@ fn fast_pto() {
     let dgram = client.process(None, now).dgram();
 
     let stream_before = server.stats().frame_rx.stream;
-    server.process_input(dgram.unwrap(), now);
+    server.process_input(&dgram.unwrap(), now);
     assert_eq!(server.stats().frame_rx.stream, stream_before + 1);
 }
 
@@ -797,8 +797,8 @@ fn fast_pto_persistent_congestion() {
 
     // Now acknowledge the tail packet and enter persistent congestion.
     now += DEFAULT_RTT / 2;
-    let ack = server.process(Some(dgram), now).dgram();
+    let ack = server.process(Some(&dgram), now).dgram();
     now += DEFAULT_RTT / 2;
-    client.process_input(ack.unwrap(), now);
+    client.process_input(&ack.unwrap(), now);
     assert_eq!(cwnd(&client), CWND_MIN);
 }

@@ -8,29 +8,33 @@
 
 #![deny(clippy::pedantic)]
 
-use std::cmp::{max, min};
-use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::mem;
-use std::ops::RangeInclusive;
-use std::time::{Duration, Instant};
+use std::{
+    cmp::{max, min},
+    collections::BTreeMap,
+    convert::TryFrom,
+    mem,
+    ops::RangeInclusive,
+    time::{Duration, Instant},
+};
 
 use smallvec::{smallvec, SmallVec};
 
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 
-use crate::ackrate::AckRate;
-use crate::cid::ConnectionIdEntry;
-use crate::crypto::CryptoRecoveryToken;
-use crate::packet::PacketNumber;
-use crate::path::{Path, PathRef};
-use crate::qlog::{self, QlogMetric};
-use crate::quic_datagrams::DatagramTracking;
-use crate::rtt::RttEstimate;
-use crate::send_stream::SendStreamRecoveryToken;
-use crate::stats::{Stats, StatsCell};
-use crate::stream_id::{StreamId, StreamType};
-use crate::tracking::{AckToken, PacketNumberSpace, PacketNumberSpaceSet, SentPacket};
+use crate::{
+    ackrate::AckRate,
+    cid::ConnectionIdEntry,
+    crypto::CryptoRecoveryToken,
+    packet::PacketNumber,
+    path::{Path, PathRef},
+    qlog::{self, QlogMetric},
+    quic_datagrams::DatagramTracking,
+    rtt::RttEstimate,
+    send_stream::SendStreamRecoveryToken,
+    stats::{Stats, StatsCell},
+    stream_id::{StreamId, StreamType},
+    tracking::{AckToken, PacketNumberSpace, PacketNumberSpaceSet, SentPacket},
+};
 
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
@@ -806,7 +810,7 @@ impl LossRecovery {
             (Some(loss_time), Some(pto_time)) => Some(min(loss_time, pto_time)),
             (Some(loss_time), None) => Some(loss_time),
             (None, Some(pto_time)) => Some(pto_time),
-            _ => None,
+            (None, None) => None,
         }
     }
 
@@ -997,18 +1001,22 @@ mod tests {
     use super::{
         LossRecovery, LossRecoverySpace, PacketNumberSpace, SendProfile, SentPacket, FAST_PTO_SCALE,
     };
-    use crate::cc::CongestionControlAlgorithm;
-    use crate::cid::{ConnectionId, ConnectionIdEntry};
-    use crate::packet::PacketType;
-    use crate::path::{Path, PathRef};
-    use crate::rtt::RttEstimate;
-    use crate::stats::{Stats, StatsCell};
+    use crate::{
+        cc::CongestionControlAlgorithm,
+        cid::{ConnectionId, ConnectionIdEntry},
+        packet::PacketType,
+        path::{Path, PathRef},
+        rtt::RttEstimate,
+        stats::{Stats, StatsCell},
+    };
     use neqo_common::qlog::NeqoQlog;
-    use std::cell::RefCell;
-    use std::convert::TryInto;
-    use std::ops::{Deref, DerefMut, RangeInclusive};
-    use std::rc::Rc;
-    use std::time::{Duration, Instant};
+    use std::{
+        cell::RefCell,
+        convert::TryInto,
+        ops::{Deref, DerefMut, RangeInclusive},
+        rc::Rc,
+        time::{Duration, Instant},
+    };
     use test_fixture::{addr, now};
 
     // Shorthand for a time in milliseconds.

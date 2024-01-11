@@ -421,7 +421,7 @@ impl Connection {
             #[cfg(test)]
             test_frame_writer: None,
         };
-        c.stats.borrow_mut().init(format!("{}", c));
+        c.stats.borrow_mut().init(format!("{c}"));
         Ok(c)
     }
 
@@ -817,7 +817,7 @@ impl Connection {
     ) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
-            let msg = format!("{:?}", v);
+            let msg = format!("{v:?}");
             #[cfg(not(debug_assertions))]
             let msg = "";
             let error = ConnectionError::Transport(v.clone());
@@ -917,15 +917,20 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: Datagram, now: Instant) {
+    pub fn process_input(&mut self, d: &Datagram, now: Instant) {
         self.input(d, now, now);
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_multiple_input(&mut self, dgrams: Vec<Datagram>, now: Instant) {
-        if dgrams.is_empty() {
+    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let dgrams = dgrams.into_iter();
+        if dgrams.len() == 0 {
             return;
         }
 
@@ -1035,7 +1040,7 @@ impl Connection {
 
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
             self.input(d, now, now);
             self.process_saved(now);
@@ -1134,18 +1139,18 @@ impl Connection {
             debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(saved.d, saved.t, now);
+                self.input(&saved.d, saved.t, now);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    fn save_datagram(&mut self, cspace: CryptoSpace, d: Datagram, remaining: usize, now: Instant) {
+    fn save_datagram(&mut self, cspace: CryptoSpace, d: &Datagram, remaining: usize, now: Instant) {
         let d = if remaining < d.len() {
             Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..])
         } else {
-            d
+            d.clone()
         };
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
@@ -1371,7 +1376,7 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: Datagram, received: Instant, now: Instant) {
+    fn input(&mut self, d: &Datagram, received: Instant, now: Instant) {
         // First determine the path.
         let path = self.paths.find_path_with_rebinding(
             d.destination(),
@@ -1384,7 +1389,7 @@ impl Connection {
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
-    fn input_path(&mut self, path: &PathRef, d: Datagram, now: Instant) -> Res<()> {
+    fn input_path(&mut self, path: &PathRef, d: &Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
         let mut dcid = None;
 
@@ -1432,7 +1437,7 @@ impl Connection {
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
                         match self.process_packet(path, &payload, now) {
-                            Ok(migrate) => self.postprocess_packet(path, &d, &packet, migrate, now),
+                            Ok(migrate) => self.postprocess_packet(path, d, &packet, migrate, now),
                             Err(e) => {
                                 self.ensure_error_path(path, &packet, now);
                                 return Err(e);
@@ -1464,7 +1469,7 @@ impl Connection {
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
+                    self.check_stateless_reset(path, d, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&mut self.qlog, &packet);
                 }
@@ -1472,7 +1477,7 @@ impl Connection {
             slc = remainder;
             dcid = Some(ConnectionId::from(packet.dcid()));
         }
-        self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
+        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
         Ok(())
     }
 
@@ -2645,7 +2650,7 @@ impl Connection {
                     &data
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto.streams.inbound_frame(space, offset, data);
+                self.crypto.streams.inbound_frame(space, offset, data)?;
                 if self.crypto.streams.data_ready(space) {
                     let mut buf = Vec::new();
                     let read = self.crypto.streams.read_to_end(space, &mut buf);
