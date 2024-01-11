@@ -146,10 +146,6 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-<<<<<<< HEAD
-            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            client.process_input(&received, Instant::now());
-=======
             let received = Datagram::new_with_tos_and_ttl(
                 nctx.remote_addr,
                 nctx.local_addr,
@@ -157,8 +153,7 @@ fn process_loop(
                 ttl,
                 &buf[..sz],
             );
-            client.process_input(received, Instant::now());
->>>>>>> 6671b12b (Rollup)
+            client.process_input(&received, Instant::now());
         }
     }
 }
