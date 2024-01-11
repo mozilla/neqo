@@ -603,9 +603,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from a supported version.
-        let version = if let Ok(v) = Version::try_from(version) {
-            v
-        } else {
+        let Ok(version) = Version::try_from(version) else {
             return Ok((
                 Self {
                     packet_type: PacketType::OtherVersion,

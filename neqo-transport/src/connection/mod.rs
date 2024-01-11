@@ -1864,12 +1864,9 @@ impl Connection {
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
         for space in PacketNumberSpace::iter() {
-            let (cspace, tx) =
-                if let Some(crypto) = self.crypto.states.select_tx_mut(self.version, *space) {
-                    crypto
-                } else {
-                    continue;
-                };
+            let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+                continue;
+            };
 
             let path = close.path().borrow();
             let (_, mut builder) = Self::build_packet_header(
@@ -2152,12 +2149,9 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let (cspace, tx) =
-                if let Some(crypto) = self.crypto.states.select_tx_mut(self.version, *space) {
-                    crypto
-                } else {
-                    continue;
-                };
+            let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+                continue;
+            };
 
             let header_start = encoder.len();
             let (pt, mut builder) = Self::build_packet_header(
@@ -3113,13 +3107,11 @@ impl Connection {
             return Err(Error::NotAvailable);
         }
         let version = self.version();
-        let (cspace, tx) = if let Some(crypto) = self
+        let Some((cspace, tx)) = self
             .crypto
             .states
             .select_tx(self.version, PacketNumberSpace::ApplicationData)
-        {
-            crypto
-        } else {
+        else {
             return Err(Error::NotAvailable);
         };
         let path = self.paths.primary_fallible().ok_or(Error::NotAvailable)?;

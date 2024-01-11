@@ -726,16 +726,12 @@ where
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
-        let tpslice = if let Some(v) = dec.decode_vvec() {
-            v
-        } else {
+        let Some(tpslice) = dec.decode_vvec() else {
             qinfo!("0-RTT: token code error");
             return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
-        let remembered = if let Ok(v) = TransportParameters::decode(&mut dec_tp) {
-            v
-        } else {
+        let Ok(remembered) = TransportParameters::decode(&mut dec_tp) else {
             qinfo!("0-RTT: transport parameter decode error");
             return ZeroRttCheckResult::Fail;
         };

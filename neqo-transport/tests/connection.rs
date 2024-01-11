@@ -140,7 +140,7 @@ fn overflow_crypto() {
         decode_initial_header(client_initial.as_ref().unwrap(), Role::Client);
     let client_dcid = client_dcid.to_owned();
 
-    let server_packet = server.process(client_initial, now()).dgram();
+    let server_packet = server.process(client_initial.as_ref(), now()).dgram();
     let (server_initial, _) = split_datagram(server_packet.as_ref().unwrap());
 
     // Now decrypt the server packet to get AEAD and HP instances.
@@ -184,7 +184,7 @@ fn overflow_crypto() {
             server_initial.destination(),
             packet,
         );
-        client.process_input(dgram, now());
+        client.process_input(&dgram, now());
         if let State::Closing { error, .. } = client.state() {
             assert!(
                 matches!(

@@ -332,9 +332,7 @@ impl Server {
                     dgram.source(),
                     now,
                 );
-                let token = if let Ok(t) = res {
-                    t
-                } else {
+                let Ok(token) = res else {
                     qerror!([self], "unable to generate token, dropping packet");
                     return None;
                 };
@@ -539,12 +537,9 @@ impl Server {
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
         let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
-        let (packet, _remainder) = match res {
-            Ok(res) => res,
-            _ => {
-                qtrace!([self], "Discarding {:?}", dgram);
-                return None;
-            }
+        let Ok((packet, _remainder)) = res else {
+            qtrace!([self], "Discarding {:?}", dgram);
+            return None;
         };
 
         // Finding an existing connection. Should be the most common case.
