@@ -564,7 +564,7 @@ impl HttpServer for SimpleServer {
     }
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir)
+        self.server.set_qlog_dir(dir);
     }
 
     fn validate_address(&mut self, v: ValidateAddress) {

@@ -200,7 +200,7 @@ impl Handler for H9Handler {
                     }
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    eprintln!("stream {stream_id} writable")
+                    eprintln!("stream {stream_id} writable");
                 }
                 _ => {
                     eprintln!("Unexpected event {event:?}");
@@ -777,7 +777,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
         match child.1.join() {
             Ok(e) => {
                 eprintln!("Test complete {:?}, {:?}", child.0, e);
-                results.push(e)
+                results.push(e);
             }
             Err(_) => {
                 eprintln!("Thread crashed {:?}", child.0);

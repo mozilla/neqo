@@ -240,7 +240,7 @@ fn test_103_response() {
     set_response(&mut request);
     let out = hconn_s.process(None, now());
     mem::drop(hconn_c.process(out.as_dgram_ref(), now()));
-    process_client_events(&mut hconn_c)
+    process_client_events(&mut hconn_c);
 }
 
 #[test]

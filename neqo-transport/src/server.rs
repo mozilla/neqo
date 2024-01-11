@@ -682,7 +682,7 @@ impl ActiveConnectionRef {
 impl std::hash::Hash for ActiveConnectionRef {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let ptr: *const _ = self.c.as_ref();
-        ptr.hash(state)
+        ptr.hash(state);
     }
 }
 
