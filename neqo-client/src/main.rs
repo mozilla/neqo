@@ -454,7 +454,7 @@ fn process_loop(
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     if let Err(e) = emit_datagram(socket, &dgram) {
-                        eprintln!("UDP write error: {}", e);
+                        eprintln!("UDP write error: {e}");
                         client.close(Instant::now(), 0, e.to_string());
                         exiting = true;
                         break 'write;
@@ -475,29 +475,6 @@ fn process_loop(
         if exiting {
             return Ok(client.state());
         }
-
-        let mut tos = 0;
-        let mut ttl = 0;
-        match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
-            Err(ref err)
-                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted => {}
-            Err(err) => {
-                eprintln!("UDP error: {}", err);
-                exit(1)
-            }
-            Ok((sz, remote)) => {
-                if sz == buf.len() {
-                    eprintln!("Received more than {} bytes", buf.len());
-                    continue;
-                }
-                if sz > 0 {
-                    let d =
-                        Datagram::new_with_tos_and_ttl(remote, *local_addr, tos, ttl, &buf[..sz]);
-                    client.process_input(&d, Instant::now());
-                    handler.maybe_key_update(client)?;
-                }
-            }
-        };
     }
 }
 
@@ -1437,29 +1414,6 @@ mod old {
 
             if exiting {
                 return Ok(client.state().clone());
-            }
-
-            let mut tos = 0;
-            let mut ttl = 0;
-            match recv_datagram(socket, &mut buf[..], &mut tos, &mut ttl) {
-                Err(err) => {
-                    if err.kind() != ErrorKind::WouldBlock && err.kind() != ErrorKind::Interrupted {
-                        eprintln!("UDP error: {}", err);
-                        exit(1);
-                    }
-                }
-                Ok((sz, addr)) => {
-                    if sz == buf.len() {
-                        eprintln!("Received more than {} bytes", buf.len());
-                        continue;
-                    }
-                    if sz > 0 {
-                        let d =
-                            Datagram::new_with_tos_and_ttl(addr, *local_addr, tos, ttl, &buf[..sz]);
-                        client.process_input(&d, Instant::now());
-                        handler.maybe_key_update(client)?;
-                    }
-                }
             }
         }
     }
