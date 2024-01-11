@@ -199,7 +199,7 @@ impl Http09Server {
 }
 
 impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
 

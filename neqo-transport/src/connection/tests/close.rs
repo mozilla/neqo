@@ -38,7 +38,7 @@ fn connection_close() {
 
     let out = client.process(None, now);
 
-    server.process_input(out.dgram().unwrap(), now);
+    server.process_input(&out.dgram().unwrap(), now);
     assert_draining(&server, &Error::PeerApplicationError(42));
 }
 
@@ -55,7 +55,7 @@ fn connection_close_with_long_reason_string() {
 
     let out = client.process(None, now);
 
-    server.process_input(out.dgram().unwrap(), now);
+    server.process_input(&out.dgram().unwrap(), now);
     assert_draining(&server, &Error::PeerApplicationError(42));
 }
 
@@ -68,7 +68,7 @@ fn early_application_close() {
     // One flight each.
     let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
-    let dgram = server.process(dgram, now()).dgram();
+    let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert!(dgram.is_some());
 
     server.close(now(), 77, String::new());
@@ -76,7 +76,7 @@ fn early_application_close() {
     let dgram = server.process(None, now()).dgram();
     assert!(dgram.is_some());
 
-    client.process_input(dgram.unwrap(), now());
+    client.process_input(&dgram.unwrap(), now());
     assert_draining(&client, &Error::PeerError(ERROR_APPLICATION_CLOSE));
 }
 
@@ -93,13 +93,13 @@ fn bad_tls_version() {
 
     let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
-    let dgram = server.process(dgram, now()).dgram();
+    let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert_eq!(
         *server.state(),
         State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
     );
     assert!(dgram.is_some());
-    client.process_input(dgram.unwrap(), now());
+    client.process_input(&dgram.unwrap(), now());
     assert_draining(&client, &Error::PeerError(Error::ProtocolViolation.code()));
 }
 
@@ -116,11 +116,11 @@ fn closing_timers_interation() {
     // We're going to induce time-based loss recovery so that timer is set.
     let _p1 = send_something(&mut client, now);
     let p2 = send_something(&mut client, now);
-    let ack = server.process(Some(p2), now).dgram();
+    let ack = server.process(Some(&p2), now).dgram();
     assert!(ack.is_some()); // This is an ACK.
 
     // After processing the ACK, we should be on the loss recovery timer.
-    let cb = client.process(ack, now).callback();
+    let cb = client.process(ack.as_ref(), now).callback();
     assert_ne!(cb, Duration::from_secs(0));
     now += cb;
 
@@ -153,7 +153,7 @@ fn closing_and_draining() {
 
     // The client will spit out the same packet in response to anything it receives.
     let p3 = send_something(&mut server, now());
-    let client_close2 = client.process(Some(p3), now()).dgram();
+    let client_close2 = client.process(Some(&p3), now()).dgram();
     assert_eq!(
         client_close.as_ref().unwrap().len(),
         client_close2.as_ref().unwrap().len()
@@ -168,14 +168,14 @@ fn closing_and_draining() {
     );
 
     // When the server receives the close, it too should generate CONNECTION_CLOSE.
-    let server_close = server.process(client_close, now()).dgram();
+    let server_close = server.process(client_close.as_ref(), now()).dgram();
     assert!(server.state().closed());
     assert!(server_close.is_some());
     // .. but it ignores any further close packets.
-    let server_close_timer = server.process(client_close2, now()).callback();
+    let server_close_timer = server.process(client_close2.as_ref(), now()).callback();
     assert_ne!(server_close_timer, Duration::from_secs(0));
     // Even a legitimate packet without a close in it.
-    let server_close_timer2 = server.process(Some(p1), now()).callback();
+    let server_close_timer2 = server.process(Some(&p1), now()).callback();
     assert_eq!(server_close_timer, server_close_timer2);
 
     let end = server.process(None, now() + server_close_timer);
@@ -201,6 +201,6 @@ fn stateless_reset_client() {
         .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    client.process_input(Datagram::new(addr(), addr(), vec![77; 21]), now());
+    client.process_input(&Datagram::new(addr(), addr(), vec![77; 21]), now());
     assert_draining(&client, &Error::StatelessReset);
 }

@@ -351,7 +351,7 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
 }
 
 trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
     fn process_events(&mut self, args: &Args, now: Instant);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
@@ -467,7 +467,7 @@ impl Display for SimpleServer {
 }
 
 impl HttpServer for SimpleServer {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
 
@@ -734,7 +734,7 @@ impl ServersRunner {
             .unwrap_or(first)
     }
 
-    fn process(&mut self, inx: usize, dgram: Option<Datagram>) -> bool {
+    fn process(&mut self, inx: usize, dgram: Option<&Datagram>) -> bool {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.find_socket(dgram.source());
@@ -770,7 +770,7 @@ impl ServersRunner {
                     if dgram.is_none() {
                         break;
                     }
-                    _ = self.process(inx, dgram);
+                    _ = self.process(inx, dgram.as_ref());
                 }
             } else {
                 _ = self.process(inx, None);

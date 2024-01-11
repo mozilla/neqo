@@ -432,7 +432,7 @@ fn process_loop(
             };
         }
         if !datagrams.is_empty() {
-            client.process_multiple_input(datagrams, Instant::now());
+            client.process_multiple_input(&datagrams, Instant::now());
             handler.maybe_key_update(client)?;
         }
 
@@ -1364,7 +1364,7 @@ mod old {
                         }
                         if sz > 0 {
                             let d = Datagram::new(remote, *local_addr, &buf[..sz]);
-                            client.process_input(d, Instant::now());
+                            client.process_input(&d, Instant::now());
                             handler.maybe_key_update(client)?;
                         }
                     }

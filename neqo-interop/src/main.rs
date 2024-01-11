@@ -149,7 +149,7 @@ fn process_loop(
         }
         if sz > 0 {
             let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            client.process_input(received, Instant::now());
+            client.process_input(&received, Instant::now());
         }
     }
 }
@@ -310,7 +310,7 @@ fn process_loop_h3(
         }
         if sz > 0 {
             let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            handler.h3.process_input(received, Instant::now());
+            handler.h3.process_input(&received, Instant::now());
         }
     }
 }
