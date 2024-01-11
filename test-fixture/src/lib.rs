@@ -7,7 +7,12 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::{event::Provider, hex, qtrace, Datagram, Decoder};
+use neqo_common::{
+    event::Provider,
+    hex,
+    qlog::{new_trace, NeqoQlog},
+    qtrace, Datagram, Decoder, Role,
+};
 
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
@@ -16,13 +21,17 @@ use neqo_transport::{
     ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
 };
 
+use qlog::{events::EventImportance, streamer::QlogStreamer};
+
 use std::{
     cell::RefCell,
     cmp::max,
     convert::TryFrom,
+    io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -323,3 +332,60 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         b.map(|b| Datagram::new(d.source(), d.destination(), b)),
     )
 }
+
+#[derive(Clone)]
+struct SharedVec {
+    buf: Arc<Mutex<Cursor<Vec<u8>>>>,
+}
+
+impl Write for SharedVec {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        self.buf.lock().unwrap().write(buf)
+    }
+    fn flush(&mut self) -> Result<()> {
+        self.buf.lock().unwrap().flush()
+    }
+}
+
+/// Return the contents of the log.
+/// # Panics
+/// Panics if the log cannot be accessed.
+#[must_use]
+pub fn neqo_qlog_contents(log: &NeqoQlog) -> String {
+    let w = log
+        .inner()
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .streamer()
+        .writer();
+
+    String::from_utf8(w.as_ref().get_ref().clone()).unwrap() // Not like this?
+}
+
+/// Return a new enabled `NeqoQlog` that is backed by a Vec.
+/// # Panics
+/// Panics if the log cannot be created.
+#[must_use]
+pub fn new_neqo_qlog() -> NeqoQlog {
+    let mut trace = new_trace(Role::Client);
+    // Set reference time to 0.0 for testing.
+    trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+    let streamer = QlogStreamer::new(
+        qlog::QLOG_VERSION.to_string(),
+        None,
+        None,
+        None,
+        std::time::Instant::now(),
+        trace,
+        EventImportance::Base,
+        Box::new(SharedVec {
+            buf: Arc::new(Mutex::new(Cursor::new(Vec::new()))),
+        }),
+    );
+    let log = NeqoQlog::enabled(streamer, "");
+    assert!(log.is_ok());
+    log.unwrap()
+}
+
+pub const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";

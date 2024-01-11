@@ -553,3 +553,18 @@ fn to_qlog_pkt_type(ptype: PacketType) -> qlog::events::quic::PacketType {
         PacketType::OtherVersion => qlog::events::quic::PacketType::Unknown,
     }
 }
+
+#[cfg(test)]
+mod test {
+    // use crate::qlog::connection_started;
+    use test_fixture::{default_client, neqo_qlog_contents, new_neqo_qlog};
+
+    #[test]
+    fn test_connection_started() {
+        let mut log = new_neqo_qlog();
+        assert_eq!(neqo_qlog_contents(&log), "");
+        // let client = default_client();
+        // let path = test_fixture::new_test_path();
+        // connection_started(&mut log, client.paths.primary());
+    }
+}

@@ -29,6 +29,12 @@ pub struct NeqoQlogShared {
     streamer: QlogStreamer,
 }
 
+impl NeqoQlogShared {
+    pub fn streamer(&mut self) -> &mut QlogStreamer {
+        &mut self.streamer
+    }
+}
+
 impl NeqoQlog {
     /// Create an enabled `NeqoQlog` configuration.
     /// # Errors
@@ -46,6 +52,11 @@ impl NeqoQlog {
                 qlog_path: qlog_path.as_ref().to_owned(),
             }))),
         })
+    }
+
+    #[must_use]
+    pub fn inner(&self) -> Rc<RefCell<Option<NeqoQlogShared>>> {
+        Rc::clone(&self.inner)
     }
 
     /// Create a disabled `NeqoQlog` configuration.
@@ -147,56 +158,20 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
 
 #[cfg(test)]
 mod test {
-    use super::{new_trace, NeqoQlog};
-    use crate::Role;
-    use qlog::{
-        events::{Event, EventImportance},
-        streamer::QlogStreamer,
-    };
-    use std::io::Cursor;
+    use qlog::events::Event;
+    use test_fixture::{neqo_qlog_contents, new_neqo_qlog, EXPECTED_LOG_HEADER};
 
     const EV_DATA: qlog::events::EventData =
         qlog::events::EventData::SpinBitUpdated(qlog::events::connectivity::SpinBitUpdated {
             state: true,
         });
 
-    const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";
     const EXPECTED_LOG_EVENT: &str = "\u{1e}{\"time\":0.0,\"name\":\"connectivity:spin_bit_updated\",\"data\":{\"state\":true}}\n";
-
-    fn new_neqo_qlog() -> NeqoQlog {
-        let mut trace = new_trace(Role::Client);
-        // Set reference time to 0.0 for testing.
-        trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
-
-        let streamer = QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
-            None,
-            None,
-            None,
-            std::time::Instant::now(),
-            trace,
-            EventImportance::Base,
-            Box::new(Cursor::new(Vec::new())),
-        );
-        let log = NeqoQlog::enabled(streamer, "");
-        assert!(log.is_ok());
-        log.unwrap()
-    }
-
-    fn log_contents(log: &NeqoQlog) -> String {
-        // TODO: Figure out a way to make this less ugly.
-        #[allow(clippy::borrowed_box)]
-        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe {
-            #[allow(clippy::transmute_ptr_to_ptr)]
-            std::mem::transmute(log.inner.borrow_mut().as_mut().unwrap().streamer.writer())
-        };
-        String::from_utf8(w.as_ref().get_ref().clone()).unwrap()
-    }
 
     #[test]
     fn test_new_neqo_qlog() {
         let log = new_neqo_qlog();
-        assert_eq!(log_contents(&log), EXPECTED_LOG_HEADER);
+        assert_eq!(neqo_qlog_contents(&log), EXPECTED_LOG_HEADER);
     }
 
     #[test]
@@ -204,7 +179,7 @@ mod test {
         let mut log = new_neqo_qlog();
         log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
         assert_eq!(
-            log_contents(&log),
+            neqo_qlog_contents(&log),
             format!(
                 "{EXPECTED_LOG_HEADER}{}",
                 EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
