@@ -10,6 +10,3 @@ members = [
   "neqo-interop",
   "test-fixture",
 ]
-
-[patch.crates-io]
-qlog = { git = "https://github.com/cloudflare/quiche", branch = "master" }
