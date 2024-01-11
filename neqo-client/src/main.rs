@@ -1049,7 +1049,7 @@ fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match bind(local_addr) {
+        let socket = match bind(&local_addr) {
             Err(e) => {
                 eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
