@@ -110,7 +110,7 @@ fn process_loop(
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
                     if let Err(e) = emit_datagram(&nctx.socket, &dgram) {
-                        eprintln!("UDP write error: {}", e);
+                        eprintln!("UDP write error: {e}");
                         continue;
                     }
                 }
@@ -285,7 +285,7 @@ fn process_loop_h3(
             match output {
                 Output::Datagram(dgram) => {
                     if let Err(e) = emit_datagram(&nctx.socket, &dgram) {
-                        eprintln!("UDP write error: {}", e);
+                        eprintln!("UDP write error: {e}");
                         break;
                     }
                 }
