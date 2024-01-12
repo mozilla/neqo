@@ -7,23 +7,27 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
-use std::cmp::max;
-use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::mem;
-use std::rc::{Rc, Weak};
+use std::{
+    cmp::max,
+    collections::BTreeMap,
+    convert::TryFrom,
+    mem,
+    rc::{Rc, Weak},
+};
 
 use smallvec::SmallVec;
 
-use crate::events::ConnectionEvents;
-use crate::fc::ReceiverFlowControl;
-use crate::frame::FRAME_TYPE_STOP_SENDING;
-use crate::packet::PacketBuilder;
-use crate::recovery::{RecoveryToken, StreamRecoveryToken};
-use crate::send_stream::SendStreams;
-use crate::stats::FrameStats;
-use crate::stream_id::StreamId;
-use crate::{AppError, Error, Res};
+use crate::{
+    events::ConnectionEvents,
+    fc::ReceiverFlowControl,
+    frame::FRAME_TYPE_STOP_SENDING,
+    packet::PacketBuilder,
+    recovery::{RecoveryToken, StreamRecoveryToken},
+    send_stream::SendStreams,
+    stats::FrameStats,
+    stream_id::StreamId,
+    AppError, Error, Res,
+};
 use neqo_common::{qtrace, Role};
 use std::cell::RefCell;
 
@@ -278,11 +282,11 @@ impl RxStreamOrderer {
     }
 
     /// Bytes read by the application.
-    fn retired(&self) -> u64 {
+    pub fn retired(&self) -> u64 {
         self.retired
     }
 
-    fn received(&self) -> u64 {
+    pub fn received(&self) -> u64 {
         self.received
     }
 
@@ -652,12 +656,12 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state.name())
+                qtrace!("data received when we are in state {}", self.state.name());
             }
         }
 
         if !already_data_ready && (self.data_ready() || self.needs_to_inform_app_about_fin()) {
-            self.conn_events.recv_stream_readable(self.stream_id)
+            self.conn_events.recv_stream_readable(self.stream_id);
         }
 
         Ok(())
@@ -837,7 +841,7 @@ impl RecvStream {
                     err,
                     final_received: received,
                     final_read: read,
-                })
+                });
             }
             RecvStreamState::DataRecvd {
                 fc,

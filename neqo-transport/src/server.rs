@@ -259,7 +259,7 @@ impl Server {
     fn process_connection(
         &mut self,
         c: StateRef,
-        dgram: Option<Datagram>,
+        dgram: Option<&Datagram>,
         now: Instant,
     ) -> Option<Datagram> {
         qtrace!([self], "Process connection {:?}", c);
@@ -278,7 +278,7 @@ impl Server {
                     self.timers.add(next, Rc::clone(&c));
                 }
             }
-            _ => {
+            Output::None => {
                 self.remove_timer(&c);
             }
         }
@@ -310,7 +310,7 @@ impl Server {
     fn handle_initial(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram,
+        dgram: &Datagram,
         now: Instant,
     ) -> Option<Datagram> {
         qdebug!([self], "Handle initial");
@@ -332,9 +332,7 @@ impl Server {
                     dgram.source(),
                     now,
                 );
-                let token = if let Ok(t) = res {
-                    t
-                } else {
+                let Ok(token) = res else {
                     qerror!([self], "unable to generate token, dropping packet");
                     return None;
                 };
@@ -364,7 +362,7 @@ impl Server {
     fn connection_attempt(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram,
+        dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
     ) -> Option<Datagram> {
@@ -465,7 +463,7 @@ impl Server {
         &mut self,
         attempt_key: AttemptKey,
         initial: InitialDetails,
-        dgram: Datagram,
+        dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
     ) -> Option<Datagram> {
@@ -521,7 +519,7 @@ impl Server {
     /// receives a connection ID from the server.
     fn handle_0rtt(
         &mut self,
-        dgram: Datagram,
+        dgram: &Datagram,
         dcid: ConnectionId,
         now: Instant,
     ) -> Option<Datagram> {
@@ -543,18 +541,15 @@ impl Server {
         }
     }
 
-    fn process_input(&mut self, dgram: Datagram, now: Instant) -> Option<Datagram> {
+    fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Option<Datagram> {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
         let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
-        let (packet, _remainder) = match res {
-            Ok(res) => res,
-            _ => {
-                qtrace!([self], "Discarding {:?}", dgram);
-                return None;
-            }
+        let Ok((packet, _remainder)) = res else {
+            qtrace!([self], "Discarding {:?}", dgram);
+            return None;
         };
 
         // Finding an existing connection. Should be the most common case.
@@ -651,7 +646,7 @@ impl Server {
         }
     }
 
-    pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let out = if let Some(d) = dgram {
             self.process_input(d, now)
         } else {
@@ -709,7 +704,7 @@ impl ActiveConnectionRef {
 impl std::hash::Hash for ActiveConnectionRef {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let ptr: *const _ = self.c.as_ref();
-        ptr.hash(state)
+        ptr.hash(state);
     }
 }
 

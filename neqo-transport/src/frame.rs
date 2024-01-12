@@ -368,7 +368,7 @@ impl<'a> Frame<'a> {
             )),
             Self::Padding => None,
             Self::Datagram { data, .. } => Some(format!("Datagram {{ len: {} }}", data.len())),
-            _ => Some(format!("{:?}", self)),
+            _ => Some(format!("{self:?}")),
         }
     }
 
@@ -658,7 +658,7 @@ mod tests {
             application_error_code: 0x77,
         };
 
-        just_dec(&f, "053F4077")
+        just_dec(&f, "053F4077");
     }
 
     #[test]

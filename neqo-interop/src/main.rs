@@ -149,7 +149,7 @@ fn process_loop(
         }
         if sz > 0 {
             let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            client.process_input(received, Instant::now());
+            client.process_input(&received, Instant::now());
         }
     }
 }
@@ -178,11 +178,11 @@ impl Handler for H9Handler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
-            eprintln!("Event: {:?}", event);
+            eprintln!("Event: {event:?}");
             match event {
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        eprintln!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {stream_id}");
                         return false;
                     }
 
@@ -190,20 +190,20 @@ impl Handler for H9Handler {
                         .stream_recv(stream_id, &mut data)
                         .expect("Read should succeed");
                     data.truncate(sz);
-                    eprintln!("Length={}", sz);
+                    eprintln!("Length={sz}");
                     self.rbytes += sz;
                     if fin {
-                        eprintln!("<FIN[{}]>", stream_id);
+                        eprintln!("<FIN[{stream_id}]>");
                         client.close(Instant::now(), 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    eprintln!("stream {} writable", stream_id)
+                    eprintln!("stream {stream_id} writable");
                 }
                 _ => {
-                    eprintln!("Unexpected event {:?}", event);
+                    eprintln!("Unexpected event {event:?}");
                 }
             }
         }
@@ -310,7 +310,7 @@ fn process_loop_h3(
         }
         if sz > 0 {
             let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            handler.h3.process_input(received, Instant::now());
+            handler.h3.process_input(&received, Instant::now());
         }
     }
 }
@@ -328,15 +328,15 @@ impl H3Handler {
                     ..
                 } => {
                     if !self.streams.contains(&stream_id) {
-                        eprintln!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {stream_id}");
                         return false;
                     }
 
-                    eprintln!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
+                    eprintln!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        eprintln!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {stream_id}");
                         return false;
                     }
 
@@ -345,12 +345,12 @@ impl H3Handler {
                         .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     if let Ok(txt) = String::from_utf8(data.clone()) {
-                        eprintln!("READ[{}]: {}", stream_id, txt);
+                        eprintln!("READ[{stream_id}]: {txt}");
                     } else {
                         eprintln!("READ[{}]: 0x{}", stream_id, hex(&data));
                     }
                     if fin {
-                        eprintln!("<FIN[{}]>", stream_id);
+                        eprintln!("<FIN[{stream_id}]>");
                         if close {
                             self.h3.close(Instant::now(), 0, "kthxbye!");
                         }
@@ -472,14 +472,14 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
     let st = match res {
         Ok(st) => st,
         Err(e) => {
-            return Err(format!("ERROR: {}", e));
+            return Err(format!("ERROR: {e}"));
         }
     };
 
     if st.connected() {
         Ok(client)
     } else {
-        Err(format!("{:?}", st))
+        Err(format!("{st:?}"))
     }
 }
 
@@ -494,7 +494,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     let res = process_loop(nctx, client, &mut hc);
 
     if let Err(e) = res {
-        return Err(format!("ERROR: {}", e));
+        return Err(format!("ERROR: {e}"));
     }
     if hc.rbytes == 0 {
         return Err(String::from("Empty response"));
@@ -522,7 +522,7 @@ fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Ha
     };
 
     if let Err(e) = process_loop_h3(nctx, &mut hc, true, false) {
-        return Err(format!("ERROR: {}", e));
+        return Err(format!("ERROR: {e}"));
     }
     Ok(hc)
 }
@@ -544,7 +544,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, false, *test != Test::D) {
-        return Err(format!("ERROR: {}", e));
+        return Err(format!("ERROR: {e}"));
     }
 
     if *test == Test::D {
@@ -562,7 +562,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
         hc.h3.stream_close_send(client_stream_id).unwrap();
         hc.streams.insert(client_stream_id);
         if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
-            return Err(format!("ERROR: {}", e));
+            return Err(format!("ERROR: {e}"));
         }
 
         if hc.h3.qpack_decoder_stats().dynamic_table_references == 0 {
@@ -600,7 +600,7 @@ fn test_h3_rz(
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
-        return Err(format!("ERROR: {}", e));
+        return Err(format!("ERROR: {e}"));
     }
 
     // get resumption ticket
@@ -652,7 +652,7 @@ fn test_h3_rz(
         mem::drop(hc.h3.stream_close_send(client_stream_id));
         hc.streams.insert(client_stream_id);
         if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
-            return Err(format!("ERROR: {}", e));
+            return Err(format!("ERROR: {e}"));
         }
 
         let recvd_0rtt_reject = |e| e == Http3ClientEvent::ZeroRttRejected;
@@ -662,7 +662,7 @@ fn test_h3_rz(
     } else {
         println!("Test resumption");
         if let Err(e) = process_loop_h3(nctx, &mut hc, true, true) {
-            return Err(format!("ERROR: {}", e));
+            return Err(format!("ERROR: {e}"));
         }
     }
 
@@ -777,7 +777,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
         match child.1.join() {
             Ok(e) => {
                 eprintln!("Test complete {:?}, {:?}", child.0, e);
-                results.push(e)
+                results.push(e);
             }
             Err(_) => {
                 eprintln!("Thread crashed {:?}", child.0);

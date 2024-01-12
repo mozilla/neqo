@@ -5,20 +5,24 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
-use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN};
-use crate::crypto::{CryptoDxState, CryptoSpace, CryptoStates};
-use crate::version::{Version, WireVersion};
-use crate::{Error, Res};
+use crate::{
+    cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
+    crypto::{CryptoDxState, CryptoSpace, CryptoStates},
+    version::{Version, WireVersion},
+    Error, Res,
+};
 
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
 
-use std::cmp::min;
-use std::convert::TryFrom;
-use std::fmt;
-use std::iter::ExactSizeIterator;
-use std::ops::{Deref, DerefMut, Range};
-use std::time::Instant;
+use std::{
+    cmp::min,
+    convert::TryFrom,
+    fmt,
+    iter::ExactSizeIterator,
+    ops::{Deref, DerefMut, Range},
+    time::Instant,
+};
 
 pub const PACKET_BIT_LONG: u8 = 0x80;
 const PACKET_BIT_SHORT: u8 = 0x00;
@@ -241,7 +245,7 @@ impl PacketBuilder {
 
     /// Adjust the limit to ensure that no more data is added.
     pub fn mark_full(&mut self) {
-        self.limit = self.encoder.len()
+        self.limit = self.encoder.len();
     }
 
     /// Mark the packet as needing padding (or not).
@@ -599,9 +603,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from a supported version.
-        let version = if let Ok(v) = Version::try_from(version) {
-            v
-        } else {
+        let Ok(version) = Version::try_from(version) else {
             return Ok((
                 Self {
                     packet_type: PacketType::OtherVersion,
@@ -865,8 +867,10 @@ impl Deref for DecryptedPacket {
 #[cfg(all(test, not(feature = "fuzzing")))]
 mod tests {
     use super::*;
-    use crate::crypto::{CryptoDxState, CryptoStates};
-    use crate::{EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version};
+    use crate::{
+        crypto::{CryptoDxState, CryptoStates},
+        EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
+    };
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
 

@@ -245,9 +245,7 @@ impl Crypto {
 
     fn install_handshake_keys(&mut self) -> Res<bool> {
         qtrace!([self], "Attempt to install handshake keys");
-        let write_secret = if let Some(secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) {
-            secret
-        } else {
+        let Some(write_secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) else {
             // No keys is fine.
             return Ok(false);
         };
@@ -1400,6 +1398,9 @@ pub enum CryptoStreams {
 }
 
 impl CryptoStreams {
+    /// Keep around 64k if a server wants to push excess data at us.
+    const BUFFER_LIMIT: u64 = 65536;
+
     pub fn discard(&mut self, space: PacketNumberSpace) {
         match space {
             PacketNumberSpace::Initial => {
@@ -1434,8 +1435,14 @@ impl CryptoStreams {
         self.get_mut(space).unwrap().tx.send(data);
     }
 
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) {
-        self.get_mut(space).unwrap().rx.inbound_frame(offset, data);
+    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+        let rx = &mut self.get_mut(space).unwrap().rx;
+        rx.inbound_frame(offset, data);
+        if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
+            Ok(())
+        } else {
+            Err(Error::CryptoBufferExceeded)
+        }
     }
 
     pub fn data_ready(&self, space: PacketNumberSpace) -> bool {

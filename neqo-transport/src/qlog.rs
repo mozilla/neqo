@@ -33,7 +33,7 @@ use crate::{
     stream_id::StreamType as NeqoStreamType,
     tparams::{self, TransportParametersHandler},
     tracking::SentPacket,
-    version::Version,
+    version::{Version, VersionConfig, WireVersion},
 };
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
@@ -75,15 +75,15 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
 
         // This event occurs very early, so just mark the time as 0.0.
         Some(Event::with_time(0.0, ev_data))
-    })
+    });
 }
 
 pub fn server_connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
-    connection_started(qlog, path)
+    connection_started(qlog, path);
 }
 
 pub fn client_connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
-    connection_started(qlog, path)
+    connection_started(qlog, path);
 }
 
 fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
@@ -105,7 +105,7 @@ fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
@@ -118,14 +118,50 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
                 State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                 State::Connected => ConnectionState::HandshakeCompleted,
                 State::Confirmed => ConnectionState::HandshakeConfirmed,
-                State::Closing { .. } => ConnectionState::Draining,
+                State::Closing { .. } => ConnectionState::Closing,
                 State::Draining { .. } => ConnectionState::Draining,
                 State::Closed { .. } => ConnectionState::Closed,
             },
         });
 
         Some(ev_data)
-    })
+    });
+}
+
+pub fn client_version_information_initiated(qlog: &mut NeqoQlog, version_config: &VersionConfig) {
+    qlog.add_event_data(|| {
+        Some(EventData::VersionInformation(VersionInformation {
+            client_versions: Some(
+                version_config
+                    .all()
+                    .iter()
+                    .map(|v| format!("{:02x}", v.wire_version()))
+                    .collect(),
+            ),
+            server_versions: None,
+            chosen_version: Some(format!("{:02x}", version_config.initial().wire_version())),
+        }))
+    });
+}
+
+pub fn client_version_information_negotiated(
+    qlog: &mut NeqoQlog,
+    client: &[Version],
+    server: &[WireVersion],
+    chosen: Version,
+) {
+    qlog.add_event_data(|| {
+        Some(EventData::VersionInformation(VersionInformation {
+            client_versions: Some(
+                client
+                    .iter()
+                    .map(|v| format!("{:02x}", v.wire_version()))
+                    .collect(),
+            ),
+            server_versions: Some(server.iter().map(|v| format!("{v:02x}")).collect()),
+            chosen_version: Some(format!("{:02x}", chosen.wire_version())),
+        }))
+    });
 }
 
 pub fn server_version_information_failed(qlog: &mut NeqoQlog, server: &[Version], client: Version) {
@@ -186,7 +222,7 @@ pub fn packet_sent(
         });
 
         stream.add_event_data_now(ev_data)
-    })
+    });
 }
 
 pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
@@ -213,7 +249,7 @@ pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
@@ -231,7 +267,7 @@ pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
             stream.add_event_data_now(ev_data)?;
         }
         Ok(())
-    })
+    });
 }
 
 pub fn packet_received(
@@ -280,7 +316,7 @@ pub fn packet_received(
         });
 
         stream.add_event_data_now(ev_data)
-    })
+    });
 }
 
 #[allow(dead_code)]
@@ -322,7 +358,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
                 QlogMetric::RttVariance(v) => rtt_variance = Some(*v as f32),
                 QlogMetric::PtoCount(v) => pto_count = Some(u16::try_from(*v).unwrap()),
                 QlogMetric::CongestionWindow(v) => {
-                    congestion_window = Some(u64::try_from(*v).unwrap())
+                    congestion_window = Some(u64::try_from(*v).unwrap());
                 }
                 QlogMetric::BytesInFlight(v) => bytes_in_flight = Some(u64::try_from(*v).unwrap()),
                 QlogMetric::SsThresh(v) => ssthresh = Some(u64::try_from(*v).unwrap()),
@@ -346,7 +382,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
         });
 
         Some(ev_data)
-    })
+    });
 }
 
 // Helper functions

@@ -93,9 +93,7 @@ impl ActivePushStreams {
             None | Some(PushState::Closed) => None,
             Some(s) => {
                 let res = mem::replace(s, PushState::Closed);
-                while self.push_streams.get(0).is_some()
-                    && *self.push_streams.get(0).unwrap() == PushState::Closed
-                {
+                while let Some(PushState::Closed) = self.push_streams.front() {
                     self.push_streams.pop_front();
                     self.first_push_id += 1;
                 }
