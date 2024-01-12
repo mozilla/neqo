@@ -82,6 +82,7 @@ impl Paths {
         local: SocketAddr,
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
+        pacing: bool,
         now: Instant,
     ) -> PathRef {
         self.paths
@@ -94,7 +95,7 @@ impl Paths {
                 }
             })
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote, cc, self.qlog.clone(), now);
+                let mut p = Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -111,6 +112,7 @@ impl Paths {
         local: SocketAddr,
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
+        pacing: bool,
         now: Instant,
     ) -> PathRef {
         self.paths
@@ -136,6 +138,7 @@ impl Paths {
                     local,
                     remote,
                     cc,
+                    pacing,
                     self.qlog.clone(),
                     now,
                 )))
@@ -553,10 +556,11 @@ impl Path {
         local: SocketAddr,
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
+        pacing: bool,
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, Self::mtu_by_addr(remote.ip()), now);
+        let mut sender = PacketSender::new(cc, pacing, Self::mtu_by_addr(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,

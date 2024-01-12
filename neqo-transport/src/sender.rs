@@ -35,7 +35,12 @@ impl Display for PacketSender {
 
 impl PacketSender {
     #[must_use]
-    pub fn new(alg: CongestionControlAlgorithm, mtu: usize, now: Instant) -> Self {
+    pub fn new(
+        alg: CongestionControlAlgorithm,
+        pacing_enabled: bool,
+        mtu: usize,
+        now: Instant,
+    ) -> Self {
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
@@ -45,7 +50,7 @@ impl PacketSender {
                     Box::new(ClassicCongestionControl::new(Cubic::default()))
                 }
             },
-            pacer: Pacer::new(now, mtu * PACING_BURST_SIZE, mtu),
+            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
         }
     }
 

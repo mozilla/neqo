@@ -309,6 +309,10 @@ struct QuicParameters {
     #[structopt(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
+
+    #[structopt(long = "pacing")]
+    /// Whether pacing is enabled.
+    pacing: bool,
 }
 
 impl QuicParameters {
@@ -317,7 +321,7 @@ impl QuicParameters {
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .cc_algorithm(self.congestion_control);
+            .cc_algorithm(self.congestion_control).pacing(self.pacing);
 
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
