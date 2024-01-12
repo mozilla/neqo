@@ -321,7 +321,8 @@ impl QuicParameters {
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .cc_algorithm(self.congestion_control).pacing(self.pacing);
+            .cc_algorithm(self.congestion_control)
+            .pacing(self.pacing);
 
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
