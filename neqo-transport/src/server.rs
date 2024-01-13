@@ -506,7 +506,7 @@ impl Server {
                     crate::qlog::server_version_information_failed(
                         &mut self.create_qlog_trace(&attempt_key),
                         self.conn_params.get_versions().all(),
-                        initial.version,
+                        initial.version.wire_version(),
                     )
                 }
                 None
@@ -590,9 +590,7 @@ impl Server {
                     odcid: packet.dcid().into(),
                 }),
                 self.conn_params.get_versions().all(),
-                packet
-                    .version()
-                    .expect("version on `OtherVersion` and `Initial` to be set"),
+                packet.wire_version(),
             );
 
             return Some(Datagram::new(dgram.destination(), dgram.source(), vn));

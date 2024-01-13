@@ -164,10 +164,14 @@ pub fn client_version_information_negotiated(
     });
 }
 
-pub fn server_version_information_failed(qlog: &mut NeqoQlog, server: &[Version], client: Version) {
+pub fn server_version_information_failed(
+    qlog: &mut NeqoQlog,
+    server: &[Version],
+    client: WireVersion,
+) {
     qlog.add_event_data(|| {
         Some(EventData::VersionInformation(VersionInformation {
-            client_versions: Some(vec![format!("{:02x}", client.wire_version())]),
+            client_versions: Some(vec![format!("{client:02x}")]),
             server_versions: Some(
                 server
                     .iter()
