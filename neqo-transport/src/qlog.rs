@@ -85,7 +85,7 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
                 },
             });
 
-        Some(ev_data))
+        Some(ev_data)
     });
 }
 
@@ -556,15 +556,20 @@ fn to_qlog_pkt_type(ptype: PacketType) -> qlog::events::quic::PacketType {
 
 #[cfg(test)]
 mod test {
-    // use crate::qlog::connection_started;
-    use test_fixture::{default_client, neqo_qlog_contents, new_neqo_qlog};
+    use test_fixture::{
+        default_client, default_server, handshake, neqo_qlog_contents, new_neqo_qlog,
+        EXPECTED_LOG_HEADER,
+    };
 
     #[test]
     fn test_connection_started() {
-        let mut log = new_neqo_qlog();
-        assert_eq!(neqo_qlog_contents(&log), "");
-        // let client = default_client();
-        // let path = test_fixture::new_test_path();
-        // connection_started(&mut log, client.paths.primary());
+        const CONNECTION_STARTED: &str = "\"name\":\"connectivity:connection_started\"";
+        let (log, contents) = new_neqo_qlog();
+        let mut client = default_client();
+        client.set_qlog(log);
+        handshake(&mut client, &mut default_server());
+        let c = neqo_qlog_contents(&contents);
+        assert!(c.starts_with(EXPECTED_LOG_HEADER));
+        assert!(c.contains(CONNECTION_STARTED));
     }
 }

@@ -170,16 +170,16 @@ mod test {
 
     #[test]
     fn test_new_neqo_qlog() {
-        let log = new_neqo_qlog();
-        assert_eq!(neqo_qlog_contents(&log), EXPECTED_LOG_HEADER);
+        let (_log, contents) = new_neqo_qlog();
+        assert_eq!(neqo_qlog_contents(&contents), EXPECTED_LOG_HEADER);
     }
 
     #[test]
     fn test_add_event() {
-        let mut log = new_neqo_qlog();
+        let (mut log, contents) = new_neqo_qlog();
         log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
         assert_eq!(
-            neqo_qlog_contents(&log),
+            neqo_qlog_contents(&contents),
             format!(
                 "{EXPECTED_LOG_HEADER}{}",
                 EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")

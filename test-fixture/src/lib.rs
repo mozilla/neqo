@@ -351,26 +351,21 @@ impl Write for SharedVec {
 /// # Panics
 /// Panics if the log cannot be accessed.
 #[must_use]
-pub fn neqo_qlog_contents(log: &NeqoQlog) -> String {
-    let w = log
-        .inner()
-        .borrow_mut()
-        .as_mut()
-        .unwrap()
-        .streamer()
-        .writer();
-
-    String::from_utf8(w.as_ref().get_ref().clone()).unwrap() // Not like this?
+pub fn neqo_qlog_contents(log: &Arc<Mutex<Cursor<Vec<u8>>>>) -> String {
+    String::from_utf8(log.lock().unwrap().clone().into_inner()).unwrap()
 }
 
-/// Return a new enabled `NeqoQlog` that is backed by a Vec.
+/// Returns a pair of new enabled `NeqoQlog` that is backed by a Vec<u8> together with a
+/// `Cursor<Vec<u8>>` that can be used to read the contents of the log.
 /// # Panics
 /// Panics if the log cannot be created.
 #[must_use]
-pub fn new_neqo_qlog() -> NeqoQlog {
+pub fn new_neqo_qlog() -> (NeqoQlog, Arc<Mutex<Cursor<Vec<u8>>>>) {
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+    let buf = Arc::new(Mutex::new(Cursor::new(Vec::new())));
+    let contents = Arc::clone(&buf);
     let streamer = QlogStreamer::new(
         qlog::QLOG_VERSION.to_string(),
         None,
@@ -379,13 +374,11 @@ pub fn new_neqo_qlog() -> NeqoQlog {
         std::time::Instant::now(),
         trace,
         EventImportance::Base,
-        Box::new(SharedVec {
-            buf: Arc::new(Mutex::new(Cursor::new(Vec::new()))),
-        }),
+        Box::new(SharedVec { buf }),
     );
     let log = NeqoQlog::enabled(streamer, "");
     assert!(log.is_ok());
-    log.unwrap()
+    (log.unwrap(), contents)
 }
 
 pub const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";
