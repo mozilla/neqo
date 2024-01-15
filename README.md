@@ -9,10 +9,14 @@ To run test HTTP/3 programs (neqo-client and neqo-server):
 * `./target/debug/neqo-client http://127.0.0.1:12345/`
 
 If a "Failure to load dynamic library" error happens at runtime, do
-```
+```shell
 export LD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.so -print | head -1)")"
 ```
-On a mac, use `DYLD_LIBRARY_PATH` instead.
+
+On a macOS, do
+```shell
+export DYLD_LIBRARY_PATH="$(dirname "$(find . -name libssl3.dylib -print | head -1)")"
+```
 
 ## Faster Builds with Separate NSS/NSPR
 
