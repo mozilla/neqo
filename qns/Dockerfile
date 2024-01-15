@@ -14,7 +14,7 @@ ARG RUST_VERSION
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH \
+    PATH=/usr/local/cargo/bin:$PATH
 
 RUN set -eux; \
     curl -sSLf "https://static.rust-lang.org/rustup/archive/1.22.1/x86_64-unknown-linux-gnu/rustup-init" -o rustup-init; \
