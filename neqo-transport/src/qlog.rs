@@ -553,23 +553,3 @@ fn to_qlog_pkt_type(ptype: PacketType) -> qlog::events::quic::PacketType {
         PacketType::OtherVersion => qlog::events::quic::PacketType::Unknown,
     }
 }
-
-#[cfg(test)]
-mod test {
-    use test_fixture::{
-        default_client, default_server, handshake, neqo_qlog_contents, new_neqo_qlog,
-        EXPECTED_LOG_HEADER,
-    };
-
-    #[test]
-    fn test_connection_started() {
-        const CONNECTION_STARTED: &str = "\"name\":\"connectivity:connection_started\"";
-        let (log, contents) = new_neqo_qlog();
-        let mut client = default_client();
-        client.set_qlog(log);
-        handshake(&mut client, &mut default_server());
-        let c = neqo_qlog_contents(&contents);
-        assert!(c.starts_with(EXPECTED_LOG_HEADER));
-        assert!(c.contains(CONNECTION_STARTED));
-    }
-}

@@ -139,7 +139,8 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 #[must_use]
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
-    Connection::new_client(
+    let (log, _contents) = new_neqo_qlog();
+    let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
@@ -148,7 +149,9 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
-    .expect("create a client")
+    .expect("create a client");
+    client.set_qlog(log);
+    client
 }
 
 /// Create a transport client with default configuration.
@@ -175,7 +178,7 @@ pub fn default_server_h3() -> Connection {
 #[must_use]
 pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
     fixture_init();
-
+    let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
@@ -183,6 +186,7 @@ pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Con
         params.ack_ratio(255),
     )
     .expect("create a server");
+    c.set_qlog(log);
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c

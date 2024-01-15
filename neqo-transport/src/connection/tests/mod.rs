@@ -30,7 +30,7 @@ use std::{
 
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{self, addr, fixture_init, now};
+use test_fixture::{self, addr, fixture_init, new_neqo_qlog, now};
 
 // All the tests.
 mod ackrate;
@@ -99,7 +99,8 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // These are a direct copy of those functions.
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
-    Connection::new_client(
+    let (log, _contents) = new_neqo_qlog();
+    let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
@@ -108,15 +109,18 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         params,
         now(),
     )
-    .expect("create a default client")
+    .expect("create a default client");
+    client.set_qlog(log);
+    client
 }
+
 pub fn default_client() -> Connection {
     new_client(ConnectionParameters::default())
 }
 
 pub fn new_server(params: ConnectionParameters) -> Connection {
     fixture_init();
-
+    let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -124,6 +128,7 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
         params,
     )
     .expect("create a default server");
+    c.set_qlog(log);
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
