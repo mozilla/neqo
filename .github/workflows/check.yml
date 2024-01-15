@@ -128,7 +128,7 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  qns-docker-image:
+  qns-docker-image: # Docker image for QUIC network simulator i.e. interop runner (https://github.com/quic-interop/quic-interop-runner)
     # needs: check
     runs-on: ubuntu-latest
     steps:
@@ -168,7 +168,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          push: ${{ github.repository == 'mozilla/neqo' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: |
