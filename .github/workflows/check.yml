@@ -129,7 +129,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   qns-docker-image:
-    needs: check
+    # needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
