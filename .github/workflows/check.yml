@@ -129,7 +129,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   qns-docker-image: # Docker image for QUIC network simulator i.e. interop runner (https://github.com/quic-interop/quic-interop-runner)
-    # needs: check
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
