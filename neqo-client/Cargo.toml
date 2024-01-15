@@ -14,10 +14,10 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-common = { path="./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
-structopt = "0.3.7"
-url = "2.0"
+structopt = "0.3.26"
+url = "2.5"
 qlog = "0.11.0"
-mio = "0.6.17"
+mio = "0.6.23"
 
 [features]
 deny-warnings = []

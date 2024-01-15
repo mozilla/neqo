@@ -13,8 +13,8 @@ neqo-common = { path="./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 
-structopt = "0.3.7"
-lazy_static = "1.3.0"
+structopt = "0.3.26"
+lazy_static = "1.4.0"
 
 [features]
 deny-warnings = []

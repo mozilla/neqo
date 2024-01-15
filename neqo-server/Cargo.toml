@@ -12,11 +12,11 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-common = { path="./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
-structopt = "0.3.7"
+structopt = "0.3.26"
 regex = "1"
-mio = "0.6.17"
-mio-extras = "2.0.5"
-log = {version = "0.4.0", default-features = false}
+mio = "0.6.23"
+mio-extras = "2.0.6"
+log = {version = "0.4.17", default-features = false}
 qlog = "0.11.0"
 
 [features]
