@@ -108,9 +108,9 @@ impl Debug for Pacer {
     }
 }
 
-#[cfg(tests)]
+#[cfg(test)]
 mod tests {
-    use super::Pacer;
+    use super::*;
     use test_fixture::now;
 
     const RTT: Duration = Duration::from_millis(1000);
@@ -119,20 +119,20 @@ mod tests {
 
     #[test]
     fn even() {
-        let mut n = now();
-        let p = Pacer::new(n, PACKET, PACKET);
-        assert_eq!(p.next(RTT, CWND), None);
+        let n = now();
+        let mut p = Pacer::new(n, PACKET, PACKET);
+        assert_eq!(p.next(RTT, CWND), n);
         p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), Some(n + (RTT / 10)));
+        assert_eq!(p.next(RTT, CWND), n + (RTT / 20), "{n:?}");
     }
 
     #[test]
     fn backwards_in_time() {
-        let mut n = now();
-        let p = Pacer::new(n + RTT, PACKET, PACKET);
-        assert_eq!(p.next(RTT, CWND), None);
+        let n = now();
+        let mut p = Pacer::new(n + RTT, PACKET, PACKET);
+        assert_eq!(p.next(RTT, CWND), n + RTT);
         // Now spend some credit in the past using a time machine.
         p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), Some(n + (RTT / 10)));
+        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 }
