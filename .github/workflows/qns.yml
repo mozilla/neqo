@@ -1,13 +1,13 @@
 name: qns # (quic-network-simulator)
 
 on:
-  push:
-    branches: ["main", "docker"] # TODO: remove docker
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  schedule:
+    - cron: '42 3 * * *' # Runs at 03:42 UTC (m and h chosen arbitrary) every day.
   pull_request:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-
+    branch: ["main"]
+    paths:
+      - 'qns/**'
+      - '.github/workflows.qns.yml'
 jobs:
   docker-image:
     runs-on: ubuntu-latest
