@@ -7,14 +7,13 @@ rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-neqo-crypto = { path = "./../neqo-crypto" }
-neqo-transport = { path = "./../neqo-transport" }
+lazy_static = "~1.4.0"
 neqo-common = { path="./../neqo-common" }
+neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
-
-structopt = "0.3.26"
-lazy_static = "1.4.0"
+neqo-transport = { path = "./../neqo-transport" }
+structopt = "~0.3"
 
 [features]
 deny-warnings = []

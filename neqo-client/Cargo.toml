@@ -9,15 +9,15 @@ rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-neqo-crypto = { path = "./../neqo-crypto" }
-neqo-transport = { path = "./../neqo-transport" }
+mio = "~0.6.23"
 neqo-common = { path="./../neqo-common" }
+neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
-structopt = "0.3.26"
-url = "2.5"
+neqo-transport = { path = "./../neqo-transport" }
 qlog = "0.11.0"
-mio = "0.6.23"
+structopt = "~0.3"
+url = "~2.5.0"
 
 [features]
 deny-warnings = []

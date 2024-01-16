@@ -7,17 +7,17 @@ rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+enumset = "~1.1.2"
+lazy_static = "~1.4.0"
+log = {version = "~0.4.17", default-features = false}
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
-neqo-transport = { path = "./../neqo-transport" }
 neqo-qpack = { path = "./../neqo-qpack" }
-log = {version = "0.4.17", default-features = false}
-smallvec = "1.11.1"
+neqo-transport = { path = "./../neqo-transport" }
 qlog = "0.11.0"
-sfv = "0.9.3"
-url = "2.5"
-lazy_static = "1.4.0"
-enumset = "1.1.2"
+sfv = "~0.9.3"
+smallvec = "~1.11.1"
+url = "~2.5.0"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
