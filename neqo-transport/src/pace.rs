@@ -87,7 +87,6 @@ impl Pacer {
     /// window (`cwnd`), and the number of bytes that were sent (`count`).
     pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
         if !self.enabled {
-            self.c = self.m;
             self.t = now;
             return;
         }
