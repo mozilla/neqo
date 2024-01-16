@@ -1,4 +1,4 @@
-name: qns # (quic-network-simulator)
+name: QUIC Network Simulator
 
 on:
   schedule:
