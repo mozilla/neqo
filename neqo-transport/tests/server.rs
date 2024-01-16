@@ -23,8 +23,8 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
-    self, assertions, default_client, new_client, now, split_datagram,
-    CountingConnectionIdGenerator, datagram,
+    self, assertions, datagram, default_client, new_client, now, split_datagram,
+    CountingConnectionIdGenerator,
 };
 
 use std::{cell::RefCell, convert::TryFrom, mem, net::SocketAddr, rc::Rc, time::Duration};
@@ -373,7 +373,13 @@ fn new_token_different_port() {
     // Now rewrite the source port, which should not change that the token is OK.
     let d = dgram.unwrap();
     let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
-    let dgram = Some(Datagram::new(src, d.destination(), d.tos(), d.ttl(), &d[..]));
+    let dgram = Some(Datagram::new(
+        src,
+        d.destination(),
+        d.tos(),
+        d.ttl(),
+        &d[..],
+    ));
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_initial(dgram.as_ref().unwrap(), false);
@@ -428,7 +434,13 @@ fn bad_client_initial() {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let bad_dgram = Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), dgram.ttl(), ciphertext);
+    let bad_dgram = Datagram::new(
+        dgram.source(),
+        dgram.destination(),
+        dgram.tos(),
+        dgram.ttl(),
+        ciphertext,
+    );
 
     // The server should reject this.
     let response = server.process(Some(&bad_dgram), now());
@@ -476,7 +488,13 @@ fn version_negotiation_ignored() {
     let dgram = client.process(None, now()).dgram().expect("a datagram");
     let mut input = dgram.to_vec();
     input[1] ^= 0x12;
-    let damaged = Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), dgram.ttl(), input.clone());
+    let damaged = Datagram::new(
+        dgram.source(),
+        dgram.destination(),
+        dgram.tos(),
+        dgram.ttl(),
+        input.clone(),
+    );
     let vn = server.process(Some(&damaged), now()).dgram();
 
     let mut dec = Decoder::from(&input[5..]); // Skip past version.

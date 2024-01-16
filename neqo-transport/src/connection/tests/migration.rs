@@ -61,7 +61,13 @@ fn new_port(a: SocketAddr) -> SocketAddr {
 }
 
 fn change_source_port(d: &Datagram) -> Datagram {
-    Datagram::new(new_port(d.source()), d.destination(), d.tos(), d.ttl(), &d[..])
+    Datagram::new(
+        new_port(d.source()),
+        d.destination(),
+        d.tos(),
+        d.ttl(),
+        &d[..],
+    )
 }
 
 /// As these tests use a new path, that path often has a non-zero RTT.
