@@ -35,6 +35,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use const_format::concatcp;
 use lazy_static::lazy_static;
 
 pub mod assertions;
@@ -385,4 +386,8 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
     )
 }
 
-pub const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";
+pub const EXPECTED_LOG_HEADER: &str = concatcp!(
+    "\u{1e}",
+    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"Example qlog trace description","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    "\n"
+);

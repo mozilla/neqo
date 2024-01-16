@@ -152,6 +152,7 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
 
 #[cfg(test)]
 mod test {
+    use const_format::concatcp;
     use qlog::events::Event;
     use test_fixture::{new_neqo_qlog, EXPECTED_LOG_HEADER};
 
@@ -160,7 +161,11 @@ mod test {
             state: true,
         });
 
-    const EXPECTED_LOG_EVENT: &str = "\u{1e}{\"time\":0.0,\"name\":\"connectivity:spin_bit_updated\",\"data\":{\"state\":true}}\n";
+    const EXPECTED_LOG_EVENT: &str = concatcp!(
+        "\u{1e}",
+        r#"{"time":0.0,"name":"connectivity:spin_bit_updated","data":{"state":true}}"#,
+        "\n"
+    );
 
     #[test]
     fn test_new_neqo_qlog() {
