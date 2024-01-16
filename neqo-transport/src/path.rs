@@ -948,7 +948,6 @@ impl Path {
 
     /// Discard a packet that previously might have been in-flight.
     pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant) {
-        println!("discard_packet {:#?}", self.ecn);
         if self.rtt.first_sample_time().is_none() {
             // When discarding a packet there might not be a good RTT estimate.
             // But discards only occur after receiving something, so that means
