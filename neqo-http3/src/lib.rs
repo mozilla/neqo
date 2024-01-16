@@ -95,7 +95,7 @@ match client.process_output(Instant::now()) {
 // Reading new data coming for the network.
 match socket.recv_from(&mut buf[..]) {
      Ok((sz, remote)) => {
-        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+        let d = Datagram::new(remote, *local_addr, tos, ttl, &buf[..sz]);
         client.process_input(d, Instant::now());
     }
     Err(err) => {

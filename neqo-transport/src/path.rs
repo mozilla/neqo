@@ -701,7 +701,7 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(self.local, self.remote, self.ecn as u8, self.ttl, payload)
+        Datagram::new(self.local, self.remote, self.ecn.into(), self.ttl, payload)
     }
 
     /// Get local address as `SocketAddr`

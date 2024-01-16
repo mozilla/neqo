@@ -806,6 +806,8 @@ fn anti_amplification() {
 #[cfg(not(feature = "fuzzing"))]
 #[test]
 fn garbage_initial() {
+    use test_fixture::datagram;
+
     let mut client = default_client();
     let mut server = default_server();
 
@@ -814,7 +816,7 @@ fn garbage_initial() {
     let mut corrupted = Vec::from(&initial[..initial.len() - 1]);
     corrupted.push(initial[initial.len() - 1] ^ 0xb7);
     corrupted.extend_from_slice(rest.as_ref().map_or(&[], |r| &r[..]));
-    let garbage = Datagram::new(addr(), addr(), IpTosEcn::Ect1.into(), 111, corrupted);
+    let garbage = datagram(corrupted);
     assert_eq!(Output::None, server.process(Some(&garbage), now()));
 }
 

@@ -371,7 +371,7 @@ mod test {
         let d = Datagram::new(
             client.local_addr().unwrap(),
             server.local_addr().unwrap(),
-            IpTosEcn::Ce as u8,
+            IpTosEcn::Ce.into(),
             16,
             [0x42; 16],
         );
