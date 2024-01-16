@@ -50,7 +50,7 @@ impl NeqoQlog {
 
     #[must_use]
     pub fn inner(&self) -> Rc<RefCell<Option<NeqoQlogShared>>> {
-        self.inner.clone()
+        Rc::clone(&self.inner)
     }
 
     /// Create a disabled `NeqoQlog` configuration.
