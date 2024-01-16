@@ -368,7 +368,7 @@ mod test {
             Err(e) => panic!("{}", e),
         };
 
-        let d = Datagram::new_with_tos_and_ttl(
+        let d = Datagram::new(
             client.local_addr().unwrap(),
             server.local_addr().unwrap(),
             IpTosEcn::Ce as u8,

@@ -34,6 +34,13 @@ impl From<u8> for IpTosEcn {
         }
     }
 }
+
+impl From<IpTosEcn> for u8 {
+    fn from(val: IpTosEcn) -> Self {
+        val as u8
+    }
+}
+
 impl std::fmt::Debug for IpTosEcn {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -85,23 +92,7 @@ pub struct Datagram {
 }
 
 impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, d: V) -> Self {
-        Self {
-            src,
-            dst,
-            tos: IpTosEcn::Ect0 as u8,
-            ttl: 128,
-            d: d.into(),
-        }
-    }
-
-    pub fn new_with_tos_and_ttl<V: Into<Vec<u8>>>(
-        src: SocketAddr,
-        dst: SocketAddr,
-        tos: u8,
-        ttl: u8,
-        d: V,
-    ) -> Self {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: u8, ttl: u8, d: V) -> Self {
         Self {
             src,
             dst,

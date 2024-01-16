@@ -146,13 +146,7 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new_with_tos_and_ttl(
-                nctx.remote_addr,
-                nctx.local_addr,
-                tos,
-                ttl,
-                &buf[..sz],
-            );
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, tos, ttl, &buf[..sz]);
             client.process_input(&received, Instant::now());
         }
     }
@@ -320,13 +314,7 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new_with_tos_and_ttl(
-                nctx.remote_addr,
-                nctx.local_addr,
-                tos,
-                ttl,
-                &buf[..sz],
-            );
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, tos, ttl, &buf[..sz]);
             handler.h3.process_input(&received, Instant::now());
         }
     }
@@ -699,7 +687,7 @@ impl Handler for VnHandler {
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
         let mut payload = d[..].to_vec();
         payload[1] = 0x1a;
-        Some(Datagram::new_with_tos_and_ttl(
+        Some(Datagram::new(
             d.source(),
             d.destination(),
             d.tos(),

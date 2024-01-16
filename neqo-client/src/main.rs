@@ -427,13 +427,7 @@ fn process_loop(
                         break 'read;
                     }
                     if sz > 0 {
-                        let d = Datagram::new_with_tos_and_ttl(
-                            remote,
-                            *local_addr,
-                            tos,
-                            ttl,
-                            &buf[..sz],
-                        );
+                        let d = Datagram::new(remote, *local_addr, tos, ttl, &buf[..sz]);
                         datagrams.push(d);
                     }
                 }
@@ -1370,13 +1364,7 @@ mod old {
                             break 'read;
                         }
                         if sz > 0 {
-                            let d = Datagram::new_with_tos_and_ttl(
-                                remote,
-                                *local_addr,
-                                tos,
-                                ttl,
-                                &buf[..sz],
-                            );
+                            let d = Datagram::new(remote, *local_addr, tos, ttl, &buf[..sz]);
                             client.process_input(&d, Instant::now());
                             handler.maybe_key_update(client)?;
                         }

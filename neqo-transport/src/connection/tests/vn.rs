@@ -13,10 +13,10 @@ use crate::packet::PACKET_BIT_LONG;
 use crate::tparams::{self, TransportParameter};
 use crate::{ConnectionParameters, Error, Version};
 
-use neqo_common::{event::Provider, Datagram, Decoder, Encoder};
+use neqo_common::{event::Provider, Decoder, Encoder};
 use std::mem;
 use std::time::Duration;
-use test_fixture::{self, addr, assertions, now};
+use test_fixture::{self, assertions, datagram, now};
 
 // The expected PTO duration after the first Initial is sent.
 const INITIAL_PTO: Duration = Duration::from_millis(300);
@@ -29,10 +29,7 @@ fn unknown_version() {
 
     let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
     unknown_version_packet.resize(1200, 0x0);
-    mem::drop(client.process(
-        Some(&Datagram::new(addr(), addr(), unknown_version_packet)),
-        now(),
-    ));
+    mem::drop(client.process(Some(&datagram(unknown_version_packet)), now()));
     assert_eq!(1, client.stats().dropped_rx);
 }
 
@@ -44,10 +41,7 @@ fn server_receive_unknown_first_packet() {
     unknown_version_packet.resize(1200, 0x0);
 
     assert_eq!(
-        server.process(
-            Some(&Datagram::new(addr(), addr(), unknown_version_packet,)),
-            now(),
-        ),
+        server.process(Some(&datagram(unknown_version_packet)), now(),),
         Output::None
     );
 
@@ -86,7 +80,7 @@ fn version_negotiation_current_version() {
         &[0x1a1a_1a1a, Version::default().wire_version()],
     );
 
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
@@ -105,7 +99,7 @@ fn version_negotiation_version0() {
 
     let vn = create_vn(&initial_pkt, &[0, 0x1a1a_1a1a]);
 
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
@@ -124,7 +118,7 @@ fn version_negotiation_only_reserved() {
 
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     assert_eq!(client.process(Some(&dgram), now()), Output::None);
     match client.state() {
         State::Closed(err) => {
@@ -146,7 +140,7 @@ fn version_negotiation_corrupted() {
 
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
-    let dgram = Datagram::new(addr(), addr(), &vn[..vn.len() - 1]);
+    let dgram = datagram(vn[..vn.len() - 1].to_vec());
     let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
@@ -165,7 +159,7 @@ fn version_negotiation_empty() {
 
     let vn = create_vn(&initial_pkt, &[]);
 
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
@@ -183,7 +177,7 @@ fn version_negotiation_not_supported() {
         .to_vec();
 
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     assert_eq!(client.process(Some(&dgram), now()), Output::None);
     match client.state() {
         State::Closed(err) => {
@@ -206,7 +200,7 @@ fn version_negotiation_bad_cid() {
     initial_pkt[6] ^= 0xc4;
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
 
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
@@ -311,7 +305,7 @@ fn version_negotiation_downgrade() {
     // Start the handshake and spoof a VN packet.
     let initial = client.process_output(now()).dgram().unwrap();
     let vn = create_vn(&initial, &[DOWNGRADE.wire_version()]);
-    let dgram = Datagram::new(addr(), addr(), vn);
+    let dgram = datagram(vn);
     client.process_input(&dgram, now());
 
     connect_fail(

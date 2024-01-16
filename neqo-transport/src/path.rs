@@ -29,7 +29,7 @@ use crate::stats::FrameStats;
 use crate::tracking::{PacketNumberSpace, SentPacket};
 use crate::{Error, Res};
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder};
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTosEcn};
 use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
@@ -537,6 +537,10 @@ pub struct Path {
     rtt: RttEstimate,
     /// A packet sender for the path, which includes congestion control and a pacer.
     sender: PacketSender,
+    /// The ECN marking to use for outgoing packets on this path.
+    ecn: IpTosEcn,
+    /// The IP TTL to use for outgoing packets on this path.
+    ttl: u8,
 
     /// The number of bytes received on this path.
     /// Note that this value might saturate on a long-lived connection,
@@ -573,6 +577,8 @@ impl Path {
             challenge: None,
             rtt: RttEstimate::default(),
             sender,
+            ecn: IpTosEcn::Ect0,
+            ttl: 64,
             received_bytes: 0,
             sent_bytes: 0,
             qlog,
@@ -695,7 +701,7 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(self.local, self.remote, payload)
+        Datagram::new(self.local, self.remote, self.ecn as u8, self.ttl, payload)
     }
 
     /// Get local address as `SocketAddr`
@@ -939,6 +945,7 @@ impl Path {
 
     /// Discard a packet that previously might have been in-flight.
     pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant) {
+        println!("discard_packet {:#?}", self.ecn);
         if self.rtt.first_sample_time().is_none() {
             // When discarding a packet there might not be a good RTT estimate.
             // But discards only occur after receiving something, so that means
