@@ -23,7 +23,7 @@ pub enum Version {
 impl Version {
     pub const fn wire_version(self) -> WireVersion {
         match self {
-            Self::Version2 => 0x6b3343cf,
+            Self::Version2 => 0x6b33_43cf,
             Self::Version1 => 1,
             Self::Draft29 => 0xff00_0000 + 29,
             Self::Draft30 => 0xff00_0000 + 30,
@@ -131,7 +131,7 @@ impl TryFrom<WireVersion> for Version {
     fn try_from(wire: WireVersion) -> Res<Self> {
         if wire == 1 {
             Ok(Self::Version1)
-        } else if wire == 0x6b3343cf {
+        } else if wire == 0x6b33_43cf {
             Ok(Self::Version2)
         } else if wire == 0xff00_0000 + 29 {
             Ok(Self::Draft29)
