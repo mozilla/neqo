@@ -2,7 +2,7 @@ name: qns # (quic-network-simulator)
 
 on:
   schedule:
-    - cron: '42 3 * * *' # Runs at 03:42 UTC (m and h chosen arbitrary) every day.
+    - cron: '42 3 * * *' # Runs at 03:42 UTC (m and h chosen arbitrarily) every day.
   pull_request:
     branch: ["main"]
     paths:
