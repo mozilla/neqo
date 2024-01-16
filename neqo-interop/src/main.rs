@@ -774,15 +774,12 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     }
 
     for child in children {
-        match child.1.join() {
-            Ok(e) => {
-                eprintln!("Test complete {:?}, {:?}", child.0, e);
-                results.push(e);
-            }
-            Err(_) => {
-                eprintln!("Thread crashed {:?}", child.0);
-                results.push((child.0, String::from("CRASHED")));
-            }
+        if let Ok(e) = child.1.join() {
+            eprintln!("Test complete {:?}, {:?}", child.0, e);
+            results.push(e);
+        } else {
+            eprintln!("Thread crashed {:?}", child.0);
+            results.push((child.0, String::from("CRASHED")));
         }
     }
 

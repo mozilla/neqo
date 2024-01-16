@@ -625,28 +625,23 @@ impl Server {
     }
 
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        let out = if let Some(d) = dgram {
-            self.process_input(d, now)
-        } else {
-            None
-        };
-        let out = out.or_else(|| self.process_next_output(now));
-        match out {
-            Some(d) => {
+        dgram
+            .and_then(|d| self.process_input(d, now))
+            .or_else(|| self.process_next_output(now))
+            .map(|d| {
                 qtrace!([self], "Send packet: {:?}", d);
                 Output::Datagram(d)
-            }
-            _ => match self.next_time(now) {
-                Some(delay) => {
+            })
+            .or_else(|| {
+                self.next_time(now).map(|delay| {
                     qtrace!([self], "Wait: {:?}", delay);
                     Output::Callback(delay)
-                }
-                _ => {
-                    qtrace!([self], "Go dormant");
-                    Output::None
-                }
-            },
-        }
+                })
+            })
+            .unwrap_or_else(|| {
+                qtrace!([self], "Go dormant");
+                Output::None
+            })
     }
 
     /// This lists the connections that have received new events

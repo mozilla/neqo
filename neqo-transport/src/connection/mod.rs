@@ -1261,31 +1261,25 @@ impl Connection {
                 }
             }
             (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
-                match packet.supported_versions() {
-                    Ok(versions) => {
-                        if versions.is_empty()
-                            || versions.contains(&self.version().wire_version())
-                            || versions.contains(&0)
-                            || packet.scid() != self.odcid().unwrap()
-                            || matches!(
-                                self.address_validation,
-                                AddressValidationInfo::Retry { .. }
-                            )
-                        {
-                            // Ignore VersionNegotiation packets that contain the current version.
-                            // Or don't have the right connection ID.
-                            // Or are received after a Retry.
-                            self.stats.borrow_mut().pkt_dropped("Invalid VN");
-                            return Ok(PreprocessResult::End);
-                        }
+                if let Ok(versions) = packet.supported_versions() {
+                    if versions.is_empty()
+                        || versions.contains(&self.version().wire_version())
+                        || versions.contains(&0)
+                        || packet.scid() != self.odcid().unwrap()
+                        || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+                    {
+                        // Ignore VersionNegotiation packets that contain the current version.
+                        // Or don't have the right connection ID.
+                        // Or are received after a Retry.
+                        self.stats.borrow_mut().pkt_dropped("Invalid VN");
+                        return Ok(PreprocessResult::End);
+                    }
 
-                        self.version_negotiation(&versions, now)?;
-                        return Ok(PreprocessResult::End);
-                    }
-                    Err(_) => {
-                        self.stats.borrow_mut().pkt_dropped("VN with no versions");
-                        return Ok(PreprocessResult::End);
-                    }
+                    self.version_negotiation(&versions, now)?;
+                    return Ok(PreprocessResult::End);
+                } else {
+                    self.stats.borrow_mut().pkt_dropped("VN with no versions");
+                    return Ok(PreprocessResult::End);
                 }
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {

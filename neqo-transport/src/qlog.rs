@@ -182,14 +182,11 @@ pub fn packet_sent(
 
         let mut frames = SmallVec::new();
         while d.remaining() > 0 {
-            match Frame::decode(&mut d) {
-                Ok(f) => {
-                    frames.push(frame_to_qlogframe(&f));
-                }
-                Err(_) => {
-                    qinfo!("qlog: invalid frame");
-                    break;
-                }
+            if let Ok(f) = Frame::decode(&mut d) {
+                frames.push(frame_to_qlogframe(&f))
+            } else {
+                qinfo!("qlog: invalid frame");
+                break;
             }
         }
 
@@ -279,12 +276,11 @@ pub fn packet_received(
         let mut frames = Vec::new();
 
         while d.remaining() > 0 {
-            match Frame::decode(&mut d) {
-                Ok(f) => frames.push(frame_to_qlogframe(&f)),
-                Err(_) => {
-                    qinfo!("qlog: invalid frame");
-                    break;
-                }
+            if let Ok(f) = Frame::decode(&mut d) {
+                frames.push(frame_to_qlogframe(&f))
+            } else {
+                qinfo!("qlog: invalid frame");
+                break;
             }
         }
 
