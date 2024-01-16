@@ -383,11 +383,11 @@ impl Server {
         }
     }
 
-    fn create_qlog_trace(&self, attempt_key: &AttemptKey) -> NeqoQlog {
+    fn create_qlog_trace(&self, odcid: &ConnectionIdRef<'_>) -> NeqoQlog {
         if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.to_path_buf();
 
-            qlog_path.push(format!("{}.qlog", attempt_key.odcid));
+            qlog_path.push(format!("{}.qlog", odcid));
 
             // The original DCID is chosen by the client. Using create_new()
             // prevents attackers from overwriting existing logs.
@@ -449,7 +449,7 @@ impl Server {
             c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
         }
         c.set_validation(Rc::clone(&self.address_validation));
-        c.set_qlog(self.create_qlog_trace(attempt_key));
+        c.set_qlog(self.create_qlog_trace(&attempt_key.odcid.as_cid_ref()));
         if let Some(cfg) = &self.ech_config {
             if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
@@ -504,7 +504,7 @@ impl Server {
                 qwarn!([self], "Unable to create connection");
                 if e == crate::Error::VersionNegotiation {
                     crate::qlog::server_version_information_failed(
-                        &mut self.create_qlog_trace(&attempt_key),
+                        &mut self.create_qlog_trace(&attempt_key.odcid.as_cid_ref()),
                         self.conn_params.get_versions().all(),
                         initial.version.wire_version(),
                     )
@@ -585,10 +585,7 @@ impl Server {
             );
 
             crate::qlog::server_version_information_failed(
-                &mut self.create_qlog_trace(&AttemptKey {
-                    remote_address: dgram.source(),
-                    odcid: packet.dcid().into(),
-                }),
+                &mut self.create_qlog_trace(packet.dcid()),
                 self.conn_params.get_versions().all(),
                 packet.wire_version(),
             );
