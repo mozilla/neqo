@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::ackrate::{AckRate, PeerAckDelay};
-use crate::cc::CongestionControlAlgorithm;
+use crate::cc::{CongestionControlAlgorithm, MAX_DATAGRAM_SIZE};
 use crate::cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry};
 use crate::frame::{
     FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID,
@@ -548,6 +548,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
+    /// The number of ECN-marked bytes sent on this path that were declared lost.
+    lost_ecn_bytes: usize,
 
     /// For logging of events.
     qlog: NeqoQlog,
@@ -580,6 +582,7 @@ impl Path {
             ecn: IpTosEcn::Ect0,
             ttl: 64,
             received_bytes: 0,
+            lost_ecn_bytes: 0,
             sent_bytes: 0,
             qlog,
         }
@@ -990,6 +993,28 @@ impl Path {
             self.rtt.pto(space), // Important: the base PTO, not adjusted.
             lost_packets,
         );
+
+        if self.ecn == IpTosEcn::Ect0 {
+            // If the path is currently marking outgoing packets as ECT(0),
+            // update the count of lost ECN-marked bytes.
+            self.lost_ecn_bytes += lost_packets
+                .iter()
+                .map(|p| p.size)
+                .sum::<usize>();
+
+            // If we lost more than 3 MTUs worth of ECN-marked bytes, then
+            // disable ECN on this path. See RFC 9000, Section 13.4.2.
+            // This doesn't quite implement the algorithm given in RFC 9000,
+            // Appendix A.4, but it should be OK. (It might be worthwhile caching
+            // destination IP addresses for paths on which we had to disable ECN,
+            // in order to not persitently delay connection establishment to
+            // those destinations.)
+            if self.lost_ecn_bytes > MAX_DATAGRAM_SIZE * 3 {
+                qinfo!([self], "Disabling ECN on path due to excessive loss");
+                self.ecn = IpTosEcn::NotEct;
+            }
+        }
+
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
         }
