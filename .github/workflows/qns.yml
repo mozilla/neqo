@@ -7,7 +7,7 @@ on:
     branch: ["main"]
     paths:
       - 'qns/**'
-      - '.github/workflows.qns.yml'
+      - '.github/workflows/qns.yml'
 jobs:
   docker-image:
     runs-on: ubuntu-latest
