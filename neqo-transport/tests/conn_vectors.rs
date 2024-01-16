@@ -8,7 +8,7 @@
 #![deny(clippy::pedantic)]
 #![cfg(not(feature = "fuzzing"))]
 
-use neqo_common::Datagram;
+use neqo_common::{IpTosEcn, Datagram};
 use neqo_transport::{
     Connection, ConnectionParameters, RandomConnectionIdGenerator, State, Version,
 };
@@ -265,7 +265,7 @@ fn make_server(v: Version) -> Connection {
 fn process_client_initial(v: Version, packet: &[u8]) {
     let mut server = make_server(v);
 
-    let dgram = Datagram::new(addr(), addr(), packet);
+    let dgram = Datagram::new(addr(), addr(), IpTosEcn::Ect0.into(), 128, packet);
     assert_eq!(*server.state(), State::Init);
     let out = server.process(Some(&dgram), now());
     assert_eq!(*server.state(), State::Handshaking);

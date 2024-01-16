@@ -93,6 +93,12 @@ pub fn addr() -> SocketAddr {
     SocketAddr::new(v6ip, 443)
 }
 
+/// Create a default datagram with the given data.
+#[must_use]
+pub fn datagram(data: Vec<u8>) -> Datagram {
+    Datagram::new(addr(), addr(), IpTosEcn::Ect0.into(), 128, data)
+}
+
 /// An IPv4 version of the default socket address.
 #[must_use]
 pub fn addr_v4() -> SocketAddr {
@@ -332,8 +338,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
-        Datagram::new_with_tos_and_ttl(d.source(), d.destination(), d.tos(), d.ttl(), a),
-        b.map(|b| Datagram::new_with_tos_and_ttl(d.source(), d.destination(), d.tos(), d.ttl(), b)),
+        Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), a),
+        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), b)),
     )
 }
 

@@ -20,7 +20,7 @@ use crate::{
     ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
 };
 
-use neqo_common::{event::Provider, qdebug, Datagram};
+use neqo_common::{event::Provider, qdebug, Datagram, IpTosEcn};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
@@ -615,7 +615,7 @@ fn corrupted_initial() {
         .find(|(_, &v)| v != 0)
         .unwrap();
     corrupted[idx] ^= 0x76;
-    let dgram = Datagram::new(d.source(), d.destination(), corrupted);
+    let dgram = Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), corrupted);
     server.process_input(&dgram, now());
     // The server should have received two packets,
     // the first should be dropped, the second saved.
@@ -711,7 +711,7 @@ fn extra_initial_invalid_cid() {
     let mut copy = hs.to_vec();
     assert_ne!(copy[5], 0); // The DCID should be non-zero length.
     copy[6] ^= 0xc4;
-    let dgram_copy = Datagram::new(hs.destination(), hs.source(), copy);
+    let dgram_copy = Datagram::new(hs.destination(), hs.source(), hs.tos(), hs.ttl(), copy);
     let nothing = client.process(Some(&dgram_copy), now).dgram();
     assert!(nothing.is_none());
 }
@@ -814,7 +814,7 @@ fn garbage_initial() {
     let mut corrupted = Vec::from(&initial[..initial.len() - 1]);
     corrupted.push(initial[initial.len() - 1] ^ 0xb7);
     corrupted.extend_from_slice(rest.as_ref().map_or(&[], |r| &r[..]));
-    let garbage = Datagram::new(addr(), addr(), corrupted);
+    let garbage = Datagram::new(addr(), addr(), IpTosEcn::Ect1.into(), 111, corrupted);
     assert_eq!(Output::None, server.process(Some(&garbage), now()));
 }
 
@@ -832,6 +832,8 @@ fn drop_initial_packet_from_wrong_address() {
     let dgram = Datagram::new(
         SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
+        IpTosEcn::Ect0.into(),
+        128,
         &p[..],
     );
 
@@ -858,6 +860,8 @@ fn drop_handshake_packet_from_wrong_address() {
     let dgram = Datagram::new(
         SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
+        IpTosEcn::Ect0.into(),
+        128,
         &p[..],
     );
 

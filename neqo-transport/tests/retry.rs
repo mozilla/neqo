@@ -21,7 +21,7 @@ use std::convert::TryFrom;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
-use test_fixture::{self, addr, assertions, default_client, now, split_datagram};
+use test_fixture::{self, assertions, default_client, now, split_datagram, datagram};
 
 #[test]
 fn retry_basic() {
@@ -150,7 +150,7 @@ fn retry_different_ip() {
     let dgram = dgram.unwrap();
     let other_v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
     let other_addr = SocketAddr::new(other_v4, 443);
-    let from_other = Datagram::new(other_addr, dgram.destination(), &dgram[..]);
+    let from_other = Datagram::new(other_addr, dgram.destination(), dgram.tos(), dgram.ttl(), &dgram[..]);
     let dgram = server.process(Some(&from_other), now()).dgram();
     assert!(dgram.is_none());
 }
@@ -171,7 +171,7 @@ fn new_token_different_ip() {
     // Now rewrite the source address.
     let d = dgram.unwrap();
     let src = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), d.source().port());
-    let dgram = Some(Datagram::new(src, d.destination(), &d[..]));
+    let dgram = Some(Datagram::new(src, d.destination(), d.tos(), d.ttl(), &d[..]));
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_retry(dgram.as_ref().unwrap());
@@ -196,7 +196,7 @@ fn new_token_expired() {
     let the_future = now() + Duration::from_secs(60 * 60 * 24 * 30);
     let d = dgram.unwrap();
     let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
-    let dgram = Some(Datagram::new(src, d.destination(), &d[..]));
+    let dgram = Some(Datagram::new(src, d.destination(), d.tos(), d.ttl(), &d[..]));
     let dgram = server.process(dgram.as_ref(), the_future).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_retry(dgram.as_ref().unwrap());
@@ -257,7 +257,7 @@ fn retry_bad_integrity() {
 
     let mut tweaked = retry.to_vec();
     tweaked[retry.len() - 1] ^= 0x45; // damage the auth tag
-    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), tweaked);
+    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), retry.tos(), retry.ttl(), tweaked);
 
     // The client should ignore this packet.
     let dgram = client.process(Some(&tweaked_packet), now()).dgram();
@@ -338,7 +338,7 @@ fn vn_after_retry() {
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
-    let vn = Datagram::new(addr(), addr(), encoder);
+    let vn = datagram(encoder.into());
 
     assert_ne!(
         client.process(Some(&vn), now()).callback(),
@@ -425,6 +425,8 @@ fn mitm_retry() {
     let new_datagram = Datagram::new(
         client_initial2.source(),
         client_initial2.destination(),
+        client_initial2.tos(),
+        client_initial2.ttl(),
         notoken_packet,
     );
     qdebug!("passing modified Initial to the main server");

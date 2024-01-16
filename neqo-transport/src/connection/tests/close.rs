@@ -9,7 +9,7 @@ use super::{connect, connect_force_idle, default_client, default_server, send_so
 use crate::tparams::{self, TransportParameter};
 use crate::{AppError, ConnectionError, Error, ERROR_APPLICATION_CLOSE};
 
-use neqo_common::Datagram;
+use neqo_common::{Datagram, IpTosEcn};
 use std::time::Duration;
 use test_fixture::{self, addr, now};
 
@@ -201,6 +201,6 @@ fn stateless_reset_client() {
         .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    client.process_input(&Datagram::new(addr(), addr(), vec![77; 21]), now());
+    client.process_input(&Datagram::new(addr(), addr(), IpTosEcn::Ect0.into(), 128, vec![77; 21]), now());
     assert_draining(&client, &Error::StatelessReset);
 }

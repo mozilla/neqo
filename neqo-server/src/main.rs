@@ -601,7 +601,7 @@ fn read_dgram(
         eprintln!("zero length datagram received?");
         Ok(None)
     } else {
-        Ok(Some(Datagram::new_with_tos_and_ttl(
+        Ok(Some(Datagram::new(
             remote_addr,
             *local_address,
             tos,
