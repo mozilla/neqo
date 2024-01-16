@@ -351,12 +351,10 @@ impl Write for SharedVec {
     }
 }
 
-/// Return the contents of the log.
-/// # Panics
-/// Panics if the log cannot be accessed.
-#[must_use]
-pub fn neqo_qlog_contents(log: &Arc<Mutex<Cursor<Vec<u8>>>>) -> String {
+impl ToString for SharedVec {
+  fn to_string(&self) -> String {
     String::from_utf8(log.lock().unwrap().clone().into_inner()).unwrap()
+  }
 }
 
 /// Returns a pair of new enabled `NeqoQlog` that is backed by a Vec<u8> together with a
@@ -364,7 +362,7 @@ pub fn neqo_qlog_contents(log: &Arc<Mutex<Cursor<Vec<u8>>>>) -> String {
 /// # Panics
 /// Panics if the log cannot be created.
 #[must_use]
-pub fn new_neqo_qlog() -> (NeqoQlog, Arc<Mutex<Cursor<Vec<u8>>>>) {
+pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
