@@ -381,8 +381,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, Arc<Mutex<Cursor<Vec<u8>>>>) {
         Box::new(SharedVec { buf }),
     );
     let log = NeqoQlog::enabled(streamer, "");
-    assert!(log.is_ok());
-    (log.unwrap(), contents)
+    (log.expect("to be able to write to new log"), contents)
 }
 
 pub const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";
