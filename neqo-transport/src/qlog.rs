@@ -77,7 +77,7 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
                         connection_id: cid.connection_id().to_string(),
                         stateless_reset_token: hex(cid.reset_token()),
                     })
-                },
+                }),
             });
 
         Some(ev_data)

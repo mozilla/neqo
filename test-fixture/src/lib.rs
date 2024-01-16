@@ -338,7 +338,7 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
 }
 
 #[derive(Clone)]
-struct SharedVec {
+pub struct SharedVec {
     buf: Arc<Mutex<Cursor<Vec<u8>>>>,
 }
 
@@ -352,9 +352,9 @@ impl Write for SharedVec {
 }
 
 impl ToString for SharedVec {
-  fn to_string(&self) -> String {
-    String::from_utf8(log.lock().unwrap().clone().into_inner()).unwrap()
-  }
+    fn to_string(&self) -> String {
+        String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap()
+    }
 }
 
 /// Returns a pair of new enabled `NeqoQlog` that is backed by a Vec<u8> together with a
@@ -379,7 +379,10 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         Box::new(SharedVec { buf }),
     );
     let log = NeqoQlog::enabled(streamer, "");
-    (log.expect("to be able to write to new log"), contents)
+    (
+        log.expect("to be able to write to new log"),
+        SharedVec { buf: contents },
+    )
 }
 
 pub const EXPECTED_LOG_HEADER: &str = "\u{1e}{\"qlog_version\":\"0.3\",\"qlog_format\":\"JSON-SEQ\",\"trace\":{\"vantage_point\":{\"name\":\"neqo-Client\",\"type\":\"client\"},\"title\":\"neqo-Client trace\",\"description\":\"Example qlog trace description\",\"configuration\":{\"time_offset\":0.0},\"common_fields\":{\"reference_time\":0.0,\"time_format\":\"relative\"}}}\n";

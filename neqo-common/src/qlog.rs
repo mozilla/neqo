@@ -29,12 +29,6 @@ pub struct NeqoQlogShared {
     streamer: QlogStreamer,
 }
 
-impl NeqoQlogShared {
-    pub fn streamer(&mut self) -> &mut QlogStreamer {
-        &mut self.streamer
-    }
-}
-
 impl NeqoQlog {
     /// Create an enabled `NeqoQlog` configuration.
     /// # Errors
@@ -159,7 +153,7 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
 #[cfg(test)]
 mod test {
     use qlog::events::Event;
-    use test_fixture::{neqo_qlog_contents, new_neqo_qlog, EXPECTED_LOG_HEADER};
+    use test_fixture::{new_neqo_qlog, EXPECTED_LOG_HEADER};
 
     const EV_DATA: qlog::events::EventData =
         qlog::events::EventData::SpinBitUpdated(qlog::events::connectivity::SpinBitUpdated {
@@ -171,7 +165,7 @@ mod test {
     #[test]
     fn test_new_neqo_qlog() {
         let (_log, contents) = new_neqo_qlog();
-        assert_eq!(neqo_qlog_contents(&contents), EXPECTED_LOG_HEADER);
+        assert_eq!(contents.to_string(), EXPECTED_LOG_HEADER);
     }
 
     #[test]
@@ -179,7 +173,7 @@ mod test {
         let (mut log, contents) = new_neqo_qlog();
         log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
         assert_eq!(
-            neqo_qlog_contents(&contents),
+            contents.to_string(),
             format!(
                 "{EXPECTED_LOG_HEADER}{}",
                 EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
