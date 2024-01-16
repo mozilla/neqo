@@ -1083,7 +1083,7 @@ mod tests {
     impl Default for Fixture {
         fn default() -> Self {
             const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
-            let mut path = Path::temporary(addr(), addr(), CC, NeqoQlog::default(), now());
+            let mut path = Path::temporary(addr(), addr(), CC, true, NeqoQlog::default(), now());
             path.make_permanent(
                 None,
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
