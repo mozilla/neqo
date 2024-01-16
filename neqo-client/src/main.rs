@@ -332,6 +332,7 @@ impl QuicParameters {
             };
             params.versions(first.0, all.iter().map(|&x| x.0).collect())
         } else {
+            #[allow(clippy::match_same_arms)]
             let version = match alpn {
                 "h3" | "hq-interop" => Version::default(),
                 "h3-29" | "hq-29" => Version::Draft29,
