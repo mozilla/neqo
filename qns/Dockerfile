@@ -39,7 +39,7 @@ ADD . /neqo
 RUN set -eux; \
     cd /neqo; \
     RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release \
-      --bin neqo-client --bin neqo-server;
+      --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
 
