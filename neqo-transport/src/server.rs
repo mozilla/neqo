@@ -383,11 +383,11 @@ impl Server {
         }
     }
 
-    fn create_qlog_trace(&self, attempt_key: &AttemptKey) -> NeqoQlog {
+    fn create_qlog_trace(&self, odcid: &ConnectionIdRef<'_>) -> NeqoQlog {
         if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.to_path_buf();
 
-            qlog_path.push(format!("{}.qlog", attempt_key.odcid));
+            qlog_path.push(format!("{}.qlog", odcid));
 
             // The original DCID is chosen by the client. Using create_new()
             // prevents attackers from overwriting existing logs.
@@ -449,7 +449,7 @@ impl Server {
             c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
         }
         c.set_validation(Rc::clone(&self.address_validation));
-        c.set_qlog(self.create_qlog_trace(attempt_key));
+        c.set_qlog(self.create_qlog_trace(&attempt_key.odcid.as_cid_ref()));
         if let Some(cfg) = &self.ech_config {
             if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
@@ -487,20 +487,30 @@ impl Server {
             params,
         );
 
-        if let Ok(mut c) = sconn {
-            self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
-            let c = Rc::new(RefCell::new(ServerConnectionState {
-                c,
-                last_timer: now,
-                active_attempt: Some(attempt_key.clone()),
-            }));
-            cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
-            let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
-            debug_assert!(previous_attempt.is_none());
-            self.process_connection(c, Some(dgram), now)
-        } else {
-            qwarn!([self], "Unable to create connection");
-            None
+        match sconn {
+            Ok(mut c) => {
+                self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
+                let c = Rc::new(RefCell::new(ServerConnectionState {
+                    c,
+                    last_timer: now,
+                    active_attempt: Some(attempt_key.clone()),
+                }));
+                cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
+                let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
+                debug_assert!(previous_attempt.is_none());
+                self.process_connection(c, Some(dgram), now)
+            }
+            Err(e) => {
+                qwarn!([self], "Unable to create connection");
+                if e == crate::Error::VersionNegotiation {
+                    crate::qlog::server_version_information_failed(
+                        &mut self.create_qlog_trace(&attempt_key.odcid.as_cid_ref()),
+                        self.conn_params.get_versions().all(),
+                        initial.version.wire_version(),
+                    )
+                }
+                None
+            }
         }
     }
 
@@ -573,6 +583,13 @@ impl Server {
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
             );
+
+            crate::qlog::server_version_information_failed(
+                &mut self.create_qlog_trace(packet.dcid()),
+                self.conn_params.get_versions().all(),
+                packet.wire_version(),
+            );
+
             return Some(Datagram::new(dgram.destination(), dgram.source(), vn));
         }
 
