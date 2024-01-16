@@ -1210,7 +1210,7 @@ impl Connection {
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
-        if dcid.map_or(false, |d| d != packet.dcid()) {
+        if dcid.map_or(false, |d| d != &packet.dcid()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
@@ -1266,7 +1266,7 @@ impl Connection {
                         if versions.is_empty()
                             || versions.contains(&self.version().wire_version())
                             || versions.contains(&0)
-                            || packet.scid() != self.odcid().unwrap()
+                            || &packet.scid() != self.odcid().unwrap()
                             || matches!(
                                 self.address_validation,
                                 AddressValidationInfo::Retry { .. }
@@ -1373,7 +1373,7 @@ impl Connection {
             self.handle_migration(path, d, migrate, now);
         } else if self.role != Role::Client
             && (packet.packet_type() == PacketType::Handshake
-                || (packet.dcid().len() >= 8 && packet.dcid() == &self.local_initial_source_cid))
+                || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
         {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
