@@ -68,20 +68,15 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
                 initial_max_stream_data_uni: Some(remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)),
                 initial_max_streams_bidi: Some(remote.get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)),
                 initial_max_streams_uni: Some(remote.get_integer(tparams::INITIAL_MAX_STREAMS_UNI)),
-                preferred_address: {
-                    match remote.get_preferred_address() {
-                        Some((paddr, cid)) => {
-                            Some(qlog::events::quic::PreferredAddress {
-                                ip_v4: paddr.ipv4()?.ip().to_string(),
-                                ip_v6: paddr.ipv6()?.ip().to_string(),
-                                port_v4: paddr.ipv4()?.port(),
-                                port_v6: paddr.ipv6()?.port(),
-                                connection_id: cid.connection_id().to_string(),
-                                stateless_reset_token: hex(cid.reset_token()),
-                            })
-                        }
-                        None => None,
-                    }
+                preferred_address: remote.get_preferred_address().and_then(|(paddr, cid)| {
+                    Some(qlog::events::quic::PreferredAddress {
+                        ip_v4: paddr.ipv4()?.ip().to_string(),
+                        ip_v6: paddr.ipv6()?.ip().to_string(),
+                        port_v4: paddr.ipv4()?.port(),
+                        port_v6: paddr.ipv6()?.port(),
+                        connection_id: cid.connection_id().to_string(),
+                        stateless_reset_token: hex(cid.reset_token()),
+                    })
                 },
             });
 
