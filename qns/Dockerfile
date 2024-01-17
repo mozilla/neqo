@@ -1,8 +1,5 @@
 FROM martenseemann/quic-network-simulator-endpoint:latest AS buildimage
 
-# Which branch to build from.
-ARG NEQO_BRANCH=main
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates coreutils curl git make mercurial ssh \
     build-essential clang llvm libclang-dev lld \
@@ -10,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && apt-get autoremove -y && apt-get clean -y \
  && rm -rf /var/lib/apt/lists/*
 
-ARG RUST_VERSION
+ARG RUST_VERSION=stable
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
