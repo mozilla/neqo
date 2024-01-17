@@ -12,20 +12,20 @@ cfg_aliases = "0.2.0"
 
 [dependencies]
 log = { version = "0.4.0", default-features = false }
+enum-map = "2.7.3"
 env_logger = { version = "0.10", default-features = false }
 lazy_static = "1.3.0"
+mio = { version = "0.6.17", optional = true }
 qlog = "0.11.0"
 time = { version = "0.3", features = ["formatting"] }
-
-[dev-dependencies]
-test-fixture = { path = "../test-fixture" }
 nix = { git = "https://github.com/larseggert/nix.git", branch = "feat-tos", features = [
         "socket",
         "net",
         "uio",
 ], optional = true }
-mio = { version = "0.6.17", optional = true }
-enum-map = "2.7.3"
+
+[dev-dependencies]
+test-fixture = { path = "../test-fixture" }
 
 [features]
 deny-warnings = []

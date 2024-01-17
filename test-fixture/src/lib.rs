@@ -11,7 +11,7 @@ use neqo_common::{
     event::Provider,
     hex,
     qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, Role,
+    qtrace, Datagram, Decoder, IpTosEcn, Role,
 };
 
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};

@@ -19,7 +19,7 @@ use std::{
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    cc::CongestionControlAlgorithm,
+    cc::{CongestionControlAlgorithm, MAX_DATAGRAM_SIZE},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
