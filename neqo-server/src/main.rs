@@ -836,6 +836,15 @@ fn main() -> Result<(), io::Error> {
     init_db(args.db.clone());
 
     if let Some(testcase) = args.qns_test.as_ref() {
+        assert!(
+            args.quic_parameters.quic_version.is_empty(),
+            "-V and --qns-test are mutually exclusive. Each qns testcase itself dictates the supported versions.",
+        );
+        // Quic Interop Runner expects the server to support `Version1` only.
+        // Exceptions are testcases `versionnegotiation` and `v2`. Neither are
+        // supported by Neqo. Thus always set `Version1`.
+        args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+
         match testcase.as_str() {
             "http3" => (),
             "zerortt" => {
