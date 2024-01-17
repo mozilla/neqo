@@ -30,7 +30,7 @@ use std::{
 use test_fixture::{
     self, addr, addr_v4,
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, now,
+    fixture_init, new_neqo_qlog, now,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -498,6 +498,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     };
 
     fixture_init();
+    let (log, _contents) = new_neqo_qlog();
     let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
@@ -508,6 +509,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
         now(),
     )
     .unwrap();
+    client.set_qlog(log);
     let spa = match preferred {
         SocketAddr::V6(v6) => PreferredAddress::new(None, Some(v6)),
         SocketAddr::V4(v4) => PreferredAddress::new(Some(v4), None),

@@ -323,6 +323,10 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
     pub fn connection_id(&self) -> &ConnectionId {
         &self.cid
     }
+
+    pub fn reset_token(&self) -> &SRT {
+        &self.srt
+    }
 }
 
 pub type RemoteConnectionIdEntry = ConnectionIdEntry<[u8; 16]>;

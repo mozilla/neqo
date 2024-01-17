@@ -7,7 +7,12 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::{event::Provider, hex, qtrace, Datagram, Decoder};
+use neqo_common::{
+    event::Provider,
+    hex,
+    qlog::{new_trace, NeqoQlog},
+    qtrace, Datagram, Decoder, Role,
+};
 
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
@@ -16,13 +21,17 @@ use neqo_transport::{
     ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
 };
 
+use qlog::{events::EventImportance, streamer::QlogStreamer};
+
 use std::{
     cell::RefCell,
     cmp::max,
     convert::TryFrom,
+    io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -130,7 +139,8 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 #[must_use]
 pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
-    Connection::new_client(
+    let (log, _contents) = new_neqo_qlog();
+    let mut client = Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
@@ -139,7 +149,9 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
-    .expect("create a client")
+    .expect("create a client");
+    client.set_qlog(log);
+    client
 }
 
 /// Create a transport client with default configuration.
@@ -166,7 +178,7 @@ pub fn default_server_h3() -> Connection {
 #[must_use]
 pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
     fixture_init();
-
+    let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
@@ -174,6 +186,7 @@ pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Con
         params.ack_ratio(255),
     )
     .expect("create a server");
+    c.set_qlog(log);
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
@@ -323,3 +336,56 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         b.map(|b| Datagram::new(d.source(), d.destination(), b)),
     )
 }
+
+#[derive(Clone)]
+pub struct SharedVec {
+    buf: Arc<Mutex<Cursor<Vec<u8>>>>,
+}
+
+impl Write for SharedVec {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        self.buf.lock().unwrap().write(buf)
+    }
+    fn flush(&mut self) -> Result<()> {
+        self.buf.lock().unwrap().flush()
+    }
+}
+
+impl ToString for SharedVec {
+    fn to_string(&self) -> String {
+        String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap()
+    }
+}
+
+/// Returns a pair of new enabled `NeqoQlog` that is backed by a Vec<u8> together with a
+/// `Cursor<Vec<u8>>` that can be used to read the contents of the log.
+/// # Panics
+/// Panics if the log cannot be created.
+#[must_use]
+pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
+    let mut trace = new_trace(Role::Client);
+    // Set reference time to 0.0 for testing.
+    trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+    let buf = SharedVec {
+        buf: Arc::default(),
+    };
+    let contents = buf.clone();
+    let streamer = QlogStreamer::new(
+        qlog::QLOG_VERSION.to_string(),
+        None,
+        None,
+        None,
+        std::time::Instant::now(),
+        trace,
+        EventImportance::Base,
+        Box::new(buf),
+    );
+    let log = NeqoQlog::enabled(streamer, "");
+    (log.expect("to be able to write to new log"), contents)
+}
+
+pub const EXPECTED_LOG_HEADER: &str = concat!(
+    "\u{1e}",
+    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"Example qlog trace description","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    "\n"
+);
