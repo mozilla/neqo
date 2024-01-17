@@ -18,12 +18,14 @@ use neqo_crypto::random;
 use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell};
-use std::cmp::max;
 use std::cmp::min;
 use std::convert::AsRef;
 use std::convert::TryFrom;
 use std::ops::Deref;
 use std::rc::Rc;
+
+#[cfg(not(feature = "fuzzing"))]
+use std::cmp::max;
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
@@ -33,6 +35,9 @@ pub const CONNECTION_ID_SEQNO_PREFERRED: u64 = 1;
 const CONNECTION_ID_SEQNO_ODCID: u64 = u64::MAX;
 /// A special value.  See `ConnectionIdEntry::empty_remote`.
 const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
+
+#[cfg(feature = "fuzzing")]
+pub const INITIAL_CID_FUZZING: &[u8; 8] = &[0xb; 8];
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
@@ -46,11 +51,17 @@ impl ConnectionId {
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
+    #[cfg(not(feature = "fuzzing"))]
     pub fn generate_initial() -> Self {
         let v = random(1);
         // Bias selection toward picking 8 (>50% of the time).
         let len: usize = max(8, 5 + (v[0] & (v[0] >> 4))).into();
         Self::generate(len)
+    }
+
+    #[cfg(feature = "fuzzing")]
+    pub fn generate_initial() -> Self {
+        Self::from(INITIAL_CID_FUZZING)
     }
 
     pub fn as_cid_ref(&self) -> ConnectionIdRef {
