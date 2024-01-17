@@ -168,7 +168,7 @@ mod test {
     );
 
     #[test]
-    fn test_new_neqo_qlog() {
+    fn new_neqo_qlog() {
         let (_log, contents) = new_neqo_qlog();
         assert_eq!(contents.to_string(), EXPECTED_LOG_HEADER);
     }
