@@ -2,7 +2,8 @@ name: QUIC Network Simulator
 
 on:
   schedule:
-    - cron: '42 3 * * *' # Runs at 03:42 UTC (m and h chosen arbitrarily) every day.
+    - cron: '42 3 * * 2,5' # Runs at 03:42 UTC (m and h chosen arbitrarily) twice a week.
+  workflow_dispatch:
   pull_request:
     branch: ["main"]
     paths:
