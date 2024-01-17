@@ -48,6 +48,10 @@ def main():
         "last_bytes_in_flight": 0,
         "last_state": ("SlowStart", 0),
 
+        # color background depending on state
+        "bg_state": [],
+        "bg_time": [],
+
         # event occurences
         "p": {}, # pn -> y-axis (bytes in flight after packet sent)
         "ps": defaultdict(lambda: defaultdict(lambda: [])), # x/y coords of packet_sent/_acked/_lost
@@ -63,6 +67,9 @@ def main():
             data[this]["bif"].append(data[this]["last_bytes_in_flight"])
             data[this]["cwnd"].append(int(result.group(4)))
             state = result.group(5)
+            if data[this]["last_state"][0] != state:
+                data[this]["bg_state"].append(state)
+                data[this]["bg_time"].append(now)
             data[this]["last_state"] = (state, now)
             data[this]["new_acked"] = result.group(6)
             if data[this]["limited"]:
@@ -79,8 +86,12 @@ def main():
                     data[this]["last_bytes_in_flight"] += packet_size
                     data[this]["p"][pn] = data[this]["last_bytes_in_flight"]
                     if data[this]["last_state"][0] == 'RecoveryStart':
+                        data[this]["bg_state"].append('CongestionAvoidance')
+                        data[this]["bg_time"].append(now)
                         data[this]["last_state"] = ('CongestionAvoidance', now)
                     if data[this]["last_state"] == 'PersistentCongestion':
+                        data[this]["bg_state"].append('SlowStart')
+                        data[this]["bg_time"].append(now)
                         data[this]["last_state"] = ('SlowStart', now)
                 # only remember events for packets where we sent the packet
                 if pn in data[this]["p"]:
@@ -95,6 +106,9 @@ def main():
             data[this]["bif"].append(data[this]["last_bytes_in_flight"])
             data[this]["cwnd"].append(int(result.group(4)))
             state = result.group(5)
+            if data[this]["last_state"][0] != state:
+                data[this]["bg_state"].append(state)
+                data[this]["bg_time"].append(now)
             data[this]["last_state"] = (state, now)
 
     output = ""
@@ -105,14 +119,18 @@ def main():
             output = el
     fig, axs = plt.subplots(2, 1)
 
+    data[output]['bg_time'].append(data[output]['time'][-1])
+    for ax in axs:
+        color_background(ax, data[output]['bg_time'], data[output]['bg_state'])
+
     # add plots
     graph_pn(axs[0], data[output])
     graph_cwnd(axs[1], data[output])
 
+
     # configure graph
     axs[0].set_title(sys.argv[1].split('/')[-1])
     for ax in axs:
-        ax.grid()
         ax.legend()
     plt.show()
 
@@ -138,6 +156,25 @@ def graph_cwnd(ax, output_data):
         ax.scatter(output_data["ps"][event]["time"], output_data["ps"][event]["bif"], label=event, s=10, color=COLORS[event])
     ax.set_xlabel('time in s')
     ax.set_ylabel('bytes')
+
+def color_background(ax, time, states):
+    # change background depending on congestion controller state
+    state_colors = {
+        "SlowStart": "green",
+        "CongestionAvoidance": "blue",
+        "RecoveryStart": "gray",
+        "Recovery": "orange",
+        "PersistentCongestion": "purple",
+    }
+    legend = set()
+    for (time_from, time_to, state) in zip(time[:-1], time[1:], states):
+        color = state_colors[state]
+        if state in legend:
+            ax.axvspan(time_from, time_to, facecolor=color, alpha=0.3)
+        else:
+            legend.add(state)
+            ax.axvspan(time_from, time_to, facecolor=color, alpha=0.3, label=state)
+
 
 if __name__ == '__main__':
     main()
