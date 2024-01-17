@@ -1,13 +1,16 @@
-#! /bin/bash
+#! /usr/bin/env bash
 
-cd "$(dirname "$0")"
+pushd "$(dirname "$0")" > /dev/null
 set -e
 
 [[ -n "$1" ]] || { echo "Usage: $0 <version>"; exit 1; }
 
-for entry in `find . -mindepth 2 -name Cargo.toml -print`; do
-    echo $entry
-    line=$(grep -n -m1 "version" $entry | cut -d: -f2)
-    CURRENT=$(echo ${line} | awk -F'"' '{print $2}')
-    sed -i "" "s/$CURRENT/$1/g" $entry
-done
+while IFS= read -r -d '' entry
+do
+    echo "$entry"
+    line=$(grep -n -m1 "version" "$entry" | cut -d: -f2)
+    current=$(echo "${line}" | awk -F'"' '{print $2}')
+    sed -i.bak "s/$current/$1/g" "$entry" && rm "$entry.bak"
+done < <(find . -mindepth 2 -name Cargo.toml -print0)
+
+popd > /dev/null
