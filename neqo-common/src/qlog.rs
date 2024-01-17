@@ -180,8 +180,8 @@ mod test {
         assert_eq!(
             contents.to_string(),
             format!(
-                "{EXPECTED_LOG_HEADER}{}",
-                EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
+                "{EXPECTED_LOG_HEADER}{e}",
+                e = EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
             )
         );
     }
