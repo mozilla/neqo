@@ -15,7 +15,6 @@ qlog = "0.11.0"
 time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
-const_format = "~0.2.32"
 test-fixture = { path = "../test-fixture" }
 
 [features]

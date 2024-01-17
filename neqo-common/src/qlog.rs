@@ -152,16 +152,15 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
 
 #[cfg(test)]
 mod test {
-    use const_format::concatcp;
     use qlog::events::Event;
-    use test_fixture::{new_neqo_qlog, EXPECTED_LOG_HEADER};
+    use test_fixture::EXPECTED_LOG_HEADER;
 
     const EV_DATA: qlog::events::EventData =
         qlog::events::EventData::SpinBitUpdated(qlog::events::connectivity::SpinBitUpdated {
             state: true,
         });
 
-    const EXPECTED_LOG_EVENT: &str = concatcp!(
+    const EXPECTED_LOG_EVENT: &str = concat!(
         "\u{1e}",
         r#"{"time":0.0,"name":"connectivity:spin_bit_updated","data":{"state":true}}"#,
         "\n"
@@ -169,13 +168,13 @@ mod test {
 
     #[test]
     fn new_neqo_qlog() {
-        let (_log, contents) = new_neqo_qlog();
+        let (_log, contents) = test_fixture::new_neqo_qlog();
         assert_eq!(contents.to_string(), EXPECTED_LOG_HEADER);
     }
 
     #[test]
     fn add_event() {
-        let (mut log, contents) = new_neqo_qlog();
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
         log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
         assert_eq!(
             contents.to_string(),

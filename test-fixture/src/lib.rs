@@ -35,7 +35,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use const_format::concatcp;
 use lazy_static::lazy_static;
 
 pub mod assertions;
@@ -367,8 +366,10 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
-    let buf = Arc::new(Mutex::new(Cursor::new(Vec::new())));
-    let contents = Arc::clone(&buf);
+    let buf = SharedVec {
+        buf: Arc::default(),
+    };
+    let contents = buf.clone();
     let streamer = QlogStreamer::new(
         qlog::QLOG_VERSION.to_string(),
         None,
@@ -377,16 +378,13 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         std::time::Instant::now(),
         trace,
         EventImportance::Base,
-        Box::new(SharedVec { buf }),
+        Box::new(buf.clone()),
     );
     let log = NeqoQlog::enabled(streamer, "");
-    (
-        log.expect("to be able to write to new log"),
-        SharedVec { buf: contents },
-    )
+    (log.expect("to be able to write to new log"), contents)
 }
 
-pub const EXPECTED_LOG_HEADER: &str = concatcp!(
+pub const EXPECTED_LOG_HEADER: &str = concat!(
     "\u{1e}",
     r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"Example qlog trace description","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
     "\n"
