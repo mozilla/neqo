@@ -378,7 +378,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         std::time::Instant::now(),
         trace,
         EventImportance::Base,
-        Box::new(buf.clone()),
+        Box::new(buf),
     );
     let log = NeqoQlog::enabled(streamer, "");
     (log.expect("to be able to write to new log"), contents)
