@@ -174,7 +174,7 @@ mod test {
     }
 
     #[test]
-    fn test_add_event() {
+    fn add_event() {
         let (mut log, contents) = new_neqo_qlog();
         log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
         assert_eq!(
