@@ -119,8 +119,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
         let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
             old: None,
             new: match new {
-                State::Init => ConnectionState::Attempted,
-                State::WaitInitial => ConnectionState::Attempted,
+                State::Init | State::WaitInitial => ConnectionState::Attempted,
                 State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                 State::Connected => ConnectionState::HandshakeCompleted,
                 State::Confirmed => ConnectionState::HandshakeConfirmed,

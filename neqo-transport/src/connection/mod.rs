@@ -1019,7 +1019,7 @@ impl Connection {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
-            (State::Init, Role::Server) | (State::WaitInitial, Role::Server) => {
+            (State::Init | State::WaitInitial, Role::Server) => {
                 return Output::None;
             }
             _ => {
@@ -1292,8 +1292,7 @@ impl Connection {
                 self.handle_retry(packet, now);
                 return Ok(PreprocessResult::Next);
             }
-            (PacketType::Handshake, State::WaitInitial, Role::Client)
-            | (PacketType::Short, State::WaitInitial, Role::Client) => {
+            (PacketType::Handshake | PacketType::Short, State::WaitInitial, Role::Client) => {
                 // This packet can't be processed now, but it could be a sign
                 // that Initial packets were lost.
                 // Resend Initial CRYPTO frames immediately a few times just
@@ -1306,9 +1305,7 @@ impl Connection {
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                 }
             }
-            (PacketType::VersionNegotiation, ..)
-            | (PacketType::Retry, ..)
-            | (PacketType::OtherVersion, ..) => {
+            (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
                 self.stats
                     .borrow_mut()
                     .pkt_dropped(format!("{:?}", packet.packet_type()));
