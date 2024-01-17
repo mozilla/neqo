@@ -7,27 +7,29 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
-use std::mem;
-use std::net::{IpAddr, SocketAddr};
-use std::rc::Rc;
-use std::time::{Duration, Instant};
-
-use crate::ackrate::{AckRate, PeerAckDelay};
-use crate::cc::CongestionControlAlgorithm;
-use crate::cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry};
-use crate::frame::{
-    FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID,
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    fmt::{self, Display},
+    mem,
+    net::{IpAddr, SocketAddr},
+    rc::Rc,
+    time::{Duration, Instant},
 };
-use crate::packet::PacketBuilder;
-use crate::recovery::RecoveryToken;
-use crate::rtt::RttEstimate;
-use crate::sender::PacketSender;
-use crate::stats::FrameStats;
-use crate::tracking::{PacketNumberSpace, SentPacket};
-use crate::{Error, Res};
+
+use crate::{
+    ackrate::{AckRate, PeerAckDelay},
+    cc::CongestionControlAlgorithm,
+    cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
+    frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
+    packet::PacketBuilder,
+    recovery::RecoveryToken,
+    rtt::RttEstimate,
+    sender::PacketSender,
+    stats::FrameStats,
+    tracking::{PacketNumberSpace, SentPacket},
+    Error, Res,
+};
 
 use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder};
 use neqo_crypto::random;
@@ -664,7 +666,7 @@ impl Path {
 
     /// Set the remote connection ID based on the peer's choice.
     /// This is only valid during the handshake.
-    pub fn set_remote_cid(&mut self, cid: &ConnectionIdRef) {
+    pub fn set_remote_cid(&mut self, cid: ConnectionIdRef) {
         self.remote_cid
             .as_mut()
             .unwrap()

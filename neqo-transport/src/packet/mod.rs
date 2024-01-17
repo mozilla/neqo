@@ -673,13 +673,12 @@ impl<'a> PublicPacket<'a> {
         self.packet_type
     }
 
-    pub fn dcid(&self) -> &ConnectionIdRef<'a> {
-        &self.dcid
+    pub fn dcid(&self) -> ConnectionIdRef<'a> {
+        self.dcid
     }
 
-    pub fn scid(&self) -> &ConnectionIdRef<'a> {
+    pub fn scid(&self) -> ConnectionIdRef<'a> {
         self.scid
-            .as_ref()
             .expect("should only be called for long header packets")
     }
 

@@ -374,7 +374,7 @@ fn migration(mut client: Connection) {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    let probe_cid = ConnectionId::from(get_cid(&probe));
 
     let resp = server.process(Some(&probe), now).dgram().unwrap();
     assert_v4_path(&resp, true);
@@ -814,7 +814,7 @@ fn retire_all() {
     .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+    let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
     server.test_frame_writer = Some(Box::new(RetireAll { cid_gen }));
     let ncid = send_something(&mut server, now());
@@ -852,7 +852,7 @@ fn retire_prior_to_migration_failure() {
     .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+    let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
     client
         .migrate(Some(addr_v4()), Some(addr_v4()), false, now())
@@ -862,7 +862,7 @@ fn retire_prior_to_migration_failure() {
     let probe = client.process_output(now()).dgram().unwrap();
     assert_v4_path(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    let probe_cid = ConnectionId::from(get_cid(&probe));
     assert_ne!(original_cid, probe_cid);
 
     // Have the server receive the probe, but separately have it decide to
@@ -907,7 +907,7 @@ fn retire_prior_to_migration_success() {
     .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+    let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
     client
         .migrate(Some(addr_v4()), Some(addr_v4()), false, now())
@@ -917,7 +917,7 @@ fn retire_prior_to_migration_success() {
     let probe = client.process_output(now()).dgram().unwrap();
     assert_v4_path(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    let probe_cid = ConnectionId::from(get_cid(&probe));
     assert_ne!(original_cid, probe_cid);
 
     // Have the server receive the probe, but separately have it decide to
