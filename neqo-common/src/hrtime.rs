@@ -301,7 +301,9 @@ impl Time {
         #[cfg(windows)]
         {
             if let Some(p) = self.active {
-                unsafe { timeBeginPeriod(p.as_uint()); };
+                unsafe {
+                    timeBeginPeriod(p.as_uint());
+                };
             }
         }
     }
@@ -311,7 +313,9 @@ impl Time {
         #[cfg(windows)]
         {
             if let Some(p) = self.active {
-                unsafe { timeEndPeriod(p.as_uint()); };
+                unsafe {
+                    timeEndPeriod(p.as_uint());
+                };
             }
         }
     }
