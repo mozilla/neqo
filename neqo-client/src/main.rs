@@ -499,10 +499,13 @@ impl StreamHandlerType {
         url: &Url,
         args: &Args,
         all_paths: &mut Vec<PathBuf>,
+        client: &mut Http3Client,
+        client_stream_id: StreamId,
     ) -> Box<dyn StreamHandler> {
         match handler_type {
             Self::Download => {
                 let out_file = get_output_file(url, &args.output_dir, all_paths);
+                client.stream_close_send(client_stream_id).unwrap();
                 Box::new(DownloadStreamHandler { out_file })
             }
             Self::Upload => Box::new(UploadStreamHandler {
@@ -657,6 +660,8 @@ impl<'a> URLHandler<'a> {
                     &url,
                     self.args,
                     &mut self.all_paths,
+                    client,
+                    client_stream_id,
                 );
                 self.stream_handlers.insert(client_stream_id, handler);
                 true
