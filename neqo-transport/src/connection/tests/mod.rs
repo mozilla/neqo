@@ -42,6 +42,7 @@ mod handshake;
 mod idle;
 mod keys;
 mod migration;
+mod ping;
 mod priority;
 mod recovery;
 mod resumption;

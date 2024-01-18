@@ -92,6 +92,7 @@ pub enum RecoveryToken {
     Ack(AckToken),
     Crypto(CryptoRecoveryToken),
     HandshakeDone,
+    Ping,
     KeepAlive, // Special PING.
     NewToken(usize),
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),

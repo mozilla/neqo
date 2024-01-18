@@ -268,6 +268,7 @@ pub struct Connection {
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
     new_token: NewTokenState,
+    ping_pending: bool,
     stats: StatsCell,
     qlog: NeqoQlog,
     /// A session ticket was received without NEW_TOKEN,
@@ -421,6 +422,7 @@ impl Connection {
             quic_datagrams,
             #[cfg(test)]
             test_frame_writer: None,
+            ping_pending: false,
         };
         c.stats.borrow_mut().init(format!("{c}"));
         Ok(c)
@@ -2049,11 +2051,7 @@ impl Connection {
         };
         if probe {
             // Nothing ack-eliciting and we need to probe; send PING.
-            debug_assert_ne!(builder.remaining(), 0);
-            builder.encode_varint(crate::frame::FRAME_TYPE_PING);
-            let stats = &mut self.stats.borrow_mut().frame_tx;
-            stats.ping += 1;
-            stats.all += 1;
+            self.ping_pending = true;
         }
         probe
     }
@@ -2122,6 +2120,16 @@ impl Connection {
         ack_eliciting |= self.maybe_probe(path, force_probe, builder, ack_end, &mut tokens, now);
         // If this is not the primary path, this should be ack-eliciting.
         debug_assert!(primary || ack_eliciting);
+
+        // Add a PING frame if we need to.
+        if self.ping_pending {
+            debug_assert_ne!(builder.remaining(), 0);
+            builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+            self.ping_pending = false;
+            let stats = &mut self.stats.borrow_mut().frame_tx;
+            stats.ping += 1;
+            stats.all += 1;
+        }
 
         // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
         // And avoid padding packets that otherwise only contain ACK because adding PADDING
@@ -2786,6 +2794,7 @@ impl Connection {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
+                    RecoveryToken::Ping => self.ping_pending = true,
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
@@ -2852,6 +2861,7 @@ impl Connection {
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     // We only worry when these are lost
                     RecoveryToken::HandshakeDone => (),
+                    RecoveryToken::Ping => (),
                 }
             }
         }
@@ -3163,6 +3173,11 @@ impl Connection {
     pub fn send_datagram(&mut self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
+    }
+
+    /// Send a PING frame.
+    pub fn send_ping(&mut self) {
+        self.ping_pending = true;
     }
 }
 
