@@ -92,7 +92,13 @@ pub struct Datagram {
 }
 
 impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: Option<u8>, ttl: Option<u8>, d: V) -> Self {
+    pub fn new<V: Into<Vec<u8>>>(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: Option<u8>,
+        ttl: Option<u8>,
+        d: V,
+    ) -> Self {
         Self {
             src,
             dst,
@@ -120,7 +126,8 @@ impl Datagram {
     #[must_use]
     pub fn ttl(&self) -> Option<u8> {
         self.ttl
-    }}
+    }
+}
 
 impl Deref for Datagram {
     type Target = Vec<u8>;

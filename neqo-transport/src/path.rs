@@ -580,7 +580,7 @@ impl Path {
             rtt: RttEstimate::default(),
             sender,
             tos: IpTosEcn::NotEct, // TODO: Default to Ect0 when ECN is supported.
-            ttl: 64, // This is the default TTL on many OSes.
+            ttl: 64,               // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
             qlog,
@@ -703,7 +703,13 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(self.local, self.remote, Some(self.tos.into()), Some(self.ttl), payload)
+        Datagram::new(
+            self.local,
+            self.remote,
+            Some(self.tos.into()),
+            Some(self.ttl),
+            payload,
+        )
     }
 
     /// Get local address as `SocketAddr`
