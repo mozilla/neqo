@@ -252,7 +252,7 @@ impl UdpIo for std::net::UdpSocket {
 
     #[cfg(not(posix_socket))]
     fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)> {
-        *tos = 0xff;
+        *tos = IpTosEcn::NotEct.into();
         *ttl = 0xff;
         self.recv_from(&mut buf[..])
     }
@@ -277,7 +277,7 @@ impl UdpIo for mio::net::UdpSocket {
 
     #[cfg(not(posix_socket))]
     fn recv(&self, buf: &mut [u8], tos: &mut u8, ttl: &mut u8) -> io::Result<(usize, SocketAddr)> {
-        *tos = 0xff;
+        *tos = IpTosEcn::NotEct.into();
         *ttl = 0xff;
         self.recv_from(&mut buf[..])
     }
@@ -340,15 +340,15 @@ mod test {
     const SOCK_V4: &SocketAddr = &SocketAddr::new(IpAddr::V4(ADDR_V4), 0);
     const SOCK_V6: &SocketAddr = &SocketAddr::new(IpAddr::V6(ADDR_V6), 0);
 
-    fn test_bind(sock_addr: &SocketAddr) {
+    fn bind_ok(sock_addr: &SocketAddr) {
         assert!(bind(sock_addr).is_ok());
     }
 
-    fn test_bind_fail(sock_addr: &SocketAddr) {
+    fn bind_err(sock_addr: &SocketAddr) {
         assert!(bind(sock_addr).is_err());
     }
 
-    fn test_io(sock_addr: &SocketAddr) {
+    fn io(sock_addr: &SocketAddr) {
         // We reconfigure the sockets to blocking mode for this test, so we don't have to poll.
         let server = match bind(sock_addr) {
             Ok(s) => {
@@ -396,34 +396,34 @@ mod test {
     }
 
     #[test]
-    fn test_bind_v4() {
-        test_bind(SOCK_V4);
+    fn bind_v4() {
+        bind_ok(SOCK_V4);
     }
 
     #[test]
-    fn test_bind_v6() {
-        test_bind(SOCK_V6);
+    fn bind_v6() {
+        bind_ok(SOCK_V6);
     }
 
     #[test]
-    fn test_bind_fail_v4() {
+    fn bind_err_v4() {
         const INVAL_V4: &SocketAddr = &SocketAddr::new(IpAddr::V4(ADDR_V4_INVALID), 0);
-        test_bind_fail(INVAL_V4);
+        bind_err(INVAL_V4);
     }
 
     #[test]
-    fn test_bind_fail_v6() {
+    fn bind_err_v6() {
         const INVAL_V6: &SocketAddr = &SocketAddr::new(IpAddr::V6(ADDR_V6_INVALID), 0);
-        test_bind_fail(INVAL_V6);
+        bind_err(INVAL_V6);
     }
 
     #[test]
-    fn test_io_v4() {
-        test_io(SOCK_V4);
+    fn io_v4() {
+        io(SOCK_V4);
     }
 
     #[test]
-    fn test_io_v6() {
-        test_io(SOCK_V6);
+    fn io_v6() {
+        io(SOCK_V6);
     }
 }
