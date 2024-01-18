@@ -606,7 +606,7 @@ fn read_dgram(
         eprintln!("zero length datagram received?");
         Ok(None)
     } else {
-        Ok(Some(Datagram::new(remote_addr, *local_address, &buf[..sz])))
+        Ok(Some(Datagram::new(remote_addr, *local_address, None, None, &buf[..sz])))
     }
 }
 

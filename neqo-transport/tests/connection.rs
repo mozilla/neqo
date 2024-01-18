@@ -39,6 +39,8 @@ fn truncate_long_packet() {
     let truncated = Datagram::new(
         dupe.source(),
         dupe.destination(),
+        dupe.tos(),
+        dupe.ttl(),
         &dupe[..(dupe.len() - tail)],
     );
     let hs_probe = client.process(Some(&truncated), now()).dgram();
@@ -108,6 +110,8 @@ fn reorder_server_initial() {
     let reordered = Datagram::new(
         server_initial.source(),
         server_initial.destination(),
+        server_initial.tos(),
+        server_initial.ttl(),
         packet,
     );
 
@@ -182,6 +186,8 @@ fn overflow_crypto() {
         let dgram = Datagram::new(
             server_initial.source(),
             server_initial.destination(),
+            server_initial.tos(),
+            server_initial.ttl(),
             packet,
         );
         client.process_input(&dgram, now());

@@ -349,7 +349,7 @@ impl Server {
                         &initial.dst_cid,
                     );
                     if let Ok(p) = packet {
-                        let retry = Datagram::new(dgram.destination(), dgram.source(), p);
+                        let retry = Datagram::new(dgram.destination(), dgram.source(), dgram.tos(), dgram.ttl(), p);
                         Some(retry)
                     } else {
                         qerror!([self], "unable to encode retry, dropping packet");
@@ -594,7 +594,7 @@ impl Server {
                 packet.wire_version(),
             );
 
-            return Some(Datagram::new(dgram.destination(), dgram.source(), vn));
+            return Some(Datagram::new(dgram.destination(), dgram.source(), dgram.tos(), dgram.ttl(), vn));
         }
 
         match packet.packet_type() {

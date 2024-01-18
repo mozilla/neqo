@@ -430,7 +430,7 @@ fn process_loop(
                         break 'read;
                     }
                     if sz > 0 {
-                        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                        let d = Datagram::new(remote, *local_addr, None, None, &buf[..sz]);
                         datagrams.push(d);
                     }
                 }
@@ -1367,7 +1367,7 @@ mod old {
                             break 'read;
                         }
                         if sz > 0 {
-                            let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                            let d = Datagram::new(remote, *local_addr, None, None, &buf[..sz]);
                             client.process_input(&d, Instant::now());
                             handler.maybe_key_update(client)?;
                         }
