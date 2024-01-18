@@ -150,3 +150,27 @@ impl std::fmt::Debug for Datagram {
         )
     }
 }
+
+#[cfg(test)]
+use test_fixture::datagram;
+
+#[test]
+fn ecn() {
+    assert_eq!(IpTosEcn::from(0b00), IpTosEcn::NotEct);
+    assert_eq!(IpTosEcn::from(0b01), IpTosEcn::Ect1);
+    assert_eq!(IpTosEcn::from(0b10), IpTosEcn::Ect0);
+    assert_eq!(IpTosEcn::from(0b11), IpTosEcn::Ce);
+    assert_eq!(u8::from(IpTosEcn::NotEct), 0b00);
+    assert_eq!(u8::from(IpTosEcn::Ect1), 0b01);
+    assert_eq!(u8::from(IpTosEcn::Ect0), 0b10);
+    assert_eq!(u8::from(IpTosEcn::Ce), 0b11);
+}
+
+#[test]
+fn fmt_datagram() {
+    let d = datagram([0; 1].to_vec());
+    assert_eq!(
+        format!("{:?}", d),
+        "Datagram TOS Some(2) TTL Some(128) [fe80::1]:443->[fe80::1]:443: [1]: 00".to_string()
+    );
+}
