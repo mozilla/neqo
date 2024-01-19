@@ -736,11 +736,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
             return (test, String::from("OK"));
         }
         Test::H9 => test_h9(&nctx, &mut client),
-        Test::H3 => test_h3(&nctx, peer, client, test),
+        Test::H3 | Test::D => test_h3(&nctx, peer, client, test),
         Test::VN => unimplemented!(),
-        Test::R => test_h3_rz(&nctx, peer, client, test),
-        Test::Z => test_h3_rz(&nctx, peer, client, test),
-        Test::D => test_h3(&nctx, peer, client, test),
+        Test::R | Test::Z => test_h3_rz(&nctx, peer, client, test),
     };
 
     if let Err(e) = res {

@@ -19,7 +19,7 @@ use qlog::events::{
         AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
         PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
     },
-    Event, EventData, RawInfo,
+    EventData, RawInfo,
 };
 
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
@@ -37,7 +37,7 @@ use crate::{
 };
 
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
-    qlog.add_event(|| {
+    qlog.add_event_data(|| {
         let remote = tph.remote();
         let ev_data = EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
@@ -61,20 +61,26 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
                 max_udp_payload_size: Some(remote.get_integer(tparams::MAX_UDP_PAYLOAD_SIZE) as u32),
                 ack_delay_exponent: Some(remote.get_integer(tparams::ACK_DELAY_EXPONENT) as u16),
                 max_ack_delay: Some(remote.get_integer(tparams::MAX_ACK_DELAY) as u16),
-                // TODO(hawkinsw@obs.cr): We do not yet handle ACTIVE_CONNECTION_ID_LIMIT in tparams yet.
-                active_connection_id_limit: None,
+                active_connection_id_limit: Some(remote.get_integer(tparams::ACTIVE_CONNECTION_ID_LIMIT) as u32),
                 initial_max_data: Some(remote.get_integer(tparams::INITIAL_MAX_DATA)),
                 initial_max_stream_data_bidi_local: Some(remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL)),
                 initial_max_stream_data_bidi_remote: Some(remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)),
                 initial_max_stream_data_uni: Some(remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI)),
                 initial_max_streams_bidi: Some(remote.get_integer(tparams::INITIAL_MAX_STREAMS_BIDI)),
                 initial_max_streams_uni: Some(remote.get_integer(tparams::INITIAL_MAX_STREAMS_UNI)),
-                // TODO(hawkinsw@obs.cr): We do not yet handle PREFERRED_ADDRESS in tparams yet.
-                preferred_address: None,
+                preferred_address: remote.get_preferred_address().and_then(|(paddr, cid)| {
+                    Some(qlog::events::quic::PreferredAddress {
+                        ip_v4: paddr.ipv4()?.ip().to_string(),
+                        ip_v6: paddr.ipv6()?.ip().to_string(),
+                        port_v4: paddr.ipv4()?.port(),
+                        port_v6: paddr.ipv6()?.port(),
+                        connection_id: cid.connection_id().to_string(),
+                        stateless_reset_token: hex(cid.reset_token()),
+                    })
+                }),
             });
 
-        // This event occurs very early, so just mark the time as 0.0.
-        Some(Event::with_time(0.0, ev_data))
+        Some(ev_data)
     });
 }
 
@@ -113,8 +119,7 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
         let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
             old: None,
             new: match new {
-                State::Init => ConnectionState::Attempted,
-                State::WaitInitial => ConnectionState::Attempted,
+                State::Init | State::WaitInitial => ConnectionState::Attempted,
                 State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
                 State::Connected => ConnectionState::HandshakeCompleted,
                 State::Confirmed => ConnectionState::HandshakeConfirmed,
@@ -164,6 +169,25 @@ pub fn client_version_information_negotiated(
     });
 }
 
+pub fn server_version_information_failed(
+    qlog: &mut NeqoQlog,
+    server: &[Version],
+    client: WireVersion,
+) {
+    qlog.add_event_data(|| {
+        Some(EventData::VersionInformation(VersionInformation {
+            client_versions: Some(vec![format!("{client:02x}")]),
+            server_versions: Some(
+                server
+                    .iter()
+                    .map(|v| format!("{:02x}", v.wire_version()))
+                    .collect(),
+            ),
+            chosen_version: None,
+        }))
+    });
+}
+
 pub fn packet_sent(
     qlog: &mut NeqoQlog,
     pt: PacketType,
@@ -175,8 +199,8 @@ pub fn packet_sent(
         let mut d = Decoder::from(body);
         let header = PacketHeader::with_type(to_qlog_pkt_type(pt), Some(pn), None, None, None);
         let raw = RawInfo {
-            length: None,
-            payload_length: Some(plen as u64),
+            length: Some(plen as u64),
+            payload_length: None,
             data: None,
         };
 
@@ -207,18 +231,18 @@ pub fn packet_sent(
     });
 }
 
-pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
+pub fn packet_dropped(qlog: &mut NeqoQlog, public_packet: &PublicPacket) {
     qlog.add_event_data(|| {
         let header = PacketHeader::with_type(
-            to_qlog_pkt_type(payload.packet_type()),
+            to_qlog_pkt_type(public_packet.packet_type()),
             None,
             None,
             None,
             None,
         );
         let raw = RawInfo {
-            length: None,
-            payload_length: Some(payload.len() as u64),
+            length: Some(public_packet.len() as u64),
+            payload_length: None,
             data: None,
         };
 
@@ -268,8 +292,8 @@ pub fn packet_received(
             None,
         );
         let raw = RawInfo {
-            length: None,
-            payload_length: Some(public_packet.len() as u64),
+            length: Some(public_packet.len() as u64),
+            payload_length: None,
             data: None,
         };
 
