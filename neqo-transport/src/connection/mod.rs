@@ -1272,15 +1272,13 @@ impl Connection {
                         // Or don't have the right connection ID.
                         // Or are received after a Retry.
                         self.stats.borrow_mut().pkt_dropped("Invalid VN");
-                        return Ok(PreprocessResult::End);
+                    } else {
+                        self.version_negotiation(&versions, now)?;
                     }
-
-                    self.version_negotiation(&versions, now)?;
-                    return Ok(PreprocessResult::End);
                 } else {
                     self.stats.borrow_mut().pkt_dropped("VN with no versions");
-                    return Ok(PreprocessResult::End);
-                }
+                };
+                return Ok(PreprocessResult::End);
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
                 self.handle_retry(packet, now);
