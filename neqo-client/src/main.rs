@@ -832,7 +832,7 @@ fn handle_test(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: &[Url],
+    urls: Vec<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let key_update = KeyUpdateState(args.key_update);
@@ -912,7 +912,7 @@ fn client(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: &[Url],
+    urls: Vec<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let testcase = args.test.clone();
@@ -1022,13 +1022,14 @@ fn main() -> Res<()> {
         }
     }
 
-    let mut urls_by_origin: HashMap<Origin, Vec<Url>> = HashMap::new();
+    let mut urls_by_origin: HashMap<Origin, VecDeque<Url>> = HashMap::new();
     for url in &args.urls {
         let entry = urls_by_origin.entry(url.origin()).or_default();
-        entry.push(url.clone());
+        entry.push_back(url.clone());
     }
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
+    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
+    {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {x:?}");
@@ -1077,23 +1078,19 @@ fn main() -> Res<()> {
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
-        let mut remaining = &urls[..];
         let mut first = true;
         loop {
-            let to_request;
-            if (args.resume && first) || args.download_in_series {
-                to_request = &remaining[..1];
-                remaining = &remaining[1..];
-                if args.resume && first && remaining.is_empty() {
+            let to_request = if (args.resume && first) || args.download_in_series {
+                if args.resume && first && urls.len() < 2 {
                     println!(
                         "Error: resumption to {hostname} cannot work without at least 2 URLs."
                     );
                     exit(127);
                 }
+                urls.pop_front().map_or(vec![], |u| vec![u])
             } else {
-                to_request = remaining;
-                remaining = &[][..];
-            }
+                urls.drain(..).collect()
+            };
             if to_request.is_empty() {
                 break;
             }
@@ -1420,7 +1417,7 @@ mod old {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         origin: &str,
-        urls: &[Url],
+        urls: Vec<Url>,
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let alpn = match args.alpn.as_str() {
