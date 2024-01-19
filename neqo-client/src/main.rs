@@ -1018,6 +1018,7 @@ fn main() -> Res<()> {
                 args.use_old_http = true;
                 args.key_update = true;
             }
+            "v2" => {}
             _ => exit(127),
         }
     }

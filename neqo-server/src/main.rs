@@ -837,10 +837,12 @@ fn main() -> Result<(), io::Error> {
 
     if let Some(testcase) = args.qns_test.as_ref() {
         if args.quic_parameters.quic_version.is_empty() {
-            // Quic Interop Runner expects the server to support `Version1` only.
-            // Exceptions are testcases `versionnegotiation` and `v2`. Neither are
-            // supported by Neqo. Thus always set `Version1`.
-            args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+            // Quic Interop Runner expects the server to support `Version1`
+            // only. Exceptions are testcases `versionnegotiation` (not yet
+            // implemented) and `v2`.
+            if testcase != "v2" {
+                args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+            }
         } else {
             qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
         }
@@ -868,6 +870,7 @@ fn main() -> Result<(), io::Error> {
                 args.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
             }
+            "v2" => (),
             _ => exit(127),
         }
     }
