@@ -153,6 +153,16 @@ pub fn maybe_authenticate(conn: &mut Connection) -> bool {
     false
 }
 
+/// Compute the RTT variance after `n` ACKs (or other RTT updates).
+pub fn rttvar_after_n_acks(n: usize, rtt: Duration) -> Duration {
+    assert!(n > 0);
+    let mut rttvar = rtt / 2;
+    for _ in 0..n - 1 {
+        rttvar = rttvar * 3 / 4;
+    }
+    rttvar
+}
+
 /// This inserts a PING frame into packets.
 struct Ping {}
 
@@ -228,15 +238,6 @@ fn connect_with_rtt(
     rtt: Duration,
 ) -> Instant {
     fn check_rtt(stats: &Stats, rtt: Duration, rtt_updates: usize) {
-        fn rttvar_after_n_acks(n: usize, rtt: Duration) -> Duration {
-            assert!(n > 0);
-            let mut rttvar = rtt / 2;
-            for _ in 0..n - 1 {
-                rttvar = rttvar * 3 / 4;
-            }
-            rttvar
-        }
-
         assert_eq!(stats.rtt, rtt);
         assert_eq!(stats.rttvar, rttvar_after_n_acks(rtt_updates, rtt));
     }
