@@ -676,16 +676,16 @@ fn keep_alive_uni() {
 /// the connection is closed after the idle timeout passes.
 #[test]
 fn keep_alive_with_ack_eliciting_packet_lost() {
-    const RTT: Duration = Duration::from_millis(500); // PTO will be ~1.1125s
+    const RTT: Duration = Duration::from_millis(500); // PTO will be ~971.875ms
 
-    // The idle time  out  will be  set to ~ 5 * PTO. (IDLE_TIMEOUT/2 > pto and IDLE_TIMEOUT/2 < pto + 2pto)
+    // The idle timeout will be set to ~ 5 * PTO. (IDLE_TIMEOUT/2 > pto and IDLE_TIMEOUT/2 < pto + 2pto)
     // After handshake all packets will be lost. The following steps will happen after the handshake:
     //  - data will be sent on a stream that is marked for keep-alive, (at start time)
     //  - PTO timer will trigger first, and the data will be retransmited toghether with a PING, (at the start time + pto)
     //  - keep-alive timer will trigger and a keep-alive PING will be sent, (at the start time + IDLE_TIMEOUT / 2)
     //  - PTO timer will trigger again. (at the start time + pto + 2*pto)
-    //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
+    //  - Idle timeout will trigger (at the timeout + IDLE_TIMEOUT)
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(4500);
 
     let mut client = new_client(ConnectionParameters::default().idle_timeout(IDLE_TIMEOUT));
     let mut server = default_server();
