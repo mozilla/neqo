@@ -11,7 +11,7 @@ use neqo_common::{
     event::Provider,
     hex,
     qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTosEcn, Role,
+    qtrace, Datagram, Decoder, IpTos, Role,
 };
 
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
@@ -88,7 +88,7 @@ pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(addr(), addr(), Some(IpTosEcn::Ect0.into()), Some(128), data)
+    Datagram::new(addr(), addr(), IpTos::default(), Some(128), data)
 }
 
 /// Create a default socket address.

@@ -30,7 +30,7 @@ use mio_extras::timer::{Builder, Timeout, Timer};
 use neqo_transport::ConnectionIdGenerator;
 use structopt::StructOpt;
 
-use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header};
+use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -609,7 +609,7 @@ fn read_dgram(
         Ok(Some(Datagram::new(
             remote_addr,
             *local_address,
-            None,
+            IpTos::default(),
             None,
             &buf[..sz],
         )))

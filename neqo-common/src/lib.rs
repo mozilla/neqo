@@ -18,7 +18,7 @@ pub mod qlog;
 pub mod timer;
 
 pub use self::codec::{Decoder, Encoder};
-pub use self::datagram::{Datagram, IpTosDscp, IpTosEcn};
+pub use self::datagram::{Datagram, IpTos, IpTosDscp, IpTosEcn};
 pub use self::header::Header;
 pub use self::incrdecoder::{
     IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,

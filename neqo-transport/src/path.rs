@@ -31,7 +31,7 @@ use crate::{
     Error, Res,
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTosEcn};
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
 use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
@@ -540,7 +540,7 @@ pub struct Path {
     /// A packet sender for the path, which includes congestion control and a pacer.
     sender: PacketSender,
     /// The DSCP/ECN marking to use for outgoing packets on this path.
-    tos: IpTosEcn,
+    tos: IpTos,
     /// The IP TTL to use for outgoing packets on this path.
     ttl: u8,
 
@@ -579,7 +579,7 @@ impl Path {
             challenge: None,
             rtt: RttEstimate::default(),
             sender,
-            tos: IpTosEcn::NotEct, // TODO: Default to Ect0 when ECN is supported.
+            tos: IpTos::default(), // TODO: Default to Ect0 when ECN is supported.
             ttl: 64,               // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
@@ -703,13 +703,7 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(
-            self.local,
-            self.remote,
-            Some(self.tos.into()),
-            Some(self.ttl),
-            payload,
-        )
+        Datagram::new(self.local, self.remote, self.tos, Some(self.ttl), payload)
     }
 
     /// Get local address as `SocketAddr`
