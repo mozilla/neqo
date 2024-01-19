@@ -870,7 +870,10 @@ fn main() -> Result<(), io::Error> {
                 args.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
             }
-            "v2" => (),
+            "v2" => {
+                args.use_old_http = true;
+                args.alpn = String::from(HQ_INTEROP);
+            }
             _ => exit(127),
         }
     }
