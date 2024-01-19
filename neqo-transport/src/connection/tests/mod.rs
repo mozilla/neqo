@@ -12,6 +12,8 @@ use crate::{
     cc::{CWND_INITIAL_PKTS, CWND_MIN},
     cid::ConnectionIdRef,
     events::ConnectionEvent,
+    frame::FRAME_TYPE_PING,
+    packet::PacketBuilder,
     path::PATH_MTU_V6,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
@@ -151,6 +153,15 @@ pub fn maybe_authenticate(conn: &mut Connection) -> bool {
     false
 }
 
+/// This inserts a PING frame into packets.
+struct Ping {}
+
+impl crate::connection::test_internal::FrameWriter for Ping {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        builder.encode_varint(FRAME_TYPE_PING);
+    }
+}
+
 /// Drive the handshake between the client and server.
 fn handshake(
     client: &mut Connection,
@@ -170,10 +181,23 @@ fn handshake(
         )
     };
 
+    let mut client_did_ping = false;
     while !is_done(a) {
         _ = maybe_authenticate(a);
         let had_input = input.is_some();
+        // Insert a PING frame into the first application data packet the client sends,
+        // in order to force the server to ACK it. This is depending on tls_info() only
+        // returning something when the TLS handshake is complete.
+        let client_should_ping =
+            a.role() == Role::Client && !client_did_ping && a.tls_info().is_some();
+        if client_should_ping {
+            a.test_frame_writer = Some(Box::new(Ping {}));
+        }
         let output = a.process(input.as_ref(), now).dgram();
+        if client_should_ping {
+            a.test_frame_writer = None;
+            client_did_ping = true;
+        }
         assert!(had_input || output.is_some());
         input = output;
         qtrace!("handshake: t += {:?}", rtt / 2);
@@ -203,18 +227,25 @@ fn connect_with_rtt(
     now: Instant,
     rtt: Duration,
 ) -> Instant {
-    fn check_rtt(stats: &Stats, rtt: Duration) {
+    fn check_rtt(stats: &Stats, rtt: Duration, rtt_updates: usize) {
+        fn rttvar_after_n_acks(n: usize, rtt: Duration) -> Duration {
+            assert!(n > 0);
+            let mut rttvar = rtt / 2;
+            for _ in 0..n - 1 {
+                rttvar = rttvar * 3 / 4;
+            }
+            rttvar
+        }
+
         assert_eq!(stats.rtt, rtt);
-        // Confirmation takes 2 round trips,
-        // so rttvar is reduced by 1/4 (from rtt/2).
-        assert_eq!(stats.rttvar, rtt * 3 / 8);
+        assert_eq!(stats.rttvar, rttvar_after_n_acks(rtt_updates, rtt));
     }
     let now = handshake(client, server, now, rtt);
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
 
-    check_rtt(&client.stats(), rtt);
-    check_rtt(&server.stats(), rtt);
+    check_rtt(&client.stats(), rtt, 3);
+    check_rtt(&server.stats(), rtt, 2);
     now
 }
 
