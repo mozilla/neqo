@@ -409,7 +409,7 @@ impl PacketBuilder {
     /// Make a retry packet.
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
-    /// this returns a Vec<u8> rather than building on an encoder.
+    /// this returns a [`Vec<u8>`] rather than building on an encoder.
     pub fn retry(
         version: Version,
         dcid: &[u8],

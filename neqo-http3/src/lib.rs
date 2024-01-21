@@ -35,7 +35,7 @@ supported and can be enabled using [`Http3Parameters`](struct.Http3Parameters.ht
 
 The crate does not create an OS level UDP socket, it produces, i.e. encodes, data that should be
 sent as a payload in a UDP packet and consumes data received on the UDP socket. For example,
-[`std::net::UdpSocket`](std::net::UdpSocket) or [`mio::net::UdpSocket`](https://crates.io/crates/mio)
+[`std::net::UdpSocket`] or [`mio::net::UdpSocket`](https://crates.io/crates/mio)
 could be used for creating UDP sockets.
 
 The application is responsible for creating a socket, polling the socket, and sending and receiving

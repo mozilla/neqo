@@ -121,6 +121,9 @@ jobs:
         if: success() || failure()
         continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
 
+      - name: Check rustdoc links
+        run: RUSTDOCFLAGS="--deny rustdoc::broken_intra_doc_links --deny warnings" cargo doc --verbose --workspace --no-deps --document-private-items
+
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
         with:
