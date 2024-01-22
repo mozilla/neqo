@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt::Debug;
+
 use enum_map::Enum;
 
 /// ECN (Explicit Congestion Notification) codepoints mapped to the
@@ -159,31 +161,45 @@ impl From<u8> for IpTosDscp {
 
 /// The type-of-service field in an IP packet.
 #[allow(clippy::module_name_repetitions)]
-#[derive(Copy, Clone, PartialEq, Eq, Default, Debug)]
-pub struct IpTos {
-    /// The DSCP (Differentiated Services Code Point) field.
-    dscp: IpTosDscp,
-
-    /// The ECN (Explicit Congestion Notification) field.
-    ecn: IpTosEcn,
-}
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct IpTos(u8);
 
 impl From<IpTosEcn> for IpTos {
     fn from(v: IpTosEcn) -> Self {
-        Self {
-            dscp: IpTosDscp::default(),
-            ecn: v,
-        }
+        Self(u8::from(v))
     }
 }
 impl From<IpTosDscp> for IpTos {
     fn from(v: IpTosDscp) -> Self {
-        Self {
-            dscp: v,
-            ecn: IpTosEcn::default(),
-        }
+        Self(u8::from(v))
     }
 }
+impl From<(IpTosDscp, IpTosEcn)> for IpTos {
+    fn from(v: (IpTosDscp, IpTosEcn)) -> Self {
+        Self(u8::from(v.0) | u8::from(v.1))
+    }
+}
+impl From<IpTos> for u8 {
+    fn from(v: IpTos) -> Self {
+        v.0
+    }
+}
+
+impl Debug for IpTos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("IpTos")
+            .field(&IpTosDscp::from(self.0 & 0xfc))
+            .field(&IpTosEcn::from(self.0 & 0x3))
+            .finish()
+    }
+}
+
+impl Default for IpTos {
+    fn default() -> Self {
+        (IpTosDscp::default(), IpTosEcn::default()).into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,16 +277,14 @@ mod tests {
     #[test]
     fn iptosecn_into_iptos() {
         let ecn = IpTosEcn::default();
-        let iptos: IpTos = ecn.into();
-        assert_eq!(iptos.dscp, IpTosDscp::default());
-        assert_eq!(iptos.ecn, ecn);
+        let iptos_ecn: IpTos = ecn.into();
+        assert_eq!(u8::from(iptos_ecn), ecn as u8);
     }
 
     #[test]
     fn iptosdscp_into_iptos() {
         let dscp = IpTosDscp::default();
-        let iptos: IpTos = dscp.into();
-        assert_eq!(iptos.dscp, dscp);
-        assert_eq!(iptos.ecn, IpTosEcn::default());
+        let iptos_dscp: IpTos = dscp.into();
+        assert_eq!(u8::from(iptos_dscp), dscp as u8);
     }
 }
