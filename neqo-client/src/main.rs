@@ -1022,20 +1022,24 @@ fn main() -> Res<()> {
         }
     }
 
-    let mut urls_by_origin: HashMap<Origin, VecDeque<Url>> = HashMap::new();
-    for url in &args.urls {
-        let entry = urls_by_origin.entry(url.origin()).or_default();
-        entry.push_back(url.clone());
-    }
+    let urls_by_origin = args
+        .urls
+        .clone()
+        .into_iter()
+        .fold(HashMap::<Origin, VecDeque<Url>>::new(), |mut urls, url| {
+            urls.entry(url.origin()).or_default().push_back(url);
+            urls
+        })
+        .into_iter()
+        .filter_map(|(origin, urls)| match origin {
+            Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
+            Origin::Opaque(x) => {
+                eprintln!("Opaque origin {x:?}");
+                None
+            }
+        });
 
-    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
-    {
-        Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
-        Origin::Opaque(x) => {
-            eprintln!("Opaque origin {x:?}");
-            None
-        }
-    }) {
+    for ((host, port), mut urls) in urls_by_origin {
         let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
