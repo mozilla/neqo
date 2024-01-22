@@ -832,7 +832,7 @@ fn handle_test(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: Vec<Url>,
+    url_queue: VecDeque<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let key_update = KeyUpdateState(args.key_update);
@@ -843,7 +843,7 @@ fn handle_test(
                     .expect("failed to create client");
             args.method = String::from("POST");
             let url_handler = URLHandler {
-                url_queue: VecDeque::from(urls.to_vec()),
+                url_queue,
                 stream_handlers: HashMap::new(),
                 all_paths: Vec::new(),
                 handler_type: StreamHandlerType::Upload,
@@ -912,7 +912,7 @@ fn client(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: Vec<Url>,
+    url_queue: VecDeque<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let testcase = args.test.clone();
@@ -925,7 +925,7 @@ fn client(
             local_addr,
             remote_addr,
             hostname,
-            urls,
+            url_queue,
             resumption_token,
         );
     }
@@ -934,7 +934,7 @@ fn client(
         .expect("failed to create client");
     let key_update = KeyUpdateState(args.key_update);
     let url_handler = URLHandler {
-        url_queue: VecDeque::from(urls.to_vec()),
+        url_queue,
         stream_handlers: HashMap::new(),
         all_paths: Vec::new(),
         handler_type: StreamHandlerType::Download,
@@ -1087,9 +1087,9 @@ fn main() -> Res<()> {
                     );
                     exit(127);
                 }
-                urls.pop_front().map_or(vec![], |u| vec![u])
+                urls.pop_front().into_iter().collect()
             } else {
-                urls.drain(..).collect()
+                std::mem::take(&mut urls)
             };
             if to_request.is_empty() {
                 break;
@@ -1417,7 +1417,7 @@ mod old {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         origin: &str,
-        urls: Vec<Url>,
+        url_queue: VecDeque<Url>,
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let alpn = match args.alpn.as_str() {
@@ -1449,7 +1449,7 @@ mod old {
         let key_update = KeyUpdateState(args.key_update);
         let mut h = HandlerOld {
             streams: HashMap::new(),
-            url_queue: VecDeque::from(urls.to_vec()),
+            url_queue,
             all_paths: Vec::new(),
             args,
             token: None,
