@@ -16,13 +16,15 @@ mod incrdecoder;
 pub mod log;
 pub mod qlog;
 pub mod timer;
+pub mod tos;
 
 pub use self::codec::{Decoder, Encoder};
-pub use self::datagram::{Datagram, IpTos, IpTosDscp, IpTosEcn};
+pub use self::datagram::Datagram;
 pub use self::header::Header;
 pub use self::incrdecoder::{
     IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
+pub use self::tos::{IpTos, IpTosDscp, IpTosEcn};
 
 use std::fmt::Write;
 
