@@ -1595,16 +1595,13 @@ impl SendStreams {
                 .flat_map(|group| group.iter()),
         );
         for stream_id in stream_ids {
-            match self.map.get_mut(&stream_id).unwrap().sendorder() {
-                Some(order) => qdebug!("   {} ({})", stream_id, order),
-                None => qdebug!("   None"),
+            let stream = self.map.get_mut(&stream_id).unwrap();
+            if let Some(order) = stream.sendorder() {
+                qdebug!("   {} ({})", stream_id, order)
+            } else {
+                qdebug!("   None")
             }
-            if !self
-                .map
-                .get_mut(&stream_id)
-                .unwrap()
-                .write_frames_with_early_return(priority, builder, tokens, stats)
-            {
+            if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                 break;
             }
         }

@@ -732,14 +732,11 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    match self.url_handler.stream_handler(&stream_id) {
-                        Some(handler) => {
-                            handler.process_header_ready(stream_id, fin, headers);
-                        }
-                        None => {
-                            println!("Data on unexpected stream: {stream_id}");
-                            return Ok(false);
-                        }
+                    if let Some(handler) = self.url_handler.stream_handler(&stream_id) {
+                        handler.process_header_ready(stream_id, fin, headers);
+                    } else {
+                        println!("Data on unexpected stream: {stream_id}");
+                        return Ok(false);
                     }
                     if fin {
                         return Ok(self.url_handler.on_stream_fin(client, stream_id));
@@ -836,26 +833,23 @@ fn handle_test(
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let key_update = KeyUpdateState(args.key_update);
-    match testcase.as_str() {
-        "upload" => {
-            let mut client =
-                create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
-                    .expect("failed to create client");
-            args.method = String::from("POST");
-            let url_handler = URLHandler {
-                url_queue,
-                stream_handlers: HashMap::new(),
-                all_paths: Vec::new(),
-                handler_type: StreamHandlerType::Upload,
-                args,
-            };
-            let mut h = Handler::new(url_handler, key_update, args.output_read_data);
-            process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
-        }
-        _ => {
-            eprintln!("Unsupported test case: {testcase}");
-            exit(127)
-        }
+    if testcase.as_str() == "upload" {
+        let mut client =
+            create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
+                .expect("failed to create client");
+        args.method = String::from("POST");
+        let url_handler = URLHandler {
+            url_queue,
+            stream_handlers: HashMap::new(),
+            all_paths: Vec::new(),
+            handler_type: StreamHandlerType::Upload,
+            args,
+        };
+        let mut h = Handler::new(url_handler, key_update, args.output_read_data);
+        process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
+    } else {
+        eprintln!("Unsupported test case: {testcase}");
+        exit(127)
     }
 
     Ok(None)
@@ -1017,6 +1011,9 @@ fn main() -> Res<()> {
             "keyupdate" => {
                 args.use_old_http = true;
                 args.key_update = true;
+            }
+            "v2" => {
+                args.use_old_http = true;
             }
             _ => exit(127),
         }
