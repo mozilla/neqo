@@ -836,6 +836,17 @@ fn main() -> Result<(), io::Error> {
     init_db(args.db.clone());
 
     if let Some(testcase) = args.qns_test.as_ref() {
+        if args.quic_parameters.quic_version.is_empty() {
+            // Quic Interop Runner expects the server to support `Version1`
+            // only. Exceptions are testcases `versionnegotiation` (not yet
+            // implemented) and `v2`.
+            if testcase != "v2" {
+                args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+            }
+        } else {
+            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
+        }
+
         match testcase.as_str() {
             "http3" => (),
             "zerortt" => {
@@ -858,6 +869,10 @@ fn main() -> Result<(), io::Error> {
                 args.use_old_http = true;
                 args.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
+            }
+            "v2" => {
+                args.use_old_http = true;
+                args.alpn = String::from(HQ_INTEROP);
             }
             _ => exit(127),
         }

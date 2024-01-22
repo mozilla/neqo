@@ -30,7 +30,7 @@ use std::{
 use test_fixture::{
     self, addr, addr_v4,
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, now,
+    fixture_init, new_neqo_qlog, now,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -374,7 +374,7 @@ fn migration(mut client: Connection) {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    let probe_cid = ConnectionId::from(get_cid(&probe));
 
     let resp = server.process(Some(&probe), now).dgram().unwrap();
     assert_v4_path(&resp, true);
@@ -498,6 +498,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     };
 
     fixture_init();
+    let (log, _contents) = new_neqo_qlog();
     let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
@@ -508,6 +509,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
         now(),
     )
     .unwrap();
+    client.set_qlog(log);
     let spa = match preferred {
         SocketAddr::V6(v6) => PreferredAddress::new(None, Some(v6)),
         SocketAddr::V4(v4) => PreferredAddress::new(Some(v4), None),
@@ -814,7 +816,7 @@ fn retire_all() {
     .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+    let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
     server.test_frame_writer = Some(Box::new(RetireAll { cid_gen }));
     let ncid = send_something(&mut server, now());
@@ -852,7 +854,7 @@ fn retire_prior_to_migration_failure() {
     .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+    let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
     client
         .migrate(Some(addr_v4()), Some(addr_v4()), false, now())
@@ -862,7 +864,7 @@ fn retire_prior_to_migration_failure() {
     let probe = client.process_output(now()).dgram().unwrap();
     assert_v4_path(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    let probe_cid = ConnectionId::from(get_cid(&probe));
     assert_ne!(original_cid, probe_cid);
 
     // Have the server receive the probe, but separately have it decide to
@@ -907,7 +909,7 @@ fn retire_prior_to_migration_success() {
     .unwrap();
     connect_force_idle(&mut client, &mut server);
 
-    let original_cid = ConnectionId::from(&get_cid(&send_something(&mut client, now())));
+    let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
     client
         .migrate(Some(addr_v4()), Some(addr_v4()), false, now())
@@ -917,7 +919,7 @@ fn retire_prior_to_migration_success() {
     let probe = client.process_output(now()).dgram().unwrap();
     assert_v4_path(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    let probe_cid = ConnectionId::from(&get_cid(&probe));
+    let probe_cid = ConnectionId::from(get_cid(&probe));
     assert_ne!(original_cid, probe_cid);
 
     // Have the server receive the probe, but separately have it decide to

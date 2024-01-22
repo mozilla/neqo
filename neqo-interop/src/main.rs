@@ -736,11 +736,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
             return (test, String::from("OK"));
         }
         Test::H9 => test_h9(&nctx, &mut client),
-        Test::H3 => test_h3(&nctx, peer, client, test),
+        Test::H3 | Test::D => test_h3(&nctx, peer, client, test),
         Test::VN => unimplemented!(),
-        Test::R => test_h3_rz(&nctx, peer, client, test),
-        Test::Z => test_h3_rz(&nctx, peer, client, test),
-        Test::D => test_h3(&nctx, peer, client, test),
+        Test::R | Test::Z => test_h3_rz(&nctx, peer, client, test),
     };
 
     if let Err(e) = res {
@@ -774,15 +772,12 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     }
 
     for child in children {
-        match child.1.join() {
-            Ok(e) => {
-                eprintln!("Test complete {:?}, {:?}", child.0, e);
-                results.push(e);
-            }
-            Err(_) => {
-                eprintln!("Thread crashed {:?}", child.0);
-                results.push((child.0, String::from("CRASHED")));
-            }
+        if let Ok(e) = child.1.join() {
+            eprintln!("Test complete {:?}, {:?}", child.0, e);
+            results.push(e);
+        } else {
+            eprintln!("Thread crashed {:?}", child.0);
+            results.push((child.0, String::from("CRASHED")));
         }
     }
 

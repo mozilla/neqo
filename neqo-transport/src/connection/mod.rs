@@ -328,6 +328,7 @@ impl Connection {
             local_addr,
             remote_addr,
             c.conn_params.get_cc_algorithm(),
+            c.conn_params.pacing_enabled(),
             NeqoQlog::default(),
             now,
         );
@@ -1018,7 +1019,7 @@ impl Connection {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
             }
-            (State::Init, Role::Server) | (State::WaitInitial, Role::Server) => {
+            (State::Init | State::WaitInitial, Role::Server) => {
                 return Output::None;
             }
             _ => {
@@ -1209,7 +1210,7 @@ impl Connection {
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
-        if dcid.map_or(false, |d| d != packet.dcid()) {
+        if dcid.map_or(false, |d| d != &packet.dcid()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
@@ -1260,39 +1261,30 @@ impl Connection {
                 }
             }
             (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
-                match packet.supported_versions() {
-                    Ok(versions) => {
-                        if versions.is_empty()
-                            || versions.contains(&self.version().wire_version())
-                            || versions.contains(&0)
-                            || packet.scid() != self.odcid().unwrap()
-                            || matches!(
-                                self.address_validation,
-                                AddressValidationInfo::Retry { .. }
-                            )
-                        {
-                            // Ignore VersionNegotiation packets that contain the current version.
-                            // Or don't have the right connection ID.
-                            // Or are received after a Retry.
-                            self.stats.borrow_mut().pkt_dropped("Invalid VN");
-                            return Ok(PreprocessResult::End);
-                        }
-
+                if let Ok(versions) = packet.supported_versions() {
+                    if versions.is_empty()
+                        || versions.contains(&self.version().wire_version())
+                        || versions.contains(&0)
+                        || &packet.scid() != self.odcid().unwrap()
+                        || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+                    {
+                        // Ignore VersionNegotiation packets that contain the current version.
+                        // Or don't have the right connection ID.
+                        // Or are received after a Retry.
+                        self.stats.borrow_mut().pkt_dropped("Invalid VN");
+                    } else {
                         self.version_negotiation(&versions, now)?;
-                        return Ok(PreprocessResult::End);
                     }
-                    Err(_) => {
-                        self.stats.borrow_mut().pkt_dropped("VN with no versions");
-                        return Ok(PreprocessResult::End);
-                    }
-                }
+                } else {
+                    self.stats.borrow_mut().pkt_dropped("VN with no versions");
+                };
+                return Ok(PreprocessResult::End);
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
                 self.handle_retry(packet, now);
                 return Ok(PreprocessResult::Next);
             }
-            (PacketType::Handshake, State::WaitInitial, Role::Client)
-            | (PacketType::Short, State::WaitInitial, Role::Client) => {
+            (PacketType::Handshake | PacketType::Short, State::WaitInitial, Role::Client) => {
                 // This packet can't be processed now, but it could be a sign
                 // that Initial packets were lost.
                 // Resend Initial CRYPTO frames immediately a few times just
@@ -1305,9 +1297,7 @@ impl Connection {
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
                 }
             }
-            (PacketType::VersionNegotiation, ..)
-            | (PacketType::Retry, ..)
-            | (PacketType::OtherVersion, ..) => {
+            (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
                 self.stats
                     .borrow_mut()
                     .pkt_dropped(format!("{:?}", packet.packet_type()));
@@ -1372,7 +1362,7 @@ impl Connection {
             self.handle_migration(path, d, migrate, now);
         } else if self.role != Role::Client
             && (packet.packet_type() == PacketType::Handshake
-                || (packet.dcid().len() >= 8 && packet.dcid() == &self.local_initial_source_cid))
+                || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
         {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
@@ -1388,6 +1378,7 @@ impl Connection {
             d.destination(),
             d.source(),
             self.conn_params.get_cc_algorithm(),
+            self.conn_params.pacing_enabled(),
             now,
         );
         path.borrow_mut().add_received(d.len());
@@ -1693,9 +1684,13 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
 
-        let path = self
-            .paths
-            .find_path(local, remote, self.conn_params.get_cc_algorithm(), now);
+        let path = self.paths.find_path(
+            local,
+            remote,
+            self.conn_params.get_cc_algorithm(),
+            self.conn_params.pacing_enabled(),
+            now,
+        );
         self.ensure_permanent(&path)?;
         qinfo!(
             [self],

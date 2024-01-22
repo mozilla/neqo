@@ -75,6 +75,7 @@ pub struct ConnectionParameters {
     fast_pto: u8,
     fuzzing: bool,
     grease: bool,
+    pacing: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -97,6 +98,7 @@ impl Default for ConnectionParameters {
             fast_pto: FAST_PTO_SCALE,
             fuzzing: false,
             grease: true,
+            pacing: true,
         }
     }
 }
@@ -301,6 +303,15 @@ impl ConnectionParameters {
 
     pub fn grease(mut self, grease: bool) -> Self {
         self.grease = grease;
+        self
+    }
+
+    pub fn pacing_enabled(&self) -> bool {
+        self.pacing
+    }
+
+    pub fn pacing(mut self, pacing: bool) -> Self {
+        self.pacing = pacing;
         self
     }
 

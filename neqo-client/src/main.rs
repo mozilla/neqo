@@ -309,6 +309,10 @@ struct QuicParameters {
     #[structopt(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
+
+    #[structopt(long = "pacing")]
+    /// Whether pacing is enabled.
+    pacing: bool,
 }
 
 impl QuicParameters {
@@ -317,7 +321,8 @@ impl QuicParameters {
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .cc_algorithm(self.congestion_control);
+            .cc_algorithm(self.congestion_control)
+            .pacing(self.pacing);
 
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
@@ -328,7 +333,7 @@ impl QuicParameters {
             params.versions(first.0, all.iter().map(|&x| x.0).collect())
         } else {
             let version = match alpn {
-                "h3" | "hq-interop" => Version::default(),
+                "h3" | "hq-interop" => Version::Version1,
                 "h3-29" | "hq-29" => Version::Draft29,
                 "h3-30" | "hq-30" => Version::Draft30,
                 "h3-31" | "hq-31" => Version::Draft31,
@@ -494,10 +499,13 @@ impl StreamHandlerType {
         url: &Url,
         args: &Args,
         all_paths: &mut Vec<PathBuf>,
+        client: &mut Http3Client,
+        client_stream_id: StreamId,
     ) -> Box<dyn StreamHandler> {
         match handler_type {
             Self::Download => {
                 let out_file = get_output_file(url, &args.output_dir, all_paths);
+                client.stream_close_send(client_stream_id).unwrap();
                 Box::new(DownloadStreamHandler { out_file })
             }
             Self::Upload => Box::new(UploadStreamHandler {
@@ -652,6 +660,8 @@ impl<'a> URLHandler<'a> {
                     &url,
                     self.args,
                     &mut self.all_paths,
+                    client,
+                    client_stream_id,
                 );
                 self.stream_handlers.insert(client_stream_id, handler);
                 true
@@ -722,14 +732,11 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    match self.url_handler.stream_handler(&stream_id) {
-                        Some(handler) => {
-                            handler.process_header_ready(stream_id, fin, headers);
-                        }
-                        None => {
-                            println!("Data on unexpected stream: {stream_id}");
-                            return Ok(false);
-                        }
+                    if let Some(handler) = self.url_handler.stream_handler(&stream_id) {
+                        handler.process_header_ready(stream_id, fin, headers);
+                    } else {
+                        println!("Data on unexpected stream: {stream_id}");
+                        return Ok(false);
                     }
                     if fin {
                         return Ok(self.url_handler.on_stream_fin(client, stream_id));
@@ -826,26 +833,23 @@ fn handle_test(
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let key_update = KeyUpdateState(args.key_update);
-    match testcase.as_str() {
-        "upload" => {
-            let mut client =
-                create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
-                    .expect("failed to create client");
-            args.method = String::from("POST");
-            let url_handler = URLHandler {
-                url_queue: VecDeque::from(urls.to_vec()),
-                stream_handlers: HashMap::new(),
-                all_paths: Vec::new(),
-                handler_type: StreamHandlerType::Upload,
-                args,
-            };
-            let mut h = Handler::new(url_handler, key_update, args.output_read_data);
-            process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
-        }
-        _ => {
-            eprintln!("Unsupported test case: {testcase}");
-            exit(127)
-        }
+    if testcase.as_str() == "upload" {
+        let mut client =
+            create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
+                .expect("failed to create client");
+        args.method = String::from("POST");
+        let url_handler = URLHandler {
+            url_queue: VecDeque::from(urls.to_vec()),
+            stream_handlers: HashMap::new(),
+            all_paths: Vec::new(),
+            handler_type: StreamHandlerType::Upload,
+            args,
+        };
+        let mut h = Handler::new(url_handler, key_update, args.output_read_data);
+        process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
+    } else {
+        eprintln!("Unsupported test case: {testcase}");
+        exit(127)
     }
 
     Ok(None)
@@ -1007,6 +1011,9 @@ fn main() -> Res<()> {
             "keyupdate" => {
                 args.use_old_http = true;
                 args.key_update = true;
+            }
+            "v2" => {
+                args.use_old_http = true;
             }
             _ => exit(127),
         }
