@@ -1040,6 +1040,11 @@ fn main() -> Res<()> {
         });
 
     for ((host, port), mut urls) in urls_by_origin {
+        if args.resume && urls.len() < 2 {
+            eprintln!("Resumption to {host} cannot work without at least 2 URLs.");
+            exit(127);
+        }
+
         let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
@@ -1082,24 +1087,13 @@ fn main() -> Res<()> {
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
-        let mut first = true;
-        loop {
-            let to_request = if (args.resume && first) || args.download_in_series {
-                if args.resume && first && urls.len() < 2 {
-                    println!(
-                        "Error: resumption to {hostname} cannot work without at least 2 URLs."
-                    );
-                    exit(127);
-                }
+        while !urls.is_empty() {
+            let to_request = if args.resume || args.download_in_series {
                 urls.pop_front().into_iter().collect()
             } else {
                 std::mem::take(&mut urls)
             };
-            if to_request.is_empty() {
-                break;
-            }
 
-            first = false;
             token = if args.use_old_http {
                 old::old_client(
                     &args,
