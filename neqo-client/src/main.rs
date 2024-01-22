@@ -7,6 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
+use common::IpTos;
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
@@ -430,7 +431,8 @@ fn process_loop(
                         break 'read;
                     }
                     if sz > 0 {
-                        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                        let d =
+                            Datagram::new(remote, *local_addr, IpTos::default(), None, &buf[..sz]);
                         datagrams.push(d);
                     }
                 }
@@ -1142,7 +1144,7 @@ mod old {
 
     use super::{qlog_new, KeyUpdateState, Res};
     use mio::{Events, Poll};
-    use neqo_common::{event::Provider, Datagram};
+    use neqo_common::{event::Provider, Datagram, IpTos};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
@@ -1367,7 +1369,13 @@ mod old {
                             break 'read;
                         }
                         if sz > 0 {
-                            let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                            let d = Datagram::new(
+                                remote,
+                                *local_addr,
+                                IpTos::default(),
+                                None,
+                                &buf[..sz],
+                            );
                             client.process_input(&d, Instant::now());
                             handler.maybe_key_update(client)?;
                         }

@@ -11,7 +11,7 @@ use neqo_common::{
     event::Provider,
     hex,
     qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, Role,
+    qtrace, Datagram, Decoder, IpTos, Role,
 };
 
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
@@ -84,6 +84,12 @@ pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
+
+// Create a default datagram with the given data.
+#[must_use]
+pub fn datagram(data: Vec<u8>) -> Datagram {
+    Datagram::new(addr(), addr(), IpTos::default(), Some(128), data)
+}
 
 /// Create a default socket address.
 #[must_use]
@@ -332,8 +338,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
-        Datagram::new(d.source(), d.destination(), a),
-        b.map(|b| Datagram::new(d.source(), d.destination(), b)),
+        Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), a),
+        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), b)),
     )
 }
 
