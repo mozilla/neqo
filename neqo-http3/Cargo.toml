@@ -15,9 +15,9 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = "0.11.0"
-sfv = "~0.9.3"
-smallvec = "~1.11.1"
-url = "~2.5.0"
+sfv = "0.9.3"
+smallvec = "1.11.1"
+url = "2.5"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
