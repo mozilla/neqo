@@ -7,7 +7,7 @@ rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-lazy_static = "~1.4.0"
+lazy_static = "1.4"
 neqo-common = { path="./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
