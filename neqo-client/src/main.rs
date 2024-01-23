@@ -831,7 +831,7 @@ fn handle_test(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: &[Url],
+    url_queue: VecDeque<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let key_update = KeyUpdateState(args.key_update);
@@ -841,7 +841,7 @@ fn handle_test(
                 .expect("failed to create client");
         args.method = String::from("POST");
         let url_handler = URLHandler {
-            url_queue: VecDeque::from(urls.to_vec()),
+            url_queue,
             stream_handlers: HashMap::new(),
             all_paths: Vec::new(),
             handler_type: StreamHandlerType::Upload,
@@ -908,7 +908,7 @@ fn client(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: &[Url],
+    url_queue: VecDeque<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let testcase = args.test.clone();
@@ -921,7 +921,7 @@ fn client(
             local_addr,
             remote_addr,
             hostname,
-            urls,
+            url_queue,
             resumption_token,
         );
     }
@@ -930,7 +930,7 @@ fn client(
         .expect("failed to create client");
     let key_update = KeyUpdateState(args.key_update);
     let url_handler = URLHandler {
-        url_queue: VecDeque::from(urls.to_vec()),
+        url_queue,
         stream_handlers: HashMap::new(),
         all_paths: Vec::new(),
         handler_type: StreamHandlerType::Download,
@@ -1021,19 +1021,29 @@ fn main() -> Res<()> {
         }
     }
 
-    let mut urls_by_origin: HashMap<Origin, Vec<Url>> = HashMap::new();
-    for url in &args.urls {
-        let entry = urls_by_origin.entry(url.origin()).or_default();
-        entry.push(url.clone());
-    }
+    let urls_by_origin = args
+        .urls
+        .clone()
+        .into_iter()
+        .fold(HashMap::<Origin, VecDeque<Url>>::new(), |mut urls, url| {
+            urls.entry(url.origin()).or_default().push_back(url);
+            urls
+        })
+        .into_iter()
+        .filter_map(|(origin, urls)| match origin {
+            Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
+            Origin::Opaque(x) => {
+                eprintln!("Opaque origin {x:?}");
+                None
+            }
+        });
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
-        Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
-        Origin::Opaque(x) => {
-            eprintln!("Opaque origin {x:?}");
-            None
+    for ((host, port), mut urls) in urls_by_origin {
+        if args.resume && urls.len() < 2 {
+            eprintln!("Resumption to {host} cannot work without at least 2 URLs.");
+            exit(127);
         }
-    }) {
+
         let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
@@ -1076,28 +1086,13 @@ fn main() -> Res<()> {
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
-        let mut remaining = &urls[..];
-        let mut first = true;
-        loop {
-            let to_request;
-            if (args.resume && first) || args.download_in_series {
-                to_request = &remaining[..1];
-                remaining = &remaining[1..];
-                if args.resume && first && remaining.is_empty() {
-                    println!(
-                        "Error: resumption to {hostname} cannot work without at least 2 URLs."
-                    );
-                    exit(127);
-                }
+        while !urls.is_empty() {
+            let to_request = if args.resume || args.download_in_series {
+                urls.pop_front().into_iter().collect()
             } else {
-                to_request = remaining;
-                remaining = &[][..];
-            }
-            if to_request.is_empty() {
-                break;
-            }
+                std::mem::take(&mut urls)
+            };
 
-            first = false;
             token = if args.use_old_http {
                 old::old_client(
                     &args,
@@ -1425,7 +1420,7 @@ mod old {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         origin: &str,
-        urls: &[Url],
+        url_queue: VecDeque<Url>,
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let alpn = match args.alpn.as_str() {
@@ -1457,7 +1452,7 @@ mod old {
         let key_update = KeyUpdateState(args.key_update);
         let mut h = HandlerOld {
             streams: HashMap::new(),
-            url_queue: VecDeque::from(urls.to_vec()),
+            url_queue,
             all_paths: Vec::new(),
             args,
             token: None,
