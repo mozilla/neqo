@@ -114,9 +114,9 @@ jobs:
 
       - name: Run client/server transfer
         run: |
-          cargo run --bin neqo-server -- $HOST:4433 &
+          cargo +${{ matrix.rust-toolchain }} run --bin neqo-server -- $HOST:4433 &
           PID=$!
-          cargo run --bin neqo-client -- --output-dir . https://$HOST:4433/
+          cargo +${{ matrix.rust-toolchain }} run --bin neqo-client -- --output-dir . https://$HOST:4433/
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
