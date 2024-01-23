@@ -672,12 +672,16 @@ impl ServersRunner {
                 Ok(s) => s,
             };
 
-            let also_v4 = if socket.only_v6().unwrap_or(true) {
-                ""
-            } else {
-                " as well as V4"
-            };
-            println!("Server waiting for connection on: {local_addr:?}{also_v4}");
+            #[cfg(not(target_os = "windows"))]
+            {
+                // On Windows, this is not supported.
+                let also_v4 = if socket.only_v6().unwrap_or(true) {
+                    ""
+                } else {
+                    " as well as V4"
+                };
+                println!("Server waiting for connection on: {local_addr:?}{also_v4}");
+            }
 
             self.poll.register(
                 &socket,
