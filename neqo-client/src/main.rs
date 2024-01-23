@@ -1086,12 +1086,15 @@ fn main() -> Res<()> {
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
+        let mut first = true;
         while !urls.is_empty() {
-            let to_request = if args.resume || args.download_in_series {
+            let to_request = if (args.resume && first) || args.download_in_series {
                 urls.pop_front().into_iter().collect()
             } else {
                 std::mem::take(&mut urls)
             };
+
+            first = false;
 
             token = if args.use_old_http {
                 old::old_client(
