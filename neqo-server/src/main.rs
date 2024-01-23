@@ -17,7 +17,7 @@ use std::{
     io,
     io::Read,
     mem,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -25,12 +25,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
 use neqo_transport::ConnectionIdGenerator;
 use structopt::StructOpt;
 
-use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
+use neqo_common::{hex, qdebug, qinfo, qwarn, udp, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -317,15 +317,6 @@ impl QuicParameters {
     }
 }
 
-fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
-    let sent = socket
-        .send_to(&out_dgram, &out_dgram.destination())
-        .expect("Error sending datagram");
-    if sent != out_dgram.len() {
-        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
-    }
-}
-
 fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
     let mut file_path = PathBuf::from("/www");
     file_path.push(filename.trim_matches(|p| p == '/'));
@@ -588,8 +579,10 @@ fn read_dgram(
     socket: &mut UdpSocket,
     local_address: &SocketAddr,
 ) -> Result<Option<Datagram>, io::Error> {
-    let buf = &mut [0u8; 2048];
-    let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
+    let mut buf = [0; u16::MAX as usize];
+    let mut tos = 0;
+    let mut ttl = 0;
+    let (sz, remote_addr) = match udp::rx(socket, &mut buf[..], &mut tos, &mut ttl) {
         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
@@ -609,8 +602,8 @@ fn read_dgram(
         Ok(Some(Datagram::new(
             remote_addr,
             *local_address,
-            IpTos::default(),
-            None,
+            tos.into(),
+            Some(ttl),
             &buf[..sz],
         )))
     }
@@ -672,15 +665,15 @@ impl ServersRunner {
                 Ok(s) => s,
             };
 
-            let also_v4 = if socket.only_v6().unwrap_or(true) {
+            let mio_socket = mio::net::UdpSocket::from_socket(socket.try_clone()?)?;
+            let also_v4 = if mio_socket.only_v6().unwrap_or(true) {
                 ""
             } else {
                 " as well as V4"
             };
             println!("Server waiting for connection on: {local_addr:?}{also_v4}");
-
             self.poll.register(
-                &socket,
+                &mio_socket,
                 Token(i),
                 Ready::readable() | Ready::writable(),
                 PollOpt::edge(),
@@ -744,7 +737,9 @@ impl ServersRunner {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.find_socket(dgram.source());
-                emit_packet(socket, dgram);
+                if let Err(e) = udp::tx(socket, &dgram) {
+                    eprintln!("UDP write error: {}", e);
+                }
                 true
             }
             Output::Callback(new_timeout) => {

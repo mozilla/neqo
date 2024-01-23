@@ -7,7 +7,12 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{event::Provider, hex, Datagram, IpTos};
+use neqo_common::{
+    event::Provider,
+    hex,
+    udp::{rx, tx},
+    Datagram,
+};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -60,13 +65,6 @@ trait Handler {
     }
 }
 
-fn emit_datagram(socket: &UdpSocket, d: Datagram) {
-    let sent = socket.send(&d[..]).expect("Error sending datagram");
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
-    }
-}
-
 lazy_static::lazy_static! {
     static ref TEST_TIMEOUT: Mutex<Duration> = Mutex::new(Duration::from_secs(5));
 }
@@ -103,7 +101,7 @@ fn process_loop(
     client: &mut Connection,
     handler: &mut dyn Handler,
 ) -> Result<State, String> {
-    let buf = &mut [0u8; 2048];
+    let mut buf = [0; u16::MAX as usize];
     let timer = Timer::new();
 
     loop {
@@ -116,7 +114,10 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-                    emit_datagram(&nctx.socket, dgram);
+                    if let Err(e) = tx(&nctx.socket, &dgram) {
+                        eprintln!("UDP write error: {e}");
+                        continue;
+                    }
                 }
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
@@ -133,7 +134,9 @@ fn process_loop(
             return Ok(client.state().clone());
         }
 
-        let sz = match nctx.socket.recv(&mut buf[..]) {
+        let mut tos = 0;
+        let mut ttl = 0;
+        let (sz, _) = match rx(&nctx.socket, &mut buf[..], &mut tos, &mut ttl) {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
@@ -151,8 +154,8 @@ fn process_loop(
             let received = Datagram::new(
                 nctx.remote_addr,
                 nctx.local_addr,
-                IpTos::default(),
-                None,
+                tos.into(),
+                Some(ttl),
                 &buf[..sz],
             );
             client.process_input(&received, Instant::now());
@@ -268,7 +271,7 @@ fn process_loop_h3(
     connect: bool,
     close: bool,
 ) -> Result<State, String> {
-    let buf = &mut [0u8; 2048];
+    let mut buf = [0; u16::MAX as usize];
     let timer = Timer::new();
 
     loop {
@@ -285,7 +288,12 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&nctx.socket, dgram),
+                Output::Datagram(dgram) => {
+                    if let Err(e) = tx(&nctx.socket, &dgram) {
+                        eprintln!("UDP write error: {e}");
+                        break;
+                    }
+                }
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
@@ -300,7 +308,9 @@ fn process_loop_h3(
             return Ok(handler.h3.conn().state().clone());
         }
 
-        let sz = match nctx.socket.recv(&mut buf[..]) {
+        let mut tos = 0;
+        let mut ttl = 0;
+        let (sz, _) = match rx(&nctx.socket, &mut buf[..], &mut tos, &mut ttl) {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
@@ -318,8 +328,8 @@ fn process_loop_h3(
             let received = Datagram::new(
                 nctx.remote_addr,
                 nctx.local_addr,
-                IpTos::default(),
-                None,
+                tos.into(),
+                Some(ttl),
                 &buf[..sz],
             );
             handler.h3.process_input(&received, Instant::now());

@@ -7,12 +7,11 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use common::IpTos;
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
-use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Poll, PollOpt, Ready, Token};
 
-use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
+use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, udp, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher, ResumptionToken,
@@ -33,7 +32,8 @@ use std::{
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, ErrorKind, Write},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    os::fd::{AsRawFd, FromRawFd},
     path::PathBuf,
     process::exit,
     rc::Rc,
@@ -346,14 +346,6 @@ impl QuicParameters {
     }
 }
 
-fn emit_datagram(socket: &mio::net::UdpSocket, d: Datagram) -> io::Result<()> {
-    let sent = socket.send_to(&d[..], &d.destination())?;
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
-    }
-    Ok(())
-}
-
 fn get_output_file(
     url: &Url,
     output_dir: &Option<PathBuf>,
@@ -414,7 +406,9 @@ fn process_loop(
 
         let mut datagrams: Vec<Datagram> = Vec::new();
         'read: loop {
-            match socket.recv_from(&mut buf[..]) {
+            let mut tos = 0;
+            let mut ttl = 0;
+            match udp::rx(socket, &mut buf[..], &mut tos, &mut ttl) {
                 Err(ref err)
                     if err.kind() == ErrorKind::WouldBlock
                         || err.kind() == ErrorKind::Interrupted =>
@@ -432,7 +426,7 @@ fn process_loop(
                     }
                     if sz > 0 {
                         let d =
-                            Datagram::new(remote, *local_addr, IpTos::default(), None, &buf[..sz]);
+                            Datagram::new(remote, *local_addr, tos.into(), Some(ttl), &buf[..sz]);
                         datagrams.push(d);
                     }
                 }
@@ -452,7 +446,7 @@ fn process_loop(
         'write: loop {
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
-                    if let Err(e) = emit_datagram(socket, dgram) {
+                    if let Err(e) = udp::tx(socket, &dgram) {
                         eprintln!("UDP write error: {e}");
                         client.close(Instant::now(), 0, e.to_string());
                         exiting = true;
@@ -1060,7 +1054,7 @@ fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match UdpSocket::bind(&local_addr) {
+        let socket = match UdpSocket::bind(local_addr) {
             Err(e) => {
                 eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
@@ -1068,15 +1062,17 @@ fn main() -> Res<()> {
             Ok(s) => s,
         };
 
+        let real_local = socket.local_addr().unwrap();
+        let mio_socket =
+            unsafe { <mio::net::UdpSocket as FromRawFd>::from_raw_fd(socket.as_raw_fd()) };
         let poll = Poll::new()?;
         poll.register(
-            &socket,
+            &mio_socket,
             Token(0),
             Ready::readable() | Ready::writable(),
             PollOpt::edge(),
         )?;
 
-        let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
             if args.use_old_http { "H9" } else { "H3" },
@@ -1131,7 +1127,7 @@ mod old {
         collections::{HashMap, VecDeque},
         fs::File,
         io::{ErrorKind, Write},
-        net::SocketAddr,
+        net::{SocketAddr, UdpSocket},
         path::PathBuf,
         process::exit,
         rc::Rc,
@@ -1142,14 +1138,18 @@ mod old {
 
     use super::{qlog_new, KeyUpdateState, Res};
     use mio::{Events, Poll};
-    use neqo_common::{event::Provider, Datagram, IpTos};
+    use neqo_common::{
+        event::Provider,
+        udp::{self},
+        Datagram,
+    };
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
         StreamType,
     };
 
-    use super::{emit_datagram, get_output_file, Args};
+    use super::{get_output_file, Args};
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,
@@ -1335,12 +1335,12 @@ mod old {
 
     fn process_loop_old(
         local_addr: &SocketAddr,
-        socket: &mio::net::UdpSocket,
+        socket: &UdpSocket,
         poll: &Poll,
         client: &mut Connection,
         handler: &mut HandlerOld,
     ) -> Res<State> {
-        let buf = &mut [0u8; 2048];
+        let mut buf = [0; u16::MAX as usize];
         let mut events = Events::with_capacity(1024);
         let mut timeout: Option<Duration> = None;
         loop {
@@ -1350,7 +1350,9 @@ mod old {
             )?;
 
             'read: loop {
-                match socket.recv_from(&mut buf[..]) {
+                let mut tos = 0;
+                let mut ttl = 0;
+                match udp::rx(socket, &mut buf[..], &mut tos, &mut ttl) {
                     Err(ref err)
                         if err.kind() == ErrorKind::WouldBlock
                             || err.kind() == ErrorKind::Interrupted =>
@@ -1370,8 +1372,8 @@ mod old {
                             let d = Datagram::new(
                                 remote,
                                 *local_addr,
-                                IpTos::default(),
-                                None,
+                                tos.into(),
+                                Some(ttl),
                                 &buf[..sz],
                             );
                             client.process_input(&d, Instant::now());
@@ -1390,7 +1392,7 @@ mod old {
             'write: loop {
                 match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
-                        if let Err(e) = emit_datagram(socket, dgram) {
+                        if let Err(e) = udp::tx(socket, &dgram) {
                             eprintln!("UDP write error: {e}");
                             client.close(Instant::now(), 0, e.to_string());
                             exiting = true;
@@ -1418,7 +1420,7 @@ mod old {
     #[allow(clippy::too_many_arguments)]
     pub fn old_client(
         args: &Args,
-        socket: &mio::net::UdpSocket,
+        socket: &UdpSocket,
         poll: &Poll,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,

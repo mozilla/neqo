@@ -1,16 +1,18 @@
 [package]
 name = "neqo-client"
 version = "0.6.8"
-authors = ["Martin Thomson <mt@lowentropy.net>",
+authors = [
+	"Martin Thomson <mt@lowentropy.net>",
 	"Dragana Damjanovic <dragana.damjano@gmail.com>",
-	"Andy Grover <agrover@mozilla.com>"]
+	"Andy Grover <agrover@mozilla.com>",
+]
 edition = "2018"
 rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
 mio = "~0.6.23"
-neqo-common = { path="./../neqo-common" }
+neqo-common = { path = "./../neqo-common", features = ["udp"] }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
