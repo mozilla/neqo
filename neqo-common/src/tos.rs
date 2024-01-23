@@ -15,16 +15,16 @@ use enum_map::Enum;
 #[repr(u8)]
 pub enum IpTosEcn {
     #[default]
-    /// Not-ECT, Not ECN-Capable Transport, [RFC3168]
+    /// Not-ECT, Not ECN-Capable Transport, RFC3168
     NotEct = 0b00,
 
-    /// ECT(1), ECN-Capable Transport(1), [RFC8311][RFC9331]
+    /// ECT(1), ECN-Capable Transport(1), RFC8311 and RFC9331
     Ect1 = 0b01,
 
-    /// ECT(0), ECN-Capable Transport(0), [RFC3168]
+    /// ECT(0), ECN-Capable Transport(0), RFC3168
     Ect0 = 0b10,
 
-    /// CE, Congestion Experienced, [RFC3168]
+    /// CE, Congestion Experienced, RFC3168
     Ce = 0b11,
 }
 
@@ -52,73 +52,73 @@ impl From<u8> for IpTosEcn {
 #[repr(u8)]
 pub enum IpTosDscp {
     #[default]
-    /// Class Selector 0, [RFC2474]
+    /// Class Selector 0, RFC2474
     Cs0 = 0b0000_0000,
 
-    /// Class Selector 1, [RFC2474]
+    /// Class Selector 1, RFC2474
     Cs1 = 0b0010_0000,
 
-    /// Class Selector 2, [RFC2474]
+    /// Class Selector 2, RFC2474
     Cs2 = 0b0100_0000,
 
-    /// Class Selector 3, [RFC2474]
+    /// Class Selector 3, RFC2474
     Cs3 = 0b0110_0000,
 
-    /// Class Selector 4, [RFC2474]
+    /// Class Selector 4, RFC2474
     Cs4 = 0b1000_0000,
 
-    /// Class Selector 5, [RFC2474]
+    /// Class Selector 5, RFC2474
     Cs5 = 0b1010_0000,
 
-    /// Class Selector 6, [RFC2474]
+    /// Class Selector 6, RFC2474
     Cs6 = 0b1100_0000,
 
-    /// Class Selector 7, [RFC2474]
+    /// Class Selector 7, RFC2474
     Cs7 = 0b1110_0000,
 
-    /// Assured Forwarding 11, [RFC2597]
+    /// Assured Forwarding 11, RFC2597
     Af11 = 0b0010_1000,
 
-    /// Assured Forwarding 12, [RFC2597]
+    /// Assured Forwarding 12, RFC2597
     Af12 = 0b0011_0000,
 
-    /// Assured Forwarding 13, [RFC2597]
+    /// Assured Forwarding 13, RFC2597
     Af13 = 0b0011_1000,
 
-    /// Assured Forwarding 21, [RFC2597]
+    /// Assured Forwarding 21, RFC2597
     Af21 = 0b0100_1000,
 
-    /// Assured Forwarding 22, [RFC2597]
+    /// Assured Forwarding 22, RFC2597
     Af22 = 0b0101_0000,
 
-    /// Assured Forwarding 23, [RFC2597]
+    /// Assured Forwarding 23, RFC2597
     Af23 = 0b0101_1000,
 
-    /// Assured Forwarding 31, [RFC2597]
+    /// Assured Forwarding 31, RFC2597
     Af31 = 0b0110_1000,
 
-    /// Assured Forwarding 32, [RFC2597]
+    /// Assured Forwarding 32, RFC2597
     Af32 = 0b0111_0000,
 
-    /// Assured Forwarding 33, [RFC2597]
+    /// Assured Forwarding 33, RFC2597
     Af33 = 0b0111_1000,
 
-    /// Assured Forwarding 41, [RFC2597]
+    /// Assured Forwarding 41, RFC2597
     Af41 = 0b1000_1000,
 
-    /// Assured Forwarding 42, [RFC2597]
+    /// Assured Forwarding 42, RFC2597
     Af42 = 0b1001_0000,
 
-    /// Assured Forwarding 43, [RFC2597]
+    /// Assured Forwarding 43, RFC2597
     Af43 = 0b1001_1000,
 
-    /// Expedited Forwarding, [RFC3246]
+    /// Expedited Forwarding, RFC3246
     Ef = 0b1011_1000,
 
-    /// Capacity-Admitted Traffic, [RFC5865]
+    /// Capacity-Admitted Traffic, RFC5865
     VoiceAdmit = 0b1011_0000,
 
-    /// Lower-Effort, [RFC8622]
+    /// Lower-Effort, RFC8622
     Le = 0b0000_0100,
 }
 
