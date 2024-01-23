@@ -363,8 +363,9 @@ impl ToString for SharedVec {
     }
 }
 
-/// Returns a pair of new enabled `NeqoQlog` that is backed by a Vec<u8> together with a
-/// `Cursor<Vec<u8>>` that can be used to read the contents of the log.
+/// Returns a pair of new enabled `NeqoQlog` that is backed by a [`Vec<u8>`]
+/// together with a [`Cursor<Vec<u8>>`] that can be used to read the contents of
+/// the log.
 /// # Panics
 /// Panics if the log cannot be created.
 #[must_use]

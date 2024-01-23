@@ -71,43 +71,43 @@ fn alpn_from_quic_version(version: Version) -> &'static str {
 
 /// The API is used for:
 /// - create and close an endpoint:
-///   - [`new`](struct.Http3Client.html#method.new)
-///   - [`new_with_conn`](struct.Http3Client.html#method.new_with_conn)
-///   - [`close`](struct.Http3Client.html#method.close)
+///   - [`Http3Client::new`]
+///   - [`Http3Client::new_with_conn`]
+///   - [`Http3Client::close`]
 /// - configuring an endpoint:
-///   - [`authenticated`](struct.Http3Client.html#method.authenticated)
-///   - [`enable_ech`](struct.Http3Client.html#method.enable_ech)
-///   - [`enable_resumption`](struct.Http3Client.html#method.enable_resumption)
-///   - [`initiate_key_update`](struct.Http3Client.html#method.initiate_key_update)
-///   - [`set_qlog`](struct.Http3Client.html#method.set_qlog)
+///   - [`Http3Client::authenticated`]
+///   - [`Http3Client::enable_ech`]
+///   - [`Http3Client::enable_resumption`]
+///   - [`Http3Client::initiate_key_update`]
+///   - [`Http3Client::set_qlog`]
 /// - retrieving information about a connection:
-/// - [`peer_certificate`](struct.Http3Client.html#method.peer_certificate)
-///   - [`qpack_decoder_stats`](struct.Http3Client.html#method.qpack_decoder_stats)
-///   - [`qpack_encoder_stats`](struct.Http3Client.html#method.qpack_encoder_stats)
-///   - [`transport_stats`](struct.Http3Client.html#method.transport_stats)
-///   - [`state`](struct.Http3Client.html#method.state)
-///   - [`take_resumption_token`](struct.Http3Client.html#method.take_resumption_token)
-///   - [`tls_inf`](struct.Http3Client.html#method.tls_info)
+/// - [`Http3Client::peer_certificate`]
+///   - [`Http3Client::qpack_decoder_stats`]
+///   - [`Http3Client::qpack_encoder_stats`]
+///   - [`Http3Client::transport_stats`]
+///   - [`Http3Client::state`]
+///   - [`Http3Client::take_resumption_token`]
+///   - [`Http3Client::tls_info`]
 /// - driving HTTP/3 session:
-///   - [`process_output`](struct.Http3Client.html#method.process_output)
-///   - [`process_input`](struct.Http3Client.html#method.process_input)
-///   - [`process`](struct.Http3Client.html#method.process)
+///   - [`Http3Client::process_output`]
+///   - [`Http3Client::process_input`]
+///   - [`Http3Client::process`]
 /// - create requests, send/receive data, and cancel requests:
-///   - [`fetch`](struct.Http3Client.html#method.fetch)
-///   - [`send_data`](struct.Http3Client.html#method.send_data)
-///   - [`read_dara`](struct.Http3Client.html#method.read_data)
-///   - [`stream_close_send`](struct.Http3Client.html#method.stream_close_send)
-///   - [`cancel_fetch`](struct.Http3Client.html#method.cancel_fetch)
-///   - [`stream_reset_send`](struct.Http3Client.html#method.stream_reset_send)
-///   - [`stream_stop_sending`](struct.Http3Client.html#method.stream_stop_sending)
-///   - [`set_stream_max_data`](struct.Http3Client.html#method.set_stream_max_data)
+///   - [`Http3Client::fetch`]
+///   - [`Http3Client::send_data`]
+///   - [`Http3Client::read_data`]
+///   - [`Http3Client::stream_close_send`]
+///   - [`Http3Client::cancel_fetch`]
+///   - [`Http3Client::stream_reset_send`]
+///   - [`Http3Client::stream_stop_sending`]
+///   - [`Http3Client::set_stream_max_data`]
 /// - priority feature:
-///   - [`priority_update`](struct.Http3Client.html#method.priority_update)
+///   - [`Http3Client::priority_update`]
 /// - `WebTransport` feature:
-///   - [`webtransport_create_session`](struct.Http3Client.html#method.webtransport_create_session)
-///   - [`webtransport_close_session`](struct.Http3Client.html#method.webtransport_close_session)
-///   - [`webtransport_create_stream`](struct.Http3Client.html#method.webtransport_create_sstream)
-///   - [`webtransport_enabled`](struct.Http3Client.html#method.webtransport_enabled)
+///   - [`Http3Client::webtransport_create_session`]
+///   - [`Http3Client::webtransport_close_session`]
+///   - [`Http3Client::webtransport_create_stream`]
+///   - [`Http3Client::webtransport_enabled`]
 ///
 /// ## Examples
 ///
