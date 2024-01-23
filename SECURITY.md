@@ -13,6 +13,7 @@ The version of neqo that is active can be found in the Firefox repositories:
 - [beta](https://hg.mozilla.org/mozilla-unified/file/beta/third_party/rust/neqo-transport/Cargo.toml), and
 - [trunk/central](https://hg.mozilla.org/mozilla-unified/file/central/third_party/rust/neqo-transport/Cargo.toml),
 - [ESR 115](https://hg.mozilla.org/mozilla-unified/file/esr115/third_party/rust/neqo-transport/Cargo.toml).
+
 The listed version in these files corresponds to [tags](https://github.com/mozilla/neqo/tags) on this repository.
 Releases do not always correspond to a branch.
 
