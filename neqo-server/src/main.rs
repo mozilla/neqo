@@ -318,9 +318,15 @@ impl QuicParameters {
 }
 
 fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
-    let sent = socket
-        .send_to(&out_dgram, &out_dgram.destination())
-        .expect("Error sending datagram");
+    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()) {
+        Err(ref err) => {
+            if err.kind() != io::ErrorKind::WouldBlock {
+                eprintln!("UDP send error: {err:?}");
+            }
+            0
+        }
+        Ok(res) => res,
+    };
     if sent != out_dgram.len() {
         eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
     }
