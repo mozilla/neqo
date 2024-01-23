@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{event::Provider, hex, Datagram};
+use neqo_common::{event::Provider, hex, Datagram, IpTos};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -148,7 +148,13 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            let received = Datagram::new(
+                nctx.remote_addr,
+                nctx.local_addr,
+                IpTos::default(),
+                None,
+                &buf[..sz],
+            );
             client.process_input(&received, Instant::now());
         }
     }
@@ -309,7 +315,13 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            let received = Datagram::new(
+                nctx.remote_addr,
+                nctx.local_addr,
+                IpTos::default(),
+                None,
+                &buf[..sz],
+            );
             handler.h3.process_input(&received, Instant::now());
         }
     }
@@ -682,7 +694,13 @@ impl Handler for VnHandler {
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
         let mut payload = d[..].to_vec();
         payload[1] = 0x1a;
-        Some(Datagram::new(d.source(), d.destination(), payload))
+        Some(Datagram::new(
+            d.source(),
+            d.destination(),
+            d.tos(),
+            d.ttl(),
+            payload,
+        ))
     }
 }
 

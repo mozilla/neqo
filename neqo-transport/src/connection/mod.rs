@@ -1149,7 +1149,13 @@ impl Connection {
     /// part that we don't have keys for.
     fn save_datagram(&mut self, cspace: CryptoSpace, d: &Datagram, remaining: usize, now: Instant) {
         let d = if remaining < d.len() {
-            Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..])
+            Datagram::new(
+                d.source(),
+                d.destination(),
+                d.tos(),
+                d.ttl(),
+                &d[d.len() - remaining..],
+            )
         } else {
             d.clone()
         };
