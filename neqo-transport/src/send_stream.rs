@@ -826,9 +826,7 @@ impl SendStream {
                 ..
             } => {
                 let used = send_buf.used(); // immutable first
-                let bytes = send_buf.next_bytes();
-                if bytes.is_some() {
-                    let (offset, slice) = bytes.unwrap();
+                if let Some((offset, slice)) = send_buf.next_bytes() {
                     Some((offset, slice))
                 } else if fin_sent {
                     None
