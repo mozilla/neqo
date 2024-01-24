@@ -318,9 +318,15 @@ impl QuicParameters {
 }
 
 fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
-    let sent = socket
-        .send_to(&out_dgram, &out_dgram.destination())
-        .expect("Error sending datagram");
+    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()) {
+        Err(ref err) => {
+            if err.kind() != io::ErrorKind::WouldBlock || err.kind() == io::ErrorKind::Interrupted {
+                eprintln!("UDP send error: {err:?}");
+            }
+            0
+        }
+        Ok(res) => res,
+    };
     if sent != out_dgram.len() {
         eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
     }
@@ -590,7 +596,12 @@ fn read_dgram(
 ) -> Result<Option<Datagram>, io::Error> {
     let buf = &mut [0u8; 2048];
     let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
-        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+        Err(ref err)
+            if err.kind() == io::ErrorKind::WouldBlock
+                || err.kind() == io::ErrorKind::Interrupted =>
+        {
+            return Ok(None)
+        }
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
             return Err(err);
@@ -672,12 +683,13 @@ impl ServersRunner {
                 Ok(s) => s,
             };
 
-            let also_v4 = if socket.only_v6().unwrap_or(true) {
-                ""
-            } else {
-                " as well as V4"
+            print!("Server waiting for connection on: {local_addr:?}");
+            // On Windows, this is not supported.
+            #[cfg(not(target_os = "windows"))]
+            if !socket.only_v6().unwrap_or(true) {
+                print!(" as well as V4");
             };
-            println!("Server waiting for connection on: {local_addr:?}{also_v4}");
+            println!();
 
             self.poll.register(
                 &socket,
