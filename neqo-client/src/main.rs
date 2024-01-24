@@ -458,8 +458,8 @@ fn process_loop(
                         {
                             break 'write;
                         }
-                        eprintln!("UDP write error: {e}");
-                        client.close(Instant::now(), 0, e.to_string());
+                        eprintln!("UDP write error: {err}");
+                        client.close(Instant::now(), 0, err.to_string());
                         exiting = true;
                         break 'write;
                     }
