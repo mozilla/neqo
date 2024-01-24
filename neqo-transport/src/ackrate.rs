@@ -149,7 +149,7 @@ pub enum PeerAckDelay {
 }
 
 impl PeerAckDelay {
-    pub const fn fixed(max_ack_delay: Duration) -> Self {
+    pub fn fixed(max_ack_delay: Duration) -> Self {
         Self::Fixed(max_ack_delay)
     }
 
