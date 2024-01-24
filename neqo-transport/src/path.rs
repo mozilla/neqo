@@ -28,7 +28,6 @@ use crate::{
     sender::PacketSender,
     stats::FrameStats,
     tracking::{PacketNumberSpace, SentPacket},
-    Error, Res,
 };
 
 use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
@@ -415,7 +414,7 @@ impl Paths {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         while let Some(seqno) = self.to_retire.pop() {
             if builder.remaining() < 1 + Encoder::varint_len(seqno) {
                 self.to_retire.push(seqno);
@@ -431,8 +430,6 @@ impl Paths {
         self.primary()
             .borrow_mut()
             .write_cc_frames(builder, tokens, stats);
-
-        Ok(())
     }
 
     pub fn lost_retire_cid(&mut self, lost: u64) {
@@ -771,9 +768,9 @@ impl Path {
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
-    ) -> Res<bool> {
+    ) -> bool {
         if builder.remaining() < 9 {
-            return Ok(false);
+            return false;
         }
 
         // Send PATH_RESPONSE.
@@ -788,7 +785,7 @@ impl Path {
             stats.all += 1;
 
             if builder.remaining() < 9 {
-                return Ok(true);
+                return true;
             }
             true
         } else {
@@ -812,9 +809,9 @@ impl Path {
                 mtu,
                 sent: now,
             };
-            Ok(true)
+            true
         } else {
-            Ok(resp_sent)
+            resp_sent
         }
     }
 
