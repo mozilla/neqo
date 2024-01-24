@@ -797,8 +797,7 @@ impl SendStream {
                 ref mut send_buf, ..
             } => {
                 let result = send_buf.next_bytes();
-                if result.is_some() {
-                    let (offset, slice) = result.unwrap();
+                if let Some((offset, slice)) = result {
                     if retransmission_only {
                         qtrace!(
                             //                            [self], can't borrow immutably since we have a mutable borrow
