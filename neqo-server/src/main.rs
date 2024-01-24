@@ -320,7 +320,7 @@ impl QuicParameters {
 fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
     let sent = match socket.send_to(&out_dgram, &out_dgram.destination()) {
         Err(ref err) => {
-            if err.kind() != io::ErrorKind::WouldBlock {
+            if err.kind() != io::ErrorKind::WouldBlock || err.kind() == io::ErrorKind::Interrupted {
                 eprintln!("UDP send error: {err:?}");
             }
             0
@@ -596,7 +596,12 @@ fn read_dgram(
 ) -> Result<Option<Datagram>, io::Error> {
     let buf = &mut [0u8; 2048];
     let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
-        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+        Err(ref err)
+            if err.kind() == io::ErrorKind::WouldBlock
+                || err.kind() == io::ErrorKind::Interrupted =>
+        {
+            return Ok(None)
+        }
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
             return Err(err);

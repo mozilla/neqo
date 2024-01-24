@@ -452,8 +452,10 @@ fn process_loop(
         'write: loop {
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
-                    if let Err(e) = emit_datagram(socket, dgram) {
-                        if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted {
+                    if let Err(err) = emit_datagram(socket, dgram) {
+                        if err.kind() == ErrorKind::WouldBlock
+                            || err.kind() == ErrorKind::Interrupted
+                        {
                             break 'write;
                         }
                         eprintln!("UDP write error: {e}");
