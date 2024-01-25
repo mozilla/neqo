@@ -403,14 +403,12 @@ fn process_loop(
     client: &mut Http3Client,
     handler: &mut Handler,
 ) -> Res<neqo_http3::Http3State> {
+    const ZERO: Duration = Duration::new(0, 0);
     let buf = &mut [0u8; 2048];
     let mut events = Events::with_capacity(1024);
-    let mut timeout: Option<Duration> = None;
+    let mut timeout = ZERO;
     loop {
-        poll.poll(
-            &mut events,
-            timeout.or_else(|| Some(Duration::from_millis(0))),
-        )?;
+        poll.poll(&mut events, Some(timeout))?;
 
         let mut datagrams: Vec<Datagram> = Vec::new();
         'read: loop {
@@ -458,9 +456,10 @@ fn process_loop(
                         exiting = true;
                         break 'write;
                     }
+                    timeout = ZERO;
                 }
                 Output::Callback(new_timeout) => {
-                    timeout = Some(new_timeout);
+                    timeout = new_timeout;
                     break 'write;
                 }
                 Output::None => {
@@ -1337,14 +1336,12 @@ mod old {
         client: &mut Connection,
         handler: &mut HandlerOld,
     ) -> Res<State> {
+        const ZERO: Duration = Duration::new(0, 0);
         let buf = &mut [0u8; 2048];
         let mut events = Events::with_capacity(1024);
-        let mut timeout: Option<Duration> = None;
+        let mut timeout = ZERO;
         loop {
-            poll.poll(
-                &mut events,
-                timeout.or_else(|| Some(Duration::from_millis(0))),
-            )?;
+            poll.poll(&mut events, Some(timeout))?;
 
             'read: loop {
                 match socket.recv_from(&mut buf[..]) {
@@ -1393,9 +1390,10 @@ mod old {
                             exiting = true;
                             break 'write;
                         }
+                        timeout = ZERO;
                     }
                     Output::Callback(new_timeout) => {
-                        timeout = Some(new_timeout);
+                        timeout = new_timeout;
                         break 'write;
                     }
                     Output::None => {
