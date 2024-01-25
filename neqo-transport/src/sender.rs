@@ -72,7 +72,7 @@ impl PacketSender {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        rtts: &RttEstimate,
+        rtt_est: &RttEstimate,
         now: Instant,
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
