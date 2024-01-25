@@ -403,10 +403,9 @@ fn process_loop(
     client: &mut Http3Client,
     handler: &mut Handler,
 ) -> Res<neqo_http3::Http3State> {
-    const ZERO: Duration = Duration::new(0, 0);
     let buf = &mut [0u8; 2048];
     let mut events = Events::with_capacity(1024);
-    let mut timeout = ZERO;
+    let mut timeout = Duration::new(0, 0);
     loop {
         poll.poll(&mut events, Some(timeout))?;
 
@@ -456,7 +455,6 @@ fn process_loop(
                         exiting = true;
                         break 'write;
                     }
-                    timeout = ZERO;
                 }
                 Output::Callback(new_timeout) => {
                     timeout = new_timeout;
@@ -1336,10 +1334,9 @@ mod old {
         client: &mut Connection,
         handler: &mut HandlerOld,
     ) -> Res<State> {
-        const ZERO: Duration = Duration::new(0, 0);
         let buf = &mut [0u8; 2048];
         let mut events = Events::with_capacity(1024);
-        let mut timeout = ZERO;
+        let mut timeout = Duration::new(0, 0);
         loop {
             poll.poll(&mut events, Some(timeout))?;
 
@@ -1390,7 +1387,6 @@ mod old {
                             exiting = true;
                             break 'write;
                         }
-                        timeout = ZERO;
                     }
                     Output::Callback(new_timeout) => {
                         timeout = new_timeout;
