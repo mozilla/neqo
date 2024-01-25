@@ -57,7 +57,7 @@ const DEFAULT_RTT: Duration = Duration::from_millis(100);
 const AT_LEAST_PTO: Duration = Duration::from_secs(1);
 const DEFAULT_STREAM_DATA: &[u8] = b"message";
 /// The number of 1-RTT packets sent in `force_idle` by a client.
-const FORCE_IDLE_CLIENT_1RTT_PACKETS: usize = 3;
+const CLIENT_HANDSHAKE_1RTT_PACKETS: usize = 1;
 
 /// WARNING!  In this module, this version of the generator needs to be used.
 /// This copies the implementation from

@@ -8,7 +8,7 @@ use super::super::Output;
 use super::{
     ack_bytes, assert_full_cwnd, connect_rtt_idle, cwnd, cwnd_avail, cwnd_packets, default_client,
     default_server, fill_cwnd, induce_persistent_congestion, send_something, DEFAULT_RTT,
-    FORCE_IDLE_CLIENT_1RTT_PACKETS, POST_HANDSHAKE_CWND,
+    CLIENT_HANDSHAKE_1RTT_PACKETS, POST_HANDSHAKE_CWND,
 };
 use crate::cc::MAX_DATAGRAM_SIZE;
 use crate::packet::PacketNumber;
@@ -54,7 +54,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
     // We have already sent packets in `connect_rtt_idle`,
     // so include a fudge factor.
     let flight1_largest =
-        PacketNumber::try_from(c_tx_dgrams.len() + FORCE_IDLE_CLIENT_1RTT_PACKETS).unwrap();
+        PacketNumber::try_from(c_tx_dgrams.len() + CLIENT_HANDSHAKE_1RTT_PACKETS).unwrap();
 
     // Server: Receive and generate ack
     now += DEFAULT_RTT / 2;
