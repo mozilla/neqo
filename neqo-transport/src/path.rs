@@ -973,8 +973,7 @@ impl Path {
     /// Record packets as acknowledged with the sender.
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant) {
         debug_assert!(self.is_primary());
-        self.sender
-            .on_packets_acked(acked_pkts, self.rtt.minimum(), now);
+        self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
     }
 
     /// Record packets as lost with the sender.
