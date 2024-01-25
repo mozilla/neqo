@@ -224,7 +224,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             let bytes_for_increase = self.cc_algorithm.bytes_for_cwnd_increase(
                 self.congestion_window,
                 new_acked,
-                rtts.minimum(),
+                rtt_est.minimum(),
                 now,
             );
             debug_assert!(bytes_for_increase > 0);
