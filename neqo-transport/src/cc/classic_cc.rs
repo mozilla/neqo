@@ -167,7 +167,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let mut new_acked = 0;
         for pkt in acked_pkts {
             qinfo!(
-                "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}, rtts={:?}",
+                "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}, rtt_est={:?}",
                 self,
                 pkt.pn,
                 pkt.size,
