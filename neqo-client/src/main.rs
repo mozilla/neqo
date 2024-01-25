@@ -405,12 +405,9 @@ fn process_loop(
 ) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     let mut events = Events::with_capacity(1024);
-    let mut timeout: Option<Duration> = None;
+    let mut timeout = Duration::new(0, 0);
     loop {
-        poll.poll(
-            &mut events,
-            timeout.or_else(|| Some(Duration::from_millis(0))),
-        )?;
+        poll.poll(&mut events, Some(timeout))?;
 
         let mut datagrams: Vec<Datagram> = Vec::new();
         'read: loop {
@@ -465,7 +462,7 @@ fn process_loop(
                     }
                 }
                 Output::Callback(new_timeout) => {
-                    timeout = Some(new_timeout);
+                    timeout = new_timeout;
                     break 'write;
                 }
                 Output::None => {
@@ -1347,12 +1344,9 @@ mod old {
     ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         let mut events = Events::with_capacity(1024);
-        let mut timeout: Option<Duration> = None;
+        let mut timeout = Duration::new(0, 0);
         loop {
-            poll.poll(
-                &mut events,
-                timeout.or_else(|| Some(Duration::from_millis(0))),
-            )?;
+            poll.poll(&mut events, Some(timeout))?;
 
             'read: loop {
                 match socket.recv_from(&mut buf[..]) {
@@ -1403,7 +1397,7 @@ mod old {
                         }
                     }
                     Output::Callback(new_timeout) => {
-                        timeout = Some(new_timeout);
+                        timeout = new_timeout;
                         break 'write;
                     }
                     Output::None => {
