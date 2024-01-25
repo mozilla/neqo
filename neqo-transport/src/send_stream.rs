@@ -188,6 +188,26 @@ impl RangeTracker {
         (prev_end, None)
     }
 
+    // Check for the common case of adding to the end.  If we can, do it and
+    // return true.
+    fn extend_final_range(&mut self, new_off: u64, new_len: u64, new_state: RangeState) -> bool {
+        if let Some(mut last) = self.used.last_entry() {
+            let prev_off = *last.key();
+            let (prev_len, prev_state) = last.get_mut();
+            // allow for overlap between new chunk and the last entry
+            if new_off >= prev_off
+                && new_off <= prev_off + *prev_len
+                && new_off + new_len > prev_off + *prev_len
+                && new_state == *prev_state
+            {
+                // simple case, extend the last entry
+                *prev_len = new_off + new_len - prev_off;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Turn one range into a list of subranges that align with existing
     /// ranges.
     /// Check impermissible overlaps in subregions: Sent cannot overwrite Acked.
@@ -216,21 +236,7 @@ impl RangeTracker {
         let mut tmp_len = new_len;
         let mut v = Vec::new();
 
-        // Check for the common case of adding to the end
-        if let Some(mut last) = self.used.last_entry() {
-            let prev_off = *last.key();
-            let (prev_len, prev_state) = last.get_mut();
-            // allow for overlap between new chunk and the last entry
-            if new_off >= prev_off
-                && new_off <= prev_off + *prev_len
-                && new_off + new_len > prev_off + *prev_len
-                && new_state == *prev_state
-            {
-                // simple case, extend the last entry
-                *prev_len = new_off + new_len - prev_off;
-                return v;
-            }
-        }
+        // we already handled the case of a simple extension of the last item
 
         // cut previous overlapping range if needed
         let prev = self.used.range_mut(..tmp_off).next_back();
@@ -331,6 +337,9 @@ impl RangeTracker {
         }
 
         self.cached = None;
+        if self.extend_final_range(off, len as u64, state) {
+            return;
+        }
         let subranges = self.chunk_range_on_edges(off, len as u64, state);
 
         for (sub_off, sub_len, sub_state) in subranges {
