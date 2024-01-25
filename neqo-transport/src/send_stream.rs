@@ -171,16 +171,17 @@ impl RangeTracker {
     fn first_unmarked_range(&mut self) -> (u64, Option<u64>) {
         let mut prev_end = 0;
 
-        if self.cached.is_some() {
-            return self.cached.unwrap();
+        if let Some(cached) = self.cached {
+            return cached;
         }
 
         for (cur_off, (cur_len, _)) in &self.used {
             if prev_end == *cur_off {
                 prev_end = cur_off + cur_len;
             } else {
-                self.cached = Some((prev_end, Some(cur_off - prev_end)));
-                return self.cached.unwrap();
+                let res = (prev_end, Some(cur_off - prev_end));
+                self.cached = Some(res);
+                return res;
             }
         }
         self.cached = Some((prev_end, None));
@@ -222,7 +223,6 @@ impl RangeTracker {
             if new_off == prev_off + *prev_len && new_state == *prev_state {
                 // simple case, extend the last entry
                 *prev_len += new_len;
-
                 return v;
             }
         }
@@ -800,7 +800,6 @@ impl SendStream {
                 if let Some((offset, slice)) = result {
                     if retransmission_only {
                         qtrace!(
-                            //                            [self], can't borrow immutably since we have a mutable borrow
                             "next_bytes apply retransmission limit at {}",
                             self.retransmission_offset
                         );
@@ -826,8 +825,9 @@ impl SendStream {
                 ..
             } => {
                 let used = send_buf.used(); // immutable first
-                if let Some((offset, slice)) = send_buf.next_bytes() {
-                    Some((offset, slice))
+                let bytes = send_buf.next_bytes();
+                if bytes.is_some() {
+                    bytes
                 } else if fin_sent {
                     None
                 } else {
