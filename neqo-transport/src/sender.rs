@@ -75,7 +75,7 @@ impl PacketSender {
         rtts: &RttEstimate,
         now: Instant,
     ) {
-        self.cc.on_packets_acked(acked_pkts, rtts, now);
+        self.cc.on_packets_acked(acked_pkts, rtt_est, now);
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.
