@@ -276,8 +276,6 @@ impl RangeTracker {
             .map(|(len, _)| *len);
 
         if let Some(len_from_zero) = acked_range_from_zero {
-            let mut to_remove = SmallVec::<[_; 8]>::new();
-
             let mut new_len_from_zero = len_from_zero;
 
             // See if there's another Acked range entry contiguous to this one
@@ -286,16 +284,13 @@ impl RangeTracker {
                 .get(&new_len_from_zero)
                 .filter(|(_, state)| *state == RangeState::Acked)
             {
-                to_remove.push(new_len_from_zero);
+                let to_remove = new_len_from_zero;
                 new_len_from_zero += *next_len;
+                self.used.remove(&to_remove);
             }
 
             if len_from_zero != new_len_from_zero {
                 self.used.get_mut(&0).expect("must be there").0 = new_len_from_zero;
-            }
-
-            for val in to_remove {
-                self.used.remove(&val);
             }
         }
     }
