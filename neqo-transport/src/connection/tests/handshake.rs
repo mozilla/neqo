@@ -378,28 +378,24 @@ fn reorder_05rtt_with_0rtt() {
     assert_eq!(client.stats().saved_datagrams, 1);
 
     // Now PTO at the client and cause the server to re-send handshake packets.
-    // Note that the client will detect some packets as lost and retransmit them.
     now += AT_LEAST_PTO;
     let c3 = client.process(None, now).dgram();
-    let c4 = client.process(None, now).dgram();
 
     now += RTT / 2;
     let s3 = server.process(c3.as_ref(), now).dgram().unwrap();
-    let s4 = server.process(c4.as_ref(), now).dgram().unwrap();
-    assertions::assert_no_1rtt(&s4[..]);
+    assertions::assert_no_1rtt(&s3[..]);
 
     // The client should be able to process the 0.5 RTT now.
+    // This should contain an ACK, so we are processing an ACK from the past.
     now += RTT / 2;
     client.process_input(&s3, now);
-    // This should contain an ACK, so we are processing an ACK from the past.
-    client.process_input(&s4, now);
     maybe_authenticate(&mut client);
-    let c5 = client.process(None, now).dgram();
+    let c4 = client.process(None, now).dgram();
     assert_eq!(*client.state(), State::Connected);
     assert_eq!(client.paths.rtt(), RTT);
 
     now += RTT / 2;
-    server.process_input(&c5.unwrap(), now);
+    server.process_input(&c4.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
     // Don't check server RTT as it will be massively inflated by a
     // poor initial estimate received when the server dropped the

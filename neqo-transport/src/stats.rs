@@ -141,6 +141,8 @@ pub struct Stats {
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
     pub rttvar: Duration,
+    /// Whether the first RTT sample was guessed from a discarded packet.
+    pub rtt_init_guess: bool,
 
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.

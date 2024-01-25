@@ -7,9 +7,8 @@
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
-    default_client, default_server, fill_cwnd, maybe_authenticate, new_client, rttvar_after_n_acks,
-    send_and_receive, send_something, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    POST_HANDSHAKE_CWND,
+    default_client, default_server, fill_cwnd, maybe_authenticate, new_client, send_and_receive,
+    send_something, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
 };
 use crate::{
     cc::CWND_MIN,
@@ -717,11 +716,13 @@ fn ping_with_ack_min() {
 
 /// This calculates the PTO timer immediately after connection establishment.
 /// It depends on there only being 2 RTT samples in the handshake.
-fn expected_pto(n: usize, rtt: Duration) -> Duration {
+fn expected_pto(rtt: Duration) -> Duration {
     // PTO calculation is rtt + 4rttvar + ack delay.
+    // rttvar should be (rtt + 4 * (rtt / 2) * (3/4)^n + 25ms)/2
+    // where n is the number of round trips
     // This uses a 25ms ack delay as the ACK delay extension
     // is negotiated and no ACK_DELAY frame has been received.
-    rtt + 4 * rttvar_after_n_acks(n, rtt) + Duration::from_millis(25)
+    rtt + rtt * 9 / 8 + Duration::from_millis(25)
 }
 
 #[test]
@@ -748,8 +749,7 @@ fn fast_pto() {
 
     // Nothing to do, should return a callback.
     let cb = client.process_output(now).callback();
-    // Four RTT updates happen before this.
-    assert_eq!(expected_pto(4, DEFAULT_RTT) / 2, cb);
+    assert_eq!(expected_pto(DEFAULT_RTT) / 2, cb);
 
     // Once the PTO timer expires, a PTO packet should be sent should want to send PTO packet.
     now += cb;
@@ -780,15 +780,13 @@ fn fast_pto_persistent_congestion() {
     // That is OK as we're still showing that this interval is less than
     // six times the PTO, which is what would be used if the scaling
     // applied to the PTO used to determine persistent congestion.
-    // Four RTT updates happen before this.
-    let pc_interval = expected_pto(4, DEFAULT_RTT) * 3;
+    let pc_interval = expected_pto(DEFAULT_RTT) * 3;
     println!("pc_interval {pc_interval:?}");
     let _drop1 = send_something(&mut client, now);
 
     // Check that the PTO matches expectations.
-    // Four RTT updates happen before this.
     let cb = client.process_output(now).callback();
-    assert_eq!(expected_pto(4, DEFAULT_RTT) * 2, cb);
+    assert_eq!(expected_pto(DEFAULT_RTT) * 2, cb);
 
     now += pc_interval;
     let _drop2 = send_something(&mut client, now);
