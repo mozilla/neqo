@@ -220,9 +220,14 @@ impl RangeTracker {
         if let Some(mut last) = self.used.last_entry() {
             let prev_off = *last.key();
             let (prev_len, prev_state) = last.get_mut();
-            if new_off == prev_off + *prev_len && new_state == *prev_state {
+            // allow for overlap between new chunk and the last entry
+            if new_off >= prev_off
+                && new_off <= prev_off + *prev_len
+                && new_off + new_len > prev_off + *prev_len
+                && new_state == *prev_state
+            {
                 // simple case, extend the last entry
-                *prev_len += new_len;
+                *prev_len = new_off + new_len - prev_off;
                 return v;
             }
         }
