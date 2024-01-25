@@ -173,7 +173,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 pkt.size,
                 i32::from(!pkt.cc_outstanding()),
                 i32::from(pkt.lost()),
-                rtts,
+                rtt_est,
             );
             if !pkt.cc_outstanding() {
                 continue;
