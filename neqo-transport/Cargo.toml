@@ -18,7 +18,12 @@ criterion = "0.5.1"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [features]
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+
+[[bench]]
+name = "range_tracker"
+harness = false
