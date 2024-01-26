@@ -200,39 +200,44 @@ impl RxStreamOrderer {
             false
         };
 
-        // Now handle possible overlap with next entries
-        let mut to_remove = SmallVec::<[_; 8]>::new();
         let mut to_add = new_data;
+        if let Some(entry) = self.data_ranges.last_entry() {
+            // is this at the end (common case)?  If so, don't need this block
+            if *entry.key() > new_start {
+                // Now handle possible overlap with next entries
+                let mut to_remove = SmallVec::<[_; 8]>::new();
 
-        for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
-            let next_end = next_start + u64::try_from(next_data.len()).unwrap();
-            let overlap = new_end.saturating_sub(next_start);
-            if overlap == 0 {
-                break;
-            } else if next_end >= new_end {
-                qtrace!(
-                    "New frame {}-{} overlaps with next frame by {}, truncating",
-                    new_start,
-                    new_end,
-                    overlap
-                );
-                let truncate_to = new_data.len() - usize::try_from(overlap).unwrap();
-                to_add = &new_data[..truncate_to];
-                break;
-            } else {
-                qtrace!(
-                    "New frame {}-{} spans entire next frame {}-{}, replacing",
-                    new_start,
-                    new_end,
-                    next_start,
-                    next_end
-                );
-                to_remove.push(next_start);
+                for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
+                    let next_end = next_start + u64::try_from(next_data.len()).unwrap();
+                    let overlap = new_end.saturating_sub(next_start);
+                    if overlap == 0 {
+                        break;
+                    } else if next_end >= new_end {
+                        qtrace!(
+                            "New frame {}-{} overlaps with next frame by {}, truncating",
+                            new_start,
+                            new_end,
+                            overlap
+                        );
+                        let truncate_to = new_data.len() - usize::try_from(overlap).unwrap();
+                        to_add = &new_data[..truncate_to];
+                        break;
+                    } else {
+                        qtrace!(
+                            "New frame {}-{} spans entire next frame {}-{}, replacing",
+                            new_start,
+                            new_end,
+                            next_start,
+                            next_end
+                        );
+                        to_remove.push(next_start);
+                    }
+                }
+
+                for start in to_remove {
+                    self.data_ranges.remove(&start);
+                }
             }
-        }
-
-        for start in to_remove {
-            self.data_ranges.remove(&start);
         }
 
         if !to_add.is_empty() {
