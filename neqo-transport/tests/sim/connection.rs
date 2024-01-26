@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{Node, Rng};
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram};
+use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
@@ -46,6 +46,7 @@ pub trait ConnectionGoal {
 pub struct ConnectionNode {
     c: Connection,
     goals: Vec<Box<dyn ConnectionGoal>>,
+    did_ping: bool,
 }
 
 impl ConnectionNode {
@@ -56,6 +57,7 @@ impl ConnectionNode {
         Self {
             c: test_fixture::new_client(params),
             goals: goals.into_iter().collect(),
+            did_ping: false,
         }
     }
 
@@ -66,6 +68,7 @@ impl ConnectionNode {
         Self {
             c: test_fixture::new_server(test_fixture::DEFAULT_ALPN, params),
             goals: goals.into_iter().collect(),
+            did_ping: false,
         }
     }
 
@@ -120,7 +123,19 @@ impl Node for ConnectionNode {
     fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
         _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
+            let should_ping = !self.did_ping
+                && (
+                    self.c.role() == Role::Client && self.c.tls_info().is_some()
+                    // || (self.c.role() == Role::Server && b.state() == &State::Connected)
+                );
+            if should_ping {
+                self.c.test_frame_writer = Some(Box::new(Ping {}));
+            }
             let res = self.c.process(d.take().as_ref(), now);
+            if should_ping {
+                self.c.test_frame_writer = None;
+                self.did_ping = true;
+            }
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {

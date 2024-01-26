@@ -166,7 +166,7 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 }
 
 /// This inserts a PING frame into packets.
-struct Ping {}
+pub struct Ping {}
 
 impl crate::connection::test_internal::FrameWriter for Ping {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
