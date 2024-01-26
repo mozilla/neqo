@@ -1,3 +1,8 @@
-nss
-nspr
-target
+# Ignore everything:
+*
+# Except for the following:
+!**/*.toml
+!**/*.rs
+!**/*.h
+!**/*.hpp
+!qns

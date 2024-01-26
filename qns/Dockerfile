@@ -14,19 +14,15 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 
 RUN set -eux; \
-    curl -sSLf "https://static.rust-lang.org/rustup/archive/1.26.0/x86_64-unknown-linux-gnu/rustup-init" -o rustup-init; \
-    echo '0b2f6c8f85a3d02fde2efc0ced4657869d73fccfce59defb4e8d29233116e6db *rustup-init' | sha256sum -c -; \
-    chmod +x rustup-init; \
-    ./rustup-init -y -q --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION"; \
-    rm -f rustup-init; \
-    chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
+    curl https://sh.rustup.rs -sSf | \
+    sh -s -- -y -q --no-modify-path --profile minimal --component rustfmt --default-toolchain $RUST_VERSION
 
 ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
 RUN set -eux; \
-    hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
+    git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"; \
     hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
