@@ -49,6 +49,7 @@ jobs:
         run: |
           csrutil status | grep disabled
           brew install ninja mercurial cargo-binstall llvm
+          echo "/usr/local/opt/llvm/bin" >> "$GITHUB_PATH"
           # python3 -m pip install gyp-next
           # Above does not work, since pypi only has gyp 0.15.0, which is too old
           # for the homebrew python3. Install from source instead.
