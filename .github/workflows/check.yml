@@ -125,7 +125,7 @@ jobs:
         env:
           HOST: localhost
           SIZE: 54321
-          RUST_LOG: info
+          RUST_LOG: warn
 
       - name: Check formatting
         run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
