@@ -292,14 +292,13 @@ fn exchange_ticket(
 /// The `handshake` method inserts PING frames into the first application data packets,
 /// which forces each peer to ACK them. As a side effect, that causes both sides of the
 /// connection to be idle aftwerwards. This method simply verifies that this is the case.
-fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, mut now: Instant) {
+fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, now: Instant) {
     let idle_timeout = min(
         client.conn_params.get_idle_timeout(),
         server.conn_params.get_idle_timeout(),
     );
-    now -= rtt / 2; // Client started its idle period half an RTT before now.
-    assert_eq!(client.process_output(now), Output::Callback(idle_timeout));
-    now += rtt / 2;
+    // Client started its idle period half an RTT before now.
+    assert_eq!(client.process_output(now.checked_sub(rtt/2).unwrap()), Output::Callback(idle_timeout));
     assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
 
