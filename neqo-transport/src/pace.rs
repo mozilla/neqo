@@ -82,7 +82,7 @@ impl Pacer {
     }
 
     /// Spend credit.  This cannot fail; users of this API are expected to call
-    /// next() to determine when to spend.  This takes the current time (`now`),
+    /// `next()` to determine when to spend.  This takes the current time (`now`),
     /// an estimate of the round trip time (`rtt`), the estimated congestion
     /// window (`cwnd`), and the number of bytes that were sent (`count`).
     pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
