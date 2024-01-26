@@ -148,6 +148,7 @@ pub enum RangeState {
 pub struct RangeTracker {
     // offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
     used: BTreeMap<u64, (u64, RangeState)>,
+    acked: u64,
 }
 
 impl RangeTracker {
@@ -155,20 +156,17 @@ impl RangeTracker {
         self.used
             .range(..)
             .next_back()
-            .map_or(0, |(k, (v, _))| *k + *v)
+            .map_or(self.acked, |(k, (v, _))| *k + *v)
     }
 
     fn acked_from_zero(&self) -> u64 {
-        self.used
-            .get(&0)
-            .filter(|(_, state)| *state == RangeState::Acked)
-            .map_or(0, |(v, _)| *v)
+        self.acked
     }
 
     /// Find the first unmarked range. If all are contiguous, this will return
     /// (highest_offset(), None).
     fn first_unmarked_range(&self) -> (u64, Option<u64>) {
-        let mut prev_end = 0;
+        let mut prev_end = self.acked;
 
         for (cur_off, (cur_len, _)) in &self.used {
             if prev_end == *cur_off {
@@ -269,29 +267,14 @@ impl RangeTracker {
     /// Merge contiguous Acked ranges into the first entry (0). This range may
     /// be dropped from the send buffer.
     fn coalesce_acked_from_zero(&mut self) {
-        let acked_range_from_zero = self
+        while let Some((next_len, _)) = self
             .used
-            .get_mut(&0)
+            .get(&self.acked)
             .filter(|(_, state)| *state == RangeState::Acked)
-            .map(|(len, _)| *len);
-
-        if let Some(len_from_zero) = acked_range_from_zero {
-            let mut new_len_from_zero = len_from_zero;
-
-            // See if there's another Acked range entry contiguous to this one
-            while let Some((next_len, _)) = self
-                .used
-                .get(&new_len_from_zero)
-                .filter(|(_, state)| *state == RangeState::Acked)
-            {
-                let to_remove = new_len_from_zero;
-                new_len_from_zero += *next_len;
-                self.used.remove(&to_remove);
-            }
-
-            if len_from_zero != new_len_from_zero {
-                self.used.get_mut(&0).expect("must be there").0 = new_len_from_zero;
-            }
+        {
+            let to_remove = self.acked;
+            self.acked += *next_len;
+            self.used.remove(&to_remove);
         }
     }
 
@@ -303,7 +286,34 @@ impl RangeTracker {
 
         let subranges = self.chunk_range_on_edges(off, len as u64, state);
 
+        let mut first: bool = true;
         for (sub_off, sub_len, sub_state) in subranges {
+            // Check if the first range overlaps the acked-from-zero range and adjust
+            if first {
+                first = false;
+                if sub_off < self.acked {
+                    if sub_state != RangeState::Acked {
+                        qinfo!(
+                            "trying to downgrade acked-from-zero range {} to Sent {} {}",
+                            self.acked,
+                            sub_off,
+                            sub_len
+                        );
+                        // in this API misuse case, should we retain any part that goes
+                        // past 'acked'?   perhaps for consistency
+                        if sub_off + sub_len > self.acked {
+                            self.used
+                                .insert(self.acked, ((sub_off + sub_len) - self.acked, sub_state));
+                        }
+                        continue;
+                    } else {
+                        if sub_off + sub_len > self.acked {
+                            self.acked = sub_off + sub_len;
+                        }
+                        continue;
+                    }
+                }
+            }
             self.used.insert(sub_off, (sub_len, sub_state));
         }
 
@@ -1666,6 +1676,11 @@ mod tests {
         assert_eq!(rt.highest_offset(), 14);
         assert_eq!(rt.acked_from_zero(), 14);
 
+        rt.mark_range(12, 20, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 32);
+        assert_eq!(rt.acked_from_zero(), 32);
+
+        // re-ack should be a no-op
         rt.mark_range(12, 20, RangeState::Acked);
         assert_eq!(rt.highest_offset(), 32);
         assert_eq!(rt.acked_from_zero(), 32);
