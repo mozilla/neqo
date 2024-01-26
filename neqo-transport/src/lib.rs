@@ -71,7 +71,7 @@ pub enum Error {
     NoError,
     // Each time tihe error is return a different parameter is supply.
     // This will be use to distinguish each occurance of this error.
-    InternalError(u16),
+    InternalError,
     ConnectionRefused,
     FlowControlError,
     StreamLimitError,
