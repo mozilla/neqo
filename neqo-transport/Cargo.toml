@@ -18,8 +18,13 @@ smallvec = "1.11.1"
 [dev-dependencies]
 enum-map = "2.7"
 test-fixture = { path = "../test-fixture" }
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [features]
 bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+
+[[bench]]
+name = "range_tracker"
+harness = false
