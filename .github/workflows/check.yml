@@ -36,7 +36,7 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build
+          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
       # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
@@ -48,7 +48,7 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           csrutil status | grep disabled
-          brew install ninja mercurial cargo-binstall
+          brew install ninja mercurial cargo-binstall llvm
           # python3 -m pip install gyp-next
           # Above does not work, since pypi only has gyp 0.15.0, which is too old
           # for the homebrew python3. Install from source instead.
@@ -66,7 +66,7 @@ jobs:
         run: |
           echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
           echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
