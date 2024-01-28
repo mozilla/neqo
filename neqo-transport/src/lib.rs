@@ -28,7 +28,10 @@ mod quic_datagrams;
 mod recovery;
 mod recv_stream;
 mod rtt;
+#[cfg(feature = "bench")]
 pub mod send_stream;
+#[cfg(not(feature = "bench"))]
+mod send_stream;
 mod sender;
 pub mod server;
 mod stats;
@@ -51,14 +54,11 @@ pub use self::{
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     quic_datagrams::DatagramTracking,
+    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
+    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
-};
-
-pub use self::{
-    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
-    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
 };
 
 pub type TransportError = u64;
@@ -184,7 +184,7 @@ impl From<std::num::TryFromIntError> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
             Self::CryptoError(e) => Some(e),
             _ => None,

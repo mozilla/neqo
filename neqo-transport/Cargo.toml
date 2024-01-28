@@ -23,7 +23,9 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 [features]
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+bench = []
 
 [[bench]]
 name = "range_tracker"
 harness = false
+required-features = ["bench"]
