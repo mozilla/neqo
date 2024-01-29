@@ -298,7 +298,7 @@ impl RangeTracker {
     //
     // Doing all this work up front should make handling each chunk much
     // easier.
-    fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
+    pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
         let new_end = new_off + u64::try_from(new_len).unwrap();
         new_off = max(self.acked, new_off);
         let mut new_len = new_end.saturating_sub(new_off);
