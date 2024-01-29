@@ -148,6 +148,7 @@ pub enum RangeState {
 pub struct RangeTracker {
     // offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
     used: BTreeMap<u64, (u64, RangeState)>,
+    acked: u64,
 }
 
 impl RangeTracker {
@@ -155,20 +156,20 @@ impl RangeTracker {
         self.used
             .range(..)
             .next_back()
-            .map_or(0, |(k, (v, _))| *k + *v)
+            .map_or(self.acked, |(k, (v, _))| *k + *v)
     }
 
     fn acked_from_zero(&self) -> u64 {
         self.used
             .get(&0)
             .filter(|(_, state)| *state == RangeState::Acked)
-            .map_or(0, |(v, _)| *v)
+            .map_or(self.acked, |(v, _)| *v)
     }
 
     /// Find the first unmarked range. If all are contiguous, this will return
     /// (highest_offset(), None).
     fn first_unmarked_range(&self) -> (u64, Option<u64>) {
-        let mut prev_end = 0;
+        let mut prev_end = self.acked;
 
         for (cur_off, (cur_len, _)) in &self.used {
             if prev_end == *cur_off {
@@ -198,12 +199,7 @@ impl RangeTracker {
     //
     // Doing all this work up front should make handling each chunk much
     // easier.
-    fn chunk_range_on_edges(
-        &mut self,
-        new_off: u64,
-        new_len: u64,
-        new_state: RangeState,
-    ) -> Vec<(u64, u64, RangeState)> {
+    fn insert_chunks_from_range(&mut self, new_off: u64, new_len: u64, new_state: RangeState) {
         let mut tmp_off = new_off;
         let mut tmp_len = new_len;
         let mut v = Vec::new();
@@ -251,6 +247,10 @@ impl RangeTracker {
             }
         }
 
+        for (off, len, state) in v {
+            self.used.insert(off, (len, state));
+        }
+
         // Maybe break last existing range in two so that a final chunk will
         // have the same length as an existing range entry
         if let Some((off, sub_len, remaining_len, state)) = last_existing_remaining {
@@ -260,59 +260,38 @@ impl RangeTracker {
 
         // Create final chunk if anything remains of the new range
         if tmp_len > 0 {
-            v.push((tmp_off, tmp_len, new_state))
+            self.used.insert(tmp_off, (tmp_len, new_state));
         }
-
-        v
     }
 
     /// Merge contiguous Acked ranges into the first entry (0). This range may
     /// be dropped from the send buffer.
-    fn coalesce_acked_from_zero(&mut self) {
-        let acked_range_from_zero = self
-            .used
-            .get_mut(&0)
-            .filter(|(_, state)| *state == RangeState::Acked)
-            .map(|(len, _)| *len);
-
-        if let Some(len_from_zero) = acked_range_from_zero {
-            let mut to_remove = SmallVec::<[_; 8]>::new();
-
-            let mut new_len_from_zero = len_from_zero;
-
-            // See if there's another Acked range entry contiguous to this one
-            while let Some((next_len, _)) = self
-                .used
-                .get(&new_len_from_zero)
-                .filter(|(_, state)| *state == RangeState::Acked)
-            {
-                to_remove.push(new_len_from_zero);
-                new_len_from_zero += *next_len;
+    fn coalesce_acked(&mut self) {
+        while let Some(&extend_len) = self.used.first_key_value().and_then(|(&k, (len, state))| {
+            if k == self.acked && *state == RangeState::Acked {
+                Some(len)
+            } else {
+                None
             }
-
-            if len_from_zero != new_len_from_zero {
-                self.used.get_mut(&0).expect("must be there").0 = new_len_from_zero;
-            }
-
-            for val in to_remove {
-                self.used.remove(&val);
-            }
+        }) {
+            self.used.pop_first();
+            self.acked += extend_len;
         }
     }
 
     pub fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
+        let len = (off + u64::try_from(len).unwrap()).saturating_sub(self.acked);
+        let off = max(self.acked, off);
+        if state == RangeState::Acked && off == self.acked {
+            self.acked += len;
+            self.coalesce_acked();
+            return;
+        }
         if len == 0 {
-            qinfo!("mark 0-length range at {}", off);
             return;
         }
 
-        let subranges = self.chunk_range_on_edges(off, len as u64, state);
-
-        for (sub_off, sub_len, sub_state) in subranges {
-            self.used.insert(sub_off, (sub_len, sub_state));
-        }
-
-        self.coalesce_acked_from_zero()
+        self.insert_chunks_from_range(off, len, state);
     }
 
     fn unmark_range(&mut self, off: u64, len: usize) {
