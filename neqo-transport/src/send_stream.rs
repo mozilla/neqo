@@ -154,16 +154,12 @@ pub struct RangeTracker {
 impl RangeTracker {
     fn highest_offset(&self) -> u64 {
         self.used
-            .range(..)
-            .next_back()
+            .last_key_value()
             .map_or(self.acked, |(k, (v, _))| *k + *v)
     }
 
     fn acked_from_zero(&self) -> u64 {
-        self.used
-            .get(&0)
-            .filter(|(_, state)| *state == RangeState::Acked)
-            .map_or(self.acked, |(v, _)| *v)
+        self.acked
     }
 
     /// Find the first unmarked range. If all are contiguous, this will return
@@ -264,24 +260,39 @@ impl RangeTracker {
         }
     }
 
-    /// Merge contiguous Acked ranges into the first entry (0). This range may
-    /// be dropped from the send buffer.
+    /// When the range of acknowledged bytes from zero increases, we need to drop any
+    /// ranges within that span AND maybe extend it to include any adjacent acknowledged
+    /// ranges.
     fn coalesce_acked(&mut self) {
-        while let Some(&extend_len) = self.used.first_key_value().and_then(|(&k, (len, state))| {
-            if k == self.acked && *state == RangeState::Acked {
-                Some(len)
-            } else {
-                None
+        while let Some(e) = self.used.first_entry() {
+            match self.acked.cmp(e.key()) {
+                Ordering::Greater => {
+                    let (off, (len, state)) = e.remove_entry();
+                    debug_assert_eq!(state, RangeState::Sent);
+
+                    let overflow = (off + len).saturating_sub(self.acked);
+                    if overflow > 0 {
+                        self.used.insert(self.acked, (overflow, state));
+                        break;
+                    }
+                }
+                Ordering::Equal => {
+                    if e.get().1 == RangeState::Acked {
+                        let (len, _) = e.remove();
+                        self.acked += len;
+                    } else {
+                        break;
+                    }
+                }
+                Ordering::Less => break,
             }
-        }) {
-            self.used.pop_first();
-            self.acked += extend_len;
         }
     }
 
     pub fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
-        let len = (off + u64::try_from(len).unwrap()).saturating_sub(self.acked);
+        let end = off + u64::try_from(len).unwrap();
         let off = max(self.acked, off);
+        let len = end.saturating_sub(off);
         if state == RangeState::Acked && off == self.acked {
             self.acked += len;
             self.coalesce_acked();
