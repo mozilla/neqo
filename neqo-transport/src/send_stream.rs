@@ -146,9 +146,12 @@ enum RangeState {
 /// range implies needing-to-be-sent, either initially or as a retransmission.
 #[derive(Debug, Default, PartialEq)]
 pub struct RangeTracker {
-    // offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
-    used: BTreeMap<u64, (u64, RangeState)>,
+    /// The number of bytes that have been acknowledged starting from offset 0.
     acked: u64,
+    /// A map that tracks the state of ranges.
+    /// Keys are the offset of the start of the range.
+    /// Values is a tuple of the range length and its state.
+    used: BTreeMap<u64, (u64, RangeState)>,
 }
 
 impl RangeTracker {
@@ -184,11 +187,13 @@ impl RangeTracker {
             match self.acked.cmp(e.key()) {
                 Ordering::Greater => {
                     let (off, (len, state)) = e.remove_entry();
-                    debug_assert_eq!(state, RangeState::Sent);
-
                     let overflow = (off + len).saturating_sub(self.acked);
                     if overflow > 0 {
-                        self.used.insert(self.acked, (overflow, state));
+                        if state == RangeState::Acked {
+                            self.acked += overflow;
+                        } else {
+                            self.used.insert(self.acked, (overflow, state));
+                        }
                         break;
                     }
                 }
@@ -219,9 +224,6 @@ impl RangeTracker {
         if new_off == self.acked {
             self.acked += new_len;
             self.coalesce_acked();
-            return;
-        }
-        if new_len == 0 {
             return;
         }
         let mut new_end = new_off + new_len;
@@ -316,7 +318,7 @@ impl RangeTracker {
         }
 
         // Get all existing ranges that start within this new range.
-        let mut covered = self
+        let covered = self
             .used
             .range(new_off..(new_off + new_len))
             .map(|(&k, _)| k)
@@ -328,23 +330,34 @@ impl RangeTracker {
                 let (extra_len, _) = next_entry.remove();
                 new_len += extra_len;
             }
-        } else if let Some(old_off) = covered.pop() {
-            // Otherwise, the last of the existing ranges might overhang this one by a little.
-            let Entry::Occupied(e) = self.used.entry(old_off) else {
-                unreachable!();
-            };
-            let &(old_len, old_state) = e.get();
-            let overhang = (old_off + old_len).saturating_sub(new_off + new_len);
-            if old_state == RangeState::Acked {
-                new_len -= overhang;
-            } else {
-                e.remove();
-                new_len += overhang;
+        }
+
+        // Merge with any preceding sent range that might overlap,
+        // or cut the head of this if the preceding range is acked.
+        let prev = self.used.range(..new_off).next_back();
+        if let Some((&prev_off, &(prev_len, prev_state))) = prev {
+            if prev_off + prev_len >= new_off {
+                let overlap = prev_off + prev_len - new_off;
+                new_len = new_len.saturating_sub(overlap);
+                if new_len == 0 {
+                    // The previous range covers this one (no more to do).
+                    return;
+                }
+
+                if prev_state == RangeState::Acked {
+                    // The previous range is acked, so it cuts this one (need to insert).
+                    new_off += overlap;
+                } else {
+                    // Extend the current range backwards.
+                    new_off = prev_off;
+                    new_len += prev_len;
+                    // The previous range will be updated below.
+                    // It might need to be cut because of a covered acked range.
+                }
             }
         }
 
         // Now interleave new sent chunks with any existing acked chunks.
-        let mut retained = None;
         for old_off in covered {
             let Entry::Occupied(e) = self.used.entry(old_off) else {
                 unreachable!();
@@ -354,57 +367,28 @@ impl RangeTracker {
                 // Now we have to insert a chunk ahead of this acked chunk.
                 let chunk_len = old_off - new_off;
                 if chunk_len > 0 {
-                    debug_assert!(retained.map_or(true, |r| r == new_off));
-                    retained = None;
                     self.used.insert(new_off, (chunk_len, RangeState::Sent));
-                } else if let Some(k) = retained.take() {
-                    self.used.remove(&k);
                 }
                 let included = chunk_len + old_len;
-                new_off += included;
-                new_len -= included;
-            } else if *e.key() == new_off {
-                // Retain a sent entry at `new_off`.
-                // This avoids the work of removing and re-creating an entry in many cases.
-                // The value will be overwritten when the next insert occurs,
-                // either when this loop hits an acked range (above)
-                // or when the preceding range overlaps this (below).
-                retained = Some(new_off);
-            } else {
-                e.remove();
-            }
-        }
-
-        // Finally, merge with any preceding sent range that might overlap,
-        // or cut the head of this if the preceding range is acked.
-        let prev = self.used.range_mut(..new_off).next_back();
-        if let Some((prev_off, (prev_len, prev_state))) = prev {
-            if *prev_off + *prev_len >= new_off {
-                let overlap = *prev_off + *prev_len - new_off;
-                new_len = new_len.saturating_sub(overlap);
-                let done = if new_len == 0 {
-                    // The previous range covers this one (no more to do).
-                    true
-                } else if *prev_state == RangeState::Acked {
-                    // The previous range is acked, so it cuts this one (need to insert).
-                    new_off += overlap;
-                    false
-                } else {
-                    // Extend the previous sent range (no more to do).
-                    *prev_len += new_len;
-                    true
-                };
-
-                // Make sure to drop borrows and remove any (invalid) retained value.
-                if let Some(k) = retained.take() {
-                    self.used.remove(&k);
-                }
-                if done {
+                new_len = new_len.saturating_sub(included);
+                if new_len == 0 {
                     return;
                 }
+                new_off += included;
+            } else {
+                let overhang = (old_off + old_len).saturating_sub(new_off + new_len);
+                new_len += overhang;
+                if *e.key() != new_off {
+                    // Retain a sent entry at `new_off`.
+                    // This avoids the work of removing and re-creating an entry.
+                    // The value will be overwritten when the next insert occurs,
+                    // either when this loop hits an acked range (above)
+                    // or for any remainder (below).
+                    e.remove();
+                }
             }
         }
-        debug_assert!(retained.map_or(true, |r| r == new_off));
+
         self.used.insert(new_off, (new_len, RangeState::Sent));
     }
 
@@ -1739,7 +1723,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_range() {
+    fn mark_acked_from_zero() {
         let mut rt = RangeTracker::default();
 
         // ranges can go from nothing->Sent if queued for retrans and then
@@ -1771,6 +1755,323 @@ mod tests {
         rt.mark_sent(0, 200);
         assert_eq!(rt.highest_offset(), 400);
         assert_eq!(rt.acked_from_zero(), 400);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///   SSS  SSSAAASSS
+    /// +    AAAAAAAAA
+    /// = SSSAAAAAAAAASS
+    /// ```
+    #[test]
+    fn mark_acked_1() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 3);
+        rt.mark_sent(6, 3);
+        rt.mark_acked(9, 3);
+        rt.mark_sent(12, 3);
+
+        rt.mark_acked(3, 10);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(0, (3, RangeState::Sent));
+        canon.used.insert(3, (10, RangeState::Acked));
+        canon.used.insert(13, (2, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///   SSS  SSS   AAA
+    /// +   AAAAAAAAA
+    /// = SSAAAAAAAAAAAA
+    /// ```
+    #[test]
+    fn mark_acked_2() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 3);
+        rt.mark_sent(6, 3);
+        rt.mark_acked(12, 3);
+
+        rt.mark_acked(2, 10);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(0, (2, RangeState::Sent));
+        canon.used.insert(2, (13, RangeState::Acked));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///    AASSS  AAAA
+    /// + AAAAAAAAA
+    /// = AAAAAAAAAAAA
+    /// ```
+    #[test]
+    fn mark_acked_3() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(1, 2);
+        rt.mark_sent(3, 3);
+        rt.mark_acked(8, 4);
+
+        rt.mark_acked(0, 9);
+
+        let canon = RangeTracker {
+            acked: 12,
+            ..RangeTracker::default()
+        };
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///      SSS
+    /// + AAAA
+    /// = AAAASS
+    /// ```
+    #[test]
+    fn mark_acked_4() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(3, 3);
+
+        rt.mark_acked(0, 4);
+
+        let mut canon = RangeTracker {
+            acked: 4,
+            ..Default::default()
+        };
+        canon.used.insert(4, (2, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///   AAAAAASSS
+    /// +    AAA
+    /// = AAAAAASSS
+    /// ```
+    #[test]
+    fn mark_acked_5() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(0, 6);
+        rt.mark_sent(6, 3);
+
+        rt.mark_acked(3, 3);
+
+        let mut canon = RangeTracker {
+            acked: 6,
+            ..RangeTracker::default()
+        };
+        canon.used.insert(6, (3, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///      AAA  AAA  AAA
+    /// +       AAAAAAA
+    /// =    AAAAAAAAAAAAA
+    /// ```
+    #[test]
+    fn mark_acked_6() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(3, 3);
+        rt.mark_acked(8, 3);
+        rt.mark_acked(13, 3);
+
+        rt.mark_acked(6, 7);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(3, (13, RangeState::Acked));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///      AAA  AAA
+    /// +       AAA
+    /// =    AAAAAAAA
+    /// ```
+    #[test]
+    fn mark_acked_7() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(3, 3);
+        rt.mark_acked(8, 3);
+
+        rt.mark_acked(6, 3);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(3, (8, RangeState::Acked));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///   SSSSSSSS
+    /// +   AAAA
+    /// = SSAAAASS
+    /// ```
+    #[test]
+    fn mark_acked_8() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 8);
+
+        rt.mark_acked(2, 4);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(0, (2, RangeState::Sent));
+        canon.used.insert(2, (4, RangeState::Acked));
+        canon.used.insert(6, (2, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// Check that marked_acked correctly handles all paths.
+    /// ```ignore
+    ///        SSS
+    /// + AAA
+    /// = AAA  SSS
+    /// ```
+    #[test]
+    fn mark_acked_9() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(5, 3);
+
+        rt.mark_acked(0, 3);
+
+        let mut canon = RangeTracker {
+            acked: 3,
+            ..Default::default()
+        };
+        canon.used.insert(5, (3, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// ```ignore
+    ///   AAA   AAA   SSS
+    /// + SSSSSSSSSSSS
+    /// = AAASSSAAASSSSSS
+    /// ```
+    #[test]
+    fn mark_sent_1() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(0, 3);
+        rt.mark_acked(6, 3);
+        rt.mark_sent(12, 3);
+
+        rt.mark_sent(0, 12);
+
+        let mut canon = RangeTracker {
+            acked: 3,
+            ..RangeTracker::default()
+        };
+        canon.used.insert(3, (3, RangeState::Sent));
+        canon.used.insert(6, (3, RangeState::Acked));
+        canon.used.insert(9, (6, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// ```ignore
+    ///   AAASS AAA S SSSS
+    /// + SSSSSSSSSSSSS
+    /// = AAASSSAAASSSSSSS
+    /// ```
+    #[test]
+    fn mark_sent_2() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(0, 3);
+        rt.mark_sent(3, 2);
+        rt.mark_acked(6, 3);
+        rt.mark_sent(10, 1);
+        rt.mark_sent(12, 4);
+
+        rt.mark_sent(0, 13);
+
+        let mut canon = RangeTracker {
+            acked: 3,
+            ..RangeTracker::default()
+        };
+        canon.used.insert(3, (3, RangeState::Sent));
+        canon.used.insert(6, (3, RangeState::Acked));
+        canon.used.insert(9, (7, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// ```ignore
+    ///   AAA  AAA
+    /// +   SSSS
+    /// = AAASSAAA
+    /// ```
+    #[test]
+    fn mark_sent_3() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(0, 3);
+        rt.mark_acked(5, 3);
+
+        rt.mark_sent(2, 4);
+
+        let mut canon = RangeTracker {
+            acked: 3,
+            ..RangeTracker::default()
+        };
+        canon.used.insert(3, (2, RangeState::Sent));
+        canon.used.insert(5, (3, RangeState::Acked));
+        assert_eq!(rt, canon);
+    }
+
+    /// ```ignore
+    ///   SSS  AAA  SS
+    /// +   SSSSSSSS
+    /// = SSSSSAAASSSS
+    /// ```
+    #[test]
+    fn mark_sent_4() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 3);
+        rt.mark_acked(5, 3);
+        rt.mark_sent(10, 2);
+
+        rt.mark_sent(2, 8);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(0, (5, RangeState::Sent));
+        canon.used.insert(5, (3, RangeState::Acked));
+        canon.used.insert(8, (4, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// ```ignore
+    ///     AAA
+    /// +   SSSSSS
+    /// =   AAASSS
+    /// ```
+    #[test]
+    fn mark_sent_5() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(3, 3);
+
+        rt.mark_sent(3, 6);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(3, (3, RangeState::Acked));
+        canon.used.insert(6, (3, RangeState::Sent));
+        assert_eq!(rt, canon);
+    }
+
+    /// ```ignore
+    ///   SSSSS
+    /// +  SSS
+    /// = SSSSS
+    /// ```
+    #[test]
+    fn mark_sent_6() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 5);
+
+        rt.mark_sent(1, 3);
+
+        let mut canon = RangeTracker::default();
+        canon.used.insert(0, (5, RangeState::Sent));
+        assert_eq!(rt, canon);
     }
 
     #[test]
@@ -1999,7 +2300,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_tx() {
+    fn stream_tx() {
         let conn_fc = connection_fc(4096);
         let conn_events = ConnectionEvents::default();
 
