@@ -13,7 +13,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
-RUN set -eux; \
+RUN \
     curl https://sh.rustup.rs -sSf | \
     sh -s -- -y -q --no-modify-path --profile minimal --default-toolchain $RUST_VERSION
 
