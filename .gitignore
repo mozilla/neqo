@@ -8,3 +8,6 @@ Cargo.lock
 *.qlog
 *.swp
 /qns/.last-update-*
+/nss
+/nspr
+/dist
