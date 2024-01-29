@@ -1946,6 +1946,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
+    /// Check that marked_sent correctly handles all paths.
     /// ```ignore
     ///   AAA   AAA   SSS
     /// + SSSSSSSSSSSS
@@ -1970,6 +1971,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
+    /// Check that marked_sent correctly handles all paths.
     /// ```ignore
     ///   AAASS AAA S SSSS
     /// + SSSSSSSSSSSSS
@@ -1996,6 +1998,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
+    /// Check that marked_sent correctly handles all paths.
     /// ```ignore
     ///   AAA  AAA
     /// +   SSSS
@@ -2018,6 +2021,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
+    /// Check that marked_sent correctly handles all paths.
     /// ```ignore
     ///   SSS  AAA  SS
     /// +   SSSSSSSS
@@ -2039,6 +2043,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
+    /// Check that marked_sent correctly handles all paths.
     /// ```ignore
     ///     AAA
     /// +   SSSSSS
@@ -2057,6 +2062,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
+    /// Check that marked_sent correctly handles all paths.
     /// ```ignore
     ///   SSSSS
     /// +  SSS
