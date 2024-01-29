@@ -47,6 +47,18 @@ impl RttEstimate {
         self.rttvar = rtt / 2;
     }
 
+    #[cfg(test)]
+    pub const fn from_duration(rtt: Duration) -> Self {
+        Self {
+            first_sample_time: None,
+            latest_rtt: rtt,
+            smoothed_rtt: rtt,
+            rttvar: Duration::from_millis(0),
+            min_rtt: rtt,
+            ack_delay: PeerAckDelay::Fixed(Duration::from_millis(25)),
+        }
+    }
+
     pub fn set_initial(&mut self, rtt: Duration) {
         qtrace!("initial RTT={:?}", rtt);
         if rtt >= GRANULARITY {

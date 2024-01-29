@@ -7,29 +7,31 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
-use std::mem;
-use std::net::{IpAddr, SocketAddr};
-use std::rc::Rc;
-use std::time::{Duration, Instant};
-
-use crate::ackrate::{AckRate, PeerAckDelay};
-use crate::cc::CongestionControlAlgorithm;
-use crate::cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry};
-use crate::frame::{
-    FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID,
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    fmt::{self, Display},
+    mem,
+    net::{IpAddr, SocketAddr},
+    rc::Rc,
+    time::{Duration, Instant},
 };
-use crate::packet::PacketBuilder;
-use crate::recovery::RecoveryToken;
-use crate::rtt::RttEstimate;
-use crate::sender::PacketSender;
-use crate::stats::FrameStats;
-use crate::tracking::{PacketNumberSpace, SentPacket};
-use crate::{Error, Res};
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder};
+use crate::{
+    ackrate::{AckRate, PeerAckDelay},
+    cc::CongestionControlAlgorithm,
+    cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
+    frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
+    packet::PacketBuilder,
+    recovery::RecoveryToken,
+    rtt::RttEstimate,
+    sender::PacketSender,
+    stats::FrameStats,
+    tracking::{PacketNumberSpace, SentPacket},
+    Error, Res,
+};
+
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
 use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
@@ -82,6 +84,7 @@ impl Paths {
         local: SocketAddr,
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
+        pacing: bool,
         now: Instant,
     ) -> PathRef {
         self.paths
@@ -94,7 +97,7 @@ impl Paths {
                 }
             })
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote, cc, self.qlog.clone(), now);
+                let mut p = Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -111,6 +114,7 @@ impl Paths {
         local: SocketAddr,
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
+        pacing: bool,
         now: Instant,
     ) -> PathRef {
         self.paths
@@ -136,6 +140,7 @@ impl Paths {
                     local,
                     remote,
                     cc,
+                    pacing,
                     self.qlog.clone(),
                     now,
                 )))
@@ -534,6 +539,10 @@ pub struct Path {
     rtt: RttEstimate,
     /// A packet sender for the path, which includes congestion control and a pacer.
     sender: PacketSender,
+    /// The DSCP/ECN marking to use for outgoing packets on this path.
+    tos: IpTos,
+    /// The IP TTL to use for outgoing packets on this path.
+    ttl: u8,
 
     /// The number of bytes received on this path.
     /// Note that this value might saturate on a long-lived connection,
@@ -553,10 +562,11 @@ impl Path {
         local: SocketAddr,
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
+        pacing: bool,
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, Self::mtu_by_addr(remote.ip()), now);
+        let mut sender = PacketSender::new(cc, pacing, Self::mtu_by_addr(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -569,6 +579,8 @@ impl Path {
             challenge: None,
             rtt: RttEstimate::default(),
             sender,
+            tos: IpTos::default(), // TODO: Default to Ect0 when ECN is supported.
+            ttl: 64,               // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
             qlog,
@@ -660,7 +672,7 @@ impl Path {
 
     /// Set the remote connection ID based on the peer's choice.
     /// This is only valid during the handshake.
-    pub fn set_remote_cid(&mut self, cid: &ConnectionIdRef) {
+    pub fn set_remote_cid(&mut self, cid: ConnectionIdRef) {
         self.remote_cid
             .as_mut()
             .unwrap()
@@ -691,7 +703,7 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(self.local, self.remote, payload)
+        Datagram::new(self.local, self.remote, self.tos, Some(self.ttl), payload)
     }
 
     /// Get local address as `SocketAddr`
@@ -961,8 +973,7 @@ impl Path {
     /// Record packets as acknowledged with the sender.
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant) {
         debug_assert!(self.is_primary());
-        self.sender
-            .on_packets_acked(acked_pkts, self.rtt.minimum(), now);
+        self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
     }
 
     /// Record packets as lost with the sender.

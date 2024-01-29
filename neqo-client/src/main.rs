@@ -7,6 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
+use common::IpTos;
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
@@ -309,6 +310,10 @@ struct QuicParameters {
     #[structopt(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
+
+    #[structopt(long = "pacing")]
+    /// Whether pacing is enabled.
+    pacing: bool,
 }
 
 impl QuicParameters {
@@ -317,7 +322,8 @@ impl QuicParameters {
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .cc_algorithm(self.congestion_control);
+            .cc_algorithm(self.congestion_control)
+            .pacing(self.pacing);
 
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
@@ -328,7 +334,7 @@ impl QuicParameters {
             params.versions(first.0, all.iter().map(|&x| x.0).collect())
         } else {
             let version = match alpn {
-                "h3" | "hq-interop" => Version::default(),
+                "h3" | "hq-interop" => Version::Version1,
                 "h3-29" | "hq-29" => Version::Draft29,
                 "h3-30" | "hq-30" => Version::Draft30,
                 "h3-31" | "hq-31" => Version::Draft31,
@@ -399,12 +405,9 @@ fn process_loop(
 ) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     let mut events = Events::with_capacity(1024);
-    let mut timeout: Option<Duration> = None;
+    let mut timeout = Duration::new(0, 0);
     loop {
-        poll.poll(
-            &mut events,
-            timeout.or_else(|| Some(Duration::from_millis(0))),
-        )?;
+        poll.poll(&mut events, Some(timeout))?;
 
         let mut datagrams: Vec<Datagram> = Vec::new();
         'read: loop {
@@ -425,14 +428,15 @@ fn process_loop(
                         break 'read;
                     }
                     if sz > 0 {
-                        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
+                        let d =
+                            Datagram::new(remote, *local_addr, IpTos::default(), None, &buf[..sz]);
                         datagrams.push(d);
                     }
                 }
             };
         }
         if !datagrams.is_empty() {
-            client.process_multiple_input(datagrams, Instant::now());
+            client.process_multiple_input(&datagrams, Instant::now());
             handler.maybe_key_update(client)?;
         }
 
@@ -445,15 +449,20 @@ fn process_loop(
         'write: loop {
             match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
-                    if let Err(e) = emit_datagram(socket, dgram) {
-                        eprintln!("UDP write error: {e}");
-                        client.close(Instant::now(), 0, e.to_string());
+                    if let Err(err) = emit_datagram(socket, dgram) {
+                        if err.kind() == ErrorKind::WouldBlock
+                            || err.kind() == ErrorKind::Interrupted
+                        {
+                            break 'write;
+                        }
+                        eprintln!("UDP write error: {err}");
+                        client.close(Instant::now(), 0, err.to_string());
                         exiting = true;
                         break 'write;
                     }
                 }
                 Output::Callback(new_timeout) => {
-                    timeout = Some(new_timeout);
+                    timeout = new_timeout;
                     break 'write;
                 }
                 Output::None => {
@@ -494,10 +503,13 @@ impl StreamHandlerType {
         url: &Url,
         args: &Args,
         all_paths: &mut Vec<PathBuf>,
+        client: &mut Http3Client,
+        client_stream_id: StreamId,
     ) -> Box<dyn StreamHandler> {
         match handler_type {
             Self::Download => {
                 let out_file = get_output_file(url, &args.output_dir, all_paths);
+                client.stream_close_send(client_stream_id).unwrap();
                 Box::new(DownloadStreamHandler { out_file })
             }
             Self::Upload => Box::new(UploadStreamHandler {
@@ -652,6 +664,8 @@ impl<'a> URLHandler<'a> {
                     &url,
                     self.args,
                     &mut self.all_paths,
+                    client,
+                    client_stream_id,
                 );
                 self.stream_handlers.insert(client_stream_id, handler);
                 true
@@ -722,14 +736,11 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    match self.url_handler.stream_handler(&stream_id) {
-                        Some(handler) => {
-                            handler.process_header_ready(stream_id, fin, headers);
-                        }
-                        None => {
-                            println!("Data on unexpected stream: {stream_id}");
-                            return Ok(false);
-                        }
+                    if let Some(handler) = self.url_handler.stream_handler(&stream_id) {
+                        handler.process_header_ready(stream_id, fin, headers);
+                    } else {
+                        println!("Data on unexpected stream: {stream_id}");
+                        return Ok(false);
                     }
                     if fin {
                         return Ok(self.url_handler.on_stream_fin(client, stream_id));
@@ -822,30 +833,27 @@ fn handle_test(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: &[Url],
+    url_queue: VecDeque<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let key_update = KeyUpdateState(args.key_update);
-    match testcase.as_str() {
-        "upload" => {
-            let mut client =
-                create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
-                    .expect("failed to create client");
-            args.method = String::from("POST");
-            let url_handler = URLHandler {
-                url_queue: VecDeque::from(urls.to_vec()),
-                stream_handlers: HashMap::new(),
-                all_paths: Vec::new(),
-                handler_type: StreamHandlerType::Upload,
-                args,
-            };
-            let mut h = Handler::new(url_handler, key_update, args.output_read_data);
-            process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
-        }
-        _ => {
-            eprintln!("Unsupported test case: {testcase}");
-            exit(127)
-        }
+    if testcase.as_str() == "upload" {
+        let mut client =
+            create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
+                .expect("failed to create client");
+        args.method = String::from("POST");
+        let url_handler = URLHandler {
+            url_queue,
+            stream_handlers: HashMap::new(),
+            all_paths: Vec::new(),
+            handler_type: StreamHandlerType::Upload,
+            args,
+        };
+        let mut h = Handler::new(url_handler, key_update, args.output_read_data);
+        process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
+    } else {
+        eprintln!("Unsupported test case: {testcase}");
+        exit(127)
     }
 
     Ok(None)
@@ -902,7 +910,7 @@ fn client(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     hostname: &str,
-    urls: &[Url],
+    url_queue: VecDeque<Url>,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Option<ResumptionToken>> {
     let testcase = args.test.clone();
@@ -915,7 +923,7 @@ fn client(
             local_addr,
             remote_addr,
             hostname,
-            urls,
+            url_queue,
             resumption_token,
         );
     }
@@ -924,7 +932,7 @@ fn client(
         .expect("failed to create client");
     let key_update = KeyUpdateState(args.key_update);
     let url_handler = URLHandler {
-        url_queue: VecDeque::from(urls.to_vec()),
+        url_queue,
         stream_handlers: HashMap::new(),
         all_paths: Vec::new(),
         handler_type: StreamHandlerType::Download,
@@ -1008,35 +1016,45 @@ fn main() -> Res<()> {
                 args.use_old_http = true;
                 args.key_update = true;
             }
+            "v2" => {
+                args.use_old_http = true;
+            }
             _ => exit(127),
         }
     }
 
-    let mut urls_by_origin: HashMap<Origin, Vec<Url>> = HashMap::new();
-    for url in &args.urls {
-        let entry = urls_by_origin.entry(url.origin()).or_default();
-        entry.push(url.clone());
-    }
+    let urls_by_origin = args
+        .urls
+        .clone()
+        .into_iter()
+        .fold(HashMap::<Origin, VecDeque<Url>>::new(), |mut urls, url| {
+            urls.entry(url.origin()).or_default().push_back(url);
+            urls
+        })
+        .into_iter()
+        .filter_map(|(origin, urls)| match origin {
+            Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
+            Origin::Opaque(x) => {
+                eprintln!("Opaque origin {x:?}");
+                None
+            }
+        });
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
-        Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
-        Origin::Opaque(x) => {
-            eprintln!("Opaque origin {x:?}");
-            None
+    for ((host, port), mut urls) in urls_by_origin {
+        if args.resume && urls.len() < 2 {
+            eprintln!("Resumption to {host} cannot work without at least 2 URLs.");
+            exit(127);
         }
-    }) {
+
         let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
                 (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
             )
         });
-        let remote_addr = match remote_addr {
-            Some(a) => a,
-            None => {
-                eprintln!("No compatible address found for: {host}");
-                exit(1);
-            }
+        let Some(remote_addr) = remote_addr else {
+            eprintln!("No compatible address found for: {host}");
+            exit(1);
         };
 
         let local_addr = match remote_addr {
@@ -1070,28 +1088,16 @@ fn main() -> Res<()> {
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
-        let mut remaining = &urls[..];
         let mut first = true;
-        loop {
-            let to_request;
-            if (args.resume && first) || args.download_in_series {
-                to_request = &remaining[..1];
-                remaining = &remaining[1..];
-                if args.resume && first && remaining.is_empty() {
-                    println!(
-                        "Error: resumption to {hostname} cannot work without at least 2 URLs."
-                    );
-                    exit(127);
-                }
+        while !urls.is_empty() {
+            let to_request = if (args.resume && first) || args.download_in_series {
+                urls.pop_front().into_iter().collect()
             } else {
-                to_request = remaining;
-                remaining = &[][..];
-            }
-            if to_request.is_empty() {
-                break;
-            }
+                std::mem::take(&mut urls)
+            };
 
             first = false;
+
             token = if args.use_old_http {
                 old::old_client(
                     &args,
@@ -1138,7 +1144,7 @@ mod old {
 
     use super::{qlog_new, KeyUpdateState, Res};
     use mio::{Events, Poll};
-    use neqo_common::{event::Provider, Datagram};
+    use neqo_common::{event::Provider, Datagram, IpTos};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
@@ -1228,7 +1234,7 @@ mod old {
                         "READ[{}]: {}",
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
-                    )
+                    );
                 }
                 if fin {
                     return Ok(true);
@@ -1296,7 +1302,7 @@ mod old {
                         };
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
-                        println!("stream {stream_id} writable")
+                        println!("stream {stream_id} writable");
                     }
                     ConnectionEvent::SendStreamComplete { stream_id } => {
                         println!("stream {stream_id} complete");
@@ -1338,12 +1344,9 @@ mod old {
     ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         let mut events = Events::with_capacity(1024);
-        let mut timeout: Option<Duration> = None;
+        let mut timeout = Duration::new(0, 0);
         loop {
-            poll.poll(
-                &mut events,
-                timeout.or_else(|| Some(Duration::from_millis(0))),
-            )?;
+            poll.poll(&mut events, Some(timeout))?;
 
             'read: loop {
                 match socket.recv_from(&mut buf[..]) {
@@ -1363,8 +1366,14 @@ mod old {
                             break 'read;
                         }
                         if sz > 0 {
-                            let d = Datagram::new(remote, *local_addr, &buf[..sz]);
-                            client.process_input(d, Instant::now());
+                            let d = Datagram::new(
+                                remote,
+                                *local_addr,
+                                IpTos::default(),
+                                None,
+                                &buf[..sz],
+                            );
+                            client.process_input(&d, Instant::now());
                             handler.maybe_key_update(client)?;
                         }
                     }
@@ -1388,7 +1397,7 @@ mod old {
                         }
                     }
                     Output::Callback(new_timeout) => {
-                        timeout = Some(new_timeout);
+                        timeout = new_timeout;
                         break 'write;
                     }
                     Output::None => {
@@ -1413,7 +1422,7 @@ mod old {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         origin: &str,
-        urls: &[Url],
+        url_queue: VecDeque<Url>,
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let alpn = match args.alpn.as_str() {
@@ -1445,7 +1454,7 @@ mod old {
         let key_update = KeyUpdateState(args.key_update);
         let mut h = HandlerOld {
             streams: HashMap::new(),
-            url_queue: VecDeque::from(urls.to_vec()),
+            url_queue,
             all_paths: Vec::new(),
             args,
             token: None,

@@ -80,7 +80,7 @@ fn datagram_enabled_on_client() {
     let out = server.process_output(now()).dgram().unwrap();
     assert_eq!(server.stats().frame_tx.datagram, dgram_sent + 1);
 
-    client.process_input(out, now());
+    client.process_input(&out, now());
     assert!(matches!(
         client.next_event().unwrap(),
         ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
@@ -108,7 +108,7 @@ fn datagram_enabled_on_server() {
     let out = client.process_output(now()).dgram().unwrap();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
-    server.process_input(out, now());
+    server.process_input(&out, now());
     assert!(matches!(
         server.next_event().unwrap(),
         ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
@@ -205,7 +205,7 @@ fn datagram_acked() {
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     let dgram_received = server.stats().frame_rx.datagram;
-    server.process_input(out.unwrap(), now());
+    server.process_input(&out.unwrap(), now());
     assert_eq!(server.stats().frame_rx.datagram, dgram_received + 1);
     let now = now() + AT_LEAST_PTO;
     // Ack should be sent
@@ -218,7 +218,7 @@ fn datagram_acked() {
         ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
     ));
 
-    client.process_input(out.unwrap(), now);
+    client.process_input(&out.unwrap(), now);
     assert!(matches!(
         client.next_event().unwrap(),
         ConnectionEvent::OutgoingDatagramOutcome { id, outcome } if id == 1 && outcome == OutgoingDatagramOutcome::Acked
@@ -230,7 +230,7 @@ fn send_packet_and_get_server_event(
     server: &mut Connection,
 ) -> ConnectionEvent {
     let out = client.process_output(now()).dgram();
-    server.process_input(out.unwrap(), now());
+    server.process_input(&out.unwrap(), now());
     let mut events: Vec<_> = server
         .events()
         .filter_map(|evt| match evt {
@@ -358,7 +358,7 @@ fn dgram_no_allowed() {
     let out = server.process_output(now()).dgram().unwrap();
     server.test_frame_writer = None;
 
-    client.process_input(out, now());
+    client.process_input(&out, now());
 
     assert_error(
         &client,
@@ -379,7 +379,7 @@ fn dgram_too_big() {
     let out = server.process_output(now()).dgram().unwrap();
     server.test_frame_writer = None;
 
-    client.process_input(out, now());
+    client.process_input(&out, now());
 
     assert_error(
         &client,
@@ -414,7 +414,7 @@ fn outgoing_datagram_queue_full() {
     // Send DATA_SMALLER_THAN_MTU_2 datagram
     let out = client.process_output(now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
-    server.process_input(out.unwrap(), now());
+    server.process_input(&out.unwrap(), now());
     assert!(matches!(
         server.next_event().unwrap(),
         ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU_2
@@ -424,7 +424,7 @@ fn outgoing_datagram_queue_full() {
     let dgram_sent2 = client.stats().frame_tx.datagram;
     let out = client.process_output(now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent2 + 1);
-    server.process_input(out.unwrap(), now());
+    server.process_input(&out.unwrap(), now());
     assert!(matches!(
         server.next_event().unwrap(),
         ConnectionEvent::Datagram(data) if data == DATA_MTU
@@ -438,7 +438,7 @@ fn send_datagram(sender: &mut Connection, receiver: &mut Connection, data: &[u8]
     assert_eq!(sender.stats().frame_tx.datagram, dgram_sent + 1);
 
     let dgram_received = receiver.stats().frame_rx.datagram;
-    receiver.process_input(out, now());
+    receiver.process_input(&out, now());
     assert_eq!(receiver.stats().frame_rx.datagram, dgram_received + 1);
 }
 
@@ -552,7 +552,7 @@ fn multiple_quic_datagrams_in_one_packet() {
 
     let out = client.process_output(now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 2);
-    server.process_input(out.unwrap(), now());
+    server.process_input(&out.unwrap(), now());
     let datagram = |e: &_| matches!(e, ConnectionEvent::Datagram(..));
     assert_eq!(server.events().filter(datagram).count(), 2);
 }

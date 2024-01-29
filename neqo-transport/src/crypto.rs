@@ -245,9 +245,7 @@ impl Crypto {
 
     fn install_handshake_keys(&mut self) -> Res<bool> {
         qtrace!([self], "Attempt to install handshake keys");
-        let write_secret = if let Some(secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) {
-            secret
-        } else {
+        let Some(write_secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) else {
             // No keys is fine.
             return Ok(false);
         };

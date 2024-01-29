@@ -289,20 +289,20 @@ impl RangeTracker {
     /// need to be kept in place, with sent ranges filling the gaps.
     ///
     /// This means:
-    /// ```
+    /// ```ignore
     ///   AAA S AAAS AAAAA
     /// +  SSSSSSSSSSSSS
     /// = AAASSSAAASSAAAAA
-    /// ````
+    /// ```
     ///
     /// But we also have to ensure that:
-    /// ```
+    /// ```ignore
     ///     SSSS
     /// + SS
     /// = SSSSSS
     /// ```
     /// and
-    /// ```
+    /// ```ignore
     ///   SSSSS
     /// +     SS
     /// = SSSSSS
@@ -545,16 +545,15 @@ impl TxBuffer {
         // Any newly-retired bytes can be dropped from the buffer.
         let new_retirable = self.retired() - prev_retired;
         debug_assert!(new_retirable <= self.buffered() as u64);
-        let keep_len =
-            self.buffered() - usize::try_from(new_retirable).expect("should fit in usize");
+        let keep = self.buffered() - usize::try_from(new_retirable).unwrap();
 
         // Truncate front
-        self.send_buf.rotate_left(self.buffered() - keep_len);
-        self.send_buf.truncate(keep_len);
+        self.send_buf.rotate_left(self.buffered() - keep);
+        self.send_buf.truncate(keep);
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
-        self.ranges.unmark_range(offset, len)
+        self.ranges.unmark_range(offset, len);
     }
 
     /// Forget about anything that was marked as sent.
@@ -713,7 +712,7 @@ pub struct SendStream {
 
 impl Hash for SendStream {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.stream_id.hash(state)
+        self.stream_id.hash(state);
     }
 }
 
@@ -1000,7 +999,7 @@ impl SendStream {
             | SendStreamState::Send { .. }
             | SendStreamState::DataSent { .. }
             | SendStreamState::DataRecvd { .. } => {
-                qtrace!([self], "Reset acked while in {} state?", self.state.name())
+                qtrace!([self], "Reset acked while in {} state?", self.state.name());
             }
             SendStreamState::ResetSent {
                 final_retired,
@@ -1114,7 +1113,7 @@ impl SendStream {
             } => {
                 send_buf.mark_as_acked(offset, len);
                 if self.avail() > 0 {
-                    self.conn_events.send_stream_writable(self.stream_id)
+                    self.conn_events.send_stream_writable(self.stream_id);
                 }
             }
             SendStreamState::DataSent {
@@ -1192,7 +1191,7 @@ impl SendStream {
             let stream_was_blocked = fc.available() == 0;
             fc.update(limit);
             if stream_was_blocked && self.avail() > 0 {
-                self.conn_events.send_stream_writable(self.stream_id)
+                self.conn_events.send_stream_writable(self.stream_id);
             }
         }
     }
@@ -1575,7 +1574,7 @@ impl SendStreams {
 
     pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.map.get_mut(&id) {
-            ss.reset_acked()
+            ss.reset_acked();
         }
     }
 
@@ -1617,7 +1616,7 @@ impl SendStreams {
                     match stream.sendorder() {
                         None => regular.remove(*stream_id),
                         Some(sendorder) => {
-                            sendordered.get_mut(&sendorder).unwrap().remove(*stream_id)
+                            sendordered.get_mut(&sendorder).unwrap().remove(*stream_id);
                         }
                     };
                 }
@@ -1686,16 +1685,13 @@ impl SendStreams {
                 .flat_map(|group| group.iter()),
         );
         for stream_id in stream_ids {
-            match self.map.get_mut(&stream_id).unwrap().sendorder() {
-                Some(order) => qdebug!("   {} ({})", stream_id, order),
-                None => qdebug!("   None"),
+            let stream = self.map.get_mut(&stream_id).unwrap();
+            if let Some(order) = stream.sendorder() {
+                qdebug!("   {} ({})", stream_id, order)
+            } else {
+                qdebug!("   None")
             }
-            if !self
-                .map
-                .get_mut(&stream_id)
-                .unwrap()
-                .write_frames_with_early_return(priority, builder, tokens, stats)
-            {
+            if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                 break;
             }
         }

@@ -138,9 +138,7 @@ impl Http09Server {
             data
         };
 
-        let msg = if let Ok(s) = std::str::from_utf8(&buf[..]) {
-            s
-        } else {
+        let Ok(msg) = std::str::from_utf8(&buf[..]) else {
             self.save_partial(stream_id, buf, conn);
             return;
         };
@@ -199,7 +197,7 @@ impl Http09Server {
 }
 
 impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
 
@@ -238,7 +236,7 @@ impl HttpServer for Http09Server {
     }
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir)
+        self.server.set_qlog_dir(dir);
     }
 
     fn validate_address(&mut self, v: ValidateAddress) {

@@ -245,7 +245,7 @@ impl PacketBuilder {
 
     /// Adjust the limit to ensure that no more data is added.
     pub fn mark_full(&mut self) {
-        self.limit = self.encoder.len()
+        self.limit = self.encoder.len();
     }
 
     /// Mark the packet as needing padding (or not).
@@ -409,7 +409,7 @@ impl PacketBuilder {
     /// Make a retry packet.
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
-    /// this returns a Vec<u8> rather than building on an encoder.
+    /// this returns a [`Vec<u8>`] rather than building on an encoder.
     pub fn retry(
         version: Version,
         dcid: &[u8],
@@ -603,9 +603,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from a supported version.
-        let version = if let Ok(v) = Version::try_from(version) {
-            v
-        } else {
+        let Ok(version) = Version::try_from(version) else {
             return Ok((
                 Self {
                     packet_type: PacketType::OtherVersion,
@@ -675,13 +673,12 @@ impl<'a> PublicPacket<'a> {
         self.packet_type
     }
 
-    pub fn dcid(&self) -> &ConnectionIdRef<'a> {
-        &self.dcid
+    pub fn dcid(&self) -> ConnectionIdRef<'a> {
+        self.dcid
     }
 
-    pub fn scid(&self) -> &ConnectionIdRef<'a> {
+    pub fn scid(&self) -> ConnectionIdRef<'a> {
         self.scid
-            .as_ref()
             .expect("should only be called for long header packets")
     }
 
