@@ -196,9 +196,8 @@ impl RangeTracker {
                     if e.get().1 == RangeState::Acked {
                         let (len, _) = e.remove();
                         self.acked += len;
-                    } else {
-                        break;
                     }
+                    break;
                 }
                 Ordering::Less => break,
             }
