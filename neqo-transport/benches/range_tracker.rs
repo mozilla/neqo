@@ -15,26 +15,28 @@ fn build_coalesce(len: u64) -> RangeTracker {
     return used;
 }
 
-fn coalesce(used: &mut RangeTracker) {
-    used.mark_range(CHUNK, CHUNK as usize, RangeState::Acked);
-    used.mark_range(END, CHUNK as usize, RangeState::Sent);
-    used.mark_range(END, CHUNK as usize, RangeState::Acked);
+fn coalesce(c: &mut Criterion, count: u64) {
+    let mut used = build_coalesce(count);
+    c.bench_function(
+        &format!("coalesce_acked_from_zero {count}+1 entries"),
+        |b| {
+            b.iter(|| {
+                let used: &mut RangeTracker = &mut used;
+                used.mark_range(CHUNK, CHUNK as usize, RangeState::Acked);
+                let tail = (count + 1) * CHUNK;
+                used.mark_range(tail, CHUNK as usize, RangeState::Sent);
+                used.mark_range(tail, CHUNK as usize, RangeState::Acked);
+            })
+        },
+    );
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
-    let mut used = build_coalesce(1);
-    c.bench_function("coalesce_acked_from_zero 2 entries", |b| {
-        b.iter(|| coalesce(&mut used))
-    });
-    used = build_coalesce(100);
-    c.bench_function("coalesce_acked_from_zero 100 entries", |b| {
-        b.iter(|| coalesce(&mut used))
-    });
-    used = build_coalesce(1000);
-    c.bench_function("coalesce_acked_from_zero 1000 entries", |b| {
-        b.iter(|| coalesce(&mut used))
-    });
+fn benchmark_coalesce(c: &mut Criterion) {
+    coalesce(c, 1);
+    coalesce(c, 3);
+    coalesce(c, 10);
+    coalesce(c, 1000);
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, benchmark_coalesce);
 criterion_main!(benches);
