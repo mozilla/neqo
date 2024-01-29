@@ -204,6 +204,13 @@ impl RangeTracker {
         }
     }
 
+    /// Mark a range as acknowledged.  This is simpler than marking a range as sent
+    /// because an acknowledged range can never turn back into a sent range, so
+    /// this function can just override the entire range.
+    ///
+    /// The only tricky parts are making sure that we maintain `self.acked`,
+    /// which is the first acknowledged range.  And making sure that we don't create
+    /// ranges of the same type that are adjacent; these need to be merged.
     pub fn mark_acked(&mut self, new_off: u64, new_len: usize) {
         let end = new_off + u64::try_from(new_len).unwrap();
         let new_off = max(self.acked, new_off);
@@ -277,21 +284,29 @@ impl RangeTracker {
 
     /// Turn a single sent range into a list of subranges that align with existing
     /// acknowledged ranges.
-    //
-    // e.g. given N is new and ABC are existing:
-    //             NNNNNNNNNNNNNNNN
-    //               AAAAA   BBBCCCCC  ...then we want 5 chunks:
-    //             1122222333444555
-    //
-    // but also if we have this:
-    //             NNNNNNNNNNNNNNNN
-    //           AAAAAAAAAA      BBBB  ...then break existing A and B ranges up:
-    //
-    //             1111111122222233
-    //           aaAAAAAAAA      BBbb
-    //
-    // Doing all this work up front should make handling each chunk much
-    // easier.
+    ///
+    /// This is more complicated than adding acked ranges because any acked ranges
+    /// need to be kept in place, with sent ranges filling the gaps.
+    ///
+    /// This means:
+    /// ```
+    ///   AAA S AAAS AAAAA
+    /// +  SSSSSSSSSSSSS
+    /// = AAASSSAAASSAAAAA
+    /// ````
+    ///
+    /// But we also have to ensure that:
+    /// ```
+    ///     SSSS
+    /// + SS
+    /// = SSSSSS
+    /// ```
+    /// and
+    /// ```
+    ///   SSSSS
+    /// +     SS
+    /// = SSSSSS
+    /// ```
     pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
         let new_end = new_off + u64::try_from(new_len).unwrap();
         new_off = max(self.acked, new_off);
