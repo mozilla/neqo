@@ -7,7 +7,7 @@ rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-indexmap = "1.9.3"
+indexmap = "2.2.1"
 lazy_static = "1.4"
 log = {version = "0.4.17", default-features = false}
 neqo-common = { path = "../neqo-common" }
