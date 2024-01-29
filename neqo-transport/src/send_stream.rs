@@ -469,7 +469,6 @@ impl RangeTracker {
 /// Buffer to contain queued bytes and track their state.
 #[derive(Debug, Default, PartialEq)]
 pub struct TxBuffer {
-    retired: u64,           // contig acked bytes, no longer in buffer
     send_buf: VecDeque<u8>, // buffer of not-acked bytes
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
@@ -492,13 +491,13 @@ impl TxBuffer {
     pub fn next_bytes(&self) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
-        if start == self.retired + u64::try_from(self.buffered()).unwrap() {
+        if start == self.retired() + u64::try_from(self.buffered()).unwrap() {
             return None;
         }
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = usize::try_from(start - self.retired).unwrap();
+        let buff_off = usize::try_from(start - self.retired()).unwrap();
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.
@@ -526,10 +525,11 @@ impl TxBuffer {
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
+        let prev_retired = self.retired();
         self.ranges.mark_acked(offset, len);
 
-        // We can drop contig acked range from the buffer
-        let new_retirable = self.ranges.acked_from_zero() - self.retired;
+        // Any newly-retired bytes can be dropped from the buffer.
+        let new_retirable = self.retired() - prev_retired;
         debug_assert!(new_retirable <= self.buffered() as u64);
         let keep_len =
             self.buffered() - usize::try_from(new_retirable).expect("should fit in usize");
@@ -537,8 +537,6 @@ impl TxBuffer {
         // Truncate front
         self.send_buf.rotate_left(self.buffered() - keep_len);
         self.send_buf.truncate(keep_len);
-
-        self.retired += new_retirable;
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
@@ -551,7 +549,7 @@ impl TxBuffer {
     }
 
     pub fn retired(&self) -> u64 {
-        self.retired
+        self.ranges.acked_from_zero()
     }
 
     fn buffered(&self) -> usize {
@@ -563,7 +561,7 @@ impl TxBuffer {
     }
 
     fn used(&self) -> u64 {
-        self.retired + u64::try_from(self.buffered()).unwrap()
+        self.retired() + u64::try_from(self.buffered()).unwrap()
     }
 }
 
@@ -1914,7 +1912,7 @@ mod tests {
                          Some((start, x)) if x.len() == 5
                          && start == five_bytes_from_end
                          && x.iter().all(|ch| *ch == 1)));
-        assert_eq!(txb.retired, five_bytes_from_end);
+        assert_eq!(txb.retired(), five_bytes_from_end);
         assert_eq!(txb.buffered(), 35);
 
         // Marking that bit as sent should let the last contig bit be returned
@@ -2476,7 +2474,6 @@ mod tests {
         );
 
         let mut send_buf = TxBuffer::new();
-        send_buf.retired = u64::try_from(offset).unwrap();
         send_buf.ranges.mark_acked(0, offset);
         let mut fc = SenderFlowControl::new(StreamId::from(stream), MAX_VARINT);
         fc.consume(offset);
