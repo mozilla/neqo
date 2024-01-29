@@ -171,13 +171,6 @@ impl RangeTracker {
             if prev_end == cur_off {
                 prev_end = cur_off + cur_len;
             } else {
-                if cur_off < prev_end {
-                    println!("{self:?} {a}", a = self.acked);
-                    for (o, (l, s)) in &self.used {
-                        println!("{s:?}: {o}+{l}={e}", e = o + l);
-                    }
-                }
-
                 return (prev_end, Some(cur_off - prev_end));
             }
         }
@@ -253,7 +246,7 @@ impl RangeTracker {
                 }
             }
         }
-        // The other overlapping ranges can just be trashed.
+        // All remaining overlapping ranges can just be trashed.
         for k in to_remove {
             self.used.remove(&k);
         }
@@ -344,6 +337,7 @@ impl RangeTracker {
             if old_state == RangeState::Acked {
                 let chunk_len = old_off - new_off;
                 if chunk_len > 0 {
+                    debug_assert!(retained.map_or(true, |r| r == new_off));
                     retained = None;
                     self.used.insert(new_off, (chunk_len, RangeState::Sent));
                 } else if let Some(k) = retained.take() {
@@ -353,8 +347,8 @@ impl RangeTracker {
                 new_off += included;
                 new_len -= included;
             } else if *e.key() == new_off {
-                // Note: Retain a sent entry at `new_off`.
-                // This avoids the work of removing and re-creating an entry in most cases.
+                // Retain a sent entry at `new_off`.
+                // This avoids the work of removing and re-creating an entry in many cases.
                 // The value will be overwritten when the next insert occurs,
                 // either when this loop hits an acked range (above)
                 // or when the preceding range overlaps this (below).
@@ -390,6 +384,7 @@ impl RangeTracker {
                 }
             }
         }
+        debug_assert!(retained.map_or(true, |r| r == new_off));
         self.used.insert(new_off, (new_len, RangeState::Sent));
     }
 
