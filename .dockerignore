@@ -2,6 +2,7 @@
 *
 # Except for the following:
 !**/*.toml
+!Cargo.lock
 !**/*.rs
 !**/*.h
 !**/*.hpp
