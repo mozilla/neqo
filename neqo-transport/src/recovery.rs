@@ -40,9 +40,9 @@ pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
 /// If the congestion window is this small, we will only send ACK frames.
 pub(crate) const ACK_ONLY_SIZE_LIMIT: usize = 256;
-/// The number of packets we send on a PTO.
-/// And the number to declare lost when the PTO timer is hit.
-pub const PTO_PACKET_COUNT: usize = 2;
+/// The maximum number of packets we send on a PTO.
+/// And the maximum number to declare lost when the PTO timer is hit.
+pub const MAX_PTO_PACKET_COUNT: usize = 2;
 /// The preferred limit on the number of packets that are tracked.
 /// If we exceed this number, we start sending `PING` frames sooner to
 /// force the peer to acknowledge some of them.
@@ -520,12 +520,24 @@ struct PtoState {
 }
 
 impl PtoState {
+    /// The number of packets we send on a PTO.
+    /// And the number to declare lost when the PTO timer is hit.
+    fn pto_packet_count(space: PacketNumberSpace) -> usize {
+        if space == PacketNumberSpace::Initial {
+            // For the Initial space, we only send one packet on PTO. This avoids
+            // sending useless PING-only packets when the Client Initial is deemed lost.
+            1
+        } else {
+            MAX_PTO_PACKET_COUNT
+        }
+    }
+
     pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(probe[space]);
         Self {
             space,
             count: 1,
-            packets: PTO_PACKET_COUNT,
+            packets: Self::pto_packet_count(space),
             probe,
         }
     }
@@ -534,7 +546,7 @@ impl PtoState {
         debug_assert!(probe[space]);
         self.space = space;
         self.count += 1;
-        self.packets = PTO_PACKET_COUNT;
+        self.packets = Self::pto_packet_count(space);
         self.probe = probe;
     }
 
@@ -910,7 +922,11 @@ impl LossRecovery {
                 if t <= now {
                     qdebug!([self], "PTO timer fired for {}", pn_space);
                     let space = self.spaces.get_mut(*pn_space).unwrap();
-                    lost.extend(space.pto_packets(PTO_PACKET_COUNT).cloned());
+                    lost.extend(
+                        space
+                            .pto_packets(PtoState::pto_packet_count(*pn_space))
+                            .cloned(),
+                    );
 
                     pto_space = pto_space.or(Some(*pn_space));
                 }

@@ -326,10 +326,8 @@ fn retry_after_pto() {
 
     // Let PTO fire on the client and then let it exhaust its PTO packets.
     now += Duration::from_secs(1);
-    let pto1 = client.process(None, now).dgram();
-    assert!(pto1.unwrap().len() >= 1200);
-    let pto2 = client.process(None, now).dgram();
-    assert!(pto2.unwrap().len() >= 1200);
+    let pto = client.process(None, now).dgram();
+    assert!(pto.unwrap().len() >= 1200);
     let cb = client.process(None, now).callback();
     assert_ne!(cb, Duration::new(0, 0));
 

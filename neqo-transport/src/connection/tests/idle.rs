@@ -296,18 +296,14 @@ fn idle_caching() {
     client.process_input(&handshake.unwrap(), start);
 
     // Perform an exchange and keep the connection alive.
-    // Only allow a packet containing a PING to pass.
     let middle = start + AT_LEAST_PTO;
-    mem::drop(client.process_output(middle));
     let dgram = client.process_output(middle).dgram();
 
     // Get the server to send its first probe and throw that away.
     mem::drop(server.process_output(middle).dgram());
-    // Now let the server process the client PING.  This causes the server
+    // Now let the server process the client packet.  This causes the server
     // to send CRYPTO frames again, so manually extract and discard those.
-    let ping_before_s = server.stats().frame_rx.ping;
     server.process_input(&dgram.unwrap(), middle);
-    assert_eq!(server.stats().frame_rx.ping, ping_before_s + 1);
     let mut tokens = Vec::new();
     server
         .crypto
@@ -337,10 +333,8 @@ fn idle_caching() {
     // Now only allow the Initial packet from the server through;
     // it shouldn't contain a CRYPTO frame.
     let (initial, _) = split_datagram(&dgram.unwrap());
-    let ping_before_c = client.stats().frame_rx.ping;
     let ack_before = client.stats().frame_rx.ack;
     client.process_input(&initial, middle);
-    assert_eq!(client.stats().frame_rx.ping, ping_before_c + 1);
     assert_eq!(client.stats().frame_rx.ack, ack_before + 1);
 
     let end = start + default_timeout() + (AT_LEAST_PTO / 2);
