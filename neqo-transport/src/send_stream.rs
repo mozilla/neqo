@@ -218,36 +218,39 @@ impl RangeTracker {
         if new_len == 0 {
             return;
         }
+        let mut new_end = new_off + new_len;
 
         // Get all existing ranges that start within this new range.
-        let mut to_remove = self
+        let mut covered = self
             .used
-            .range(new_off..(new_off + new_len))
+            .range(new_off..new_end)
             .map(|(&k, _)| k)
             .collect::<SmallVec<[_; 8]>>();
 
-        if let Entry::Occupied(next_entry) = self.used.entry(new_off + new_len) {
+        if let Entry::Occupied(next_entry) = self.used.entry(new_end) {
+            // Check if the very next entry is the same type as this.
             if next_entry.get().1 == RangeState::Acked {
-                // Check if the very next entry is the same type as this, so it can be merged.
+                // If is is acked, drop it and extend this new range.
                 let (extra_len, _) = next_entry.remove();
                 new_len += extra_len;
+                new_end += extra_len;
             }
-        } else if let Some(last) = to_remove.pop() {
+        } else if let Some(last) = covered.pop() {
             // Otherwise, the last of the existing ranges might overhang this one by some.
             let (old_off, (old_len, old_state)) = self.used.remove_entry(&last).unwrap(); // can't fail
-            let remainder = (old_off + old_len).saturating_sub(new_off + new_len);
+            let remainder = (old_off + old_len).saturating_sub(new_end);
             if remainder > 0 {
                 if old_state == RangeState::Acked {
                     // Just extend the current range.
                     new_len += remainder;
+                    new_end += remainder;
                 } else {
-                    self.used
-                        .insert(new_off + new_len, (remainder, RangeState::Sent));
+                    self.used.insert(new_end, (remainder, RangeState::Sent));
                 }
             }
         }
-        // All remaining overlapping ranges can just be trashed.
-        for k in to_remove {
+        // All covered ranges can just be trashed.
+        for k in covered {
             self.used.remove(&k);
         }
 
@@ -256,7 +259,6 @@ impl RangeTracker {
         let prev = self.used.range_mut(..new_off).next_back();
         if let Some((prev_off, (prev_len, prev_state))) = prev {
             let prev_end = *prev_off + *prev_len;
-            let new_end = new_off + new_len;
             if prev_end >= new_off {
                 if *prev_state == RangeState::Sent {
                     *prev_len = new_off - *prev_off;
@@ -300,7 +302,7 @@ impl RangeTracker {
         }
 
         // Get all existing ranges that start within this new range.
-        let mut maybe_remove = self
+        let mut covered = self
             .used
             .range(new_off..(new_off + new_len))
             .map(|(&k, _)| k)
@@ -312,7 +314,7 @@ impl RangeTracker {
                 let (extra_len, _) = next_entry.remove();
                 new_len += extra_len;
             }
-        } else if let Some(old_off) = maybe_remove.pop() {
+        } else if let Some(old_off) = covered.pop() {
             // Otherwise, the last of the existing ranges might overhang this one by a little.
             let Entry::Occupied(e) = self.used.entry(old_off) else {
                 unreachable!();
@@ -329,12 +331,13 @@ impl RangeTracker {
 
         // Now interleave new sent chunks with any existing acked chunks.
         let mut retained = None;
-        for old_off in maybe_remove {
+        for old_off in covered {
             let Entry::Occupied(e) = self.used.entry(old_off) else {
                 unreachable!();
             };
             let &(old_len, old_state) = e.get();
             if old_state == RangeState::Acked {
+                // Now we have to insert a chunk ahead of this acked chunk.
                 let chunk_len = old_off - new_off;
                 if chunk_len > 0 {
                     debug_assert!(retained.map_or(true, |r| r == new_off));
@@ -366,11 +369,14 @@ impl RangeTracker {
                 let overlap = *prev_off + *prev_len - new_off;
                 new_len = new_len.saturating_sub(overlap);
                 let done = if new_len == 0 {
+                    // The previous range covers this one (no more to do).
                     true
                 } else if *prev_state == RangeState::Acked {
+                    // The previous range is acked, so it cuts this one (need to insert).
                     new_off += overlap;
                     false
                 } else {
+                    // Extend the previous sent range (no more to do).
                     *prev_len += new_len;
                     true
                 };
