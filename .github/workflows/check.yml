@@ -77,7 +77,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Rust tools
-        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-bench cargo-llvm-cov cargo-nextest
+        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -116,7 +116,7 @@ jobs:
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Benches should at least build
-        run: cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+        run: cargo +${{ matrix.rust-toolchain }} build --features bench --benches
 
       - name: Run client/server transfer
         run: |
