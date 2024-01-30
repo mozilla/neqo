@@ -19,5 +19,6 @@ smallvec = "1.11.1"
 test-fixture = { path = "../test-fixture" }
 
 [features]
+bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
