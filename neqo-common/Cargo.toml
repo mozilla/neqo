@@ -13,7 +13,8 @@ env_logger = { version = "0.10", default-features = false }
 lazy_static = "1.4"
 log = { version = "0.4", default-features = false }
 qlog = "0.11.0"
-time = {version = "0.3.23", features = ["formatting"]}
+time = { version = "0.3.23", features = ["formatting"] }
+quinn-udp = { git = "https://github.com/quinn-rs/quinn/", optional = true }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
@@ -21,6 +22,7 @@ test-fixture = { path = "../test-fixture" }
 [features]
 deny-warnings = []
 ci = []
+udp = ["dep:quinn-udp"]
 
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"
