@@ -677,18 +677,11 @@ impl ServersRunner {
             };
 
             print!("Server waiting for connection on: {local_addr:?}");
-            // TODO
-            // // On Windows, this is not supported.
-            // #[cfg(not(target_os = "windows"))]
-            // if !socket.only_v6().unwrap_or(true) {
-            //     print!(" as well as V4");
-            // };
-            // println!();
 
-            socket.set_nonblocking(true).expect("TODO");
+            socket.set_nonblocking(true).expect("set_nonblocking to succeed");
 
             self.sockets
-                .push((host, UdpSocket::from_std(socket).expect("TODO")));
+                .push((host, UdpSocket::from_std(socket).expect("conversion to Tokio socket to succeed")));
         }
 
         Ok(())
