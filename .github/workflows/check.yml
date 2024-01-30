@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-          echo "RUSTFLAGS='-C link-arg=-fuse-ld=lld'" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
       # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
@@ -56,7 +56,7 @@ jobs:
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           python3 -m pip install packaging
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS='-C link-arg=-fuse-ld=lld'" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
