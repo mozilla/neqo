@@ -23,7 +23,7 @@ plrs=("0.0001" "0.0005" "0.001" "0.002" "0.005")
 runs=1
 
 echo -n "Enter root password: "
-read -s root_password
+read -r root_password
 echo
 
 setup_network_conditions() {
@@ -68,8 +68,8 @@ setup_network_conditions() {
     fi
 
     for command in "${set_condition_commands[@]}"; do
-        echo $command
-        echo $root_password | sudo -S bash -c "$command"
+        echo "$command"
+        echo "$root_password" | sudo -S bash -c "$command"
     done
 }
 
@@ -86,7 +86,7 @@ stop_network_conditions() {
     fi
 
     for command in "${stop_condition_commands[@]}"; do
-        echo $root_password | sudo -S bash -c "$command"
+        echo "$root_password" | sudo -S bash -c "$command"
     done
 }
 
@@ -94,7 +94,7 @@ stop_server() {
     echo "stop server"
     server_pid=$(pgrep -f "neqo-server")
     # Kill the server
-    kill $server_pid
+    kill "$server_pid"
 }
 
 start_test() {
