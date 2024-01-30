@@ -13,7 +13,9 @@ use super::{
 use crate::{
     cc::CWND_MIN,
     path::PATH_MTU_V6,
-    recovery::{FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MIN_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT},
+    recovery::{
+        FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
+    },
     rtt::GRANULARITY,
     stats::MAX_PTO_COUNTS,
     tparams::TransportParameter,
@@ -570,6 +572,8 @@ fn loss_time_past_largest_acked() {
     assert!(s_pto < RTT);
     let s_hs2 = server.process(None, now + s_pto).dgram();
     assert!(s_hs2.is_some());
+    let s_hs3 = server.process(None, now + s_pto).dgram();
+    assert!(s_hs3.is_some());
 
     // Get some Handshake packets from the client.
     // We need one to be left unacknowledged before one that is acknowledged.
@@ -589,10 +593,14 @@ fn loss_time_past_largest_acked() {
     let _p1 = send_something(&mut client, now + INCR);
     let c_hs3 = client.process(s_hs2.as_ref(), now + (INCR * 2)).dgram();
     assert!(c_hs3.is_some()); // This will be left outstanding.
+    let c_hs4 = client.process(s_hs3.as_ref(), now + (INCR * 3)).dgram();
+    assert!(c_hs4.is_some()); // This will be acknowledged.
 
-    // Process c_hs2, but skip c_hs3.
+    // Process c_hs2 and c_hs4, but skip c_hs3.
     // Then get an ACK for the client.
     now += RTT / 2;
+    // Deliver c_hs4 first, but don't generate a packet.
+    server.process_input(&c_hs4.unwrap(), now);
     let s_ack = server.process(c_hs2.as_ref(), now).dgram();
     assert!(s_ack.is_some());
     // This includes an ACK, but it also includes HANDSHAKE_DONE,

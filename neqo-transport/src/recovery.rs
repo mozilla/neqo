@@ -522,31 +522,32 @@ struct PtoState {
 impl PtoState {
     /// The number of packets we send on a PTO.
     /// And the number to declare lost when the PTO timer is hit.
-    fn pto_packet_count(space: PacketNumberSpace) -> usize {
-        if space == PacketNumberSpace::Initial {
-            // For the Initial space, we only send one packet on PTO. This avoids
-            // sending useless PING-only packets when the Client Initial is deemed lost.
+    fn pto_packet_count(space: PacketNumberSpace, rx_count: usize) -> usize {
+        if space == PacketNumberSpace::Initial && rx_count == 0 {
+            // For the Initial space, we only send one packet on PTO if we have not received any packets
+            // from the peer yet. This avoids sending useless PING-only packets when the Client Initial
+            // is deemed lost.
             1
         } else {
             MAX_PTO_PACKET_COUNT
         }
     }
 
-    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
+    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet, rx_count: usize) -> Self {
         debug_assert!(probe[space]);
         Self {
             space,
             count: 1,
-            packets: Self::pto_packet_count(space),
+            packets: Self::pto_packet_count(space, rx_count),
             probe,
         }
     }
 
-    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet) {
+    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet, rx_count: usize) {
         debug_assert!(probe[space]);
         self.space = space;
         self.count += 1;
-        self.packets = Self::pto_packet_count(space);
+        self.packets = Self::pto_packet_count(space, rx_count);
         self.probe = probe;
     }
 
@@ -889,10 +890,11 @@ impl LossRecovery {
     }
 
     fn fire_pto(&mut self, pn_space: PacketNumberSpace, allow_probes: PacketNumberSpaceSet) {
+        let rx_count = self.stats.borrow().packets_rx;
         if let Some(st) = &mut self.pto_state {
-            st.pto(pn_space, allow_probes);
+            st.pto(pn_space, allow_probes, rx_count);
         } else {
-            self.pto_state = Some(PtoState::new(pn_space, allow_probes));
+            self.pto_state = Some(PtoState::new(pn_space, allow_probes, rx_count));
         }
 
         self.pto_state
@@ -924,7 +926,10 @@ impl LossRecovery {
                     let space = self.spaces.get_mut(*pn_space).unwrap();
                     lost.extend(
                         space
-                            .pto_packets(PtoState::pto_packet_count(*pn_space))
+                            .pto_packets(PtoState::pto_packet_count(
+                                *pn_space,
+                                self.stats.borrow().packets_rx,
+                            ))
                             .cloned(),
                     );
 
