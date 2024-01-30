@@ -26,10 +26,10 @@ use std::{
 };
 
 use futures::{
-    future::{select, select_all, Either},
+    future::{select, Either, select_all},
     FutureExt,
 };
-use tokio::time::Sleep;
+use tokio::{time::Sleep, io::Interest};
 
 use neqo_transport::ConnectionIdGenerator;
 use structopt::StructOpt;
@@ -579,14 +579,17 @@ impl HttpServer for SimpleServer {
 }
 
 fn read_dgram(
-    socket: &mut tokio::net::UdpSocket,
+    socket: &tokio::net::UdpSocket,
     state: &quinn_udp::UdpSocketState,
     local_address: &SocketAddr,
 ) -> Result<Option<Datagram>, io::Error> {
     let mut buf = [0; u16::MAX as usize];
     let mut tos = 0;
     let mut ttl = 0;
-    let (sz, remote_addr) = match udp::rx(socket, state, &mut buf[..], &mut tos, &mut ttl) {
+
+    let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
+        udp::rx(&socket, state, &mut buf[..], &mut tos, &mut ttl)
+    }) {
         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
@@ -732,7 +735,7 @@ impl ServersRunner {
                 Output::Datagram(dgram) => {
                     qdebug!("writing to {:?}", dgram.source());
                     let (socket, state) = self.find_socket(dgram.source());
-                    udp::tx(socket, state,  &dgram)?;
+                    udp::tx(socket, state, &dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -785,6 +788,7 @@ impl ServersRunner {
                     }
                 }
                 Ready::Timeout => {
+                    self.timeout = None;
                     qdebug!("timeout fired");
                     self.process(None).await?;
                 }
