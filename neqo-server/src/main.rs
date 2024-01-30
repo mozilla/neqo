@@ -790,6 +790,7 @@ impl ServersRunner {
                     self.process(dgram.as_ref()).await;
                 },
                 Ready::Timeout => {
+                    self.timeout = None;
                     self.process(None).await;
                 }
             }
