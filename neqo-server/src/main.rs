@@ -734,9 +734,9 @@ impl ServersRunner {
             .unwrap_or(first_socket)
     }
 
-    async fn process(&mut self, dgram: Option<&Datagram>) {
+    async fn process(&mut self, mut dgram: Option<&Datagram>) {
         loop {
-            match self.server.process(dgram, self.args.now()) {
+            match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
                     let socket = self.find_socket(dgram.source());
                     emit_packet(socket, dgram).await;
