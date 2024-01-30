@@ -41,7 +41,8 @@ pub fn tx(socket: impl AsFd, d: &Datagram) -> io::Result<usize> {
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
         contents: d[..].to_vec().into(),
         segment_size: None,
-        src_ip: Some(d.source().ip()),
+        // TODO
+        src_ip: None,
     };
     let n = send_state
         .send((&socket).into(), slice::from_ref(&transmit))
