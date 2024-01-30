@@ -298,7 +298,10 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
         server.conn_params.get_idle_timeout(),
     );
     // Client started its idle period half an RTT before now.
-    assert_eq!(client.process_output(now.checked_sub(rtt/2).unwrap()), Output::Callback(idle_timeout));
+    assert_eq!(
+        client.process_output(now.checked_sub(rtt / 2).unwrap()),
+        Output::Callback(idle_timeout)
+    );
     assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
 

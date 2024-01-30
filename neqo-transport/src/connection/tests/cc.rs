@@ -7,8 +7,8 @@
 use super::super::Output;
 use super::{
     ack_bytes, assert_full_cwnd, connect_rtt_idle, cwnd, cwnd_avail, cwnd_packets, default_client,
-    default_server, fill_cwnd, induce_persistent_congestion, send_something, DEFAULT_RTT,
-    CLIENT_HANDSHAKE_1RTT_PACKETS, POST_HANDSHAKE_CWND,
+    default_server, fill_cwnd, induce_persistent_congestion, send_something,
+    CLIENT_HANDSHAKE_1RTT_PACKETS, DEFAULT_RTT, POST_HANDSHAKE_CWND,
 };
 use crate::cc::MAX_DATAGRAM_SIZE;
 use crate::packet::PacketNumber;

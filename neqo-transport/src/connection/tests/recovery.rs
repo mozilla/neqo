@@ -29,7 +29,10 @@ use std::{
     mem,
     time::{Duration, Instant},
 };
-use test_fixture::{assertions::{assert_handshake, assert_initial}, now, split_datagram};
+use test_fixture::{
+    assertions::{assert_handshake, assert_initial},
+    now, split_datagram,
+};
 
 #[test]
 fn pto_works_basic() {
