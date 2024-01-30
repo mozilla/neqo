@@ -848,11 +848,7 @@ impl LossRecovery {
         // where F = fast_pto / FAST_PTO_SCALE (== 1 by default)
         let pto_count = pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0));
         rtt.pto(pn_space)
-            .checked_mul(
-                u32::from(fast_pto)
-                    .checked_shl(pto_count)
-                    .unwrap_or(u32::MAX),
-            )
+            .checked_mul(u32::from(fast_pto) << min(pto_count, u32::BITS - u8::BITS))
             .map_or(Duration::from_secs(3600), |p| p / u32::from(FAST_PTO_SCALE))
     }
 
