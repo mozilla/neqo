@@ -36,7 +36,6 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    dump::*,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -60,14 +59,14 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
-
+mod dump;
 mod idle;
 pub mod params;
 mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
-
+use dump::dump_packet;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;

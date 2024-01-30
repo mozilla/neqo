@@ -16,7 +16,6 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
-mod dump;
 mod events;
 mod fc;
 mod frame;

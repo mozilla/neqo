@@ -27,7 +27,7 @@ pub fn dump_packet(
     pn: PacketNumber,
     payload: &[u8],
 ) {
-    if ::log::Level::Debug > ::log::max_level() {
+    if !log::log_enabled!(log::Level::Debug) {
         return;
     }
 
