@@ -71,6 +71,7 @@ jobs:
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
