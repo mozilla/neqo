@@ -93,13 +93,14 @@ pub fn rx(
     ) {
         Err(e) => Err(e),
         Ok(n) => {
+            assert_eq!(n, 1, "only passed one slice");
             *tos = if meta.ecn.is_some() {
                 meta.ecn.unwrap() as u8
             } else {
                 IpTos::default().into()
             };
             *ttl = 0xff; // TODO: get the real TTL
-            Ok((n, meta.addr))
+            Ok((meta.len, meta.addr))
         }
     }
 }
