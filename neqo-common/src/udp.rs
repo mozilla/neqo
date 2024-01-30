@@ -33,9 +33,7 @@ use crate::{Datagram, IpTos};
 /// # Panics
 ///
 /// Panics if the datagram is too large to send.
-pub fn tx(socket: impl AsFd, d: &Datagram) -> io::Result<usize> {
-    // TODO: Don't instantiate on each write.
-    let send_state = UdpSocketState::new((&socket).into()).unwrap();
+pub fn tx(socket: impl AsFd, state: &UdpSocketState, d: &Datagram) -> io::Result<usize> {
     let transmit = Transmit {
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
@@ -44,7 +42,7 @@ pub fn tx(socket: impl AsFd, d: &Datagram) -> io::Result<usize> {
         // TODO
         src_ip: None,
     };
-    let n = send_state
+    let n = state
         .send((&socket).into(), slice::from_ref(&transmit))
         .unwrap();
     Ok(n)
@@ -72,21 +70,19 @@ pub fn tx(socket: impl AsFd, d: &Datagram) -> io::Result<usize> {
 /// Panics if the datagram is too large to receive.
 pub fn rx(
     socket: impl AsFd,
+    state: &UdpSocketState,
     buf: &mut [u8],
     // TODO: Can these be return values instead of mutable inputs?
     tos: &mut u8,
     ttl: &mut u8,
 ) -> io::Result<(usize, SocketAddr)> {
     let mut meta = RecvMeta::default();
-    // TODO: Don't instantiate on each read.
-    let recv_state = UdpSocketState::new((&socket).into()).unwrap();
-
     // TODO: needed?
     // #[cfg(test)]
     // // `UdpSocketState` switches to non-blocking mode, undo that for the tests.
     // socket.set_nonblocking(false).unwrap();
 
-    match recv_state.recv(
+    match state.recv(
         (&socket).into(),
         &mut [IoSliceMut::new(buf)],
         slice::from_mut(&mut meta),
