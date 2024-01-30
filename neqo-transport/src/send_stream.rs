@@ -340,12 +340,12 @@ impl RangeTracker {
                 let overlap = prev_off + prev_len - new_off;
                 new_len = new_len.saturating_sub(overlap);
                 if new_len == 0 {
-                    // The previous range covers this one (no more to do).
+                    // The previous range completely covers this one (no more to do).
                     return;
                 }
 
                 if prev_state == RangeState::Acked {
-                    // The previous range is acked, so it cuts this one (need to insert).
+                    // The previous range is acked, so it cuts this one.
                     new_off += overlap;
                 } else {
                     // Extend the current range backwards.
