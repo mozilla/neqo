@@ -678,10 +678,14 @@ impl ServersRunner {
 
             print!("Server waiting for connection on: {local_addr:?}");
 
-            socket.set_nonblocking(true).expect("set_nonblocking to succeed");
+            socket
+                .set_nonblocking(true)
+                .expect("set_nonblocking to succeed");
 
-            self.sockets
-                .push((host, UdpSocket::from_std(socket).expect("conversion to Tokio socket to succeed")));
+            self.sockets.push((
+                host,
+                UdpSocket::from_std(socket).expect("conversion to Tokio socket to succeed"),
+            ));
         }
 
         Ok(())
@@ -771,10 +775,7 @@ impl ServersRunner {
             .map(Either::Left)
             .unwrap_or(Either::Right(futures::future::pending()))
             .map(|()| Ok(Ready::Timeout));
-        select(sockets_ready, timeout_ready)
-            .await
-            .factor_first()
-            .0
+        select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
     async fn run(&mut self) -> Result<(), io::Error> {
