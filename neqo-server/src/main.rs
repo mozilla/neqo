@@ -25,7 +25,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::future::{select, select_all, Either};
+use futures::{
+    future::{select, select_all, Either},
+    FutureExt,
+};
 use tokio::{net::UdpSocket, time::Sleep};
 
 use neqo_transport::ConnectionIdGenerator;
@@ -758,30 +761,33 @@ impl ServersRunner {
         }
     }
 
+    // Wait for any of the sockets to be readable or the timeout to fire.
+    async fn ready(&mut self) -> Result<Ready, io::Error> {
+        let sockets_ready = select_all(
+            self.sockets
+                .iter()
+                .map(|(_host, socket)| Box::pin(socket.readable())),
+        )
+        .map(|(res, inx, _)| match res {
+            Ok(()) => Ok(Ready::Socket(inx)),
+            Err(e) => Err(e),
+        });
+        let timeout_ready = self
+            .timeout
+            .as_mut()
+            .map(Either::Left)
+            .unwrap_or(Either::Right(futures::future::pending()))
+            .map(|()| Ok(Ready::Timeout));
+        select(sockets_ready, timeout_ready)
+            .await
+            .factor_first()
+            .0
+    }
+
     pub async fn run(&mut self) -> Result<(), io::Error> {
         loop {
-            let sockets_ready = select_all(
-                self.sockets
-                    .iter()
-                    .map(|(_host, socket)| Box::pin(socket.readable())),
-            );
-            let timeout_ready = self
-                .timeout
-                .as_mut()
-                .map(Either::Left)
-                .unwrap_or(Either::Right(futures::future::pending()));
-
-            let socket_or_timeout_ready = match select(sockets_ready, timeout_ready).await {
-                Either::Left(((res, inx, _), _)) => {
-                    res?;
-                    Either::Left(inx)
-                }
-                Either::Right(((), _)) => Either::Right(()),
-            };
-
-            match socket_or_timeout_ready {
-                // A socket is ready.
-                Either::Left(inx) => loop {
+            match self.ready().await? {
+                Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
                     let dgram = read_dgram(socket, host)?;
                     if dgram.is_none() {
@@ -789,8 +795,7 @@ impl ServersRunner {
                     }
                     self.process(dgram.as_ref()).await;
                 },
-                // The timeout fired.
-                Either::Right(()) => {
+                Ready::Timeout => {
                     self.process(None).await;
                 }
             }
@@ -799,6 +804,11 @@ impl ServersRunner {
             self.process(None).await;
         }
     }
+}
+
+enum Ready {
+    Socket(usize),
+    Timeout,
 }
 
 #[tokio::main]
