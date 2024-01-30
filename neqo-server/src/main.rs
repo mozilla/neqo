@@ -777,7 +777,7 @@ impl ServersRunner {
             .0
     }
 
-    pub async fn run(&mut self) -> Result<(), io::Error> {
+    async fn run(&mut self) -> Result<(), io::Error> {
         loop {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
