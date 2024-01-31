@@ -28,7 +28,7 @@ use crate::{
     sender::PacketSender,
     stats::FrameStats,
     tracking::{PacketNumberSpace, SentPacket},
-    Error, Res,
+    Error, Res, Stats,
 };
 
 use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
@@ -946,7 +946,7 @@ impl Path {
     }
 
     /// Discard a packet that previously might have been in-flight.
-    pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant) {
+    pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant, stats: &mut Stats) {
         if self.rtt.first_sample_time().is_none() {
             // When discarding a packet there might not be a good RTT estimate.
             // But discards only occur after receiving something, so that means
@@ -958,6 +958,7 @@ impl Path {
                 "discarding a packet without an RTT estimate; guessing RTT={:?}",
                 now - sent.time_sent
             );
+            stats.rtt_init_guess = true;
             self.rtt.update(
                 &mut self.qlog,
                 now - sent.time_sent,

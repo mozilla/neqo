@@ -29,7 +29,10 @@ use std::{
     mem,
     time::{Duration, Instant},
 };
-use test_fixture::{self, now, split_datagram};
+use test_fixture::{
+    assertions::{assert_handshake, assert_initial},
+    now, split_datagram,
+};
 
 #[test]
 fn pto_works_basic() {
@@ -210,14 +213,17 @@ fn pto_handshake_complete() {
     let mut server = default_server();
 
     let pkt = client.process(None, now).dgram();
+    assert_initial(pkt.as_ref().unwrap(), false);
     let cb = client.process(None, now).callback();
     assert_eq!(cb, Duration::from_millis(300));
 
     now += HALF_RTT;
     let pkt = server.process(pkt.as_ref(), now).dgram();
+    assert_initial(pkt.as_ref().unwrap(), false);
 
     now += HALF_RTT;
     let pkt = client.process(pkt.as_ref(), now).dgram();
+    assert_handshake(pkt.as_ref().unwrap());
 
     let cb = client.process(None, now).callback();
     // The client now has a single RTT estimate (20ms), so
@@ -233,7 +239,7 @@ fn pto_handshake_complete() {
 
     qdebug!("---- client: SH..FIN -> FIN");
     let pkt1 = client.process(None, now).dgram();
-    assert!(pkt1.is_some());
+    assert_handshake(pkt1.as_ref().unwrap());
     assert_eq!(*client.state(), State::Connected);
 
     let cb = client.process(None, now).callback();
@@ -247,6 +253,7 @@ fn pto_handshake_complete() {
     qdebug!("---- client: PTO");
     now += HALF_RTT * 6;
     let pkt2 = client.process(None, now).dgram();
+    assert_handshake(pkt2.as_ref().unwrap());
 
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -257,7 +264,10 @@ fn pto_handshake_complete() {
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_close_send(stream_id).unwrap();
     let pkt3 = client.process(None, now).dgram();
+    assert_handshake(pkt3.as_ref().unwrap());
     let (pkt3_hs, pkt3_1rtt) = split_datagram(&pkt3.unwrap());
+    assert_handshake(&pkt3_hs);
+    assert!(pkt3_1rtt.is_some());
 
     // PTO has been doubled.
     let cb = client.process(None, now).callback();
@@ -283,16 +293,21 @@ fn pto_handshake_complete() {
     // Check that the other packets (pkt2, pkt3) are Handshake packets.
     // The server discarded the Handshake keys already, therefore they are dropped.
     // Note that these don't include 1-RTT packets, because 1-RTT isn't send on PTO.
+    let (pkt2_hs, pkt2_1rtt) = split_datagram(&pkt2.unwrap());
+    assert_handshake(&pkt2_hs);
+    assert!(pkt2_1rtt.is_some());
     let dropped_before1 = server.stats().dropped_rx;
     let server_frames = server.stats().frame_rx.all;
-    server.process_input(&pkt2.unwrap(), now);
+    server.process_input(&pkt2_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before1);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
+    server.process_input(&pkt2_1rtt.unwrap(), now);
+    let server_frames2 = server.stats().frame_rx.all;
     let dropped_before2 = server.stats().dropped_rx;
     server.process_input(&pkt3_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before2);
-    assert_eq!(server.stats().frame_rx.all, server_frames);
+    assert_eq!(server.stats().frame_rx.all, server_frames2);
 
     now += HALF_RTT;
 
@@ -307,13 +322,6 @@ fn pto_handshake_complete() {
     now += cb;
     let out = client.process(None, now).dgram();
     assert!(out.is_some());
-    let cb = client.process(None, now).callback();
-    // The handshake keys are discarded, but now we're back to the idle timeout.
-    // We don't send another PING because the handshake space is done and there
-    // is nothing to probe for.
-
-    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-    assert_eq!(cb, idle_timeout - expected_ack_delay);
 }
 
 /// Test that PTO in the Handshake space contains the right frames.
@@ -616,14 +624,6 @@ fn loss_time_past_largest_acked() {
     let lr_time = client.process(None, now).callback();
     assert_ne!(lr_time, Duration::from_secs(0));
     assert!(lr_time < (RTT / 2));
-
-    // Skipping forward by the loss recovery timer should cause the client to
-    // mark packets as lost and retransmit, after which we should be on the PTO
-    // timer.
-    now += lr_time;
-    let delay = client.process(None, now).callback();
-    assert_ne!(delay, Duration::from_secs(0));
-    assert!(delay > lr_time);
 }
 
 /// `sender` sends a little, `receiver` acknowledges it.

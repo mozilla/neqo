@@ -28,6 +28,8 @@ pub use self::tos::{IpTos, IpTosDscp, IpTosEcn};
 
 use std::fmt::Write;
 
+use enum_map::Enum;
+
 #[must_use]
 pub fn hex(buf: impl AsRef<[u8]>) -> String {
     let mut ret = String::with_capacity(buf.as_ref().len() * 2);
@@ -77,7 +79,7 @@ pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a >= b) as usize]
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Enum)]
 /// Client or Server.
 pub enum Role {
     Client,
