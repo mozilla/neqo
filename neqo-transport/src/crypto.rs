@@ -22,6 +22,7 @@ use neqo_crypto::{
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
     TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
+    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
     TLS_VERSION_1_3,
 };
 
@@ -78,6 +79,13 @@ impl Crypto {
             TLS_AES_256_GCM_SHA384,
             TLS_CHACHA20_POLY1305_SHA256,
         ])?;
+        agent.set_groups(&[
+            TLS_GRP_EC_X25519,
+            TLS_GRP_EC_SECP256R1,
+            TLS_GRP_EC_SECP384R1,
+            TLS_GRP_EC_SECP521R1,
+        ])?;
+        agent.send_additional_key_shares(1)?;
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
         // Always enable 0-RTT on the client, but the server needs

@@ -461,6 +461,16 @@ impl SecretAgent {
         })
     }
 
+    /// Set the number of additional key shares that will be sent in the client hello
+    ///
+    /// # Errors
+    /// If the underlying API fails (which shouldn't happen).
+    pub fn send_additional_key_shares(&mut self, count: usize) -> Res<()> {
+        secstatus_to_res(unsafe {
+            ssl::SSL_SendAdditionalKeyShares(self.fd, c_uint::try_from(count)?)
+        })
+    }
+
     /// Set TLS options.
     ///
     /// # Errors
