@@ -65,7 +65,7 @@ setup_network_conditions() {
 
     for command in "${set_condition_commands[@]}"; do
         echo "$command"
-        bash -c "$command"
+        eval "$command"
     done
 }
 
@@ -82,7 +82,7 @@ stop_network_conditions() {
     fi
 
     for command in "${stop_condition_commands[@]}"; do
-        bash -c "$command"
+        eval "$command"
     done
 }
 
