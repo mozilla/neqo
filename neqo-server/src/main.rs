@@ -639,56 +639,29 @@ struct ServersRunner {
 
 impl ServersRunner {
     pub fn new(args: Args) -> Result<Self, io::Error> {
-        let server = Self::create_server(&args);
-        let mut runner = Self {
-            args,
-            server,
-            timeout: None,
-            sockets: Vec::new(),
-        };
-        runner.init()?;
-        Ok(runner)
-    }
-
-    /// Init Poll for all hosts. Create sockets, and a map of the
-    /// socketaddrs to instances of the HttpServer handling that addr.
-    fn init(&mut self) -> Result<(), io::Error> {
-        let hosts = self.args.listen_addresses();
+        let hosts = args.listen_addresses();
         if hosts.is_empty() {
             eprintln!("No valid hosts defined");
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
         }
+        let sockets = hosts
+            .into_iter()
+            .map(|host| {
+                let socket = std::net::UdpSocket::bind(host)?;
+                let local_addr = socket.local_addr()?;
+                println!("Server waiting for connection on: {local_addr:?}");
+                socket.set_nonblocking(true)?;
+                Ok((host, UdpSocket::from_std(socket)?))
+            })
+            .collect::<Result<_, io::Error>>()?;
+        let server = Self::create_server(&args);
 
-        for host in hosts.into_iter() {
-            let socket = match std::net::UdpSocket::bind(host) {
-                Err(err) => {
-                    eprintln!("Unable to bind UDP socket: {err}");
-                    return Err(err);
-                }
-                Ok(s) => s,
-            };
-
-            let local_addr = match socket.local_addr() {
-                Err(err) => {
-                    eprintln!("Socket local address not bound: {err}");
-                    return Err(err);
-                }
-                Ok(s) => s,
-            };
-
-            print!("Server waiting for connection on: {local_addr:?}");
-
-            socket
-                .set_nonblocking(true)
-                .expect("set_nonblocking to succeed");
-
-            self.sockets.push((
-                host,
-                UdpSocket::from_std(socket).expect("conversion to Tokio socket to succeed"),
-            ));
-        }
-
-        Ok(())
+        Ok(Self {
+            args,
+            server,
+            timeout: None,
+            sockets,
+        })
     }
 
     fn create_server(args: &Args) -> Box<dyn HttpServer> {
