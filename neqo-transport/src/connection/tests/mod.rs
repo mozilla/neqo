@@ -166,9 +166,9 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 }
 
 /// This inserts a PING frame into packets.
-pub struct Ping {}
+struct PingWriter {}
 
-impl crate::connection::test_internal::FrameWriter for Ping {
+impl crate::connection::test_internal::FrameWriter for PingWriter {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
         builder.encode_varint(FRAME_TYPE_PING);
     }
@@ -209,7 +209,7 @@ fn handshake(
             && (a.role() == Role::Client && a.tls_info().is_some()
                 || (a.role() == Role::Server && b.state() == &State::Connected));
         if should_ping {
-            a.test_frame_writer = Some(Box::new(Ping {}));
+            a.test_frame_writer = Some(Box::new(PingWriter {}));
         }
         let output = a.process(input.as_ref(), now).dgram();
         if should_ping {
@@ -299,8 +299,8 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
     );
     // Client started its idle period half an RTT before now.
     assert_eq!(
-        client.process_output(now.checked_sub(rtt / 2).unwrap()),
-        Output::Callback(idle_timeout)
+        client.process_output(now),
+        Output::Callback(idle_timeout - rtt/2)
     );
     assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
