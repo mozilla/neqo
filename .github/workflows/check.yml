@@ -87,10 +87,11 @@ jobs:
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
       # (neqo-crypto/build.rs would also need to query pkg-config to get the
       # right build flags rather than building NSS.)
+      # Clone from the main hg repo, because the GitHub mirror can be out of date.
       - name: Fetch NSS and NSPR
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-          git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
           echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
           echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
         env:
