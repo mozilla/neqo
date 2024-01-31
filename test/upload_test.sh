@@ -22,10 +22,6 @@ plrs=("0.0001" "0.0005" "0.001" "0.002" "0.005")
 
 runs=1
 
-echo -n "Enter root password: "
-read -r root_password
-echo
-
 setup_network_conditions() {
     bw="$1"
     delay_ms="$2"
@@ -69,7 +65,7 @@ setup_network_conditions() {
 
     for command in "${set_condition_commands[@]}"; do
         echo "$command"
-        echo "$root_password" | sudo -S bash -c "$command"
+        bash -c "$command"
     done
 }
 
@@ -81,12 +77,12 @@ stop_network_conditions() {
         )
     else
         stop_condition_commands=(
-            "tc qdisc del dev lo root"
+            "sudo tc qdisc del dev lo root"
         )
     fi
 
     for command in "${stop_condition_commands[@]}"; do
-        echo "$root_password" | sudo -S bash -c "$command"
+        bash -c "$command"
     done
 }
 
