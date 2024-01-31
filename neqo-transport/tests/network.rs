@@ -67,7 +67,7 @@ simulate!(
                 )))
             ]
         ),
-        Delay::new(weeks(150)..weeks(150)),
+        Delay::new(weeks(15)..weeks(15)),
         Drop::percentage(10),
         ConnectionNode::new_server(
             ConnectionParameters::default().idle_timeout(weeks(1000)),
@@ -78,7 +78,7 @@ simulate!(
                 )))
             ]
         ),
-        Delay::new(weeks(100)..weeks(100)),
+        Delay::new(weeks(10)..weeks(10)),
         Drop::percentage(10),
     ],
 );
