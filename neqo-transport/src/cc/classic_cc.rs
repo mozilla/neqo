@@ -19,6 +19,7 @@ use crate::{
     cc::MAX_DATAGRAM_SIZE,
     packet::PacketNumber,
     qlog::{self, QlogMetric},
+    rtt::RttEstimate,
     sender::PACING_BURST_SIZE,
     tracking::SentPacket,
 };
@@ -161,17 +162,18 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     }
 
     // Multi-packet version of OnPacketAckedCC
-    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], min_rtt: Duration, now: Instant) {
+    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], rtt_est: &RttEstimate, now: Instant) {
         let mut is_app_limited = true;
         let mut new_acked = 0;
         for pkt in acked_pkts {
             qinfo!(
-                "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}",
+                "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}, rtt_est={:?}",
                 self,
                 pkt.pn,
                 pkt.size,
                 i32::from(!pkt.cc_outstanding()),
-                i32::from(pkt.lost())
+                i32::from(pkt.lost()),
+                rtt_est,
             );
             if !pkt.cc_outstanding() {
                 continue;
@@ -222,7 +224,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             let bytes_for_increase = self.cc_algorithm.bytes_for_cwnd_increase(
                 self.congestion_window,
                 new_acked,
-                min_rtt,
+                rtt_est.minimum(),
                 now,
             );
             debug_assert!(bytes_for_increase > 0);
@@ -546,6 +548,7 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
         },
         packet::{PacketNumber, PacketType},
+        rtt::RttEstimate,
         tracking::SentPacket,
     };
     use neqo_common::qinfo;
@@ -557,6 +560,7 @@ mod tests {
 
     const PTO: Duration = Duration::from_millis(100);
     const RTT: Duration = Duration::from_millis(98);
+    const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(Duration::from_millis(98));
     const ZERO: Duration = Duration::from_secs(0);
     const EPSILON: Duration = Duration::from_nanos(1);
     const GAP: Duration = Duration::from_secs(1);
@@ -1025,7 +1029,7 @@ mod tests {
             }
             assert_eq!(cc.bytes_in_flight(), packet_burst_size * MAX_DATAGRAM_SIZE);
             now += RTT;
-            cc.on_packets_acked(&pkts, RTT, now);
+            cc.on_packets_acked(&pkts, &RTT_ESTIMATE, now);
             assert_eq!(cc.bytes_in_flight(), 0);
             assert_eq!(cc.acked_bytes, 0);
             assert_eq!(cwnd, cc.congestion_window); // CWND doesn't grow because we're app limited
@@ -1054,7 +1058,7 @@ mod tests {
         now += RTT;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
-            cc.on_packets_acked(&[pkt], RTT, now);
+            cc.on_packets_acked(&[pkt], &RTT_ESTIMATE, now);
 
             assert_eq!(
                 cc.bytes_in_flight(),
@@ -1101,7 +1105,7 @@ mod tests {
         );
         cc.on_packet_sent(&p_not_lost);
         now += RTT;
-        cc.on_packets_acked(&[p_not_lost], RTT, now);
+        cc.on_packets_acked(&[p_not_lost], &RTT_ESTIMATE, now);
         cwnd_is_halved(&cc);
         // cc is app limited therefore cwnd in not increased.
         assert_eq!(cc.acked_bytes, 0);
@@ -1129,7 +1133,7 @@ mod tests {
             assert_eq!(cc.bytes_in_flight(), packet_burst_size * MAX_DATAGRAM_SIZE);
             now += RTT;
             for (i, pkt) in pkts.into_iter().enumerate() {
-                cc.on_packets_acked(&[pkt], RTT, now);
+                cc.on_packets_acked(&[pkt], &RTT_ESTIMATE, now);
 
                 assert_eq!(
                     cc.bytes_in_flight(),
@@ -1164,7 +1168,7 @@ mod tests {
         let mut last_acked_bytes = 0;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
-            cc.on_packets_acked(&[pkt], RTT, now);
+            cc.on_packets_acked(&[pkt], &RTT_ESTIMATE, now);
 
             assert_eq!(
                 cc.bytes_in_flight(),

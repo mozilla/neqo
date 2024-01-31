@@ -12,6 +12,7 @@ use crate::cc::{
     ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno,
 };
 use crate::pace::Pacer;
+use crate::rtt::RttEstimate;
 use crate::tracking::SentPacket;
 use neqo_common::qlog::NeqoQlog;
 
@@ -68,8 +69,13 @@ impl PacketSender {
         self.cc.cwnd_avail()
     }
 
-    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], min_rtt: Duration, now: Instant) {
-        self.cc.on_packets_acked(acked_pkts, min_rtt, now);
+    pub fn on_packets_acked(
+        &mut self,
+        acked_pkts: &[SentPacket],
+        rtt_est: &RttEstimate,
+        now: Instant,
+    ) {
+        self.cc.on_packets_acked(acked_pkts, rtt_est, now);
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.

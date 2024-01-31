@@ -17,6 +17,7 @@ use crate::{
         CongestionControl, MAX_DATAGRAM_SIZE, MAX_DATAGRAM_SIZE_F64,
     },
     packet::PacketType,
+    rtt::RttEstimate,
     tracking::SentPacket,
 };
 use std::{
@@ -27,6 +28,7 @@ use std::{
 use test_fixture::now;
 
 const RTT: Duration = Duration::from_millis(100);
+const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(Duration::from_millis(100));
 const CWND_INITIAL_F64: f64 = 10.0 * MAX_DATAGRAM_SIZE_F64;
 const CWND_INITIAL_10_F64: f64 = 10.0 * CWND_INITIAL_F64;
 const CWND_INITIAL_10: usize = 10 * CWND_INITIAL;
@@ -59,7 +61,7 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
         Vec::new(),        // tokens
         MAX_DATAGRAM_SIZE, // size
     );
-    cc.on_packets_acked(&[acked], RTT, now);
+    cc.on_packets_acked(&[acked], &RTT_ESTIMATE, now);
 }
 
 fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {

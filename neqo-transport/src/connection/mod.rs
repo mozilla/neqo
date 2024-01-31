@@ -2260,6 +2260,7 @@ impl Connection {
         }
 
         if encoder.is_empty() {
+            qinfo!("TX blocked, profile={:?} ", profile);
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
