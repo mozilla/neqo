@@ -198,16 +198,15 @@ fn handshake(
         _ = maybe_authenticate(a);
         let had_input = input.is_some();
         // Insert a PING frame into the first application data packet an endpoint sends,
-        // in order to force the peer to ACK it. For the client, this is depending on
-        // tls_info() only returning something when the TLS handshake is complete.
-        // For the server, this is depending on the client's connection state, which is
-        // accessible during the tests.
+        // in order to force the peer to ACK it. For the server, this is depending on the
+        // client's connection state, which is accessible during the tests.
         //
         // We're doing this to prevent packet loss from delaying ACKs, which would cause
-        // cwnd to shrink, which is not something the tests are written to account for.
+        // cwnd to shrink, and also to prevent the delayed ACK timer from being armed after
+        // the handshake, which is not something the tests are written to account for.
         let should_ping = !did_ping[a.role()]
-            && (a.role() == Role::Client && a.tls_info().is_some()
-                || (a.role() == Role::Server && b.state() == &State::Connected));
+            && (a.role() == Role::Client && *a.state() == State::Connected
+                || (a.role() == Role::Server && *b.state() == State::Connected));
         if should_ping {
             a.test_frame_writer = Some(Box::new(PingWriter {}));
         }
@@ -300,7 +299,7 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
     // Client started its idle period half an RTT before now.
     assert_eq!(
         client.process_output(now),
-        Output::Callback(idle_timeout - rtt/2)
+        Output::Callback(idle_timeout - rtt / 2)
     );
     assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
