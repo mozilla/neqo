@@ -204,7 +204,7 @@ impl RxStreamOrderer {
         if self
             .data_ranges
             .last_entry()
-            .map_or(false, |e| *e.key() > new_start)
+            .map_or(false, |e| *e.key() >= new_start)
         {
             // Is this at the end (common case)?  If so, nothing to do in this block
             // Common case:
