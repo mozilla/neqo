@@ -31,9 +31,6 @@ use futures::{
 };
 use tokio::{net::UdpSocket, time::Sleep};
 
-use neqo_transport::ConnectionIdGenerator;
-use structopt::StructOpt;
-
 use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
