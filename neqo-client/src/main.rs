@@ -7,10 +7,12 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use common::IpTos;
+use common::{qdebug, qinfo, IpTos};
+use futures::{
+    future::{select, Either},
+    FutureExt, TryFutureExt,
+};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
-
-use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
 
 use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
@@ -32,9 +34,10 @@ use std::{
     convert::TryFrom,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
-    io::{self, ErrorKind, Write},
+    io::{self, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
+    pin::Pin,
     process::exit,
     rc::Rc,
     str::FromStr,
@@ -42,6 +45,7 @@ use std::{
 };
 
 use structopt::StructOpt;
+use tokio::{net::UdpSocket, time::Sleep};
 use url::{Origin, Url};
 
 #[derive(Debug)]
@@ -346,10 +350,17 @@ impl QuicParameters {
     }
 }
 
-fn emit_datagram(socket: &mio::net::UdpSocket, d: Datagram) -> io::Result<()> {
-    let sent = socket.send_to(&d[..], &d.destination())?;
-    if sent != d.len() {
-        eprintln!("Unable to send all {} bytes of datagram", d.len());
+async fn emit_datagram(socket: &UdpSocket, out_dgram: Datagram) -> Result<(), io::Error> {
+    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()).await {
+        Ok(res) => res,
+        Err(ref err) if err.kind() != io::ErrorKind::WouldBlock => {
+            eprintln!("UDP send error: {err:?}");
+            0
+        }
+        Err(e) => return Err(e),
+    };
+    if sent != out_dgram.len() {
+        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
     }
     Ok(())
 }
@@ -396,86 +407,59 @@ fn get_output_file(
     }
 }
 
-fn process_loop(
-    local_addr: &SocketAddr,
+enum Ready {
+    Socket,
+    Timeout,
+}
+
+// Wait for the socket to be readable or the timeout to fire.
+async fn ready(
     socket: &UdpSocket,
-    poll: &Poll,
-    client: &mut Http3Client,
-    handler: &mut Handler,
-) -> Res<neqo_http3::Http3State> {
+    mut timeout: Option<&mut Pin<Box<Sleep>>>,
+) -> Result<Ready, io::Error> {
+    let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
+    let timeout_ready = timeout
+        .as_mut()
+        .map(Either::Left)
+        .unwrap_or(Either::Right(futures::future::pending()))
+        .map(|()| Ok(Ready::Timeout));
+    select(socket_ready, timeout_ready).await.factor_first().0
+}
+
+fn read_dgram(
+    socket: &UdpSocket,
+    local_address: &SocketAddr,
+) -> Result<Option<Datagram>, io::Error> {
     let buf = &mut [0u8; 2048];
-    let mut events = Events::with_capacity(1024);
-    let mut timeout = Duration::new(0, 0);
-    loop {
-        poll.poll(&mut events, Some(timeout))?;
-
-        let mut datagrams: Vec<Datagram> = Vec::new();
-        'read: loop {
-            match socket.recv_from(&mut buf[..]) {
-                Err(ref err)
-                    if err.kind() == ErrorKind::WouldBlock
-                        || err.kind() == ErrorKind::Interrupted =>
-                {
-                    break 'read
-                }
-                Err(ref err) => {
-                    eprintln!("UDP error: {err}");
-                    exit(1);
-                }
-                Ok((sz, remote)) => {
-                    if sz == buf.len() {
-                        eprintln!("Received more than {} bytes", buf.len());
-                        break 'read;
-                    }
-                    if sz > 0 {
-                        let d =
-                            Datagram::new(remote, *local_addr, IpTos::default(), None, &buf[..sz]);
-                        datagrams.push(d);
-                    }
-                }
-            };
+    let (sz, remote_addr) = match socket.try_recv_from(&mut buf[..]) {
+        Err(ref err)
+            if err.kind() == io::ErrorKind::WouldBlock
+                || err.kind() == io::ErrorKind::Interrupted =>
+        {
+            return Ok(None)
         }
-        if !datagrams.is_empty() {
-            client.process_multiple_input(&datagrams, Instant::now());
-            handler.maybe_key_update(client)?;
+        Err(err) => {
+            eprintln!("UDP recv error: {err:?}");
+            return Err(err);
         }
+        Ok(res) => res,
+    };
 
-        if let Http3State::Closed(..) = client.state() {
-            return Ok(client.state());
-        }
+    if sz == buf.len() {
+        eprintln!("Might have received more than {} bytes", buf.len());
+    }
 
-        let mut exiting = !handler.handle(client)?;
-
-        'write: loop {
-            match client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => {
-                    if let Err(err) = emit_datagram(socket, dgram) {
-                        if err.kind() == ErrorKind::WouldBlock
-                            || err.kind() == ErrorKind::Interrupted
-                        {
-                            break 'write;
-                        }
-                        eprintln!("UDP write error: {err}");
-                        client.close(Instant::now(), 0, err.to_string());
-                        exiting = true;
-                        break 'write;
-                    }
-                }
-                Output::Callback(new_timeout) => {
-                    timeout = new_timeout;
-                    break 'write;
-                }
-                Output::None => {
-                    // Not strictly necessary, since we're about to exit
-                    exiting = true;
-                    break 'write;
-                }
-            }
-        }
-
-        if exiting {
-            return Ok(client.state());
-        }
+    if sz == 0 {
+        eprintln!("zero length datagram received?");
+        Ok(None)
+    } else {
+        Ok(Some(Datagram::new(
+            remote_addr,
+            *local_address,
+            IpTos::default(),
+            None,
+            &buf[..sz],
+        )))
     }
 }
 
@@ -824,39 +808,122 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_test(
-    testcase: &String,
-    args: &mut Args,
-    socket: &UdpSocket,
-    poll: &Poll,
+struct ClientRunner<'a> {
     local_addr: SocketAddr,
-    remote_addr: SocketAddr,
-    hostname: &str,
-    url_queue: VecDeque<Url>,
-    resumption_token: Option<ResumptionToken>,
-) -> Res<Option<ResumptionToken>> {
-    let key_update = KeyUpdateState(args.key_update);
-    if testcase.as_str() == "upload" {
-        let mut client =
-            create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
-                .expect("failed to create client");
-        args.method = String::from("POST");
+    socket: &'a UdpSocket,
+    client: Http3Client,
+    handler: Handler<'a>,
+    timeout: Option<Pin<Box<Sleep>>>,
+    args: &'a Args,
+}
+
+impl<'a> ClientRunner<'a> {
+    async fn new(
+        args: &'a mut Args,
+        socket: &'a UdpSocket,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
+        hostname: &str,
+        url_queue: VecDeque<Url>,
+        resumption_token: Option<ResumptionToken>,
+    ) -> Res<ClientRunner<'a>> {
+        if let Some(testcase) = &args.test {
+            if testcase.as_str() != "upload" {
+                eprintln!("Unsupported test case: {testcase}");
+                exit(127)
+            }
+        }
+
+        let client = create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
+            .expect("failed to create client");
+        if args.test.is_some() {
+            args.method = String::from("POST");
+        }
+        let key_update = KeyUpdateState(args.key_update);
         let url_handler = URLHandler {
             url_queue,
             stream_handlers: HashMap::new(),
             all_paths: Vec::new(),
-            handler_type: StreamHandlerType::Upload,
+            handler_type: if args.test.is_some() {
+                StreamHandlerType::Upload
+            } else {
+                StreamHandlerType::Download
+            },
             args,
         };
-        let mut h = Handler::new(url_handler, key_update, args.output_read_data);
-        process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
-    } else {
-        eprintln!("Unsupported test case: {testcase}");
-        exit(127)
+        let handler = Handler::new(url_handler, key_update, args.output_read_data);
+
+        Ok(Self {
+            local_addr,
+            socket,
+            client,
+            handler,
+            timeout: None,
+            args,
+        })
     }
 
-    Ok(None)
+    async fn run(mut self) -> Res<Option<ResumptionToken>> {
+        loop {
+            if !self.handler.handle(&mut self.client)? {
+                break;
+            }
+
+            self.process(None).await?;
+
+            match ready(self.socket, self.timeout.as_mut()).await? {
+                Ready::Socket => loop {
+                    let dgram = read_dgram(self.socket, &self.local_addr)?;
+                    if dgram.is_none() {
+                        break;
+                    }
+                    self.process(dgram.as_ref()).await?;
+                    self.handler.maybe_key_update(&mut self.client)?;
+                },
+                Ready::Timeout => {
+                    self.timeout = None;
+                }
+            }
+
+            if let Http3State::Closed(..) = self.client.state() {
+                break;
+            }
+        }
+
+        let token = if self.args.test.is_none() && self.args.resume {
+            // If we haven't received an event, take a token if there is one.
+            // Lots of servers don't provide NEW_TOKEN, but a session ticket
+            // without NEW_TOKEN is better than nothing.
+            self.handler
+                .token
+                .take()
+                .or_else(|| self.client.take_resumption_token(Instant::now()))
+        } else {
+            None
+        };
+        Ok(token)
+    }
+
+    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+        loop {
+            match self.client.process(dgram.take(), Instant::now()) {
+                Output::Datagram(dgram) => {
+                    emit_datagram(self.socket, dgram).await?;
+                }
+                Output::Callback(new_timeout) => {
+                    qinfo!("Setting timeout of {:?}", new_timeout);
+                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    break;
+                }
+                Output::None => {
+                    qdebug!("Output::None");
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn create_http3_client(
@@ -902,58 +969,6 @@ fn create_http3_client(
     Ok(client)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn client(
-    args: &mut Args,
-    socket: &UdpSocket,
-    poll: &Poll,
-    local_addr: SocketAddr,
-    remote_addr: SocketAddr,
-    hostname: &str,
-    url_queue: VecDeque<Url>,
-    resumption_token: Option<ResumptionToken>,
-) -> Res<Option<ResumptionToken>> {
-    let testcase = args.test.clone();
-    if let Some(testcase) = testcase {
-        return handle_test(
-            &testcase,
-            args,
-            socket,
-            poll,
-            local_addr,
-            remote_addr,
-            hostname,
-            url_queue,
-            resumption_token,
-        );
-    }
-
-    let mut client = create_http3_client(args, local_addr, remote_addr, hostname, resumption_token)
-        .expect("failed to create client");
-    let key_update = KeyUpdateState(args.key_update);
-    let url_handler = URLHandler {
-        url_queue,
-        stream_handlers: HashMap::new(),
-        all_paths: Vec::new(),
-        handler_type: StreamHandlerType::Download,
-        args,
-    };
-    let mut h = Handler::new(url_handler, key_update, args.output_read_data);
-
-    process_loop(&local_addr, socket, poll, &mut client, &mut h)?;
-
-    let token = if args.resume {
-        // If we haven't received an event, take a token if there is one.
-        // Lots of servers don't provide NEW_TOKEN, but a session ticket
-        // without NEW_TOKEN is better than nothing.
-        h.token
-            .or_else(|| client.take_resumption_token(Instant::now()))
-    } else {
-        None
-    };
-    Ok(token)
-}
-
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
         let mut qlog_path = qlog_dir.to_path_buf();
@@ -983,7 +998,8 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     }
 }
 
-fn main() -> Res<()> {
+#[tokio::main]
+async fn main() -> Res<()> {
     init();
 
     let mut args = Args::from_args();
@@ -1062,21 +1078,15 @@ fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match UdpSocket::bind(&local_addr) {
+        let socket = match std::net::UdpSocket::bind(&local_addr) {
             Err(e) => {
                 eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
             }
             Ok(s) => s,
         };
-
-        let poll = Poll::new()?;
-        poll.register(
-            &socket,
-            Token(0),
-            Ready::readable() | Ready::writable(),
-            PollOpt::edge(),
-        )?;
+        socket.set_nonblocking(true)?;
+        let socket = UdpSocket::from_std(socket)?;
 
         let real_local = socket.local_addr().unwrap();
         println!(
@@ -1099,27 +1109,31 @@ fn main() -> Res<()> {
             first = false;
 
             token = if args.use_old_http {
-                old::old_client(
+                old::ClientRunner::new(
                     &args,
                     &socket,
-                    &poll,
                     real_local,
                     remote_addr,
                     &hostname,
                     to_request,
                     token,
-                )?
+                )
+                .await?
+                .run()
+                .await?
             } else {
-                client(
+                ClientRunner::new(
                     &mut args,
                     &socket,
-                    &poll,
                     real_local,
                     remote_addr,
                     &hostname,
                     to_request,
                     token,
-                )?
+                )
+                .await?
+                .run()
+                .await?
             };
         }
     }
@@ -1132,26 +1146,27 @@ mod old {
         cell::RefCell,
         collections::{HashMap, VecDeque},
         fs::File,
-        io::{ErrorKind, Write},
+        io::{self, Write},
         net::SocketAddr,
         path::PathBuf,
-        process::exit,
+        pin::Pin,
         rc::Rc,
-        time::{Duration, Instant},
+        time::Instant,
     };
 
+    use tokio::{net::UdpSocket, time::Sleep};
     use url::Url;
 
-    use super::{qlog_new, KeyUpdateState, Res};
-    use mio::{Events, Poll};
-    use neqo_common::{event::Provider, Datagram, IpTos};
+    use crate::emit_datagram;
+
+    use neqo_common::{event::Provider, qdebug, qinfo, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
         StreamType,
     };
 
-    use super::{emit_datagram, get_output_file, Args};
+    use super::{get_output_file, qlog_new, read_dgram, ready, Args, KeyUpdateState, Ready, Res};
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,
@@ -1335,143 +1350,133 @@ mod old {
         }
     }
 
-    fn process_loop_old(
-        local_addr: &SocketAddr,
-        socket: &mio::net::UdpSocket,
-        poll: &Poll,
-        client: &mut Connection,
-        handler: &mut HandlerOld,
-    ) -> Res<State> {
-        let buf = &mut [0u8; 2048];
-        let mut events = Events::with_capacity(1024);
-        let mut timeout = Duration::new(0, 0);
-        loop {
-            poll.poll(&mut events, Some(timeout))?;
+    pub struct ClientRunner<'a> {
+        local_addr: SocketAddr,
+        socket: &'a UdpSocket,
+        client: Connection,
+        handler: HandlerOld<'a>,
+        timeout: Option<Pin<Box<Sleep>>>,
+        args: &'a Args,
+    }
 
-            'read: loop {
-                match socket.recv_from(&mut buf[..]) {
-                    Err(ref err)
-                        if err.kind() == ErrorKind::WouldBlock
-                            || err.kind() == ErrorKind::Interrupted =>
-                    {
-                        break 'read
-                    }
-                    Err(ref err) => {
-                        eprintln!("UDP error: {err}");
-                        exit(1);
-                    }
-                    Ok((sz, remote)) => {
-                        if sz == buf.len() {
-                            eprintln!("Received more than {} bytes", buf.len());
-                            break 'read;
-                        }
-                        if sz > 0 {
-                            let d = Datagram::new(
-                                remote,
-                                *local_addr,
-                                IpTos::default(),
-                                None,
-                                &buf[..sz],
-                            );
-                            client.process_input(&d, Instant::now());
-                            handler.maybe_key_update(client)?;
-                        }
-                    }
-                };
+    impl<'a> ClientRunner<'a> {
+        pub async fn new(
+            args: &'a Args,
+            socket: &'a UdpSocket,
+            local_addr: SocketAddr,
+            remote_addr: SocketAddr,
+            origin: &str,
+            url_queue: VecDeque<Url>,
+            token: Option<ResumptionToken>,
+        ) -> Res<Self> {
+            let alpn = match args.alpn.as_str() {
+                "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.alpn.as_str(),
+                _ => "hq-interop",
+            };
+
+            let mut client = Connection::new_client(
+                origin,
+                &[alpn],
+                Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+                local_addr,
+                remote_addr,
+                args.quic_parameters.get(alpn),
+                Instant::now(),
+            )?;
+
+            if let Some(tok) = token {
+                client.enable_resumption(Instant::now(), tok)?;
             }
 
-            if let State::Closed(..) = client.state() {
-                return Ok(client.state().clone());
+            let ciphers = args.get_ciphers();
+            if !ciphers.is_empty() {
+                client.set_ciphers(&ciphers)?;
             }
 
-            let mut exiting = !handler.handle(client)?;
+            client.set_qlog(qlog_new(args, origin, client.odcid().unwrap())?);
 
-            'write: loop {
-                match client.process_output(Instant::now()) {
+            let key_update = KeyUpdateState(args.key_update);
+            let handler = HandlerOld {
+                streams: HashMap::new(),
+                url_queue,
+                all_paths: Vec::new(),
+                args,
+                token: None,
+                key_update,
+            };
+
+            Ok(Self {
+                local_addr,
+                socket,
+                client,
+                handler,
+                timeout: None,
+                args,
+            })
+        }
+
+        pub async fn run(mut self) -> Res<Option<ResumptionToken>> {
+            loop {
+                if !self.handler.handle(&mut self.client)? {
+                    break;
+                }
+
+                self.process(None).await?;
+
+                match ready(self.socket, self.timeout.as_mut()).await? {
+                    Ready::Socket => loop {
+                        let dgram = read_dgram(self.socket, &self.local_addr)?;
+                        if dgram.is_none() {
+                            break;
+                        }
+                        self.process(dgram.as_ref()).await?;
+                        self.handler.maybe_key_update(&mut self.client)?;
+                    },
+                    Ready::Timeout => {
+                        self.timeout = None;
+                    }
+                }
+
+                if let State::Closed(..) = self.client.state() {
+                    break;
+                }
+
+            }
+
+            let token = if self.args.resume {
+                // If we haven't received an event, take a token if there is one.
+                // Lots of servers don't provide NEW_TOKEN, but a session ticket
+                // without NEW_TOKEN is better than nothing.
+                self.handler
+                    .token
+                    .take()
+                    .or_else(|| self.client.take_resumption_token(Instant::now()))
+            } else {
+                None
+            };
+
+            Ok(token)
+        }
+
+        async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+            loop {
+                match self.client.process(dgram.take(), Instant::now()) {
                     Output::Datagram(dgram) => {
-                        if let Err(e) = emit_datagram(socket, dgram) {
-                            eprintln!("UDP write error: {e}");
-                            client.close(Instant::now(), 0, e.to_string());
-                            exiting = true;
-                            break 'write;
-                        }
+                        emit_datagram(self.socket, dgram).await?;
                     }
                     Output::Callback(new_timeout) => {
-                        timeout = new_timeout;
-                        break 'write;
+                        qinfo!("Setting timeout of {:?}", new_timeout);
+                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                        break;
                     }
                     Output::None => {
-                        // Not strictly necessary, since we're about to exit
-                        exiting = true;
-                        break 'write;
+                        qdebug!("Output::None");
+                        break;
                     }
                 }
             }
 
-            if exiting {
-                return Ok(client.state().clone());
-            }
+            Ok(())
         }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn old_client(
-        args: &Args,
-        socket: &mio::net::UdpSocket,
-        poll: &Poll,
-        local_addr: SocketAddr,
-        remote_addr: SocketAddr,
-        origin: &str,
-        url_queue: VecDeque<Url>,
-        token: Option<ResumptionToken>,
-    ) -> Res<Option<ResumptionToken>> {
-        let alpn = match args.alpn.as_str() {
-            "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.alpn.as_str(),
-            _ => "hq-interop",
-        };
-
-        let mut client = Connection::new_client(
-            origin,
-            &[alpn],
-            Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-            local_addr,
-            remote_addr,
-            args.quic_parameters.get(alpn),
-            Instant::now(),
-        )?;
-
-        if let Some(tok) = token {
-            client.enable_resumption(Instant::now(), tok)?;
-        }
-
-        let ciphers = args.get_ciphers();
-        if !ciphers.is_empty() {
-            client.set_ciphers(&ciphers)?;
-        }
-
-        client.set_qlog(qlog_new(args, origin, client.odcid().unwrap())?);
-
-        let key_update = KeyUpdateState(args.key_update);
-        let mut h = HandlerOld {
-            streams: HashMap::new(),
-            url_queue,
-            all_paths: Vec::new(),
-            args,
-            token: None,
-            key_update,
-        };
-
-        process_loop_old(&local_addr, socket, poll, &mut client, &mut h)?;
-
-        let token = if args.resume {
-            // If we haven't received an event, take a token if there is one.
-            // Lots of servers don't provide NEW_TOKEN, but a session ticket
-            // without NEW_TOKEN is better than nothing.
-            h.token
-                .or_else(|| client.take_resumption_token(Instant::now()))
-        } else {
-            None
-        };
-        Ok(token)
     }
 }

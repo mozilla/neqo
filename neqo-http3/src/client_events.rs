@@ -268,6 +268,7 @@ impl Http3ClientEvents {
 
     /// Add a new `AuthenticationNeeded` event
     pub(crate) fn authentication_needed(&self) {
+        self.remove(|evt| matches!(evt, Http3ClientEvent::AuthenticationNeeded));
         self.insert(Http3ClientEvent::AuthenticationNeeded);
     }
 
