@@ -14,16 +14,16 @@ use crate::{huffman::decode_huffman, prefix::Prefix, Error, Res};
 pub trait ReadByte {
     /// # Errors
     ///
-    ///    Return error occurred while reading a byte.
-    ///    The exact error depends on trait implementation.
+    /// Return error occurred while reading a byte.
+    /// The exact error depends on trait implementation.
     fn read_byte(&mut self) -> Res<u8>;
 }
 
 pub trait Reader {
     /// # Errors
     ///
-    ///    Return error occurred while reading date into a buffer.
-    ///    The exact error depends on trait implementation.
+    /// Return error occurred while reading date into a buffer.
+    /// The exact error depends on trait implementation.
     fn read(&mut self, buf: &mut [u8]) -> Res<usize>;
 }
 

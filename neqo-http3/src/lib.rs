@@ -348,7 +348,7 @@ impl Error {
 
     /// # Errors
     ///
-    ///   Any error is mapped to the indicated type.
+    /// Any error is mapped to the indicated type.
     ///
     /// # Panics
     ///

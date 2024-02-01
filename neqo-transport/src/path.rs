@@ -498,7 +498,7 @@ enum ProbeState {
 }
 
 impl ProbeState {
-    ///  Determine whether the current state requires probing.
+    /// Determine whether the current state requires probing.
     fn probe_needed(&self) -> bool {
         matches!(self, Self::ProbeNeeded { .. })
     }

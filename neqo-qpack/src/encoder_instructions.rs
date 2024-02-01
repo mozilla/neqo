@@ -189,9 +189,9 @@ impl EncoderInstructionReader {
 
     /// # Errors
     ///
-    ///  1) `NeedMoreData` if the reader needs more data
-    ///  2) `ClosedCriticalStream`
-    ///  3) other errors will be translated to `EncoderStream` by the caller of this function.
+    /// 1) `NeedMoreData` if the reader needs more data
+    /// 2) `ClosedCriticalStream`
+    /// 3) other errors will be translated to `EncoderStream` by the caller of this function.
     pub fn read_instructions<T: ReadByte + Reader>(
         &mut self,
         recv: &mut T,

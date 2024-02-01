@@ -785,7 +785,7 @@ impl Http3Client {
 
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
-    ///  packet number, ack frames, etc.
+    /// packet number, ack frames, etc.
     ///
     /// # Errors
     ///
@@ -2845,7 +2845,7 @@ mod tests {
             out = client.process(out.as_dgram_ref(), now());
         }
 
-        //  check received frames and send a response.
+        // Check received frames and send a response.
         while let Some(e) = server.conn.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
@@ -5520,7 +5520,7 @@ mod tests {
         assert!(!client.events().any(push_event));
     }
 
-    //  Test that max_push_id is enforced when a push promise frame is received.
+    // Test that max_push_id is enforced when a push promise frame is received.
     #[test]
     fn exceed_max_push_id_promise() {
         // Connect and send a request

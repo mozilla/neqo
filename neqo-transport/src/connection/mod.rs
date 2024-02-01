@@ -498,9 +498,9 @@ impl Connection {
     }
 
     /// `odcid` is their original choice for our CID, which we get from the Retry token.
-    /// `remote_cid` is the value from the Source Connection ID field of
-    ///   an incoming packet: what the peer wants us to use now.
-    /// `retry_cid` is what we asked them to use when we sent the Retry.
+    /// `remote_cid` is the value from the Source Connection ID field of an incoming packet: what
+    /// the peer wants us to use now. `retry_cid` is what we asked them to use when we sent the
+    /// Retry.
     pub(crate) fn set_retry_cids(
         &mut self,
         odcid: ConnectionId,

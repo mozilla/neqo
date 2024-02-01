@@ -85,9 +85,9 @@ impl DecoderInstructionReader {
 
     /// # Errors
     ///
-    ///  1) `NeedMoreData` if the reader needs more data
-    ///  2) `ClosedCriticalStream`
-    ///  3) other errors will be translated to `DecoderStream` by the caller of this function.
+    /// 1) `NeedMoreData` if the reader needs more data
+    /// 2) `ClosedCriticalStream`
+    /// 3) other errors will be translated to `DecoderStream` by the caller of this function.
     pub fn read_instructions<R: ReadByte>(&mut self, recv: &mut R) -> Res<DecoderInstruction> {
         qdebug!([self], "read a new instraction");
         loop {
