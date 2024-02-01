@@ -31,7 +31,9 @@ use test_fixture::{
 /// Take a pair of connections in any state and complete the handshake.
 /// The `datagram` argument is a packet that was received from the server.
 /// See `connect` for what this returns.
+///
 /// # Panics
+///
 /// Only when the connection fails.
 pub fn complete_connection(
     client: &mut Connection,

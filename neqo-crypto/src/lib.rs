@@ -116,7 +116,10 @@ fn version_check() {
 }
 
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance
-/// that # Panics
+/// that
+///
+/// # Panics
+///
 /// When NSS initialization fails.
 pub fn init() {
     // Set time zero.
@@ -149,7 +152,9 @@ fn enable_ssl_trace() {
 }
 
 /// Initialize with a database.
+///
 /// # Panics
+///
 /// If NSS cannot be initialized.
 pub fn init_db<P: Into<PathBuf>>(dir: P) {
     time::init();
@@ -192,6 +197,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
 }
 
 /// # Panics
+///
 /// If NSS isn't initialized.
 pub fn assert_initialized() {
     unsafe {

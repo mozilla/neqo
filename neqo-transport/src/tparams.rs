@@ -71,6 +71,7 @@ impl PreferredAddress {
     /// Make a new preferred address configuration.
     ///
     /// # Panics
+    ///
     /// If neither address is provided, or if either address is of the wrong type.
     #[must_use]
     pub fn new(v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>) -> Self {

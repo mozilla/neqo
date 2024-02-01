@@ -13,6 +13,7 @@ use crate::{huffman::decode_huffman, prefix::Prefix, Error, Res};
 
 pub trait ReadByte {
     /// # Errors
+    ///
     ///    Return error occurred while reading a byte.
     ///    The exact error depends on trait implementation.
     fn read_byte(&mut self) -> Res<u8>;
@@ -20,6 +21,7 @@ pub trait ReadByte {
 
 pub trait Reader {
     /// # Errors
+    ///
     ///    Return error occurred while reading date into a buffer.
     ///    The exact error depends on trait implementation.
     fn read(&mut self, buf: &mut [u8]) -> Res<usize>;
@@ -156,7 +158,9 @@ pub struct IntReader {
 impl IntReader {
     /// `IntReader` is created by suppling the first byte anf prefix length.
     /// A varint may take only one byte, In that case already the first by has set state to done.
+    ///
     /// # Panics
+    ///
     /// When `prefix_len` is 8 or larger.
     #[must_use]
     pub fn new(first_byte: u8, prefix_len: u8) -> Self {
@@ -176,6 +180,7 @@ impl IntReader {
     }
 
     /// # Panics
+    ///
     /// Never, but rust doesn't know that.
     #[must_use]
     pub fn make(first_byte: u8, prefixes: &[Prefix]) -> Self {
@@ -189,7 +194,9 @@ impl IntReader {
 
     /// This function reads bytes until the varint is decoded or until stream/buffer does not
     /// have any more date.
+    ///
     /// # Errors
+    ///
     /// Possible errors are:
     ///  1) `NeedMoreData` if the reader needs more data,
     ///  2) `IntegerOverflow`,
@@ -247,7 +254,9 @@ impl LiteralReader {
     /// Creates `LiteralReader` with the first byte. This constructor is always used
     /// when a litreral has a prefix.
     /// For literals without a prefix please use the default constructor.
+    ///
     /// # Panics
+    ///
     /// If `prefix_len` is 8 or more.
     #[must_use]
     pub fn new_with_first_byte(first_byte: u8, prefix_len: u8) -> Self {
@@ -263,13 +272,17 @@ impl LiteralReader {
 
     /// This function reads bytes until the literal is decoded or until stream/buffer does not
     /// have any more date ready.
+    ///
     /// # Errors
+    ///
     /// Possible errors are:
     ///  1) `NeedMoreData` if the reader needs more data,
     ///  2) `IntegerOverflow`
     ///  3) Any `ReadByte`'s error
     /// It returns value if reading the literal is done or None if it needs more data.
+    ///
     /// # Panics
+    ///
     /// When this object is complete.
     pub fn read<T: ReadByte + Reader>(&mut self, s: &mut T) -> Res<Vec<u8>> {
         loop {
@@ -311,7 +324,9 @@ impl LiteralReader {
 
 /// This is a helper function used only by `ReceiverBufferWrapper`, therefore it returns
 /// `DecompressionFailed` if any error happens.
+///
 /// # Errors
+///
 /// If an parsing error occurred, the function returns `BadUtf8`.
 pub fn parse_utf8(v: &[u8]) -> Res<&str> {
     str::from_utf8(v).map_err(|_| Error::BadUtf8)

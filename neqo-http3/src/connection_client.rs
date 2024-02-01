@@ -302,6 +302,7 @@ impl Display for Http3Client {
 
 impl Http3Client {
     /// # Errors
+    ///
     /// Making a `neqo-transport::connection` may produce an error. This can only be a crypto error
     /// if the crypto context can't be created or configured.
     pub fn new(
@@ -390,6 +391,7 @@ impl Http3Client {
     /// Enable encrypted client hello (ECH).
     ///
     /// # Errors
+    ///
     /// Fails when the configuration provided is bad.
     pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
         self.conn.client_enable_ech(ech_config_list)?;
@@ -398,7 +400,9 @@ impl Http3Client {
 
     /// Get the connection id, which is useful for disambiguating connections to
     /// the same origin.
+    ///
     /// # Panics
+    ///
     /// Never, because clients always have this field.
     #[must_use]
     pub fn connection_id(&self) -> &ConnectionId {
@@ -439,8 +443,11 @@ impl Http3Client {
     /// and used until the setting are received from the server.
     ///
     /// # Errors
+    ///
     /// An error is return if token cannot be decoded or a connection is is a wrong state.
+    ///
     /// # Panics
+    ///
     /// On closing if the base handler can't handle it (debug only).
     pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
         if self.base_handler.state != Http3State::Initializing {
@@ -499,7 +506,9 @@ impl Http3Client {
     }
 
     /// Attempt to force a key update.
+    ///
     /// # Errors
+    ///
     /// If the connection isn't confirmed, or there is an outstanding key update, this
     /// returns `Err(Error::TransportError(neqo_transport::Error::KeyUpdateBlocked))`.
     pub fn initiate_key_update(&mut self) -> Res<()> {
@@ -512,9 +521,13 @@ impl Http3Client {
     /// The function fetches a resource using `method`, `target` and `headers`. A response body
     /// may be added by calling `send_data`. `stream_close_send` must be sent to finish the request
     /// even if request data are not sent.
+    ///
     /// # Errors
+    ///
     /// If a new stream cannot be created an error will be return.
+    ///
     /// # Panics
+    ///
     /// `SendMessage` implements `http_stream` so it will not panic.
     pub fn fetch<'x, 't: 'x, T>(
         &mut self,
@@ -550,7 +563,9 @@ impl Http3Client {
 
     /// Send an [`PRIORITY_UPDATE`-frame][1] on next `Http3Client::process_output()` call.
     /// Returns if the priority got changed.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
@@ -560,7 +575,9 @@ impl Http3Client {
 
     /// An application may cancel a stream(request).
     /// Both sides, the receiviing and sending side, sending and receiving side, will be closed.
+    ///
     /// # Errors
+    ///
     /// An error will be return if a stream does not exist.
     pub fn cancel_fetch(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
         qinfo!([self], "reset_stream {} error={}.", stream_id, error);
@@ -569,7 +586,9 @@ impl Http3Client {
     }
 
     /// This is call when application is done sending a request.
+    ///
     /// # Errors
+    ///
     /// An error will be return if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId) -> Res<()> {
         qinfo!([self], "Close sending side stream={}.", stream_id);
@@ -578,6 +597,7 @@ impl Http3Client {
     }
 
     /// # Errors
+    ///
     /// An error will be return if a stream does not exist.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
         qinfo!([self], "stream_reset_send {} error={}.", stream_id, error);
@@ -586,6 +606,7 @@ impl Http3Client {
     }
 
     /// # Errors
+    ///
     /// An error will be return if a stream does not exist.
     pub fn stream_stop_sending(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
         qinfo!([self], "stream_stop_sending {} error={}.", stream_id, error);
@@ -598,6 +619,7 @@ impl Http3Client {
     /// headers are supplied through the `fetch` function.
     ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
@@ -620,7 +642,9 @@ impl Http3Client {
 
     /// Response data are read directly into a buffer supplied as a parameter of this function to
     /// avoid copying data.
+    ///
     /// # Errors
+    ///
     /// It returns an error if a stream does not exist or an error happen while reading a stream,
     /// e.g. early close, protocol error, etc.
     pub fn read_data(
@@ -642,7 +666,9 @@ impl Http3Client {
     // API: Push streams
 
     /// Cancel a push
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist.
     pub fn cancel_push(&mut self, push_id: u64) -> Res<()> {
         self.push_handler
@@ -652,7 +678,9 @@ impl Http3Client {
 
     /// Push response data are read directly into a buffer supplied as a parameter of this function
     /// to avoid copying data.
+    ///
     /// # Errors
+    ///
     /// It returns an error if a stream does not exist(`InvalidStreamId`) or an error has happened
     /// while reading a stream, e.g. early close, protocol error, etc.
     pub fn push_read_data(
@@ -671,8 +699,9 @@ impl Http3Client {
     }
 
     // API WebTransport
-
+    //
     /// # Errors
+    ///
     /// If `WebTransport` cannot be created, e.g. the `WebTransport` support is
     /// not negotiated or the HTTP/3 connection is closed.
     pub fn webtransport_create_session<'x, 't: 'x, T>(
@@ -700,7 +729,9 @@ impl Http3Client {
     }
 
     /// Close `WebTransport` cleanly
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
     /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
@@ -717,6 +748,7 @@ impl Http3Client {
     }
 
     /// # Errors
+    ///
     /// This may return an error if the particular session does not exist
     /// or the connection is not in the active state.
     pub fn webtransport_create_stream(
@@ -734,7 +766,9 @@ impl Http3Client {
     }
 
     /// Send `WebTransport` datagram.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
@@ -752,9 +786,13 @@ impl Http3Client {
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     ///  packet number, ack frames, etc.
+    ///
     /// # Errors
+    ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
+    ///
     /// # Panics
+    ///
     /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         Ok(self.conn.max_datagram_size()?
@@ -762,9 +800,13 @@ impl Http3Client {
     }
 
     /// Sets the `SendOrder` for a given stream
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    ///
     /// # Panics
+    ///
     /// This cannot panic.
     pub fn webtransport_set_sendorder(
         &mut self,
@@ -775,16 +817,22 @@ impl Http3Client {
     }
 
     /// Sets the `Fairness` for a given stream
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    ///
     /// # Panics
+    ///
     /// This cannot panic.
     pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
     }
 
     /// Returns the current `SendStreamStats` of a `WebTransportSendStream`.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.base_handler
@@ -795,7 +843,9 @@ impl Http3Client {
     }
 
     /// Returns the current `RecvStreamStats` of a `WebTransportRecvStream`.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist.
     pub fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
         self.base_handler
@@ -1197,7 +1247,9 @@ impl Http3Client {
     }
 
     /// Increases `max_stream_data` for a `stream_id`.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
     pub fn set_stream_max_data(&mut self, stream_id: StreamId, max_data: u64) -> Res<()> {

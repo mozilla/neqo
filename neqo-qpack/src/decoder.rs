@@ -32,12 +32,13 @@ pub struct QPackDecoder {
     local_stream_id: Option<StreamId>,
     max_table_size: u64,
     max_blocked_streams: usize,
-    blocked_streams: Vec<(StreamId, u64)>, //stream_id and requested inserts count.
+    blocked_streams: Vec<(StreamId, u64)>, // stream_id and requested inserts count.
     stats: Stats,
 }
 
 impl QPackDecoder {
     /// # Panics
+    ///
     /// If settings include invalid values.
     #[must_use]
     pub fn new(qpack_settings: &QpackSettings) -> Self {
@@ -69,6 +70,7 @@ impl QPackDecoder {
     }
 
     /// # Panics
+    ///
     /// If the number of blocked streams is too large.
     #[must_use]
     pub fn get_blocked_streams(&self) -> u16 {
@@ -76,7 +78,9 @@ impl QPackDecoder {
     }
 
     /// returns a list of unblocked streams
+    ///
     /// # Errors
+    ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `EncoderStream`
     /// in case of any other transport error.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<Vec<StreamId>> {
@@ -166,8 +170,11 @@ impl QPackDecoder {
     }
 
     /// # Errors
+    ///
     /// May return an error in case of any transport error. TODO: define transport errors.
+    ///
     /// # Panics
+    ///
     /// Never, but rust doesn't know that.
     #[allow(clippy::map_err_ignore)]
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
@@ -188,6 +195,7 @@ impl QPackDecoder {
     }
 
     /// # Errors
+    ///
     /// May return `DecompressionFailed` if header block is incorrect or incomplete.
     pub fn refers_dynamic_table(&self, buf: &[u8]) -> Res<bool> {
         HeaderDecoder::new(buf).refers_dynamic_table(self.max_entries, self.table.base())
@@ -195,9 +203,13 @@ impl QPackDecoder {
 
     /// This function returns None if the stream is blocked waiting for table insertions.
     /// 'buf' must contain the complete header block.
+    ///
     /// # Errors
+    ///
     /// May return `DecompressionFailed` if header block is incorrect or incomplete.
+    ///
     /// # Panics
+    ///
     /// When there is a programming error.
     pub fn decode_header_block(
         &mut self,
@@ -238,6 +250,7 @@ impl QPackDecoder {
     }
 
     /// # Panics
+    ///
     /// When a stream has already been added.
     pub fn add_send_stream(&mut self, stream_id: StreamId) {
         assert!(

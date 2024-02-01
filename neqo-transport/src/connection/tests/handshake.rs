@@ -133,7 +133,7 @@ fn no_alpn() {
     handshake(&mut client, &mut server, now(), Duration::new(0, 0));
     // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
     // and the client never sees the server's rejection of its handshake.
-    //assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
+    // assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
     assert_error(
         &server,
         &ConnectionError::Transport(Error::CryptoAlert(120)),

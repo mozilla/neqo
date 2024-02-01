@@ -49,7 +49,9 @@ impl Http3ServerHandler {
     }
 
     /// Supply a response for a request.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
@@ -91,7 +93,9 @@ impl Http3ServerHandler {
     }
 
     /// This is called when application is done sending a request.
+    ///
     /// # Errors
+    ///
     /// An error will be returned if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
         qinfo!([self], "Close sending side stream={}.", stream_id);
@@ -103,7 +107,9 @@ impl Http3ServerHandler {
 
     /// An application may reset a stream(request).
     /// Both sides, sending and receiving side, will be closed.
+    ///
     /// # Errors
+    ///
     /// An error will be return if a stream does not exist.
     pub fn cancel_fetch(
         &mut self,
@@ -156,7 +162,9 @@ impl Http3ServerHandler {
     }
 
     /// Close `WebTransport` cleanly
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
     /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
@@ -388,7 +396,9 @@ impl Http3ServerHandler {
 
     /// Response data are read directly into a buffer supplied as a parameter of this function to
     /// avoid copying data.
+    ///
     /// # Errors
+    ///
     /// It returns an error if a stream does not exist or an error happen while reading a stream,
     /// e.g. early close, protocol error, etc.
     pub fn read_data(

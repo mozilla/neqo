@@ -62,6 +62,7 @@ impl RealAead {
     /// Create a new AEAD based on the indicated TLS version and cipher suite.
     ///
     /// # Errors
+    ///
     /// Returns `Error` when the supporting NSS functions fail.
     pub fn new(
         _fuzzing: bool,
@@ -107,6 +108,7 @@ impl RealAead {
     /// the value provided in `Aead::expansion`.
     ///
     /// # Errors
+    ///
     /// If the input can't be protected or any input is too large for NSS.
     pub fn encrypt<'a>(
         &self,
@@ -139,6 +141,7 @@ impl RealAead {
     /// the final result will be shorter.
     ///
     /// # Errors
+    ///
     /// If the input isn't authenticated or any input is too large for NSS.
     pub fn decrypt<'a>(
         &self,

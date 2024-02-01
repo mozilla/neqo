@@ -81,7 +81,9 @@ impl QPackEncoder {
 
     /// This function is use for setting encoders table max capacity. The value is received as
     /// a `SETTINGS_QPACK_MAX_TABLE_CAPACITY` setting parameter.
+    ///
     /// # Errors
+    ///
     /// `EncoderStream` if value is too big.
     /// `ChangeCapacity` if table capacity cannot be reduced.
     pub fn set_max_capacity(&mut self, cap: u64) -> Res<()> {
@@ -109,7 +111,9 @@ impl QPackEncoder {
 
     /// This function is use for setting encoders max blocked streams. The value is received as
     /// a `SETTINGS_QPACK_BLOCKED_STREAMS` setting parameter.
+    ///
     /// # Errors
+    ///
     /// `EncoderStream` if value is too big.
     pub fn set_max_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
         self.max_blocked_streams = u16::try_from(blocked_streams).or(Err(Error::EncoderStream))?;
@@ -117,7 +121,9 @@ impl QPackEncoder {
     }
 
     /// Reads decoder instructions.
+    ///
     /// # Errors
+    ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
@@ -230,11 +236,17 @@ impl QPackEncoder {
     /// Inserts a new entry into a table and sends the corresponding instruction to a peer. An entry
     /// is added only if it is possible to send the corresponding instruction immediately, i.e.
     /// the encoder stream is not blocked by the flow control (or stream internal buffer(this is
-    /// very unlikely)). ### Errors
+    /// very unlikely)).
+    ///
+    /// # Errors
+    ///
     /// `EncoderStreamBlocked` if the encoder stream is blocked by the flow control.
     /// `DynamicTableFull` if the dynamic table does not have enough space for the entry.
     /// The function can return transport errors: `InvalidStreamId`, `InvalidInput` and
-    /// `FinalSizeError`. # Panics
+    /// `FinalSizeError`.
+    ///
+    /// # Panics
+    ///
     /// When the insertion fails (it should not).
     pub fn send_and_insert(
         &mut self,
@@ -309,7 +321,9 @@ impl QPackEncoder {
     }
 
     /// Sends any qpack encoder instructions.
+    ///
     /// # Errors
+    ///
     ///   returns `EncoderStream` in case of an error.
     pub fn send_encoder_updates(&mut self, conn: &mut Connection) -> Res<()> {
         match self.local_stream {
@@ -345,10 +359,14 @@ impl QPackEncoder {
     }
 
     /// Encodes headers
+    ///
     /// # Errors
+    ///
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
+    ///
     /// # Panics
+    ///
     /// If there is a programming error.
     pub fn encode_header_block(
         &mut self,
@@ -463,7 +481,9 @@ impl QPackEncoder {
     }
 
     /// Encoder stream has been created. Add the stream id.
+    ///
     /// # Panics
+    ///
     /// If a stream has already been added.
     pub fn add_send_stream(&mut self, stream_id: StreamId) {
         if self.local_stream == LocalStreamState::NoStream {

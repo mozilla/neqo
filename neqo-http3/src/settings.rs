@@ -122,6 +122,7 @@ impl HSettings {
     }
 
     /// # Errors
+    ///
     /// Returns an error if settings types are reserved of settings value are not permitted.
     pub fn decode_frame_contents(&mut self, dec: &mut Decoder) -> Res<()> {
         while dec.remaining() > 0 {

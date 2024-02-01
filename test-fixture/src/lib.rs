@@ -61,15 +61,19 @@ fn earlier() -> Instant {
 
 /// The current time for the test.  Which is in the future,
 /// because 0-RTT tests need to run at least `ANTI_REPLAY_WINDOW` in the past.
+///
 /// # Panics
+///
 /// When the setup fails.
 #[must_use]
 pub fn now() -> Instant {
     earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
 }
 
-// Create a default anti-replay context.
+/// Create a default anti-replay context.
+///
 /// # Panics
+///
 /// When the setup fails.
 #[must_use]
 pub fn anti_replay() -> AntiReplay {
@@ -137,7 +141,9 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 }
 
 /// Create a new client.
+///
 /// # Panics
+///
 /// If this doesn't work.
 #[must_use]
 pub fn new_client(params: ConnectionParameters) -> Connection {
@@ -176,7 +182,9 @@ pub fn default_server_h3() -> Connection {
 }
 
 /// Create a transport server with a configuration.
+///
 /// # Panics
+///
 /// If this doesn't work.
 #[must_use]
 pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection {
@@ -226,6 +234,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
 }
 
 /// # Panics
+///
 /// When the connection fails.
 #[must_use]
 pub fn connect() -> (Connection, Connection) {
@@ -238,7 +247,9 @@ pub fn connect() -> (Connection, Connection) {
 }
 
 /// Create a http3 client with default configuration.
+///
 /// # Panics
+///
 /// When the client can't be created.
 #[must_use]
 pub fn default_http3_client() -> Http3Client {
@@ -259,7 +270,9 @@ pub fn default_http3_client() -> Http3Client {
 }
 
 /// Create a http3 client.
+///
 /// # Panics
+///
 /// When the client can't be created.
 #[must_use]
 pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
@@ -276,7 +289,9 @@ pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
 }
 
 /// Create a http3 server with default configuration.
+///
 /// # Panics
+///
 /// When the server can't be created.
 #[must_use]
 pub fn default_http3_server() -> Http3Server {
@@ -363,7 +378,9 @@ impl ToString for SharedVec {
 /// Returns a pair of new enabled `NeqoQlog` that is backed by a [`Vec<u8>`]
 /// together with a [`Cursor<Vec<u8>>`] that can be used to read the contents of
 /// the log.
+///
 /// # Panics
+///
 /// Panics if the log cannot be created.
 #[must_use]
 pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {

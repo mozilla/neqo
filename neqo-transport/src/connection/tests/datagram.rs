@@ -325,7 +325,7 @@ fn datagram_lost() {
     let pings_sent = client.stats().frame_tx.ping;
     let dgram_lost = client.stats().datagram_tx.lost;
     let out = client.process_output(now).dgram();
-    assert!(out.is_some()); //PING probing
+    assert!(out.is_some()); // PING probing
                             // Datagram is not sent again.
     assert_eq!(client.stats().frame_tx.ping, pings_sent + 1);
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent2);

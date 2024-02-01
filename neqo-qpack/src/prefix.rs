@@ -111,7 +111,7 @@ create_prefix!(ENCODER_INSERT_WITH_NAME_LITERAL, 0x40, 2);
 create_prefix!(ENCODER_DUPLICATE, 0x00, 3);
 
 //=====================================================================
-//Header block encoding prefixes
+// Header block encoding prefixes
 //=====================================================================
 
 create_prefix!(BASE_PREFIX_POSITIVE, 0x00, 1);

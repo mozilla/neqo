@@ -35,7 +35,9 @@ fn assert_long_packet_type(b: u8, v1_expected: u8, version: Version) {
 }
 
 /// Simple checks for the version being correct.
+///
 /// # Panics
+///
 /// If this is not a long header packet with the given version.
 pub fn assert_version(payload: &[u8], v: u32) {
     let mut dec = Decoder::from(payload);
@@ -44,7 +46,9 @@ pub fn assert_version(payload: &[u8], v: u32) {
 }
 
 /// Simple checks for a Version Negotiation packet.
+///
 /// # Panics
+///
 /// If this is clearly not a Version Negotiation packet.
 pub fn assert_vn(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
@@ -56,7 +60,9 @@ pub fn assert_vn(payload: &[u8]) {
 }
 
 /// Do a simple decode of the datagram to verify that it is coalesced.
+///
 /// # Panics
+///
 /// If the tests fail.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
     assert!(payload.len() >= 1200);
@@ -74,6 +80,7 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
 }
 
 /// # Panics
+///
 /// If the tests fail.
 pub fn assert_retry(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
@@ -83,7 +90,9 @@ pub fn assert_retry(payload: &[u8]) {
 }
 
 /// Assert that this is an Initial packet with (or without) a token.
+///
 /// # Panics
+///
 /// If the tests fail.
 pub fn assert_initial(payload: &[u8], expect_token: bool) {
     let mut dec = Decoder::from(payload);
@@ -97,7 +106,9 @@ pub fn assert_initial(payload: &[u8], expect_token: bool) {
 }
 
 /// Assert that this is a Handshake packet.
+///
 /// # Panics
+///
 /// If the tests fail.
 pub fn assert_handshake(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
@@ -107,6 +118,7 @@ pub fn assert_handshake(payload: &[u8]) {
 }
 
 /// # Panics
+///
 /// If the tests fail.
 pub fn assert_no_1rtt(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
@@ -138,6 +150,7 @@ pub fn assert_no_1rtt(payload: &[u8]) {
 }
 
 /// # Panics
+///
 /// When the path doesn't use the given socket address at both ends.
 pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
     assert_eq!(dgram.source(), path_addr);
@@ -145,6 +158,7 @@ pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
 }
 
 /// # Panics
+///
 /// When the path doesn't use the default v4 socket address at both ends.
 pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, addr_v4());
@@ -154,6 +168,7 @@ pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
 }
 
 /// # Panics
+///
 /// When the path doesn't use the default v6 socket address at both ends.
 pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, addr());

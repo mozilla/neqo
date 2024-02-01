@@ -59,7 +59,9 @@ pub trait AsRequestTarget<'x> {
     type Target: RequestTarget;
     type Error;
     /// Produce a `RequestTarget` that refers to `self`.
+    ///
     /// # Errors
+    ///
     /// This method can generate an error of type `Self::Error`
     /// if the conversion is unsuccessful.
     fn as_request_target(&'x self) -> Result<Self::Target, Self::Error>;

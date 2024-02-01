@@ -83,7 +83,8 @@ impl DecoderInstructionReader {
         }
     }
 
-    /// ### Errors
+    /// # Errors
+    ///
     ///  1) `NeedMoreData` if the reader needs more data
     ///  2) `ClosedCriticalStream`
     ///  3) other errors will be translated to `DecoderStream` by the caller of this function.

@@ -768,6 +768,7 @@ impl RecvStream {
     }
 
     /// # Errors
+    ///
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let data_recvd_state = matches!(self.state, RecvStreamState::DataRecvd { .. });

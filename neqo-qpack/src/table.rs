@@ -109,7 +109,9 @@ impl HeaderTable {
     }
 
     /// Change the dynamic table capacity.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `ChangeCapacity` if table capacity cannot be reduced.
     /// The table cannot be reduce if there are entries that are referred at the moment or their
     /// inserts are unacked.
@@ -123,7 +125,9 @@ impl HeaderTable {
     }
 
     /// Get a static entry with `index`.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `HeaderLookup` if the index does not exist in the static table.
     pub fn get_static(index: u64) -> Res<&'static StaticTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
@@ -155,7 +159,9 @@ impl HeaderTable {
     }
 
     /// Get a entry in the  dynamic table.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `HeaderLookup` if entry does not exist.
     pub fn get_dynamic(&self, index: u64, base: u64, post: bool) -> Res<&DynamicTableEntry> {
         let inx = if post {
@@ -284,7 +290,9 @@ impl HeaderTable {
     }
 
     /// Insert a new entry.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough
     /// space and/or other entry cannot be evicted.
     pub fn insert(&mut self, name: &[u8], value: &[u8]) -> Res<u64> {
@@ -308,7 +316,9 @@ impl HeaderTable {
     }
 
     /// Insert a new entry with the name refer to by a index to static or dynamic table.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough
     /// space and/or other entry cannot be evicted.
     /// `HeaderLookup` if the index dos not exits in the static/dynamic table.
@@ -340,7 +350,9 @@ impl HeaderTable {
     }
 
     /// Duplicate an entry.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough
     /// space and/or other entry cannot be evicted.
     /// `HeaderLookup` if the index dos not exits in the static/dynamic table.
@@ -359,7 +371,9 @@ impl HeaderTable {
     }
 
     /// Increment number of acknowledge entries.
-    /// ### Errors
+    ///
+    /// # Errors
+    ///
     /// `IncrementAck` if ack is greater than actual number of inserts.
     pub fn increment_acked(&mut self, increment: u64) -> Res<()> {
         qtrace!([self], "increment acked by {}", increment);

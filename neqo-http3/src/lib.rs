@@ -287,6 +287,7 @@ impl Error {
     }
 
     /// # Panics
+    ///
     /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_send_errors(err: &Error) -> Self {
@@ -303,6 +304,7 @@ impl Error {
     }
 
     /// # Panics
+    ///
     /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_create_errors(err: &TransportError) -> Self {
@@ -317,6 +319,7 @@ impl Error {
     }
 
     /// # Panics
+    ///
     /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_recv_errors(err: &Error) -> Self {
@@ -344,8 +347,11 @@ impl Error {
     }
 
     /// # Errors
+    ///
     ///   Any error is mapped to the indicated type.
+    ///
     /// # Panics
+    ///
     /// On internal errors, in debug mode.
     fn map_error<R>(r: Result<R, impl Into<Self>>, err: Self) -> Result<R, Self> {
         r.map_err(|e| {
@@ -449,16 +455,23 @@ trait RecvStream: Stream {
     /// The stream reads data from the corresponding quic stream and returns `ReceiveOutput`.
     /// The function also returns true as the second parameter if the stream is done and
     /// could be forgotten, i.e. removed from all records.
+    ///
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
+
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, etc.
     fn reset(&mut self, close_type: CloseType) -> Res<()>;
+
     /// The function allows an app to read directly from the quic stream. The function
     /// returns the number of bytes written into `buf` and true/false if the stream is
     /// completely done and can be forgotten, i.e. removed from all records.
+    ///
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
         Err(Error::InvalidStreamId)
@@ -482,7 +495,9 @@ trait HttpRecvStream: RecvStream {
     /// This function is similar to the receive function and has the same output, i.e.
     /// a `ReceiveOutput` enum and bool. The bool is true if the stream is completely done
     /// and can be forgotten, i.e. removed from all records.
+    ///
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
 
@@ -551,6 +566,7 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
 
 trait SendStream: Stream {
     /// # Errors
+    ///
     /// Error my occur during sending data, e.g. protocol error, etc.
     fn send(&mut self, conn: &mut Connection) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
@@ -558,14 +574,19 @@ trait SendStream: Stream {
     fn done(&self) -> bool;
     fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>) -> Res<()>;
     fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) -> Res<()>;
+
     /// # Errors
+    ///
     /// Error my occur during sending data, e.g. protocol error, etc.
     fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
 
     /// # Errors
+    ///
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
+
     /// # Errors
+    ///
     /// It may happen that the transport stream is already close. This is unlikely.
     fn close_with_message(
         &mut self,
@@ -575,6 +596,7 @@ trait SendStream: Stream {
     ) -> Res<()> {
         Err(Error::InvalidStreamId)
     }
+
     /// This function is called when sending side is closed abruptly by the peer or
     /// the application.
     fn handle_stop_sending(&mut self, close_type: CloseType);
@@ -583,6 +605,7 @@ trait SendStream: Stream {
     }
 
     /// # Errors
+    ///
     /// It may happen that the transport stream is already close. This is unlikely.
     fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
         Err(Error::InvalidStreamId)
@@ -598,7 +621,9 @@ trait HttpSendStream: SendStream {
     /// This function is used to supply headers to a http message. The
     /// function is used for request headers, response headers, 1xx response and
     /// trailers.
+    ///
     /// # Errors
+    ///
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()>;
     fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}

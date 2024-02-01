@@ -175,7 +175,9 @@ impl Display for PushController {
 
 impl PushController {
     /// A new `push_promise` has been received.
+    ///
     /// # Errors
+    ///
     /// `HttpId` if `push_id` greater than it is allowed has been received.
     pub fn new_push_promise(
         &mut self,

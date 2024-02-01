@@ -30,6 +30,7 @@ impl SelfEncrypt {
     const SALT_LENGTH: usize = 16;
 
     /// # Errors
+    ///
     /// Failure to generate a new HKDF key using NSS results in an error.
     pub fn new(version: Version, cipher: Cipher) -> Res<Self> {
         let key = hkdf::generate_key(version, cipher)?;
@@ -53,6 +54,7 @@ impl SelfEncrypt {
     /// key.
     ///
     /// # Errors
+    ///
     /// Failure to generate a new HKDF key using NSS results in an error.
     pub fn rotate(&mut self) -> Res<()> {
         let new_key = hkdf::generate_key(self.version, self.cipher)?;
@@ -69,6 +71,7 @@ impl SelfEncrypt {
     /// caller is responsible for carrying the AAD as appropriate.
     ///
     /// # Errors
+    ///
     /// Failure to protect using NSS AEAD APIs produces an error.
     pub fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Res<Vec<u8>> {
         // Format is:
@@ -121,6 +124,7 @@ impl SelfEncrypt {
     /// Open the protected `ciphertext`.
     ///
     /// # Errors
+    ///
     /// Returns an error when the self-encrypted object is invalid;
     /// when the keys have been rotated; or when NSS fails.
     #[allow(clippy::similar_names)] // aad is similar to aead

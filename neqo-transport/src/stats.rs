@@ -178,6 +178,7 @@ impl Stats {
     }
 
     /// # Panics
+    ///
     /// When preconditions are violated.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);

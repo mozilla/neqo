@@ -99,7 +99,7 @@ fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option
     let out = hconn_c.process(None, now()); // Initial
     let out = hconn_s.process(out.as_dgram_ref(), now()); // Initial + Handshake
     let out = hconn_c.process(out.as_dgram_ref(), now()); // ACK
-    mem::drop(hconn_s.process(out.as_dgram_ref(), now())); //consume ACK
+    mem::drop(hconn_s.process(out.as_dgram_ref(), now())); // consume ACK
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
@@ -129,7 +129,7 @@ fn connect_peers_with_network_propagation_delay(
     now += net_delay;
     let out = hconn_c.process(out.as_dgram_ref(), now); // ACK
     now += net_delay;
-    let out = hconn_s.process(out.as_dgram_ref(), now); //consume ACK
+    let out = hconn_s.process(out.as_dgram_ref(), now); // consume ACK
     assert!(out.dgram().is_none());
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));

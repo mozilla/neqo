@@ -404,7 +404,9 @@ fn increase_cwnd(
 }
 
 /// Receive multiple packets and generate an ack-only packet.
+///
 /// # Panics
+///
 /// The caller is responsible for ensuring that `dest` has received
 /// enough data that it wants to generate an ACK.  This panics if
 /// no ACK frame is generated.

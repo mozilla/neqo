@@ -51,6 +51,7 @@ impl ::std::fmt::Display for Http3Server {
 
 impl Http3Server {
     /// # Errors
+    ///
     /// Making a `neqo_transport::Server` may produce an error. This can only be a crypto error if
     /// the socket can't be created or configured.
     pub fn new(
@@ -94,6 +95,7 @@ impl Http3Server {
     /// Enable encrypted client hello (ECH).
     ///
     /// # Errors
+    ///
     /// Only when NSS can't serialize a configuration.
     pub fn enable_ech(
         &mut self,

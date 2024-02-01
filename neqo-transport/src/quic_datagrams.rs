@@ -143,7 +143,9 @@ impl QuicDatagrams {
     }
 
     /// Returns true if there was an unsent datagram that has been dismissed.
+    ///
     /// # Error
+    ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size. The funcion does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during

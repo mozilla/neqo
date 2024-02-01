@@ -36,7 +36,9 @@ pub struct Timer<T> {
 
 impl<T> Timer<T> {
     /// Construct a new wheel at the given granularity, starting at the given time.
+    ///
     /// # Panics
+    ///
     /// When `capacity` is too large to fit in `u32` or `granularity` is zero.
     pub fn new(now: Instant, granularity: Duration, capacity: usize) -> Self {
         assert!(u32::try_from(capacity).is_ok());
@@ -111,7 +113,9 @@ impl<T> Timer<T> {
     }
 
     /// Asserts if the time given is in the past or too far in the future.
+    ///
     /// # Panics
+    ///
     /// When `time` is in the past relative to previous calls.
     pub fn add(&mut self, time: Instant, item: T) {
         assert!(time >= self.now);

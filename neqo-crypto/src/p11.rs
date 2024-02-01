@@ -41,6 +41,7 @@ macro_rules! scoped_ptr {
             /// Create a new instance of `$scoped` from a pointer.
             ///
             /// # Errors
+            ///
             /// When passed a null pointer generates an error.
             pub fn from_ptr(ptr: *mut $target) -> Result<Self, $crate::err::Error> {
                 if ptr.is_null() {
@@ -82,8 +83,11 @@ impl PublicKey {
     /// Get the HPKE serialization of the public key.
     ///
     /// # Errors
+    ///
     /// When the key cannot be exported, which can be because the type is not supported.
+    ///
     /// # Panics
+    ///
     /// When keys are too large to fit in `c_uint/usize`.  So only on programming error.
     pub fn key_data(&self) -> Res<Vec<u8>> {
         let mut buf = vec![0; 100];
@@ -126,9 +130,12 @@ impl PrivateKey {
     /// Get the bits of the private key.
     ///
     /// # Errors
+    ///
     /// When the key cannot be exported, which can be because the type is not supported
     /// or because the key data cannot be extracted from the PKCS#11 module.
+    ///
     /// # Panics
+    ///
     /// When the values are too large to fit.  So never.
     pub fn key_data(&self) -> Res<Vec<u8>> {
         let mut key_item = Item::make_empty();
@@ -190,6 +197,7 @@ impl SymKey {
     /// You really don't want to use this.
     ///
     /// # Errors
+    ///
     /// Internal errors in case of failures in NSS.
     pub fn as_bytes(&self) -> Res<&[u8]> {
         secstatus_to_res(unsafe { PK11_ExtractKeyValue(self.ptr) })?;
@@ -271,6 +279,7 @@ impl Item {
     /// content that is referenced there.
     ///
     /// # Safety
+    ///
     /// This dereferences two pointers.  It doesn't get much less safe.
     pub unsafe fn into_vec(self) -> Vec<u8> {
         let b = self.ptr.as_ref().unwrap();
@@ -282,7 +291,9 @@ impl Item {
 }
 
 /// Generate a randomized buffer.
+///
 /// # Panics
+///
 /// When `size` is too large or NSS fails.
 #[must_use]
 pub fn random(size: usize) -> Vec<u8> {

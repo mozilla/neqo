@@ -111,7 +111,7 @@ fn tcp_phase() {
 
     for _ in 0..num_tcp_increases {
         let cwnd_rtt_start = cubic.cwnd();
-        //Expected acks during a period of RTT / CUBIC_ALPHA.
+        // Expected acks during a period of RTT / CUBIC_ALPHA.
         let acks = expected_tcp_acks(cwnd_rtt_start);
         // The time between acks if they are ideally paced over a RTT.
         let time_increase = RTT / u32::try_from(cwnd_rtt_start / MAX_DATAGRAM_SIZE).unwrap();
@@ -209,7 +209,7 @@ fn cubic_phase() {
     let num_rtts_w_max = (k / RTT.as_secs_f64()).round() as u64;
     for _ in 0..num_rtts_w_max {
         let cwnd_rtt_start = cubic.cwnd();
-        //Expected acks
+        // Expected acks
         let acks = cwnd_rtt_start / MAX_DATAGRAM_SIZE;
         let time_increase = RTT / u32::try_from(acks).unwrap();
         for _ in 0..acks {

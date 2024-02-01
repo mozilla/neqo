@@ -463,7 +463,9 @@ impl LossRecoverySpaces {
 
     /// Drop a packet number space and return all the packets that were
     /// outstanding, so that those can be marked as lost.
+    ///
     /// # Panics
+    ///
     /// If the space has already been removed.
     pub fn drop_space(&mut self, space: PacketNumberSpace) -> impl IntoIterator<Item = SentPacket> {
         let sp = match space {

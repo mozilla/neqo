@@ -68,9 +68,14 @@ impl<'a> BitReader<'a> {
 }
 
 /// Decodes huffman encoded input.
+///
 /// # Errors
+///
 /// This function may return `HuffmanDecompressionFailed` if `input` is not a correct
-/// huffman-encoded array of bits. # Panics
+/// huffman-encoded array of bits.
+///
+/// # Panics
+///
 /// Never, but rust can't know that.
 pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
     let mut reader = BitReader::new(input);
@@ -112,6 +117,7 @@ fn decode_character(reader: &mut BitReader) -> Res<Option<u16>> {
 }
 
 /// # Panics
+///
 /// Never, but rust doesn't know that.
 #[must_use]
 pub fn encode_huffman(input: &[u8]) -> Vec<u8> {

@@ -37,6 +37,7 @@ impl BufferedStream {
     }
 
     /// # Panics
+    ///
     /// If the `BufferedStream` is initialized more than one it will panic.
     pub fn init(&mut self, stream_id: StreamId) {
         debug_assert!(&Self::Uninitialized == self);
@@ -47,6 +48,7 @@ impl BufferedStream {
     }
 
     /// # Panics
+    ///
     /// This functon cannot be called before the `BufferedStream` is initialized.
     pub fn buffer(&mut self, to_buf: &[u8]) {
         if let Self::Initialized { buf, .. } = self {
@@ -57,6 +59,7 @@ impl BufferedStream {
     }
 
     /// # Errors
+    ///
     /// Returns `neqo_transport` errors.
     pub fn send_buffer(&mut self, conn: &mut Connection) -> Res<usize> {
         let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
@@ -77,6 +80,7 @@ impl BufferedStream {
     }
 
     /// # Errors
+    ///
     /// Returns `neqo_transport` errors.
     pub fn send_atomic(&mut self, conn: &mut Connection, to_send: &[u8]) -> Res<bool> {
         // First try to send anything that is in the buffer.

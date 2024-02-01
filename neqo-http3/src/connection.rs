@@ -944,7 +944,9 @@ impl Http3Connection {
 
     /// Stream data are read directly into a buffer supplied as a parameter of this function to
     /// avoid copying data.
+    ///
     /// # Errors
+    ///
     /// It returns an error if a stream does not exist or an error happens while reading a stream,
     /// e.g. early close, protocol error, etc.
     pub fn read_data(
@@ -1010,7 +1012,9 @@ impl Http3Connection {
     }
 
     /// Set the stream `SendOrder`.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if the stream id doesn't exist
     pub fn stream_set_sendorder(
         conn: &mut Connection,
@@ -1024,7 +1028,9 @@ impl Http3Connection {
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
     /// streams of the same sendOrder group (or the unordered group).  Unfair streams
     /// will give bandwidth preferentially to the lowest streamId with data to send.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if the stream id doesn't exist
     pub fn stream_set_fairness(
         conn: &mut Connection,

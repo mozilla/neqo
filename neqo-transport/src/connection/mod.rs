@@ -478,7 +478,9 @@ impl Connection {
     /// Set a local transport parameter, possibly overriding a default value.
     /// This only sets transport parameters without dealing with other aspects of
     /// setting the value.
+    ///
     /// # Panics
+    ///
     /// This panics if the transport parameter is known to this crate.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
         #[cfg(not(test))]
@@ -644,7 +646,9 @@ impl Connection {
     /// problem for short-lived connections, where the connection is closed before any events are
     /// released. This function retrieves the token, without waiting for a `NEW_TOKEN` frame to
     /// arrive.
+    ///
     /// # Panics
+    ///
     /// If this is called on a server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
         assert_eq!(self.role, Role::Client);
@@ -1674,6 +1678,7 @@ impl Connection {
     /// Either way, the path is probed and will be abandoned if the probe fails.
     ///
     /// # Errors
+    ///
     /// Fails if this is not a client, not confirmed, or there are not enough connection
     /// IDs available to use.
     pub fn migrate(
@@ -2964,7 +2969,9 @@ impl Connection {
 
     /// Create a stream.
     /// Returns new stream id
+    ///
     /// # Errors
+    ///
     /// `ConnectionState` if the connecton stat does not allow to create streams.
     /// `StreamLimitError` if we are limiied by server's stream concurence.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
@@ -2986,7 +2993,9 @@ impl Connection {
     }
 
     /// Set the priority of a stream.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` the stream does not exist.
     pub fn stream_priority(
         &mut self,
@@ -3001,7 +3010,9 @@ impl Connection {
     }
 
     /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
+    ///
     /// # Errors
+    ///
     /// Returns InvalidStreamId if the stream id doesn't exist
     pub fn stream_sendorder(
         &mut self,
@@ -3012,7 +3023,9 @@ impl Connection {
     }
 
     /// Set the Fairness of a stream
+    ///
     /// # Errors
+    ///
     /// Returns InvalidStreamId if the stream id doesn't exist
     pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
@@ -3031,7 +3044,9 @@ impl Connection {
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` the stream does not exist,
     /// `InvalidInput` if length of `data` is zero,
     /// `FinalSizeError` if the stream has already been closed.
@@ -3042,7 +3057,9 @@ impl Connection {
     /// Send all data or nothing on a stream. May cause DATA_BLOCKED or
     /// STREAM_DATA_BLOCKED frames to be sent.
     /// Returns true if data was successfully sent, otherwise false.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` the stream does not exist,
     /// `InvalidInput` if length of `data` is zero,
     /// `FinalSizeError` if the stream has already been closed.
@@ -3083,7 +3100,9 @@ impl Connection {
 
     /// Read buffered data from stream. bool says whether read bytes includes
     /// the final data on stream.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
@@ -3102,7 +3121,9 @@ impl Connection {
     }
 
     /// Increases `max_stream_data` for a `stream_id`.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
     pub fn set_stream_max_data(&mut self, stream_id: StreamId, max_data: u64) -> Res<()> {
@@ -3116,7 +3137,9 @@ impl Connection {
     /// (if `keep` is `true`) or no longer important (if `keep` is `false`).  If any
     /// stream is marked this way, PING frames will be used to keep the connection
     /// alive, even when there is no activity.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
     pub fn stream_keep_alive(&mut self, stream_id: StreamId, keep: bool) -> Res<()> {
@@ -3130,7 +3153,9 @@ impl Connection {
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
+    ///
     /// # Error
+    ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_dgram_size = self.quic_datagrams.remote_datagram_size();
@@ -3171,7 +3196,9 @@ impl Connection {
     }
 
     /// Queue a datagram for sending.
+    ///
     /// # Error
+    ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size. The funcion does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during

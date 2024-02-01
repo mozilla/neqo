@@ -34,7 +34,9 @@ impl NewStreamType {
     /// Get the final `NewStreamType` from a stream type. All streams, except Push stream,
     /// are identified by the type only. This function will return None for the Push stream
     /// because it needs the ID besides the type.
-    /// # Error
+    ///
+    /// # Errors
+    ///
     /// Push streams received by the server are not allowed and this function will return
     /// `HttpStreamCreation` error.
     fn final_stream_type(

@@ -131,6 +131,7 @@ impl SendMessage {
     }
 
     /// # Errors
+    ///
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
     fn encode(
@@ -233,6 +234,7 @@ impl SendStream for SendMessage {
     }
 
     /// # Errors
+    ///
     /// `InternalError` if an unexpected error occurred.
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.

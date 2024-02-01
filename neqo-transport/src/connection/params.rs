@@ -151,6 +151,7 @@ impl ConnectionParameters {
     }
 
     /// # Panics
+    ///
     /// If v > 2^60 (the maximum allowed by the protocol).
     pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
         assert!(v <= (1 << 60), "max_streams is too large");
@@ -166,7 +167,9 @@ impl ConnectionParameters {
     }
 
     /// Get the maximum stream data that we will accept on different types of streams.
+    ///
     /// # Panics
+    ///
     /// If `StreamType::UniDi` and `false` are passed as that is not a valid combination.
     pub fn get_max_stream_data(&self, stream_type: StreamType, remote: bool) -> u64 {
         match (stream_type, remote) {
@@ -180,7 +183,9 @@ impl ConnectionParameters {
     }
 
     /// Set the maximum stream data that we will accept on different types of streams.
+    ///
     /// # Panics
+    ///
     /// If `StreamType::UniDi` and `false` are passed as that is not a valid combination
     /// or if v >= 62 (the maximum allowed by the protocol).
     pub fn max_stream_data(mut self, stream_type: StreamType, remote: bool, v: u64) -> Self {
@@ -228,6 +233,7 @@ impl ConnectionParameters {
     }
 
     /// # Panics
+    ///
     /// If `timeout` is 2^62 milliseconds or more.
     pub fn idle_timeout(mut self, timeout: Duration) -> Self {
         assert!(timeout.as_millis() < (1 << 62), "idle timeout is too long");
@@ -285,6 +291,7 @@ impl ConnectionParameters {
     /// congestion.
     ///
     /// # Panics
+    ///
     /// A value of 0 is invalid and will cause a panic.
     pub fn fast_pto(mut self, scale: u8) -> Self {
         assert_ne!(scale, 0);

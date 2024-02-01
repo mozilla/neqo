@@ -54,6 +54,7 @@ impl Http3Parameters {
     }
 
     /// # Panics
+    ///
     /// The table size must be smaller than 1 << 30 by the spec.
     #[must_use]
     pub fn max_table_size_encoder(mut self, mut max_table: u64) -> Self {
@@ -69,6 +70,7 @@ impl Http3Parameters {
     }
 
     /// # Panics
+    ///
     /// The table size must be smaller than 1 << 30 by the spec.
     #[must_use]
     pub fn max_table_size_decoder(mut self, mut max_table: u64) -> Self {

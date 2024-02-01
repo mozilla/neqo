@@ -62,7 +62,9 @@ impl StreamHandler {
     }
 
     /// Supply a response header to a request.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn send_headers(&mut self, headers: &[Header]) -> Res<()> {
         self.handler.borrow_mut().send_headers(
@@ -73,7 +75,9 @@ impl StreamHandler {
     }
 
     /// Supply response data to a request.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn send_data(&mut self, buf: &[u8]) -> Res<usize> {
         self.handler
@@ -82,7 +86,9 @@ impl StreamHandler {
     }
 
     /// Close sending side.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_close_send(&mut self) -> Res<()> {
         self.handler
@@ -91,7 +97,9 @@ impl StreamHandler {
     }
 
     /// Request a peer to stop sending a stream.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_stop_sending(&mut self, app_error: AppError) -> Res<()> {
         qdebug!(
@@ -108,7 +116,9 @@ impl StreamHandler {
     }
 
     /// Reset sending side of a stream.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_reset_send(&mut self, app_error: AppError) -> Res<()> {
         qdebug!(
@@ -125,7 +135,9 @@ impl StreamHandler {
     }
 
     /// Reset a stream/request.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore
     pub fn cancel_fetch(&mut self, app_error: AppError) -> Res<()> {
         qdebug!([self], "reset error:{}.", app_error);
@@ -164,14 +176,18 @@ impl Http3OrWebTransportStream {
     }
 
     /// Supply a response header to a request.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn send_headers(&mut self, headers: &[Header]) -> Res<()> {
         self.stream_handler.send_headers(headers)
     }
 
     /// Supply response data to a request.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn send_data(&mut self, data: &[u8]) -> Res<usize> {
         qinfo!([self], "Set new response.");
@@ -179,7 +195,9 @@ impl Http3OrWebTransportStream {
     }
 
     /// Close sending side.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_close_send(&mut self) -> Res<()> {
         qinfo!([self], "Set new response.");
@@ -248,7 +266,9 @@ impl WebTransportRequest {
     }
 
     /// Respond to a `WebTransport` session request.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn response(&mut self, accept: &WebTransportSessionAcceptAction) -> Res<()> {
         qinfo!([self], "Set a response for a WebTransport session.");
@@ -263,6 +283,7 @@ impl WebTransportRequest {
     }
 
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// Also return an error if the stream was closed on the transport layer,
     /// but that information is not yet consumed on the  http/3 layer.
@@ -284,7 +305,9 @@ impl WebTransportRequest {
     }
 
     /// Close sending side.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn create_stream(&mut self, stream_type: StreamType) -> Res<Http3OrWebTransportStream> {
         let session_id = self.stream_handler.stream_id();
@@ -306,7 +329,9 @@ impl WebTransportRequest {
     }
 
     /// Send `WebTransport` datagram.
+    ///
     /// # Errors
+    ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
@@ -331,9 +356,13 @@ impl WebTransportRequest {
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
+    ///
     /// # Errors
+    ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
+    ///
     /// # Panics
+    ///
     /// This cannot panic. The max varint length is 8.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
