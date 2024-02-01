@@ -10,7 +10,7 @@ fn build_coalesce(len: u64) -> RangeTracker {
         // These do not get immediately coalesced when marking since they're not at the end or start
         used.mark_range(i * 1000, 1000, RangeState::Acked);
     }
-    return used;
+    used
 }
 
 fn coalesce(used: &mut RangeTracker) {

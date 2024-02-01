@@ -138,7 +138,7 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings
         if: success() || failure()
         continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
 
