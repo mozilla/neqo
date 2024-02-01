@@ -6,9 +6,9 @@ fn build_coalesce(len: u64) -> RangeTracker {
     used.mark_range(0, 1000, RangeState::Acked);
     used.mark_range(1000, 100000, RangeState::Sent);
     // leave a gap or it will coalesce here
-    for i in 1 .. len {
+    for i in 2..=len {
 	// These do not get immediately coalesced when marking since they're not at the end or start
-	used.mark_range((i+1) * 1000, 1000, RangeState::Acked); 
+	used.mark_range(i * 1000, 1000, RangeState::Acked); 
     }
     return used;
 }
