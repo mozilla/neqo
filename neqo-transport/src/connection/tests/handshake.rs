@@ -30,6 +30,7 @@ use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::Duration;
+use test_fixture::assertions::assert_coalesced_0rtt;
 use test_fixture::{self, addr, assertions, datagram, fixture_init, now, split_datagram};
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -380,10 +381,10 @@ fn reorder_05rtt_with_0rtt() {
     // Now PTO at the client and cause the server to re-send handshake packets.
     now += AT_LEAST_PTO;
     let c3 = client.process(None, now).dgram();
+    assert_coalesced_0rtt(c3.as_ref().unwrap());
 
     now += RTT / 2;
     let s3 = server.process(c3.as_ref(), now).dgram().unwrap();
-    assertions::assert_no_1rtt(&s3[..]);
 
     // The client should be able to process the 0.5 RTT now.
     // This should contain an ACK, so we are processing an ACK from the past.

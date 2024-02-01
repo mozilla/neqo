@@ -74,7 +74,7 @@ use std::{
     ptr::null,
 };
 
-const MINIMUM_NSS_VERSION: &str = "3.74";
+const MINIMUM_NSS_VERSION: &str = "3.97";
 
 #[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
 #[allow(clippy::upper_case_acronyms)]

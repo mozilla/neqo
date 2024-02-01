@@ -387,6 +387,17 @@ impl<'a> Frame<'a> {
     }
 
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
+        /// Maximum ACK Range Count in ACK Frame
+        ///
+        /// Given a max UDP datagram size of 64k bytes and a minimum ACK Range size of 2
+        /// bytes (2 QUIC varints), a single datagram can at most contain 32k ACK
+        /// Ranges.
+        ///
+        /// Note that the maximum (jumbogram) Ethernet MTU of 9216 or on the
+        /// Internet the regular Ethernet MTU of 1518 are more realistically to
+        /// be the limiting factor. Though for simplicity the higher limit is chosen.
+        const MAX_ACK_RANGE_COUNT: u64 = 32 * 1024;
+
         fn d<T>(v: Option<T>) -> Res<T> {
             v.ok_or(Error::NoMoreData)
         }
@@ -410,7 +421,13 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
                 let la = dv(dec)?;
                 let ad = dv(dec)?;
-                let nr = dv(dec)?;
+                let nr = dv(dec).and_then(|nr| {
+                    if nr < MAX_ACK_RANGE_COUNT {
+                        Ok(nr)
+                    } else {
+                        Err(Error::TooMuchData)
+                    }
+                })?;
                 let fa = dv(dec)?;
                 let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
                 for _ in 0..nr {
@@ -942,5 +959,17 @@ mod tests {
             fill: false,
         };
         just_dec(&f, "403103010203");
+    }
+
+    #[test]
+    fn frame_decode_enforces_bound_on_ack_range() {
+        let mut e = Encoder::new();
+
+        e.encode_varint(FRAME_TYPE_ACK);
+        e.encode_varint(0u64); // largest acknowledged
+        e.encode_varint(0u64); // ACK delay
+        e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
+
+        assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
     }
 }

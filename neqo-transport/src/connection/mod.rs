@@ -42,7 +42,7 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
+    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
     HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
     Server, ZeroRttChecker,
 };
@@ -542,6 +542,26 @@ impl Connection {
             return Err(Error::ConnectionState);
         }
         self.crypto.tls.set_ciphers(ciphers)?;
+        Ok(())
+    }
+
+    /// Enable a set of key exchange groups.
+    pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
+        if self.state != State::Init {
+            qerror!([self], "Cannot enable groups in state {:?}", self.state);
+            return Err(Error::ConnectionState);
+        }
+        self.crypto.tls.set_groups(groups)?;
+        Ok(())
+    }
+
+    /// Set the number of additional key shares to send in the client hello.
+    pub fn send_additional_key_shares(&mut self, count: usize) -> Res<()> {
+        if self.state != State::Init {
+            qerror!([self], "Cannot enable groups in state {:?}", self.state);
+            return Err(Error::ConnectionState);
+        }
+        self.crypto.tls.send_additional_key_shares(count)?;
         Ok(())
     }
 
