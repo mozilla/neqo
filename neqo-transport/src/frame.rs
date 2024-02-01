@@ -6,15 +6,16 @@
 
 // Directly relating to QUIC frames.
 
+use std::{convert::TryFrom, ops::RangeInclusive};
+
 use neqo_common::{qtrace, Decoder};
 
-use crate::cid::MAX_CONNECTION_ID_LEN;
-use crate::packet::PacketType;
-use crate::stream_id::{StreamId, StreamType};
-use crate::{AppError, ConnectionError, Error, Res, TransportError};
-
-use std::convert::TryFrom;
-use std::ops::RangeInclusive;
+use crate::{
+    cid::MAX_CONNECTION_ID_LEN,
+    packet::PacketType,
+    stream_id::{StreamId, StreamType},
+    AppError, ConnectionError, Error, Res, TransportError,
+};
 
 #[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
@@ -612,8 +613,9 @@ impl<'a> Frame<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neqo_common::{Decoder, Encoder};
+
+    use super::*;
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);

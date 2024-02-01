@@ -31,6 +31,7 @@ pub struct NeqoQlogShared {
 
 impl NeqoQlog {
     /// Create an enabled `NeqoQlog` configuration.
+    ///
     /// # Errors
     ///
     /// Will return `qlog::Error` if cannot write to the new log.

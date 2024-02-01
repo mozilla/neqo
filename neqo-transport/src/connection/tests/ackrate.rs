@@ -4,15 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{mem, time::Duration};
+
+use test_fixture::{addr_v4, assertions};
+
 use super::{
     super::{ConnectionParameters, ACK_RATIO_SCALE},
     ack_bytes, connect_rtt_idle, default_client, default_server, fill_cwnd, increase_cwnd,
     induce_persistent_congestion, new_client, new_server, send_something, DEFAULT_RTT,
 };
 use crate::stream_id::StreamType;
-
-use std::{mem, time::Duration};
-use test_fixture::{addr_v4, assertions};
 
 /// With the default RTT here (100ms) and default ratio (4), endpoints won't send
 /// `ACK_FREQUENCY` as the ACK delay isn't different enough from the default.

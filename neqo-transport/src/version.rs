@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{Error, Res};
-use neqo_common::qdebug;
 use std::convert::TryFrom;
+
+use neqo_common::qdebug;
+
+use crate::{Error, Res};
 
 pub type WireVersion = u32;
 

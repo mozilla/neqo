@@ -4,20 +4,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::Encoder;
-use std::cmp::{min, Ordering};
-use std::mem;
-use std::rc::Rc;
-use std::time::Instant;
-
-use crate::frame::{
-    FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION, FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
-    FRAME_TYPE_HANDSHAKE_DONE,
+use std::{
+    cmp::{min, Ordering},
+    mem,
+    rc::Rc,
+    time::Instant,
 };
-use crate::packet::PacketBuilder;
-use crate::path::PathRef;
-use crate::recovery::RecoveryToken;
-use crate::{ConnectionError, Error, Res};
+
+use neqo_common::Encoder;
+
+use crate::{
+    frame::{
+        FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION, FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+        FRAME_TYPE_HANDSHAKE_DONE,
+    },
+    packet::PacketBuilder,
+    path::PathRef,
+    recovery::RecoveryToken,
+    ConnectionError, Error, Res,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// The state of the Connection.

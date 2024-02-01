@@ -51,14 +51,11 @@ pub use self::{
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     quic_datagrams::DatagramTracking,
+    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
+    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
-};
-
-pub use self::{
-    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
-    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
 };
 
 pub type TransportError = u64;

@@ -13,6 +13,7 @@ use std::{
     time::Duration,
 };
 
+use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
@@ -21,8 +22,6 @@ use qlog::events::{
     },
     EventData, RawInfo,
 };
-
-use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 use smallvec::SmallVec;
 
 use crate::{
