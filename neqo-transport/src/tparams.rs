@@ -6,10 +6,12 @@
 
 // Transport parameters. See -transport section 7.3.
 
-use crate::{
-    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
-    version::{Version, VersionConfig, WireVersion},
-    Error, Res,
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    convert::TryFrom,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    rc::Rc,
 };
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
@@ -19,12 +21,10 @@ use neqo_crypto::{
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
 
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    convert::TryFrom,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
-    rc::Rc,
+use crate::{
+    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    version::{Version, VersionConfig, WireVersion},
+    Error, Res,
 };
 
 pub type TransportParameterId = u64;
@@ -71,6 +71,7 @@ impl PreferredAddress {
     /// Make a new preferred address configuration.
     ///
     /// # Panics
+    ///
     /// If neither address is provided, or if either address is of the wrong type.
     #[must_use]
     pub fn new(v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>) -> Self {
@@ -440,7 +441,7 @@ impl TransportParameters {
         let rbuf = random(4);
         let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
-        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a0a0a;
+        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
         for &v in versions.all() {
             if role == Role::Client && !versions.initial().is_compatible(v) {
@@ -584,7 +585,7 @@ impl TransportParametersHandler {
     pub fn set_version(&mut self, version: Version) {
         debug_assert_eq!(self.role, Role::Client);
         self.versions.set_initial(version);
-        self.local.set_versions(self.role, &self.versions)
+        self.local.set_versions(self.role, &self.versions);
     }
 
     pub fn remote(&self) -> &TransportParameters {
@@ -726,16 +727,12 @@ where
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
-        let tpslice = if let Some(v) = dec.decode_vvec() {
-            v
-        } else {
+        let Some(tpslice) = dec.decode_vvec() else {
             qinfo!("0-RTT: token code error");
             return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
-        let remembered = if let Ok(v) = TransportParameters::decode(&mut dec_tp) {
-            v
-        } else {
+        let Ok(remembered) = TransportParameters::decode(&mut dec_tp) else {
             qinfo!("0-RTT: transport parameter decode error");
             return ZeroRttCheckResult::Fail;
         };
@@ -1027,7 +1024,8 @@ mod tests {
     fn active_connection_id_limit_min_2() {
         let mut tps = TransportParameters::default();
 
-        // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport parameter.
+        // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport
+        // parameter.
         tps.params
             .insert(ACTIVE_CONNECTION_ID_LIMIT, TransportParameter::Integer(1));
 

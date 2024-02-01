@@ -7,14 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{event::Provider, hex, Datagram};
-use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
-use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
-    Error, Output, State, StreamId, StreamType,
-};
-
 use std::{
     cell::RefCell,
     cmp::min,
@@ -30,6 +22,14 @@ use std::{
     sync::Mutex,
     thread,
     time::{Duration, Instant},
+};
+
+use neqo_common::{event::Provider, hex, Datagram, IpTos};
+use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
+use neqo_transport::{
+    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error, Output, State, StreamId, StreamType,
 };
 use structopt::StructOpt;
 
@@ -148,8 +148,14 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            client.process_input(received, Instant::now());
+            let received = Datagram::new(
+                nctx.remote_addr,
+                nctx.local_addr,
+                IpTos::default(),
+                None,
+                &buf[..sz],
+            );
+            client.process_input(&received, Instant::now());
         }
     }
 }
@@ -200,7 +206,7 @@ impl Handler for H9Handler {
                     }
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    eprintln!("stream {stream_id} writable")
+                    eprintln!("stream {stream_id} writable");
                 }
                 _ => {
                     eprintln!("Unexpected event {event:?}");
@@ -309,8 +315,14 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
-            handler.h3.process_input(received, Instant::now());
+            let received = Datagram::new(
+                nctx.remote_addr,
+                nctx.local_addr,
+                IpTos::default(),
+                None,
+                &buf[..sz],
+            );
+            handler.h3.process_input(&received, Instant::now());
         }
     }
 }
@@ -548,7 +560,8 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
     }
 
     if *test == Test::D {
-        // Send another request, when the first one was send we probably did not have the peer's qpack parameter.
+        // Send another request, when the first one was send we probably did not have the peer's
+        // qpack parameter.
         let client_stream_id = hc
             .h3
             .fetch(
@@ -682,7 +695,13 @@ impl Handler for VnHandler {
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
         let mut payload = d[..].to_vec();
         payload[1] = 0x1a;
-        Some(Datagram::new(d.source(), d.destination(), payload))
+        Some(Datagram::new(
+            d.source(),
+            d.destination(),
+            d.tos(),
+            d.ttl(),
+            payload,
+        ))
     }
 }
 
@@ -736,11 +755,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
             return (test, String::from("OK"));
         }
         Test::H9 => test_h9(&nctx, &mut client),
-        Test::H3 => test_h3(&nctx, peer, client, test),
+        Test::H3 | Test::D => test_h3(&nctx, peer, client, test),
         Test::VN => unimplemented!(),
-        Test::R => test_h3_rz(&nctx, peer, client, test),
-        Test::Z => test_h3_rz(&nctx, peer, client, test),
-        Test::D => test_h3(&nctx, peer, client, test),
+        Test::R | Test::Z => test_h3_rz(&nctx, peer, client, test),
     };
 
     if let Err(e) = res {
@@ -774,15 +791,12 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     }
 
     for child in children {
-        match child.1.join() {
-            Ok(e) => {
-                eprintln!("Test complete {:?}, {:?}", child.0, e);
-                results.push(e)
-            }
-            Err(_) => {
-                eprintln!("Thread crashed {:?}", child.0);
-                results.push((child.0, String::from("CRASHED")));
-            }
+        if let Ok(e) = child.1.join() {
+            eprintln!("Test complete {:?}, {:?}", child.0, e);
+            results.push(e);
+        } else {
+            eprintln!("Thread crashed {:?}", child.0);
+            results.push((child.0, String::from("CRASHED")));
         }
     }
 

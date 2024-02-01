@@ -17,9 +17,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use smallvec::{smallvec, SmallVec};
-
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
+use smallvec::{smallvec, SmallVec};
 
 use crate::{
     ackrate::AckRate,
@@ -40,9 +39,9 @@ pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
 /// If the congestion window is this small, we will only send ACK frames.
 pub(crate) const ACK_ONLY_SIZE_LIMIT: usize = 256;
-/// The number of packets we send on a PTO.
-/// And the number to declare lost when the PTO timer is hit.
-pub const PTO_PACKET_COUNT: usize = 2;
+/// The maximum number of packets we send on a PTO.
+/// And the maximum number to declare lost when the PTO timer is hit.
+pub const MAX_PTO_PACKET_COUNT: usize = 2;
 /// The preferred limit on the number of packets that are tracked.
 /// If we exceed this number, we start sending `PING` frames sooner to
 /// force the peer to acknowledge some of them.
@@ -412,7 +411,7 @@ impl LossRecoverySpace {
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|(&k, _)| Some(k) < largest_acked)
+            .take_while(|(&k, _)| k < largest_acked.unwrap_or(PacketNumber::MAX))
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent + loss_delay <= now {
@@ -430,7 +429,9 @@ impl LossRecoverySpace {
                     largest_acked
                 );
             } else {
-                self.first_ooo_time = Some(packet.time_sent);
+                if largest_acked.is_some() {
+                    self.first_ooo_time = Some(packet.time_sent);
+                }
                 // No more packets can be declared lost after this one.
                 break;
             };
@@ -462,7 +463,9 @@ impl LossRecoverySpaces {
 
     /// Drop a packet number space and return all the packets that were
     /// outstanding, so that those can be marked as lost.
+    ///
     /// # Panics
+    ///
     /// If the space has already been removed.
     pub fn drop_space(&mut self, space: PacketNumberSpace) -> impl IntoIterator<Item = SentPacket> {
         let sp = match space {
@@ -520,21 +523,34 @@ struct PtoState {
 }
 
 impl PtoState {
-    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
+    /// The number of packets we send on a PTO.
+    /// And the number to declare lost when the PTO timer is hit.
+    fn pto_packet_count(space: PacketNumberSpace, rx_count: usize) -> usize {
+        if space == PacketNumberSpace::Initial && rx_count == 0 {
+            // For the Initial space, we only send one packet on PTO if we have not received any
+            // packets from the peer yet. This avoids sending useless PING-only packets
+            // when the Client Initial is deemed lost.
+            1
+        } else {
+            MAX_PTO_PACKET_COUNT
+        }
+    }
+
+    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet, rx_count: usize) -> Self {
         debug_assert!(probe[space]);
         Self {
             space,
             count: 1,
-            packets: PTO_PACKET_COUNT,
+            packets: Self::pto_packet_count(space, rx_count),
             probe,
         }
     }
 
-    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet) {
+    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet, rx_count: usize) {
         debug_assert!(probe[space]);
         self.space = space;
         self.count += 1;
-        self.packets = PTO_PACKET_COUNT;
+        self.packets = Self::pto_packet_count(space, rx_count);
         self.probe = probe;
     }
 
@@ -609,7 +625,7 @@ impl LossRecovery {
             .collect::<Vec<_>>();
         let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
-            path.discard_packet(p, now);
+            path.discard_packet(p, now, &mut self.stats.borrow_mut());
         }
         dropped
     }
@@ -749,7 +765,7 @@ impl LossRecovery {
             .collect::<Vec<_>>();
         let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
-            path.discard_packet(p, now);
+            path.discard_packet(p, now, &mut self.stats.borrow_mut());
         }
         dropped
     }
@@ -782,7 +798,7 @@ impl LossRecovery {
         qdebug!([self], "Reset loss recovery state for {}", space);
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
-            path.discard_packet(&p, now);
+            path.discard_packet(&p, now, &mut self.stats.borrow_mut());
         }
 
         // We just made progress, so discard PTO count.
@@ -835,11 +851,7 @@ impl LossRecovery {
         // where F = fast_pto / FAST_PTO_SCALE (== 1 by default)
         let pto_count = pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0));
         rtt.pto(pn_space)
-            .checked_mul(
-                u32::from(fast_pto)
-                    .checked_shl(pto_count)
-                    .unwrap_or(u32::MAX),
-            )
+            .checked_mul(u32::from(fast_pto) << min(pto_count, u32::BITS - u8::BITS))
             .map_or(Duration::from_secs(3600), |p| p / u32::from(FAST_PTO_SCALE))
     }
 
@@ -877,10 +889,11 @@ impl LossRecovery {
     }
 
     fn fire_pto(&mut self, pn_space: PacketNumberSpace, allow_probes: PacketNumberSpaceSet) {
+        let rx_count = self.stats.borrow().packets_rx;
         if let Some(st) = &mut self.pto_state {
-            st.pto(pn_space, allow_probes);
+            st.pto(pn_space, allow_probes, rx_count);
         } else {
-            self.pto_state = Some(PtoState::new(pn_space, allow_probes));
+            self.pto_state = Some(PtoState::new(pn_space, allow_probes, rx_count));
         }
 
         self.pto_state
@@ -910,7 +923,14 @@ impl LossRecovery {
                 if t <= now {
                     qdebug!([self], "PTO timer fired for {}", pn_space);
                     let space = self.spaces.get_mut(*pn_space).unwrap();
-                    lost.extend(space.pto_packets(PTO_PACKET_COUNT).cloned());
+                    lost.extend(
+                        space
+                            .pto_packets(PtoState::pto_packet_count(
+                                *pn_space,
+                                self.stats.borrow().packets_rx,
+                            ))
+                            .cloned(),
+                    );
 
                     pto_space = pto_space.or(Some(*pn_space));
                 }
@@ -998,6 +1018,17 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::RefCell,
+        convert::TryInto,
+        ops::{Deref, DerefMut, RangeInclusive},
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    use neqo_common::qlog::NeqoQlog;
+    use test_fixture::{addr, now};
+
     use super::{
         LossRecovery, LossRecoverySpace, PacketNumberSpace, SendProfile, SentPacket, FAST_PTO_SCALE,
     };
@@ -1009,15 +1040,6 @@ mod tests {
         rtt::RttEstimate,
         stats::{Stats, StatsCell},
     };
-    use neqo_common::qlog::NeqoQlog;
-    use std::{
-        cell::RefCell,
-        convert::TryInto,
-        ops::{Deref, DerefMut, RangeInclusive},
-        rc::Rc,
-        time::{Duration, Instant},
-    };
-    use test_fixture::{addr, now};
 
     // Shorthand for a time in milliseconds.
     const fn ms(t: u64) -> Duration {
@@ -1083,7 +1105,7 @@ mod tests {
     impl Default for Fixture {
         fn default() -> Self {
             const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
-            let mut path = Path::temporary(addr(), addr(), CC, NeqoQlog::default(), now());
+            let mut path = Path::temporary(addr(), addr(), CC, true, NeqoQlog::default(), now());
             path.make_permanent(
                 None,
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),

@@ -7,14 +7,9 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::Instant;
-
-use regex::Regex;
+use std::{
+    cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
+};
 
 use neqo_common::{event::Provider, hex, qdebug, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
@@ -23,6 +18,7 @@ use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State, StreamId,
 };
+use regex::Regex;
 
 use super::{qns_read_response, Args, HttpServer};
 
@@ -138,9 +134,7 @@ impl Http09Server {
             data
         };
 
-        let msg = if let Ok(s) = std::str::from_utf8(&buf[..]) {
-            s
-        } else {
+        let Ok(msg) = std::str::from_utf8(&buf[..]) else {
             self.save_partial(stream_id, buf, conn);
             return;
         };
@@ -199,7 +193,7 @@ impl Http09Server {
 }
 
 impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
 
@@ -238,7 +232,7 @@ impl HttpServer for Http09Server {
     }
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir)
+        self.server.set_qlog_dir(dir);
     }
 
     fn validate_address(&mut self, v: ValidateAddress) {

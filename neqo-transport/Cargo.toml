@@ -1,23 +1,25 @@
 [package]
 name = "neqo-transport"
-version = "0.6.8"
+version = "0.6.9"
 authors = ["EKR <ekr@rtfm.com>", "Andy Grover <agrover@mozilla.com>"]
 edition = "2018"
 rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-neqo-crypto = { path = "../neqo-crypto" }
+indexmap = "1.9.3"
+lazy_static = "1.4"
+log = {version = "0.4.17", default-features = false}
 neqo-common = { path = "../neqo-common" }
-lazy_static = "1.3.0"
-log = {version = "0.4.0", default-features = false}
-smallvec = "1.0.0"
-qlog = "0.10.0"
-indexmap = "1.0"
+neqo-crypto = { path = "../neqo-crypto" }
+qlog = "0.11.0"
+smallvec = "1.11.1"
 
 [dev-dependencies]
+enum-map = "2.7"
 test-fixture = { path = "../test-fixture" }
 
 [features]
+bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]

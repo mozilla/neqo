@@ -1,23 +1,23 @@
 [package]
 name = "neqo-http3"
-version = "0.6.8"
+version = "0.6.9"
 authors = ["Dragana Damjanovic <dragana.damjano@gmail.com>"]
 edition = "2018"
 rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+enumset = "1.1.2"
+lazy_static = "1.4"
+log = {version = "0.4.17", default-features = false}
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
-neqo-transport = { path = "./../neqo-transport" }
 neqo-qpack = { path = "./../neqo-qpack" }
-log = {version = "0.4.0", default-features = false}
-smallvec = "1.0.0"
-qlog = "0.10.0"
-sfv = "0.9.1"
-url = "2.0"
-lazy_static = "1.3.0"
-enumset = "1.1.2"
+neqo-transport = { path = "./../neqo-transport" }
+qlog = "0.11.0"
+sfv = "0.9.3"
+smallvec = "1.11.1"
+url = "2.5"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }

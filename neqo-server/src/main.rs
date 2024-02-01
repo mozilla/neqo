@@ -27,10 +27,7 @@ use std::{
 
 use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
-use neqo_transport::ConnectionIdGenerator;
-use structopt::StructOpt;
-
-use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header};
+use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -40,8 +37,10 @@ use neqo_http3::{
 };
 use neqo_transport::{
     server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
-    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType, Version,
+    ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
+    Version,
 };
+use structopt::StructOpt;
 
 use crate::old_https::Http09Server;
 
@@ -318,9 +317,15 @@ impl QuicParameters {
 }
 
 fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
-    let sent = socket
-        .send_to(&out_dgram, &out_dgram.destination())
-        .expect("Error sending datagram");
+    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()) {
+        Err(ref err) => {
+            if err.kind() != io::ErrorKind::WouldBlock || err.kind() == io::ErrorKind::Interrupted {
+                eprintln!("UDP send error: {err:?}");
+            }
+            0
+        }
+        Ok(res) => res,
+    };
     if sent != out_dgram.len() {
         eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
     }
@@ -351,7 +356,7 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
 }
 
 trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
     fn process_events(&mut self, args: &Args, now: Instant);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
@@ -467,7 +472,7 @@ impl Display for SimpleServer {
 }
 
 impl HttpServer for SimpleServer {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
 
@@ -564,7 +569,7 @@ impl HttpServer for SimpleServer {
     }
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir)
+        self.server.set_qlog_dir(dir);
     }
 
     fn validate_address(&mut self, v: ValidateAddress) {
@@ -590,7 +595,12 @@ fn read_dgram(
 ) -> Result<Option<Datagram>, io::Error> {
     let buf = &mut [0u8; 2048];
     let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
-        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+        Err(ref err)
+            if err.kind() == io::ErrorKind::WouldBlock
+                || err.kind() == io::ErrorKind::Interrupted =>
+        {
+            return Ok(None)
+        }
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
             return Err(err);
@@ -606,7 +616,13 @@ fn read_dgram(
         eprintln!("zero length datagram received?");
         Ok(None)
     } else {
-        Ok(Some(Datagram::new(remote_addr, *local_address, &buf[..sz])))
+        Ok(Some(Datagram::new(
+            remote_addr,
+            *local_address,
+            IpTos::default(),
+            None,
+            &buf[..sz],
+        )))
     }
 }
 
@@ -666,12 +682,13 @@ impl ServersRunner {
                 Ok(s) => s,
             };
 
-            let also_v4 = if socket.only_v6().unwrap_or(true) {
-                ""
-            } else {
-                " as well as V4"
+            print!("Server waiting for connection on: {local_addr:?}");
+            // On Windows, this is not supported.
+            #[cfg(not(target_os = "windows"))]
+            if !socket.only_v6().unwrap_or(true) {
+                print!(" as well as V4");
             };
-            println!("Server waiting for connection on: {local_addr:?}{also_v4}");
+            println!();
 
             self.poll.register(
                 &socket,
@@ -734,7 +751,7 @@ impl ServersRunner {
             .unwrap_or(first)
     }
 
-    fn process(&mut self, inx: usize, dgram: Option<Datagram>) -> bool {
+    fn process(&mut self, inx: usize, dgram: Option<&Datagram>) -> bool {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.find_socket(dgram.source());
@@ -770,7 +787,7 @@ impl ServersRunner {
                     if dgram.is_none() {
                         break;
                     }
-                    _ = self.process(inx, dgram);
+                    _ = self.process(inx, dgram.as_ref());
                 }
             } else {
                 _ = self.process(inx, None);
@@ -836,6 +853,17 @@ fn main() -> Result<(), io::Error> {
     init_db(args.db.clone());
 
     if let Some(testcase) = args.qns_test.as_ref() {
+        if args.quic_parameters.quic_version.is_empty() {
+            // Quic Interop Runner expects the server to support `Version1`
+            // only. Exceptions are testcases `versionnegotiation` (not yet
+            // implemented) and `v2`.
+            if testcase != "v2" {
+                args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+            }
+        } else {
+            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
+        }
+
         match testcase.as_str() {
             "http3" => (),
             "zerortt" => {
@@ -858,6 +886,10 @@ fn main() -> Result<(), io::Error> {
                 args.use_old_http = true;
                 args.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
+            }
+            "v2" => {
+                args.use_old_http = true;
+                args.alpn = String::from(HQ_INTEROP);
             }
             _ => exit(127),
         }

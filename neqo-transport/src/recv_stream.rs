@@ -8,6 +8,7 @@
 // incoming STREAM frames.
 
 use std::{
+    cell::RefCell,
     cmp::max,
     collections::BTreeMap,
     convert::TryFrom,
@@ -15,6 +16,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use neqo_common::{qtrace, Role};
 use smallvec::SmallVec;
 
 use crate::{
@@ -28,8 +30,6 @@ use crate::{
     stream_id::StreamId,
     AppError, Error, Res,
 };
-use neqo_common::{qtrace, Role};
-use std::cell::RefCell;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
@@ -680,12 +680,12 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state.name())
+                qtrace!("data received when we are in state {}", self.state.name());
             }
         }
 
         if !already_data_ready && (self.data_ready() || self.needs_to_inform_app_about_fin()) {
-            self.conn_events.recv_stream_readable(self.stream_id)
+            self.conn_events.recv_stream_readable(self.stream_id);
         }
 
         Ok(())
@@ -792,6 +792,7 @@ impl RecvStream {
     }
 
     /// # Errors
+    ///
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let data_recvd_state = matches!(self.state, RecvStreamState::DataRecvd { .. });
@@ -865,7 +866,7 @@ impl RecvStream {
                     err,
                     final_received: received,
                     final_read: read,
-                })
+                });
             }
             RecvStreamState::DataRecvd {
                 fc,
@@ -989,9 +990,11 @@ impl RecvStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use neqo_common::Encoder;
     use std::ops::Range;
+
+    use neqo_common::Encoder;
+
+    use super::*;
 
     const SESSION_WINDOW: usize = 1024;
 
