@@ -6,6 +6,29 @@
 
 // The class implementing a QUIC connection.
 
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    convert::TryFrom,
+    fmt::{self, Debug},
+    mem,
+    net::{IpAddr, SocketAddr},
+    ops::RangeInclusive,
+    rc::{Rc, Weak},
+    time::{Duration, Instant},
+};
+
+use neqo_common::{
+    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+};
+use neqo_crypto::{
+    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
+    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
+    Server, ZeroRttChecker,
+};
+use smallvec::SmallVec;
+
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
@@ -37,27 +60,6 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
-use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
-};
-use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
-};
-use smallvec::SmallVec;
-use std::{
-    cell::RefCell,
-    cmp::{max, min},
-    convert::TryFrom,
-    fmt::{self, Debug},
-    mem,
-    net::{IpAddr, SocketAddr},
-    ops::RangeInclusive,
-    rc::{Rc, Weak},
-    time::{Duration, Instant},
-};
 
 mod idle;
 pub mod params;
@@ -66,16 +68,16 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
-pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
+use idle::IdleTimeout;
 pub use params::ConnectionParameters;
+use params::PreferredAddressConfig;
 #[cfg(test)]
 pub use params::ACK_RATIO_SCALE;
-pub use state::{ClosingFrame, State};
-
-use idle::IdleTimeout;
-use params::PreferredAddressConfig;
 use saved::SavedDatagrams;
 use state::StateSignaling;
+pub use state::{ClosingFrame, State};
+
+pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -849,8 +851,8 @@ impl Connection {
                     qwarn!([self], "Closing again after error {:?}", err);
                 }
                 State::Init => {
-                    // We have not even sent anything just close the connection without sending any error.
-                    // This may happen when client_start fails.
+                    // We have not even sent anything just close the connection without sending any
+                    // error. This may happen when client_start fails.
                     self.set_state(State::Closed(error));
                 }
                 State::WaitInitial => {

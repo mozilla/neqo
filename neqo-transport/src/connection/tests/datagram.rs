@@ -4,21 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{cell::RefCell, convert::TryFrom, rc::Rc};
+
+use neqo_common::event::Provider;
+use test_fixture::now;
+
 use super::{
     assert_error, connect_force_idle, default_client, default_server, new_client, new_server,
     AT_LEAST_PTO,
 };
-use crate::events::{ConnectionEvent, OutgoingDatagramOutcome};
-use crate::frame::FRAME_TYPE_DATAGRAM;
-use crate::packet::PacketBuilder;
-use crate::quic_datagrams::MAX_QUIC_DATAGRAM;
 use crate::{
+    events::{ConnectionEvent, OutgoingDatagramOutcome},
+    frame::FRAME_TYPE_DATAGRAM,
+    packet::PacketBuilder,
+    quic_datagrams::MAX_QUIC_DATAGRAM,
     send_stream::{RetransmissionPriority, TransmissionPriority},
     Connection, ConnectionError, ConnectionParameters, Error, StreamType,
 };
-use neqo_common::event::Provider;
-use std::{cell::RefCell, convert::TryFrom, rc::Rc};
-use test_fixture::now;
 
 const DATAGRAM_LEN_MTU: u64 = 1310;
 const DATA_MTU: &[u8] = &[1; 1310];

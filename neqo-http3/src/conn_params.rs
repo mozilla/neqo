@@ -4,9 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::cmp::min;
+
 use neqo_qpack::QpackSettings;
 use neqo_transport::ConnectionParameters;
-use std::cmp::min;
 
 const QPACK_MAX_TABLE_SIZE_DEFAULT: u64 = 65536;
 const QPACK_TABLE_SIZE_LIMIT: u64 = (1 << 30) - 1;

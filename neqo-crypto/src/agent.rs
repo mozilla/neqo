@@ -4,6 +4,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    ffi::{CStr, CString},
+    mem::{self, MaybeUninit},
+    ops::{Deref, DerefMut},
+    os::raw::{c_uint, c_void},
+    pin::Pin,
+    ptr::{null, null_mut},
+    rc::Rc,
+    time::Instant,
+};
+
+use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qinfo, qtrace, qwarn};
+
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
     cert::CertificateInfo,
@@ -24,19 +39,6 @@ use crate::{
     secrets::SecretHolder,
     ssl::{self, PRBool},
     time::{Time, TimeHolder},
-};
-use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qinfo, qtrace, qwarn};
-use std::{
-    cell::RefCell,
-    convert::TryFrom,
-    ffi::{CStr, CString},
-    mem::{self, MaybeUninit},
-    ops::{Deref, DerefMut},
-    os::raw::{c_uint, c_void},
-    pin::Pin,
-    ptr::{null, null_mut},
-    rc::Rc,
-    time::Instant,
 };
 
 /// The maximum number of tickets to remember for a given connection.
@@ -549,9 +551,9 @@ impl SecretAgent {
 
     /// Install an extension handler.
     ///
-    /// This can be called multiple times with different values for `ext`.  The handler is provided as
-    /// `Rc<RefCell<dyn T>>` so that the caller is able to hold a reference to the handler and later
-    /// access any state that it accumulates.
+    /// This can be called multiple times with different values for `ext`.  The handler is provided
+    /// as `Rc<RefCell<dyn T>>` so that the caller is able to hold a reference to the handler
+    /// and later access any state that it accumulates.
     ///
     /// # Errors
     /// When the extension handler can't be successfully installed.
@@ -996,7 +998,8 @@ pub enum ZeroRttCheckResult {
     Fail,
 }
 
-/// A `ZeroRttChecker` is used by the agent to validate the application token (as provided by `send_ticket`)
+/// A `ZeroRttChecker` is used by the agent to validate the application token (as provided by
+/// `send_ticket`)
 pub trait ZeroRttChecker: std::fmt::Debug + std::marker::Unpin {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult;
 }
@@ -1090,7 +1093,8 @@ impl Server {
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_reject_0rtt
             }
             ZeroRttCheckResult::HelloRetryRequest(tok) => {
-                // Don't bother propagating errors from this, because it should be caught in testing.
+                // Don't bother propagating errors from this, because it should be caught in
+                // testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
                 let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);

@@ -9,11 +9,12 @@
 
 mod common;
 
+use std::{cell::RefCell, convert::TryFrom, mem, net::SocketAddr, rc::Rc, time::Duration};
+
 use common::{
     apply_header_protection, connect, connected_server, decode_initial_header, default_server,
     find_ticket, generate_ticket, initial_aead_and_hp, new_server, remove_header_protection,
 };
-
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
     generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
@@ -26,8 +27,6 @@ use test_fixture::{
     self, assertions, datagram, default_client, new_client, now, split_datagram,
     CountingConnectionIdGenerator,
 };
-
-use std::{cell::RefCell, convert::TryFrom, mem, net::SocketAddr, rc::Rc, time::Duration};
 
 /// Take a pair of connections in any state and complete the handshake.
 /// The `datagram` argument is a packet that was received from the server.

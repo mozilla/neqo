@@ -4,6 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    os::raw::{c_uint, c_void},
+    pin::Pin,
+    rc::Rc,
+};
+
 use crate::{
     agentio::as_c_void,
     constants::{Extension, HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
@@ -12,13 +20,6 @@ use crate::{
         PRBool, PRFileDesc, SECFailure, SECStatus, SECSuccess, SSLAlertDescription,
         SSLExtensionHandler, SSLExtensionWriter, SSLHandshakeType,
     },
-};
-use std::{
-    cell::RefCell,
-    convert::TryFrom,
-    os::raw::{c_uint, c_void},
-    pin::Pin,
-    rc::Rc,
 };
 
 experimental_api!(SSL_InstallExtensionHooks(

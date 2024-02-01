@@ -160,14 +160,8 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use neqo_qpack::Error as QpackError;
-pub use neqo_transport::{streams::SendOrder, Output, StreamId};
-use neqo_transport::{
-    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
-};
-use std::fmt::Debug;
+use std::{any::Any, cell::RefCell, fmt::Debug, rc::Rc};
 
-use crate::priority::PriorityHandler;
 use buffered_send_stream::BufferedStream;
 pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
@@ -177,15 +171,19 @@ use features::extended_connect::WebTransportSession;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
+use neqo_qpack::Error as QpackError;
+pub use neqo_transport::{streams::SendOrder, Output, StreamId};
+use neqo_transport::{
+    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
+};
 pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{
     Http3OrWebTransportStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
 };
-use std::any::Any;
-use std::cell::RefCell;
-use std::rc::Rc;
 use stream_type_reader::NewStreamType;
+
+use crate::priority::PriorityHandler;
 
 type Res<T> = Result<T, Error>;
 
@@ -193,7 +191,8 @@ type Res<T> = Result<T, Error>;
 pub enum Error {
     HttpNoError,
     HttpGeneralProtocol,
-    HttpGeneralProtocolStream, //this is the same as the above but it should only close a stream not a connection.
+    HttpGeneralProtocolStream, /* this is the same as the above but it should only close a
+                                * stream not a connection. */
     // When using this error, you need to provide a value that is unique, which
     // will allow the specific error to be identified.  This will be validated in CI.
     HttpInternal(u16),

@@ -6,14 +6,17 @@
 
 // https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
 
-use crate::frame::{FRAME_TYPE_DATAGRAM, FRAME_TYPE_DATAGRAM_WITH_LEN};
-use crate::packet::PacketBuilder;
-use crate::recovery::RecoveryToken;
-use crate::{events::OutgoingDatagramOutcome, ConnectionEvents, Error, Res, Stats};
+use std::{cmp::min, collections::VecDeque, convert::TryFrom};
+
 use neqo_common::Encoder;
-use std::cmp::min;
-use std::collections::VecDeque;
-use std::convert::TryFrom;
+
+use crate::{
+    events::OutgoingDatagramOutcome,
+    frame::{FRAME_TYPE_DATAGRAM, FRAME_TYPE_DATAGRAM_WITH_LEN},
+    packet::PacketBuilder,
+    recovery::RecoveryToken,
+    ConnectionEvents, Error, Res, Stats,
+};
 
 pub const MAX_QUIC_DATAGRAM: u64 = 65535;
 

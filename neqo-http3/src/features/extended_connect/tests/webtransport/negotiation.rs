@@ -4,17 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Duration;
+
+use neqo_common::{event::Provider, Encoder};
+use neqo_crypto::AuthenticationStatus;
+use neqo_transport::{Connection, ConnectionError, StreamType};
+use test_fixture::{default_server_h3, now};
+
 use super::{connect, default_http3_client, default_http3_server, exchange_packets};
 use crate::{
     settings::{HSetting, HSettingType, HSettings},
     Error, HFrame, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State,
     WebTransportEvent,
 };
-use neqo_common::{event::Provider, Encoder};
-use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{Connection, ConnectionError, StreamType};
-use std::time::Duration;
-use test_fixture::{default_server_h3, now};
 
 fn check_wt_event(client: &mut Http3Client, wt_enable_client: bool, wt_enable_server: bool) {
     let wt_event = client.events().find_map(|e| {

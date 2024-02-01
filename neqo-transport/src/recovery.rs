@@ -17,9 +17,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use smallvec::{smallvec, SmallVec};
-
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
+use smallvec::{smallvec, SmallVec};
 
 use crate::{
     ackrate::AckRate,
@@ -526,9 +525,9 @@ impl PtoState {
     /// And the number to declare lost when the PTO timer is hit.
     fn pto_packet_count(space: PacketNumberSpace, rx_count: usize) -> usize {
         if space == PacketNumberSpace::Initial && rx_count == 0 {
-            // For the Initial space, we only send one packet on PTO if we have not received any packets
-            // from the peer yet. This avoids sending useless PING-only packets when the Client Initial
-            // is deemed lost.
+            // For the Initial space, we only send one packet on PTO if we have not received any
+            // packets from the peer yet. This avoids sending useless PING-only packets
+            // when the Client Initial is deemed lost.
             1
         } else {
             MAX_PTO_PACKET_COUNT
@@ -1017,6 +1016,17 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::RefCell,
+        convert::TryInto,
+        ops::{Deref, DerefMut, RangeInclusive},
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    use neqo_common::qlog::NeqoQlog;
+    use test_fixture::{addr, now};
+
     use super::{
         LossRecovery, LossRecoverySpace, PacketNumberSpace, SendProfile, SentPacket, FAST_PTO_SCALE,
     };
@@ -1028,15 +1038,6 @@ mod tests {
         rtt::RttEstimate,
         stats::{Stats, StatsCell},
     };
-    use neqo_common::qlog::NeqoQlog;
-    use std::{
-        cell::RefCell,
-        convert::TryInto,
-        ops::{Deref, DerefMut, RangeInclusive},
-        rc::Rc,
-        time::{Duration, Instant},
-    };
-    use test_fixture::{addr, now};
 
     // Shorthand for a time in milliseconds.
     const fn ms(t: u64) -> Duration {

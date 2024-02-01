@@ -4,10 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::huffman_decode_helper::{HuffmanDecoderNode, HUFFMAN_DECODE_ROOT};
-use crate::huffman_table::HUFFMAN_TABLE;
-use crate::{Error, Res};
 use std::convert::TryFrom;
+
+use crate::{
+    huffman_decode_helper::{HuffmanDecoderNode, HUFFMAN_DECODE_ROOT},
+    huffman_table::HUFFMAN_TABLE,
+    Error, Res,
+};
 
 struct BitReader<'a> {
     input: &'a [u8],
@@ -66,8 +69,8 @@ impl<'a> BitReader<'a> {
 
 /// Decodes huffman encoded input.
 /// # Errors
-/// This function may return `HuffmanDecompressionFailed` if `input` is not a correct huffman-encoded array of bits.
-/// # Panics
+/// This function may return `HuffmanDecompressionFailed` if `input` is not a correct
+/// huffman-encoded array of bits. # Panics
 /// Never, but rust can't know that.
 pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
     let mut reader = BitReader::new(input);

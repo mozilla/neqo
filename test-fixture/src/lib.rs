@@ -7,22 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::{
-    event::Provider,
-    hex,
-    qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTos, Role,
-};
-
-use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
-use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
-use neqo_transport::{
-    version::WireVersion, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
-    ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
-};
-
-use qlog::{events::EventImportance, streamer::QlogStreamer};
-
 use std::{
     cell::RefCell,
     cmp::max,
@@ -36,6 +20,19 @@ use std::{
 };
 
 use lazy_static::lazy_static;
+use neqo_common::{
+    event::Provider,
+    hex,
+    qlog::{new_trace, NeqoQlog},
+    qtrace, Datagram, Decoder, IpTos, Role,
+};
+use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
+use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
+use neqo_transport::{
+    version::WireVersion, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
+    ConnectionIdGenerator, ConnectionIdRef, ConnectionParameters, State, Version,
+};
+use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
 

@@ -4,12 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{addr, addr_v4};
+use std::{
+    convert::{TryFrom, TryInto},
+    net::SocketAddr,
+};
+
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::version::WireVersion;
-use neqo_transport::Version;
-use std::convert::{TryFrom, TryInto};
-use std::net::SocketAddr;
+use neqo_transport::{version::WireVersion, Version};
+
+use crate::{addr, addr_v4};
 
 const PACKET_TYPE_MASK: u8 = 0b1011_0000;
 

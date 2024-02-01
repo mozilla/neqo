@@ -8,17 +8,21 @@
 
 #![deny(clippy::pedantic)]
 
-use std::cmp::{max, min};
-use std::time::{Duration, Instant};
+use std::{
+    cmp::{max, min},
+    time::{Duration, Instant},
+};
 
 use neqo_common::{qlog::NeqoQlog, qtrace};
 
-use crate::ackrate::{AckRate, PeerAckDelay};
-use crate::packet::PacketBuilder;
-use crate::qlog::{self, QlogMetric};
-use crate::recovery::RecoveryToken;
-use crate::stats::FrameStats;
-use crate::tracking::PacketNumberSpace;
+use crate::{
+    ackrate::{AckRate, PeerAckDelay},
+    packet::PacketBuilder,
+    qlog::{self, QlogMetric},
+    recovery::RecoveryToken,
+    stats::FrameStats,
+    tracking::PacketNumberSpace,
+};
 
 /// The smallest time that the system timer (via `sleep()`, `nanosleep()`,
 /// `select()`, or similar) can reliably deliver; see `neqo_common::hrtime`.

@@ -16,9 +16,10 @@ pub struct Prefix {
 impl Prefix {
     pub fn new(prefix: u8, len: u8) -> Self {
         // len should never be larger than 7.
-        // Most of Prefixes are instantiated as consts bellow. The only place where this construcrtor is used
-        // is in tests and when literals are encoded and the Huffman bit is added to one of the consts bellow.
-        // create_prefix guaranty that all const have len < 7 so we can safely assert that len is <=7.
+        // Most of Prefixes are instantiated as consts bellow. The only place where this
+        // construcrtor is used is in tests and when literals are encoded and the Huffman
+        // bit is added to one of the consts bellow. create_prefix guaranty that all const
+        // have len < 7 so we can safely assert that len is <=7.
         assert!(len <= 7);
         assert!((len == 0) || (prefix & ((1 << (8 - len)) - 1) == 0));
         Self {
@@ -137,5 +138,6 @@ create_prefix!(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC, 0x40, 4, 0xD0);
 create_prefix!(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST, 0x00, 5, 0xF0);
 
 // | 0 | 0 | 1 | N | H |  Index(3+) |
-// N is ignored and H is not relevant for decoding this prefix, therefore the mask is 1110 0000 = 0xE0
+// N is ignored and H is not relevant for decoding this prefix, therefore the mask is 1110 0000 =
+// 0xE0
 create_prefix!(HEADER_FIELD_LITERAL_NAME_LITERAL, 0x20, 4, 0xE0);

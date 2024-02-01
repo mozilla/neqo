@@ -37,15 +37,19 @@ pub mod selfencrypt;
 mod ssl;
 mod time;
 
+use std::{
+    ffi::CString,
+    path::{Path, PathBuf},
+    ptr::null,
+};
+
 #[cfg(not(feature = "fuzzing"))]
 pub use self::aead::RealAead as Aead;
-
-#[cfg(feature = "fuzzing")]
-pub use self::aead_fuzzing::FuzzingAead as Aead;
-
 #[cfg(feature = "fuzzing")]
 pub use self::aead::RealAead;
-
+#[cfg(feature = "fuzzing")]
+pub use self::aead_fuzzing::FuzzingAead as Aead;
+use self::once::OnceResult;
 pub use self::{
     agent::{
         Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken,
@@ -64,14 +68,6 @@ pub use self::{
     replay::AntiReplay,
     secrets::SecretDirection,
     ssl::Opt,
-};
-
-use self::once::OnceResult;
-
-use std::{
-    ffi::CString,
-    path::{Path, PathBuf},
-    ptr::null,
 };
 
 const MINIMUM_NSS_VERSION: &str = "3.97";
@@ -119,8 +115,8 @@ fn version_check() {
     );
 }
 
-/// Initialize NSS.  This only executes the initialization routines once, so if there is any chance that
-/// # Panics
+/// Initialize NSS.  This only executes the initialization routines once, so if there is any chance
+/// that # Panics
 /// When NSS initialization fails.
 pub fn init() {
     // Set time zero.

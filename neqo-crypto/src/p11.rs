@@ -9,8 +9,6 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::err::{secstatus_to_res, Error, Res};
-use neqo_common::hex_with_len;
 use std::{
     convert::TryFrom,
     mem,
@@ -18,6 +16,10 @@ use std::{
     os::raw::{c_int, c_uint},
     ptr::null_mut,
 };
+
+use neqo_common::hex_with_len;
+
+use crate::err::{secstatus_to_res, Error, Res};
 
 #[allow(clippy::upper_case_acronyms)]
 #[allow(clippy::unreadable_literal)]
@@ -294,8 +296,9 @@ pub fn random(size: usize) -> Vec<u8> {
 
 #[cfg(test)]
 mod test {
-    use super::random;
     use test_fixture::fixture_init;
+
+    use super::random;
 
     #[test]
     fn randomness() {

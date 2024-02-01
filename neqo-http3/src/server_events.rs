@@ -6,20 +6,25 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::connection::{Http3State, WebTransportSessionAcceptAction};
-use crate::connection_server::Http3ServerHandler;
-use crate::{
-    features::extended_connect::SessionCloseReason, Http3StreamInfo, Http3StreamType, Priority, Res,
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    convert::TryFrom,
+    ops::{Deref, DerefMut},
+    rc::Rc,
 };
-use neqo_common::{qdebug, qinfo, Encoder, Header};
-use neqo_transport::server::ActiveConnectionRef;
-use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, StreamType};
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
+use neqo_common::{qdebug, qinfo, Encoder, Header};
+use neqo_transport::{
+    server::ActiveConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
+};
+
+use crate::{
+    connection::{Http3State, WebTransportSessionAcceptAction},
+    connection_server::Http3ServerHandler,
+    features::extended_connect::SessionCloseReason,
+    Http3StreamInfo, Http3StreamType, Priority, Res,
+};
 
 #[derive(Debug, Clone)]
 pub struct StreamHandler {

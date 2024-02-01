@@ -6,14 +6,15 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::{Error, RecvStream, Res};
+use std::{convert::TryFrom, fmt::Debug};
+
 use neqo_common::{
     hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
     IncrementalDecoderUint,
 };
 use neqo_transport::{Connection, StreamId};
-use std::convert::TryFrom;
-use std::fmt::Debug;
+
+use crate::{Error, RecvStream, Res};
 
 const MAX_READ_SIZE: usize = 4096;
 
@@ -32,8 +33,8 @@ pub(crate) trait FrameDecoder<T> {
 pub(crate) trait StreamReader {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
-    /// Return an error if the stream was closed on the transport layer, but that information is not yet
-    /// consumed on the  http/3 layer.
+    /// Return an error if the stream was closed on the transport layer, but that information is not
+    /// yet consumed on the  http/3 layer.
     fn read_data(&mut self, buf: &mut [u8]) -> Res<(usize, bool)>;
 }
 

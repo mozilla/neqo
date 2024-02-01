@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::convert::TryFrom;
+
+use neqo_common::{qdebug, Header};
+use neqo_transport::{Connection, StreamId};
+
 use crate::{
     decoder_instructions::DecoderInstruction,
     encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader},
@@ -14,9 +19,6 @@ use crate::{
     table::HeaderTable,
     Error, QpackSettings, Res,
 };
-use neqo_common::{qdebug, Header};
-use neqo_transport::{Connection, StreamId};
-use std::convert::TryFrom;
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
@@ -272,12 +274,14 @@ fn map_error(err: &Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{Connection, Error, QPackDecoder, Res};
-    use crate::QpackSettings;
+    use std::{convert::TryFrom, mem};
+
     use neqo_common::Header;
     use neqo_transport::{StreamId, StreamType};
-    use std::{convert::TryFrom, mem};
     use test_fixture::now;
+
+    use super::{Connection, Error, QPackDecoder, Res};
+    use crate::QpackSettings;
 
     const STREAM_0: StreamId = StreamId::new(0);
 
@@ -434,7 +438,8 @@ mod tests {
         );
     }
 
-    // this test tests header decoding, the header acks command and the insert count increment command.
+    // this test tests header decoding, the header acks command and the insert count increment
+    // command.
     #[test]
     fn test_duplicate() {
         let mut decoder = connect();
@@ -467,8 +472,8 @@ mod tests {
     fn test_encode_incr_encode_header_ack_some() {
         // 1. Decoder receives an instruction (header and value both as literal)
         // 2. Decoder process the instruction and sends an increment instruction.
-        // 3. Decoder receives another two instruction (header and value both as literal) and
-        //    a header block.
+        // 3. Decoder receives another two instruction (header and value both as literal) and a
+        //    header block.
         // 4. Now it sends only a header ack and an increment instruction with increment==1.
         let headers = vec![
             Header::new("my-headera", "my-valuea"),
@@ -504,8 +509,8 @@ mod tests {
     fn test_encode_incr_encode_header_ack_all() {
         // 1. Decoder receives an instruction (header and value both as literal)
         // 2. Decoder process the instruction and sends an increment instruction.
-        // 3. Decoder receives another instruction (header and value both as literal) and
-        //    a header block.
+        // 3. Decoder receives another instruction (header and value both as literal) and a header
+        //    block.
         // 4. Now it sends only a header ack.
         let headers = vec![
             Header::new("my-headera", "my-valuea"),
@@ -604,7 +609,8 @@ mod tests {
                 ],
                 encoder_inst: &[],
             },
-            // test adding a new header and encode_post_base_index, also test fix_header_block_prefix
+            // test adding a new header and encode_post_base_index, also test
+            // fix_header_block_prefix
             TestElement {
                 headers: vec![Header::new("my-header", "my-value")],
                 header_block: &[0x02, 0x80, 0x10],
@@ -683,7 +689,8 @@ mod tests {
                 ],
                 encoder_inst: &[],
             },
-            // test adding a new header and encode_post_base_index, also test fix_header_block_prefix
+            // test adding a new header and encode_post_base_index, also test
+            // fix_header_block_prefix
             TestElement {
                 headers: vec![Header::new("my-header", "my-value")],
                 header_block: &[0x02, 0x80, 0x10],

@@ -7,6 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::fmt::{Debug, Formatter};
+
 use url::{ParseError, Url};
 
 pub trait RequestTarget: Debug {

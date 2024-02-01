@@ -6,13 +6,12 @@
 
 #![deny(clippy::pedantic)]
 
-use crate::version::Version;
-use crate::{Error, Res};
+use std::cell::RefCell;
 
 use neqo_common::qerror;
 use neqo_crypto::{hkdf, Aead, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
-use std::cell::RefCell;
+use crate::{version::Version, Error, Res};
 
 /// The AEAD used for Retry is fixed, so use thread local storage.
 fn make_aead(version: Version) -> Aead {

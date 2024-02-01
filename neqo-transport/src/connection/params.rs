@@ -4,18 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT};
+use std::{cmp::max, convert::TryFrom, time::Duration};
+
 pub use crate::recovery::FAST_PTO_SCALE;
-use crate::recv_stream::RECV_BUFFER_SIZE;
-use crate::rtt::GRANULARITY;
-use crate::stream_id::StreamType;
-use crate::tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler};
-use crate::tracking::DEFAULT_ACK_DELAY;
-use crate::version::{Version, VersionConfig};
-use crate::{CongestionControlAlgorithm, Res};
-use std::cmp::max;
-use std::convert::TryFrom;
-use std::time::Duration;
+use crate::{
+    connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
+    recv_stream::RECV_BUFFER_SIZE,
+    rtt::GRANULARITY,
+    stream_id::StreamType,
+    tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
+    tracking::DEFAULT_ACK_DELAY,
+    version::{Version, VersionConfig},
+    CongestionControlAlgorithm, Res,
+};
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
@@ -49,11 +50,14 @@ pub struct ConnectionParameters {
     cc_algorithm: CongestionControlAlgorithm,
     /// Initial connection-level flow control limit.
     max_data: u64,
-    /// Initial flow control limit for receiving data on bidirectional streams that the peer creates.
+    /// Initial flow control limit for receiving data on bidirectional streams that the peer
+    /// creates.
     max_stream_data_bidi_remote: u64,
-    /// Initial flow control limit for receiving data on bidirectional streams that this endpoint creates.
+    /// Initial flow control limit for receiving data on bidirectional streams that this endpoint
+    /// creates.
     max_stream_data_bidi_local: u64,
-    /// Initial flow control limit for receiving data on unidirectional streams that the peer creates.
+    /// Initial flow control limit for receiving data on unidirectional streams that the peer
+    /// creates.
     max_stream_data_uni: u64,
     /// Initial limit on bidirectional streams that the peer creates.
     max_streams_bidi: u64,

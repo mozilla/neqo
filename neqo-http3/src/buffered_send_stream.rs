@@ -4,9 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::Res;
 use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId};
+
+use crate::Res;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BufferedStream {

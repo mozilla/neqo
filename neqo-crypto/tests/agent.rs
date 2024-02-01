@@ -1,20 +1,21 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
+use std::boxed::Box;
+
 use neqo_crypto::{
     generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, SecretAgentPreInfo,
     Server, ZeroRttCheckResult, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
     TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, TLS_VERSION_1_3,
 };
 
-use std::boxed::Box;
-
 mod handshake;
+use test_fixture::{fixture_init, now};
+
 use crate::handshake::{
     connect, connect_fail, forward_records, resumption_setup, PermissiveZeroRttChecker, Resumption,
     ZERO_RTT_TOKEN_DATA,
 };
-use test_fixture::{fixture_init, now};
 
 #[test]
 fn make_client() {

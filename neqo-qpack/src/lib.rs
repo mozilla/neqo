@@ -6,7 +6,8 @@
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
-// This is because of Encoder and Decoder structs. TODO: think about a better namings for crate and structs.
+// This is because of Encoder and Decoder structs. TODO: think about a better namings for crate and
+// structs.
 #![allow(clippy::module_name_repetitions)]
 
 pub mod decoder;
@@ -47,7 +48,8 @@ pub enum Error {
     InternalError(u16),
 
     // These are internal errors, they will be transformed into one of the above.
-    NeedMoreData, // Return when an input stream does not have more data that a decoder needs.(It does not mean that a stream is closed.)
+    NeedMoreData, /* Return when an input stream does not have more data that a decoder
+                   * needs.(It does not mean that a stream is closed.) */
     HeaderLookup,
     HuffmanDecompressionFailed,
     BadUtf8,

@@ -6,10 +6,12 @@
 
 #![allow(clippy::unused_unit)] // see https://github.com/Lymia/enumset/issues/44
 
-use crate::{Error, MessageType, Res};
+use std::convert::TryFrom;
+
 use enumset::{enum_set, EnumSet, EnumSetType};
 use neqo_common::Header;
-use std::convert::TryFrom;
+
+use crate::{Error, MessageType, Res};
 
 #[derive(EnumSetType, Debug)]
 enum PseudoHeaderState {
@@ -168,9 +170,10 @@ pub fn trailers_valid(headers: &[Header]) -> Res<()> {
 
 #[cfg(test)]
 mod tests {
+    use neqo_common::Header;
+
     use super::headers_valid;
     use crate::MessageType;
-    use neqo_common::Header;
 
     fn create_connect_headers() -> Vec<Header> {
         vec![

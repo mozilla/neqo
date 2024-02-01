@@ -4,17 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{
-    err::Res,
-    ssl::PRFileDesc,
-    time::{Interval, PRTime, Time},
-};
 use std::{
     convert::{TryFrom, TryInto},
     ops::{Deref, DerefMut},
     os::raw::c_uint,
     ptr::null_mut,
     time::{Duration, Instant},
+};
+
+use crate::{
+    err::Res,
+    ssl::PRFileDesc,
+    time::{Interval, PRTime, Time},
 };
 
 // This is an opaque struct in NSS.

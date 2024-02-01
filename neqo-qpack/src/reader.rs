@@ -4,10 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{huffman::decode_huffman, prefix::Prefix, Error, Res};
+use std::{convert::TryInto, mem, str};
+
 use neqo_common::{qdebug, qerror};
 use neqo_transport::{Connection, StreamId};
-use std::{convert::TryInto, mem, str};
+
+use crate::{huffman::decode_huffman, prefix::Prefix, Error, Res};
 
 pub trait ReadByte {
     /// # Errors
@@ -318,8 +320,9 @@ pub fn parse_utf8(v: &[u8]) -> Res<&str> {
 #[cfg(test)]
 pub(crate) mod test_receiver {
 
-    use super::{Error, ReadByte, Reader, Res};
     use std::collections::VecDeque;
+
+    use super::{Error, ReadByte, Reader, Res};
 
     #[derive(Default)]
     pub struct TestReceiver {
@@ -358,11 +361,12 @@ pub(crate) mod test_receiver {
 #[cfg(test)]
 mod tests {
 
+    use test_receiver::TestReceiver;
+
     use super::{
         parse_utf8, str, test_receiver, Error, IntReader, LiteralReader, ReadByte,
         ReceiverBufferWrapper, Res,
     };
-    use test_receiver::TestReceiver;
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
         (&[0xEA], 3, 10),

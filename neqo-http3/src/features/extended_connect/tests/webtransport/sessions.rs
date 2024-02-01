@@ -4,18 +4,24 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::features::extended_connect::tests::webtransport::{
-    default_http3_client, default_http3_server, wt_default_parameters, WtTest,
-};
-use crate::{
-    features::extended_connect::SessionCloseReason, frames::WebTransportFrame, Error, Header,
-    Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent, Http3State,
-    Priority, WebTransportEvent, WebTransportServerEvent, WebTransportSessionAcceptAction,
-};
+use std::mem;
+
 use neqo_common::{event::Provider, Encoder};
 use neqo_transport::StreamType;
-use std::mem;
 use test_fixture::now;
+
+use crate::{
+    features::extended_connect::{
+        tests::webtransport::{
+            default_http3_client, default_http3_server, wt_default_parameters, WtTest,
+        },
+        SessionCloseReason,
+    },
+    frames::WebTransportFrame,
+    Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
+    Http3State, Priority, WebTransportEvent, WebTransportServerEvent,
+    WebTransportSessionAcceptAction,
+};
 
 #[test]
 fn wt_session() {

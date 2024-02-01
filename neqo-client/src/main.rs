@@ -7,25 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use common::IpTos;
-use qlog::{events::EventImportance, streamer::QlogStreamer};
-
-use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
-
-use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
-use neqo_crypto::{
-    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init, AuthenticationStatus, Cipher, ResumptionToken,
-};
-use neqo_http3::{
-    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
-    Priority,
-};
-use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
-};
-
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -41,6 +22,22 @@ use std::{
     time::{Duration, Instant},
 };
 
+use common::IpTos;
+use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
+use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
+use neqo_crypto::{
+    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    init, AuthenticationStatus, Cipher, ResumptionToken,
+};
+use neqo_http3::{
+    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
+    Priority,
+};
+use neqo_transport::{
+    CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
+    EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
+};
+use qlog::{events::EventImportance, streamer::QlogStreamer};
 use structopt::StructOpt;
 use url::{Origin, Url};
 
@@ -1140,9 +1137,6 @@ mod old {
         time::{Duration, Instant},
     };
 
-    use url::Url;
-
-    use super::{qlog_new, KeyUpdateState, Res};
     use mio::{Events, Poll};
     use neqo_common::{event::Provider, Datagram, IpTos};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
@@ -1150,8 +1144,9 @@ mod old {
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
         StreamType,
     };
+    use url::Url;
 
-    use super::{emit_datagram, get_output_file, Args};
+    use super::{emit_datagram, get_output_file, qlog_new, Args, KeyUpdateState, Res};
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,

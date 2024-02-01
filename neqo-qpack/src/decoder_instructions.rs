@@ -4,15 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::prefix::{
-    DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION,
-};
-use crate::qpack_send_buf::QpackData;
-use crate::reader::{IntReader, ReadByte};
-use crate::Res;
+use std::mem;
+
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::StreamId;
-use std::mem;
+
+use crate::{
+    prefix::{DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION},
+    qpack_send_buf::QpackData,
+    reader::{IntReader, ReadByte},
+    Res,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum DecoderInstruction {
@@ -137,10 +139,10 @@ impl DecoderInstructionReader {
 #[cfg(test)]
 mod test {
 
-    use super::{DecoderInstruction, DecoderInstructionReader, QpackData};
-    use crate::reader::test_receiver::TestReceiver;
-    use crate::Error;
     use neqo_transport::StreamId;
+
+    use super::{DecoderInstruction, DecoderInstructionReader, QpackData};
+    use crate::{reader::test_receiver::TestReceiver, Error};
 
     fn test_encoding_decoding(instruction: DecoderInstruction) {
         let mut buf = QpackData::default();

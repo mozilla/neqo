@@ -27,9 +27,6 @@ use std::{
 
 use mio::{net::UdpSocket, Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
-use neqo_transport::ConnectionIdGenerator;
-use structopt::StructOpt;
-
 use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -40,8 +37,10 @@ use neqo_http3::{
 };
 use neqo_transport::{
     server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
-    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType, Version,
+    ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
+    Version,
 };
+use structopt::StructOpt;
 
 use crate::old_https::Http09Server;
 

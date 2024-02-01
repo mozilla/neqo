@@ -4,34 +4,39 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Output, State};
-use super::{
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    get_tokens, handshake, maybe_authenticate, resumed_server, send_something,
-    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-};
-use crate::connection::AddressValidation;
-use crate::events::ConnectionEvent;
-use crate::path::PATH_MTU_V6;
-use crate::server::ValidateAddress;
-use crate::tparams::{TransportParameter, MIN_ACK_DELAY};
-use crate::tracking::DEFAULT_ACK_DELAY;
-use crate::{
-    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    mem,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    rc::Rc,
+    time::Duration,
 };
 
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::mem;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
-use std::time::Duration;
-use test_fixture::assertions::assert_coalesced_0rtt;
-use test_fixture::{self, addr, assertions, datagram, fixture_init, now, split_datagram};
+use test_fixture::{
+    self, addr, assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now,
+    split_datagram,
+};
+
+use super::{
+    super::{Connection, Output, State},
+    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
+    get_tokens, handshake, maybe_authenticate, resumed_server, send_something,
+    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+};
+use crate::{
+    connection::AddressValidation,
+    events::ConnectionEvent,
+    path::PATH_MTU_V6,
+    server::ValidateAddress,
+    tparams::{TransportParameter, MIN_ACK_DELAY},
+    tracking::DEFAULT_ACK_DELAY,
+    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
+};
 
 const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";

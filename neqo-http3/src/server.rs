@@ -6,6 +6,21 @@
 
 #![allow(clippy::module_name_repetitions)]
 
+use std::{
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    path::PathBuf,
+    rc::Rc,
+    time::Instant,
+};
+
+use neqo_common::{qtrace, Datagram};
+use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
+use neqo_transport::{
+    server::{ActiveConnectionRef, Server, ValidateAddress},
+    ConnectionIdGenerator, Output,
+};
+
 use crate::{
     connection::Http3State,
     connection_server::Http3ServerHandler,
@@ -15,19 +30,6 @@ use crate::{
     },
     settings::HttpZeroRttChecker,
     Http3Parameters, Http3StreamInfo, Res,
-};
-use neqo_common::{qtrace, Datagram};
-use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
-use neqo_transport::{
-    server::{ActiveConnectionRef, Server, ValidateAddress},
-    ConnectionIdGenerator, Output,
-};
-use std::{
-    cell::{RefCell, RefMut},
-    collections::HashMap,
-    path::PathBuf,
-    rc::Rc,
-    time::Instant,
 };
 
 type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
@@ -309,23 +311,25 @@ fn prepare_data(
 
 #[cfg(test)]
 mod tests {
-    use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
+    use std::{
+        collections::HashMap,
+        mem,
+        ops::{Deref, DerefMut},
+    };
+
     use neqo_common::{event::Provider, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
         Connection, ConnectionError, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
     };
-    use std::{
-        collections::HashMap,
-        mem,
-        ops::{Deref, DerefMut},
-    };
     use test_fixture::{
         anti_replay, default_client, fixture_init, now, CountingConnectionIdGenerator,
         DEFAULT_ALPN, DEFAULT_KEYS,
     };
+
+    use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
+    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
 
     const DEFAULT_SETTINGS: QpackSettings = QpackSettings {
         max_table_size_encoder: 100,

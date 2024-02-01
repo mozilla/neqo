@@ -6,6 +6,20 @@
 
 #![deny(clippy::pedantic)]
 
+use std::{
+    cell::RefCell,
+    cmp::min,
+    convert::TryFrom,
+    mem,
+    rc::Rc,
+    time::{Duration, Instant},
+};
+
+use enum_map::enum_map;
+use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
+use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
+use test_fixture::{self, addr, fixture_init, new_neqo_qlog, now};
+
 use super::{Connection, ConnectionError, ConnectionId, Output, State};
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
@@ -20,21 +34,6 @@ use crate::{
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
     Version,
 };
-
-use std::{
-    cell::RefCell,
-    cmp::min,
-    convert::TryFrom,
-    mem,
-    rc::Rc,
-    time::{Duration, Instant},
-};
-
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
-use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{self, addr, fixture_init, new_neqo_qlog, now};
-
-use enum_map::enum_map;
 
 // All the tests.
 mod ackrate;

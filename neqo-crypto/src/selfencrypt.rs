@@ -4,14 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::constants::{Cipher, Version};
-use crate::err::{Error, Res};
-use crate::p11::{random, SymKey};
-use crate::{hkdf, Aead};
+use std::mem;
 
 use neqo_common::{hex, qinfo, qtrace, Encoder};
 
-use std::mem;
+use crate::{
+    constants::{Cipher, Version},
+    err::{Error, Res},
+    hkdf,
+    p11::{random, SymKey},
+    Aead,
+};
 
 #[derive(Debug)]
 pub struct SelfEncrypt {
@@ -46,7 +49,8 @@ impl SelfEncrypt {
         Aead::new(false, self.version, self.cipher, &secret, "neqo self")
     }
 
-    /// Rotate keys.  This causes any previous key that is being held to be replaced by the current key.
+    /// Rotate keys.  This causes any previous key that is being held to be replaced by the current
+    /// key.
     ///
     /// # Errors
     /// Failure to generate a new HKDF key using NSS results in an error.

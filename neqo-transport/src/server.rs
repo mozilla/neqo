@@ -6,6 +6,18 @@
 
 // This file implements a server that can handle multiple connections.
 
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet, VecDeque},
+    fs::OpenOptions,
+    mem,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    rc::{Rc, Weak},
+    time::{Duration, Instant},
+};
+
 use neqo_common::{
     self as common, event::Provider, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn,
     timer::Timer, Datagram, Decoder, Role,
@@ -23,18 +35,6 @@ use crate::{
     connection::{Connection, Output, State},
     packet::{PacketBuilder, PacketType, PublicPacket},
     ConnectionParameters, Res, Version,
-};
-
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
-    fs::OpenOptions,
-    mem,
-    net::SocketAddr,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-    rc::{Rc, Weak},
-    time::{Duration, Instant},
 };
 
 pub enum InitialResult {
@@ -190,11 +190,11 @@ impl Server {
     /// * `certs` is a list of the certificates that should be configured.
     /// * `protocols` is the preference list of ALPN values.
     /// * `anti_replay` is an anti-replay context.
-    /// * `zero_rtt_checker` determines whether 0-RTT should be accepted. This
-    ///   will be passed the value of the `extra` argument that was passed to
-    ///   `Connection::send_ticket` to see if it is OK.
-    /// * `cid_generator` is responsible for generating connection IDs and parsing them;
-    ///   connection IDs produced by the manager cannot be zero-length.
+    /// * `zero_rtt_checker` determines whether 0-RTT should be accepted. This will be passed the
+    ///   value of the `extra` argument that was passed to `Connection::send_ticket` to see if it is
+    ///   OK.
+    /// * `cid_generator` is responsible for generating connection IDs and parsing them; connection
+    ///   IDs produced by the manager cannot be zero-length.
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
@@ -615,7 +615,8 @@ impl Server {
                     qdebug!([self], "Drop initial: too short");
                     return None;
                 }
-                // Copy values from `packet` because they are currently still borrowing from `dgram`.
+                // Copy values from `packet` because they are currently still borrowing from
+                // `dgram`.
                 let initial = InitialDetails::new(&packet);
                 self.handle_initial(initial, dgram, now)
             }

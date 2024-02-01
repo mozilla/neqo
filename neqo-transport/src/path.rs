@@ -17,6 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
+use neqo_crypto::random;
+
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
@@ -30,9 +33,6 @@ use crate::{
     tracking::{PacketNumberSpace, SentPacket},
     Error, Res, Stats,
 };
-
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
-use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
 /// We use this size for Initial packets, so we don't need to worry about probing for support.
@@ -1008,7 +1008,8 @@ impl Path {
                 .map_or(usize::MAX, |limit| {
                     let budget = if limit == 0 {
                         // If we have received absolutely nothing thus far, then this endpoint
-                        // is the one initiating communication on this path.  Allow enough space for probing.
+                        // is the one initiating communication on this path.  Allow enough space for
+                        // probing.
                         self.mtu() * 5
                     } else {
                         limit

@@ -6,6 +6,11 @@
 
 #![allow(unused_assignments)]
 
+use std::{
+    mem,
+    time::{Duration, Instant},
+};
+
 use neqo_common::{event::Provider, qtrace, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
@@ -13,8 +18,6 @@ use neqo_http3::{
     Http3ServerEvent, Http3State, Priority,
 };
 use neqo_transport::{ConnectionError, ConnectionParameters, Error, Output, StreamType};
-use std::mem;
-use std::time::{Duration, Instant};
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];

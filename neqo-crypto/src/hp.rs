@@ -4,6 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    fmt::{self, Debug},
+    os::raw::{c_char, c_int, c_uint},
+    ptr::{addr_of_mut, null, null_mut},
+    rc::Rc,
+};
+
 use crate::{
     constants::{
         Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
@@ -15,14 +24,6 @@ use crate::{
         PK11_GetBlockSize, SymKey, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, CK_ATTRIBUTE_TYPE,
         CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
     },
-};
-use std::{
-    cell::RefCell,
-    convert::TryFrom,
-    fmt::{self, Debug},
-    os::raw::{c_char, c_int, c_uint},
-    ptr::{addr_of_mut, null, null_mut},
-    rc::Rc,
 };
 
 experimental_api!(SSL_HkdfExpandLabelWithMech(

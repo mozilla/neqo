@@ -4,21 +4,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{Http3Connection, Http3State, WebTransportSessionAcceptAction};
-use crate::frames::HFrame;
-use crate::recv_message::{RecvMessage, RecvMessageInfo};
-use crate::send_message::SendMessage;
-use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::{
-    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput, Res,
-};
+use std::{rc::Rc, time::Instant};
+
 use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Header, MessageType, Role};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
 };
-use std::rc::Rc;
-use std::time::Instant;
+
+use crate::{
+    connection::{Http3Connection, Http3State, WebTransportSessionAcceptAction},
+    frames::HFrame,
+    recv_message::{RecvMessage, RecvMessageInfo},
+    send_message::SendMessage,
+    server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents},
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
+    ReceiveOutput, Res,
+};
 
 #[derive(Debug)]
 pub struct Http3ServerHandler {
@@ -51,9 +52,10 @@ impl Http3ServerHandler {
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
-    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
-    /// `InvalidInput` if an empty buffer has been supplied.
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
+    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
+    /// supplied.
     pub(crate) fn send_data(
         &mut self,
         stream_id: StreamId,
@@ -156,9 +158,10 @@ impl Http3ServerHandler {
     /// Close `WebTransport` cleanly
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist,
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
-    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
-    /// `InvalidInput` if an empty buffer has been supplied.
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
+    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
+    /// supplied.
     pub fn webtransport_close_session(
         &mut self,
         conn: &mut Connection,
@@ -383,11 +386,11 @@ impl Http3ServerHandler {
         }
     }
 
-    /// Response data are read directly into a buffer supplied as a parameter of this function to avoid copying
-    /// data.
+    /// Response data are read directly into a buffer supplied as a parameter of this function to
+    /// avoid copying data.
     /// # Errors
-    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
-    /// early close, protocol error, etc.
+    /// It returns an error if a stream does not exist or an error happen while reading a stream,
+    /// e.g. early close, protocol error, etc.
     pub fn read_data(
         &mut self,
         conn: &mut Connection,

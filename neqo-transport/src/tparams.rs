@@ -6,10 +6,12 @@
 
 // Transport parameters. See -transport section 7.3.
 
-use crate::{
-    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
-    version::{Version, VersionConfig, WireVersion},
-    Error, Res,
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    convert::TryFrom,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    rc::Rc,
 };
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
@@ -19,12 +21,10 @@ use neqo_crypto::{
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
 
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    convert::TryFrom,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
-    rc::Rc,
+use crate::{
+    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    version::{Version, VersionConfig, WireVersion},
+    Error, Res,
 };
 
 pub type TransportParameterId = u64;
@@ -1023,7 +1023,8 @@ mod tests {
     fn active_connection_id_limit_min_2() {
         let mut tps = TransportParameters::default();
 
-        // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport parameter.
+        // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport
+        // parameter.
         tps.params
             .insert(ACTIVE_CONNECTION_ID_LIMIT, TransportParameter::Integer(1));
 

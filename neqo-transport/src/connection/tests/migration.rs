@@ -4,6 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    cell::RefCell,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    rc::Rc,
+    time::{Duration, Instant},
+};
+
+use neqo_common::{Datagram, Decoder};
+use test_fixture::{
+    self, addr, addr_v4,
+    assertions::{assert_v4_path, assert_v6_path},
+    fixture_init, new_neqo_qlog, now,
+};
+
 use super::{
     super::{Connection, Output, State, StreamType},
     connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
@@ -18,19 +32,6 @@ use crate::{
     tparams::{self, PreferredAddress, TransportParameter},
     ConnectionError, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
     ConnectionParameters, EmptyConnectionIdGenerator, Error,
-};
-
-use neqo_common::{Datagram, Decoder};
-use std::{
-    cell::RefCell,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    rc::Rc,
-    time::{Duration, Instant},
-};
-use test_fixture::{
-    self, addr, addr_v4,
-    assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, new_neqo_qlog, now,
 };
 
 /// This should be a valid-seeming transport parameter.

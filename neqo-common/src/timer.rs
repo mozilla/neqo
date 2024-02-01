@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom;
-use std::mem;
-use std::time::{Duration, Instant};
+use std::{
+    convert::TryFrom,
+    mem,
+    time::{Duration, Instant},
+};
 
 /// Internal structure for a timer item.
 struct TimerItem<T> {
@@ -21,10 +23,10 @@ impl<T> TimerItem<T> {
 }
 
 /// A timer queue.
-/// This uses a classic timer wheel arrangement, with some characteristics that might be considered peculiar.
-/// Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut points).
-/// Time is relative, the wheel has an origin time and it is unable to represent times that are more than
-/// `granularity * capacity` past that time.
+/// This uses a classic timer wheel arrangement, with some characteristics that might be considered
+/// peculiar. Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut
+/// points). Time is relative, the wheel has an origin time and it is unable to represent times that
+/// are more than `granularity * capacity` past that time.
 pub struct Timer<T> {
     items: Vec<Vec<TimerItem<T>>>,
     now: Instant,
@@ -241,8 +243,9 @@ impl<T> Timer<T> {
 
 #[cfg(test)]
 mod test {
-    use super::{Duration, Instant, Timer};
     use lazy_static::lazy_static;
+
+    use super::{Duration, Instant, Timer};
 
     lazy_static! {
         static ref NOW: Instant = Instant::now();
