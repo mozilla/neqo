@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{cell::RefCell, mem, rc::Rc};
+
+use neqo_common::event::Provider;
+use test_fixture::{self, now};
+
 use super::{
     super::{Connection, Error, Output},
     connect, default_client, default_server, fill_cwnd, maybe_authenticate,
@@ -13,10 +18,6 @@ use crate::{
     send_stream::{RetransmissionPriority, TransmissionPriority},
     ConnectionEvent, StreamId, StreamType,
 };
-
-use neqo_common::event::Provider;
-use std::{cell::RefCell, mem, rc::Rc};
-use test_fixture::{self, now};
 
 const BLOCK_SIZE: usize = 4_096;
 

@@ -8,16 +8,19 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-use crate::cc::{
-    ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno,
+use std::{
+    fmt::{self, Debug, Display},
+    time::{Duration, Instant},
 };
-use crate::pace::Pacer;
-use crate::rtt::RttEstimate;
-use crate::tracking::SentPacket;
+
 use neqo_common::qlog::NeqoQlog;
 
-use std::fmt::{self, Debug, Display};
-use std::time::{Duration, Instant};
+use crate::{
+    cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
+    pace::Pacer,
+    rtt::RttEstimate,
+    tracking::SentPacket,
+};
 
 /// The number of packets we allow to burst from the pacer.
 pub const PACING_BURST_SIZE: usize = 2;

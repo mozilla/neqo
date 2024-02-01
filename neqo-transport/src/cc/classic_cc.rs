@@ -14,7 +14,6 @@ use std::{
 };
 
 use super::CongestionControl;
-
 use crate::{
     cc::MAX_DATAGRAM_SIZE,
     packet::PacketNumber,
@@ -537,6 +536,14 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        convert::TryFrom,
+        time::{Duration, Instant},
+    };
+
+    use neqo_common::qinfo;
+    use test_fixture::now;
+
     use super::{
         ClassicCongestionControl, WindowAdjustment, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH,
     };
@@ -551,12 +558,6 @@ mod tests {
         rtt::RttEstimate,
         tracking::SentPacket,
     };
-    use neqo_common::qinfo;
-    use std::{
-        convert::TryFrom,
-        time::{Duration, Instant},
-    };
-    use test_fixture::now;
 
     const PTO: Duration = Duration::from_millis(100);
     const RTT: Duration = Duration::from_millis(98);

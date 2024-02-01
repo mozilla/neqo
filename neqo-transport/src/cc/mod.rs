@@ -7,14 +7,15 @@
 // Congestion control
 #![deny(clippy::pedantic)]
 
-use crate::{path::PATH_MTU_V6, rtt::RttEstimate, tracking::SentPacket, Error};
-use neqo_common::qlog::NeqoQlog;
-
 use std::{
     fmt::{Debug, Display},
     str::FromStr,
     time::{Duration, Instant},
 };
+
+use neqo_common::qlog::NeqoQlog;
+
+use crate::{path::PATH_MTU_V6, rtt::RttEstimate, tracking::SentPacket, Error};
 
 mod classic_cc;
 mod cubic;

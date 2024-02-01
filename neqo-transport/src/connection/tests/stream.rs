@@ -4,6 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{cmp::max, collections::HashMap, convert::TryFrom, mem};
+
+use neqo_common::{event::Provider, qdebug};
+use test_fixture::now;
+
 use super::{
     super::State, assert_error, connect, connect_force_idle, default_client, default_server,
     maybe_authenticate, new_client, new_server, send_something, DEFAULT_STREAM_DATA,
@@ -22,11 +27,6 @@ use crate::{
     StreamId,
     StreamType,
 };
-use std::collections::HashMap;
-
-use neqo_common::{event::Provider, qdebug};
-use std::{cmp::max, convert::TryFrom, mem};
-use test_fixture::now;
 
 #[test]
 fn stream_create() {
