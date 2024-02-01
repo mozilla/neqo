@@ -201,42 +201,61 @@ impl RxStreamOrderer {
         };
 
         let mut to_add = new_data;
-        if let Some(entry) = self.data_ranges.last_entry() {
-            // is this at the end (common case)?  If so, don't need this block
-            if *entry.key() > new_start {
-                // Now handle possible overlap with next entries
-                let mut to_remove = SmallVec::<[_; 8]>::new();
+        if self
+            .data_ranges
+            .last_entry()
+            .map_or(false, |e| *e.key() > new_start)
+        {
+            // Is this at the end (common case)?  If so, nothing to do in this block
+            // Common case:
+            //  PPPPPP        -> PPPPPP
+            //        NNNNNNN          NNNNNNN
+            // or
+            //  PPPPPP             -> PPPPPP
+            //             NNNNNNN               NNNNNNN
+            //
+            // Not the common case, handle possible overlap with next entries
+            //  PPPPPP       AAA      -> PPPPPP
+            //        NNNNNNN                  NNNNNNN
+            // or
+            //  PPPPPP     AAAA      -> PPPPPP     AAAA
+            //        NNNNNNN                 NNNNN
+            // or (this is where to_remove is used)
+            //  PPPPPP    AA       -> PPPPPP
+            //        NNNNNNN               NNNNNNN
 
-                for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
-                    let next_end = next_start + u64::try_from(next_data.len()).unwrap();
-                    let overlap = new_end.saturating_sub(next_start);
-                    if overlap == 0 {
-                        break;
-                    } else if next_end >= new_end {
-                        qtrace!(
-                            "New frame {}-{} overlaps with next frame by {}, truncating",
-                            new_start,
-                            new_end,
-                            overlap
-                        );
-                        let truncate_to = new_data.len() - usize::try_from(overlap).unwrap();
-                        to_add = &new_data[..truncate_to];
-                        break;
-                    } else {
-                        qtrace!(
-                            "New frame {}-{} spans entire next frame {}-{}, replacing",
-                            new_start,
-                            new_end,
-                            next_start,
-                            next_end
-                        );
-                        to_remove.push(next_start);
-                    }
-                }
+            let mut to_remove = SmallVec::<[_; 8]>::new();
 
-                for start in to_remove {
-                    self.data_ranges.remove(&start);
+            for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
+                let next_end = next_start + u64::try_from(next_data.len()).unwrap();
+                let overlap = new_end.saturating_sub(next_start);
+                if overlap == 0 {
+                    // Fills in the hole, exactly (probably common)
+                    break;
+                } else if next_end >= new_end {
+                    qtrace!(
+                        "New frame {}-{} overlaps with next frame by {}, truncating",
+                        new_start,
+                        new_end,
+                        overlap
+                    );
+                    let truncate_to = new_data.len() - usize::try_from(overlap).unwrap();
+                    to_add = &new_data[..truncate_to];
+                    break;
                 }
+                qtrace!(
+                    "New frame {}-{} spans entire next frame {}-{}, replacing",
+                    new_start,
+                    new_end,
+                    next_start,
+                    next_end
+                );
+                to_remove.push(next_start);
+                // Continue, since we may have more overlaps
+            }
+
+            for start in to_remove {
+                self.data_ranges.remove(&start);
             }
         }
 
