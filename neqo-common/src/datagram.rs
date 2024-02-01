@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::net::SocketAddr;
-use std::ops::Deref;
+use std::{net::SocketAddr, ops::Deref};
 
 use crate::{hex_with_len, IpTos};
 

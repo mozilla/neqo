@@ -8,6 +8,8 @@
 #![warn(clippy::pedantic)]
 #![allow(unused)]
 
+use std::{cell::RefCell, convert::TryFrom, mem, ops::Range, rc::Rc};
+
 use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -20,12 +22,6 @@ use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, State,
 };
 use test_fixture::{self, default_client, now, CountingConnectionIdGenerator};
-
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::mem;
-use std::ops::Range;
-use std::rc::Rc;
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
 pub fn new_server(params: ConnectionParameters) -> Server {

@@ -9,12 +9,13 @@
 
 mod common;
 
+use std::convert::TryFrom;
+
 use common::{
     apply_header_protection, decode_initial_header, initial_aead_and_hp, remove_header_protection,
 };
 use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_transport::{ConnectionError, ConnectionParameters, Error, State, Version};
-use std::convert::TryFrom;
 use test_fixture::{self, default_client, default_server, new_client, now, split_datagram};
 
 #[test]

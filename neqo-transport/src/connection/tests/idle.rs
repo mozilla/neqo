@@ -4,6 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    mem,
+    time::{Duration, Instant},
+};
+
+use neqo_common::{qtrace, Encoder};
+use test_fixture::{self, now, split_datagram};
+
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
     connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, default_client,
@@ -17,13 +25,6 @@ use crate::{
     tparams::{self, TransportParameter},
     tracking::PacketNumberSpace,
 };
-
-use neqo_common::{qtrace, Encoder};
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
-use test_fixture::{self, now, split_datagram};
 
 fn default_timeout() -> Duration {
     ConnectionParameters::default().get_idle_timeout()
@@ -678,11 +679,14 @@ fn keep_alive_uni() {
 fn keep_alive_with_ack_eliciting_packet_lost() {
     const RTT: Duration = Duration::from_millis(500); // PTO will be ~1.1125s
 
-    // The idle time  out  will be  set to ~ 5 * PTO. (IDLE_TIMEOUT/2 > pto and IDLE_TIMEOUT/2 < pto + 2pto)
-    // After handshake all packets will be lost. The following steps will happen after the handshake:
+    // The idle time  out  will be  set to ~ 5 * PTO. (IDLE_TIMEOUT/2 > pto and IDLE_TIMEOUT/2 < pto
+    // + 2pto) After handshake all packets will be lost. The following steps will happen after
+    // the handshake:
     //  - data will be sent on a stream that is marked for keep-alive, (at start time)
-    //  - PTO timer will trigger first, and the data will be retransmited toghether with a PING, (at the start time + pto)
-    //  - keep-alive timer will trigger and a keep-alive PING will be sent, (at the start time + IDLE_TIMEOUT / 2)
+    //  - PTO timer will trigger first, and the data will be retransmited toghether with a PING, (at
+    //    the start time + pto)
+    //  - keep-alive timer will trigger and a keep-alive PING will be sent, (at the start time +
+    //    IDLE_TIMEOUT / 2)
     //  - PTO timer will trigger again. (at the start time + pto + 2*pto)
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
     const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
