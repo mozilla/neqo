@@ -17,6 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
+use neqo_crypto::random;
+
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
@@ -28,11 +31,8 @@ use crate::{
     sender::PacketSender,
     stats::FrameStats,
     tracking::{PacketNumberSpace, SentPacket},
-    Error, Res,
+    Error, Res, Stats,
 };
-
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
-use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
 /// We use this size for Initial packets, so we don't need to worry about probing for support.
@@ -498,7 +498,7 @@ enum ProbeState {
 }
 
 impl ProbeState {
-    ///  Determine whether the current state requires probing.
+    /// Determine whether the current state requires probing.
     fn probe_needed(&self) -> bool {
         matches!(self, Self::ProbeNeeded { .. })
     }
@@ -946,7 +946,7 @@ impl Path {
     }
 
     /// Discard a packet that previously might have been in-flight.
-    pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant) {
+    pub fn discard_packet(&mut self, sent: &SentPacket, now: Instant, stats: &mut Stats) {
         if self.rtt.first_sample_time().is_none() {
             // When discarding a packet there might not be a good RTT estimate.
             // But discards only occur after receiving something, so that means
@@ -958,6 +958,7 @@ impl Path {
                 "discarding a packet without an RTT estimate; guessing RTT={:?}",
                 now - sent.time_sent
             );
+            stats.rtt_init_guess = true;
             self.rtt.update(
                 &mut self.qlog,
                 now - sent.time_sent,
@@ -1007,7 +1008,8 @@ impl Path {
                 .map_or(usize::MAX, |limit| {
                     let budget = if limit == 0 {
                         // If we have received absolutely nothing thus far, then this endpoint
-                        // is the one initiating communication on this path.  Allow enough space for probing.
+                        // is the one initiating communication on this path.  Allow enough space for
+                        // probing.
                         self.mtu() * 5
                     } else {
                         limit

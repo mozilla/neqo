@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{cell::RefCell, rc::Rc};
+
 use neqo_common::{event::Provider, Header};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
@@ -12,8 +14,6 @@ use neqo_http3::{
     WebTransportSessionAcceptAction,
 };
 use neqo_transport::{StreamId, StreamType};
-use std::cell::RefCell;
-use std::rc::Rc;
 use test_fixture::{
     addr, anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ALPN_H3,
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,

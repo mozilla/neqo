@@ -17,9 +17,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use smallvec::{smallvec, SmallVec};
-
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
+use smallvec::{smallvec, SmallVec};
 
 use crate::{
     ackrate::AckRate,
@@ -412,7 +411,7 @@ impl LossRecoverySpace {
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|(&k, _)| Some(k) < largest_acked)
+            .take_while(|(&k, _)| k < largest_acked.unwrap_or(PacketNumber::MAX))
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent + loss_delay <= now {
@@ -430,7 +429,9 @@ impl LossRecoverySpace {
                     largest_acked
                 );
             } else {
-                self.first_ooo_time = Some(packet.time_sent);
+                if largest_acked.is_some() {
+                    self.first_ooo_time = Some(packet.time_sent);
+                }
                 // No more packets can be declared lost after this one.
                 break;
             };
@@ -462,7 +463,9 @@ impl LossRecoverySpaces {
 
     /// Drop a packet number space and return all the packets that were
     /// outstanding, so that those can be marked as lost.
+    ///
     /// # Panics
+    ///
     /// If the space has already been removed.
     pub fn drop_space(&mut self, space: PacketNumberSpace) -> impl IntoIterator<Item = SentPacket> {
         let sp = match space {
@@ -524,9 +527,9 @@ impl PtoState {
     /// And the number to declare lost when the PTO timer is hit.
     fn pto_packet_count(space: PacketNumberSpace, rx_count: usize) -> usize {
         if space == PacketNumberSpace::Initial && rx_count == 0 {
-            // For the Initial space, we only send one packet on PTO if we have not received any packets
-            // from the peer yet. This avoids sending useless PING-only packets when the Client Initial
-            // is deemed lost.
+            // For the Initial space, we only send one packet on PTO if we have not received any
+            // packets from the peer yet. This avoids sending useless PING-only packets
+            // when the Client Initial is deemed lost.
             1
         } else {
             MAX_PTO_PACKET_COUNT
@@ -622,7 +625,7 @@ impl LossRecovery {
             .collect::<Vec<_>>();
         let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
-            path.discard_packet(p, now);
+            path.discard_packet(p, now, &mut self.stats.borrow_mut());
         }
         dropped
     }
@@ -762,7 +765,7 @@ impl LossRecovery {
             .collect::<Vec<_>>();
         let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
-            path.discard_packet(p, now);
+            path.discard_packet(p, now, &mut self.stats.borrow_mut());
         }
         dropped
     }
@@ -795,7 +798,7 @@ impl LossRecovery {
         qdebug!([self], "Reset loss recovery state for {}", space);
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
-            path.discard_packet(&p, now);
+            path.discard_packet(&p, now, &mut self.stats.borrow_mut());
         }
 
         // We just made progress, so discard PTO count.
@@ -1015,6 +1018,17 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::RefCell,
+        convert::TryInto,
+        ops::{Deref, DerefMut, RangeInclusive},
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    use neqo_common::qlog::NeqoQlog;
+    use test_fixture::{addr, now};
+
     use super::{
         LossRecovery, LossRecoverySpace, PacketNumberSpace, SendProfile, SentPacket, FAST_PTO_SCALE,
     };
@@ -1026,15 +1040,6 @@ mod tests {
         rtt::RttEstimate,
         stats::{Stats, StatsCell},
     };
-    use neqo_common::qlog::NeqoQlog;
-    use std::{
-        cell::RefCell,
-        convert::TryInto,
-        ops::{Deref, DerefMut, RangeInclusive},
-        rc::Rc,
-        time::{Duration, Instant},
-    };
-    use test_fixture::{addr, now};
 
     // Shorthand for a time in milliseconds.
     const fn ms(t: u64) -> Duration {

@@ -18,6 +18,7 @@ use std::{
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
+use smallvec::{smallvec, SmallVec};
 
 use crate::{
     packet::{PacketBuilder, PacketNumber, PacketType},
@@ -25,8 +26,6 @@ use crate::{
     stats::FrameStats,
     Error, Res,
 };
-
-use smallvec::{smallvec, SmallVec};
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
@@ -750,6 +749,11 @@ impl Default for AckTracker {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
+    use lazy_static::lazy_static;
+    use neqo_common::Encoder;
+
     use super::{
         AckTracker, Duration, Instant, PacketNumberSpace, PacketNumberSpaceSet, RecoveryToken,
         RecvdPackets, MAX_TRACKED_RANGES,
@@ -759,9 +763,6 @@ mod tests {
         packet::{PacketBuilder, PacketNumber},
         stats::FrameStats,
     };
-    use lazy_static::lazy_static;
-    use neqo_common::Encoder;
-    use std::collections::HashSet;
 
     const RTT: Duration = Duration::from_millis(100);
     lazy_static! {

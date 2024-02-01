@@ -4,18 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{cell::RefCell, mem, rc::Rc, time::Duration};
+
+use test_fixture::{self, assertions, now};
+
 use super::{
     connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
     new_client, resumed_server, send_something, AT_LEAST_PTO,
 };
-use crate::addr_valid::{AddressValidation, ValidateAddress};
-use crate::{ConnectionParameters, Error, Version};
-
-use std::cell::RefCell;
-use std::mem;
-use std::rc::Rc;
-use std::time::Duration;
-use test_fixture::{self, assertions, now};
+use crate::{
+    addr_valid::{AddressValidation, ValidateAddress},
+    ConnectionParameters, Error, Version,
+};
 
 #[test]
 fn resume() {

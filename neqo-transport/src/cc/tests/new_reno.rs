@@ -7,6 +7,10 @@
 // Congestion control
 #![deny(clippy::pedantic)]
 
+use std::time::Duration;
+
+use test_fixture::now;
+
 use crate::{
     cc::{
         new_reno::NewReno, ClassicCongestionControl, CongestionControl, CWND_INITIAL,
@@ -16,9 +20,6 @@ use crate::{
     rtt::RttEstimate,
     tracking::SentPacket,
 };
-
-use std::time::Duration;
-use test_fixture::now;
 
 const PTO: Duration = Duration::from_millis(100);
 const RTT: Duration = Duration::from_millis(98);
@@ -169,8 +170,8 @@ fn issue_1465() {
     cwnd_is_default(&cc);
     assert_eq!(cc.bytes_in_flight(), 3 * MAX_DATAGRAM_SIZE);
 
-    // advance one rtt to detect lost packet there this simplifies the timers, because on_packet_loss
-    // would only be called after RTO, but that is not relevant to the problem
+    // advance one rtt to detect lost packet there this simplifies the timers, because
+    // on_packet_loss would only be called after RTO, but that is not relevant to the problem
     now += RTT;
     cc.on_packets_lost(Some(now), None, PTO, &[p1]);
 
