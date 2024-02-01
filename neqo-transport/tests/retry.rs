@@ -10,6 +10,13 @@
 
 mod common;
 
+use std::{
+    convert::TryFrom,
+    mem,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Duration,
+};
+
 use common::{
     apply_header_protection, connected_server, decode_initial_header, default_server,
     generate_ticket, initial_aead_and_hp, remove_header_protection,
@@ -17,10 +24,6 @@ use common::{
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{server::ValidateAddress, ConnectionError, Error, State, StreamType};
-use std::convert::TryFrom;
-use std::mem;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
 use test_fixture::{self, assertions, datagram, default_client, now, split_datagram};
 
 #[test]

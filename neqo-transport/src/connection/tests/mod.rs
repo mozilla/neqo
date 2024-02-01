@@ -6,19 +6,6 @@
 
 #![deny(clippy::pedantic)]
 
-use super::{Connection, ConnectionError, ConnectionId, Output, State};
-use crate::{
-    addr_valid::{AddressValidation, ValidateAddress},
-    cc::{CWND_INITIAL_PKTS, CWND_MIN},
-    cid::ConnectionIdRef,
-    events::ConnectionEvent,
-    path::PATH_MTU_V6,
-    recovery::ACK_ONLY_SIZE_LIMIT,
-    stats::{FrameStats, Stats, MAX_PTO_COUNTS},
-    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
-    Version,
-};
-
 use std::{
     cell::RefCell,
     cmp::min,
@@ -28,9 +15,25 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enum_map::enum_map;
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{self, addr, fixture_init, new_neqo_qlog, now};
+
+use super::{Connection, ConnectionError, ConnectionId, Output, State};
+use crate::{
+    addr_valid::{AddressValidation, ValidateAddress},
+    cc::{CWND_INITIAL_PKTS, CWND_MIN},
+    cid::ConnectionIdRef,
+    events::ConnectionEvent,
+    frame::FRAME_TYPE_PING,
+    packet::PacketBuilder,
+    path::PATH_MTU_V6,
+    recovery::ACK_ONLY_SIZE_LIMIT,
+    stats::{FrameStats, Stats, MAX_PTO_COUNTS},
+    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
+    Version,
+};
 
 // All the tests.
 mod ackrate;
@@ -53,7 +56,7 @@ const DEFAULT_RTT: Duration = Duration::from_millis(100);
 const AT_LEAST_PTO: Duration = Duration::from_secs(1);
 const DEFAULT_STREAM_DATA: &[u8] = b"message";
 /// The number of 1-RTT packets sent in `force_idle` by a client.
-const FORCE_IDLE_CLIENT_1RTT_PACKETS: usize = 3;
+const CLIENT_HANDSHAKE_1RTT_PACKETS: usize = 1;
 
 /// WARNING!  In this module, this version of the generator needs to be used.
 /// This copies the implementation from
@@ -151,6 +154,25 @@ pub fn maybe_authenticate(conn: &mut Connection) -> bool {
     false
 }
 
+/// Compute the RTT variance after `n` ACKs or other RTT updates.
+pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
+    assert!(n > 0);
+    let mut rttvar = rtt / 2;
+    for _ in 1..n {
+        rttvar = rttvar * 3 / 4;
+    }
+    rttvar
+}
+
+/// This inserts a PING frame into packets.
+struct PingWriter {}
+
+impl crate::connection::test_internal::FrameWriter for PingWriter {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        builder.encode_varint(FRAME_TYPE_PING);
+    }
+}
+
 /// Drive the handshake between the client and server.
 fn handshake(
     client: &mut Connection,
@@ -170,10 +192,28 @@ fn handshake(
         )
     };
 
+    let mut did_ping = enum_map! {_ => false};
     while !is_done(a) {
         _ = maybe_authenticate(a);
         let had_input = input.is_some();
+        // Insert a PING frame into the first application data packet an endpoint sends,
+        // in order to force the peer to ACK it. For the server, this is depending on the
+        // client's connection state, which is accessible during the tests.
+        //
+        // We're doing this to prevent packet loss from delaying ACKs, which would cause
+        // cwnd to shrink, and also to prevent the delayed ACK timer from being armed after
+        // the handshake, which is not something the tests are written to account for.
+        let should_ping = !did_ping[a.role()]
+            && (a.role() == Role::Client && *a.state() == State::Connected
+                || (a.role() == Role::Server && *b.state() == State::Connected));
+        if should_ping {
+            a.test_frame_writer = Some(Box::new(PingWriter {}));
+        }
         let output = a.process(input.as_ref(), now).dgram();
+        if should_ping {
+            a.test_frame_writer = None;
+            did_ping[a.role()] = true;
+        }
         assert!(had_input || output.is_some());
         input = output;
         qtrace!("handshake: t += {:?}", rtt / 2);
@@ -205,9 +245,9 @@ fn connect_with_rtt(
 ) -> Instant {
     fn check_rtt(stats: &Stats, rtt: Duration) {
         assert_eq!(stats.rtt, rtt);
-        // Confirmation takes 2 round trips,
-        // so rttvar is reduced by 1/4 (from rtt/2).
-        assert_eq!(stats.rttvar, rtt * 3 / 8);
+        // Validate that rttvar has been computed correctly based on the number of RTT updates.
+        let n = stats.frame_rx.ack + usize::from(stats.rtt_init_guess);
+        assert_eq!(stats.rttvar, rttvar_after_n_updates(n, rtt));
     }
     let now = handshake(client, server, now, rtt);
     assert_eq!(*client.state(), State::Confirmed);
@@ -247,51 +287,26 @@ fn exchange_ticket(
     get_tokens(client).pop().expect("should have token")
 }
 
-/// Getting the client and server to reach an idle state is surprisingly hard.
-/// The server sends `HANDSHAKE_DONE` at the end of the handshake, and the client
-/// doesn't immediately acknowledge it.  Reordering packets does the trick.
-fn force_idle(
-    client: &mut Connection,
-    server: &mut Connection,
-    rtt: Duration,
-    mut now: Instant,
-) -> Instant {
-    // The client has sent NEW_CONNECTION_ID, so ensure that the server generates
-    // an acknowledgment by sending some reordered packets.
-    qtrace!("force_idle: send reordered client packets");
-    let c1 = send_something(client, now);
-    let c2 = send_something(client, now);
-    now += rtt / 2;
-    server.process_input(&c2, now);
-    server.process_input(&c1, now);
-
-    // Now do the same for the server.  (The ACK is in the first one.)
-    qtrace!("force_idle: send reordered server packets");
-    let s1 = send_something(server, now);
-    let s2 = send_something(server, now);
-    now += rtt / 2;
-    // Delivering s2 first at the client causes it to want to ACK.
-    client.process_input(&s2, now);
-    // Delivering s1 should not have the client change its mind about the ACK.
-    let ack = client.process(Some(&s1), now);
-    assert!(ack.as_dgram_ref().is_some());
+/// The `handshake` method inserts PING frames into the first application data packets,
+/// which forces each peer to ACK them. As a side effect, that causes both sides of the
+/// connection to be idle aftwerwards. This method simply verifies that this is the case.
+fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, now: Instant) {
     let idle_timeout = min(
         client.conn_params.get_idle_timeout(),
         server.conn_params.get_idle_timeout(),
     );
-    assert_eq!(client.process_output(now), Output::Callback(idle_timeout));
-    now += rtt / 2;
+    // Client started its idle period half an RTT before now.
     assert_eq!(
-        server.process(ack.as_dgram_ref(), now),
-        Output::Callback(idle_timeout)
+        client.process_output(now),
+        Output::Callback(idle_timeout - rtt / 2)
     );
-    now
+    assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
 
 /// Connect with an RTT and then force both peers to be idle.
 fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
     let now = connect_with_rtt(client, server, now(), rtt);
-    let now = force_idle(client, server, rtt, now);
+    assert_idle(client, server, rtt, now);
     // Drain events from both as well.
     _ = client.events().count();
     _ = server.events().count();
@@ -389,7 +404,9 @@ fn increase_cwnd(
 }
 
 /// Receive multiple packets and generate an ack-only packet.
+///
 /// # Panics
+///
 /// The caller is responsible for ensuring that `dest` has received
 /// enough data that it wants to generate an ACK.  This panics if
 /// no ACK frame is generated.

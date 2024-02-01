@@ -4,19 +4,24 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::super::{ConnectionError, ERROR_AEAD_LIMIT_REACHED};
-use super::super::{Connection, ConnectionParameters, Error, Output, State, StreamType};
+use std::mem;
+
+use neqo_common::{qdebug, Datagram};
+use test_fixture::{self, now};
+
 use super::{
+    super::{
+        super::{ConnectionError, ERROR_AEAD_LIMIT_REACHED},
+        Connection, ConnectionParameters, Error, Output, State, StreamType,
+    },
     connect, connect_force_idle, default_client, default_server, maybe_authenticate,
     send_and_receive, send_something, AT_LEAST_PTO,
 };
-use crate::crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT};
-use crate::packet::PacketNumber;
-use crate::path::PATH_MTU_V6;
-
-use neqo_common::{qdebug, Datagram};
-use std::mem;
-use test_fixture::{self, now};
+use crate::{
+    crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
+    packet::PacketNumber,
+    path::PATH_MTU_V6,
+};
 
 fn check_discarded(
     peer: &mut Connection,

@@ -11,16 +11,15 @@ use std::{
     cmp::{max, min, Ordering},
     collections::{BTreeMap, VecDeque},
     convert::TryFrom,
+    hash::{Hash, Hasher},
     mem,
     ops::Add,
     rc::Rc,
 };
 
 use indexmap::IndexMap;
-use smallvec::SmallVec;
-use std::hash::{Hash, Hasher};
-
 use neqo_common::{qdebug, qerror, qinfo, qtrace, Encoder, Role};
+use smallvec::SmallVec;
 
 use crate::{
     events::ConnectionEvents,
@@ -1280,7 +1279,8 @@ pub struct OrderGroupIter<'a> {
     // We store the next position in the OrderGroup.
     // Otherwise we'd need an explicit "done iterating" call to be made, or implement Drop to
     // copy the value back.
-    // This is where next was when we iterated for the first time; when we get back to that we stop.
+    // This is where next was when we iterated for the first time; when we get back to that we
+    // stop.
     started_at: Option<usize>,
 }
 
@@ -1321,7 +1321,10 @@ impl OrderGroup {
 
     pub fn insert(&mut self, stream_id: StreamId) {
         match self.vec.binary_search(&stream_id) {
-            Ok(_) => panic!("Duplicate stream_id {}", stream_id), // element already in vector @ `pos`
+            Ok(_) => {
+                // element already in vector @ `pos`
+                panic!("Duplicate stream_id {}", stream_id)
+            }
             Err(pos) => self.vec.insert(pos, stream_id),
         }
     }
@@ -1331,7 +1334,10 @@ impl OrderGroup {
             Ok(pos) => {
                 self.vec.remove(pos);
             }
-            Err(_) => panic!("Missing stream_id {}", stream_id), // element already in vector @ `pos`
+            Err(_) => {
+                // element already in vector @ `pos`
+                panic!("Missing stream_id {}", stream_id)
+            }
         }
     }
 }
@@ -1634,10 +1640,10 @@ pub struct SendStreamRecoveryToken {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::events::ConnectionEvent;
     use neqo_common::{event::Provider, hex_with_len, qtrace};
+
+    use super::*;
+    use crate::events::ConnectionEvent;
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
         Rc::new(RefCell::new(SenderFlowControl::new((), limit)))

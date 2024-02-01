@@ -4,33 +4,39 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Output, State};
-use super::{
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    get_tokens, handshake, maybe_authenticate, resumed_server, send_something,
-    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-};
-use crate::connection::AddressValidation;
-use crate::events::ConnectionEvent;
-use crate::path::PATH_MTU_V6;
-use crate::server::ValidateAddress;
-use crate::tparams::{TransportParameter, MIN_ACK_DELAY};
-use crate::tracking::DEFAULT_ACK_DELAY;
-use crate::{
-    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
+use std::{
+    cell::RefCell,
+    convert::TryFrom,
+    mem,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    rc::Rc,
+    time::Duration,
 };
 
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::mem;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
-use std::time::Duration;
-use test_fixture::{self, addr, assertions, datagram, fixture_init, now, split_datagram};
+use test_fixture::{
+    self, addr, assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now,
+    split_datagram,
+};
+
+use super::{
+    super::{Connection, Output, State},
+    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
+    get_tokens, handshake, maybe_authenticate, resumed_server, send_something,
+    CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+};
+use crate::{
+    connection::AddressValidation,
+    events::ConnectionEvent,
+    path::PATH_MTU_V6,
+    server::ValidateAddress,
+    tparams::{TransportParameter, MIN_ACK_DELAY},
+    tracking::DEFAULT_ACK_DELAY,
+    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
+};
 
 const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";
@@ -127,7 +133,7 @@ fn no_alpn() {
     handshake(&mut client, &mut server, now(), Duration::new(0, 0));
     // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
     // and the client never sees the server's rejection of its handshake.
-    //assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
+    // assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
     assert_error(
         &server,
         &ConnectionError::Transport(Error::CryptoAlert(120)),
@@ -380,10 +386,10 @@ fn reorder_05rtt_with_0rtt() {
     // Now PTO at the client and cause the server to re-send handshake packets.
     now += AT_LEAST_PTO;
     let c3 = client.process(None, now).dgram();
+    assert_coalesced_0rtt(c3.as_ref().unwrap());
 
     now += RTT / 2;
     let s3 = server.process(c3.as_ref(), now).dgram().unwrap();
-    assertions::assert_no_1rtt(&s3[..]);
 
     // The client should be able to process the 0.5 RTT now.
     // This should contain an ACK, so we are processing an ACK from the past.

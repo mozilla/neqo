@@ -16,7 +16,6 @@ use std::{
 };
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
-
 use neqo_crypto::{
     hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
@@ -1542,8 +1541,8 @@ impl CryptoStreams {
             }
             // Calculate length of data based on the minimum of:
             // - available data
-            // - remaining space, less the header, which counts only one byte
-            //   for the length at first to avoid underestimating length
+            // - remaining space, less the header, which counts only one byte for the length at
+            //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
             header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
             let length = min(data.len(), builder.remaining() - header_len);

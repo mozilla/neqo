@@ -7,14 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{event::Provider, hex, Datagram, IpTos};
-use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
-use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
-    Error, Output, State, StreamId, StreamType,
-};
-
 use std::{
     cell::RefCell,
     cmp::min,
@@ -30,6 +22,14 @@ use std::{
     sync::Mutex,
     thread,
     time::{Duration, Instant},
+};
+
+use neqo_common::{event::Provider, hex, Datagram, IpTos};
+use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
+use neqo_transport::{
+    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error, Output, State, StreamId, StreamType,
 };
 use structopt::StructOpt;
 
@@ -560,7 +560,8 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
     }
 
     if *test == Test::D {
-        // Send another request, when the first one was send we probably did not have the peer's qpack parameter.
+        // Send another request, when the first one was send we probably did not have the peer's
+        // qpack parameter.
         let client_stream_id = hc
             .h3
             .fetch(
