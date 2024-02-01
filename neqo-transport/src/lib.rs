@@ -26,7 +26,7 @@ mod path;
 mod qlog;
 mod quic_datagrams;
 mod recovery;
-mod recv_stream;
+pub mod recv_stream;
 mod rtt;
 mod send_stream;
 mod sender;
@@ -181,7 +181,7 @@ impl From<std::num::TryFromIntError> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Self::CryptoError(e) => Some(e),
             _ => None,
