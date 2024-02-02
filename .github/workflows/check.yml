@@ -136,7 +136,7 @@ jobs:
       - name: Check formatting
         run: |
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check \
-            ${{ matrix.rust-toolchain != 'nightly' && --config-path=/dev/null }}
+            ${{ matrix.rust-toolchain != 'nightly' && '--config-path=/dev/null' }}
         if: success() || failure()
 
       - name: Clippy
