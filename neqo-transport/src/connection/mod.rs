@@ -1935,9 +1935,6 @@ impl Connection {
                 .as_ref()
                 .unwrap_or(&close)
                 .write_frame(&mut builder);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(10));
-            }
             encoder = builder.build(tx)?;
         }
 
@@ -1982,7 +1979,7 @@ impl Connection {
         if builder.is_full() {
             return Ok(());
         }
-        self.paths.write_frames(builder, tokens, frame_stats)?;
+        self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return Ok(());
         }
@@ -2107,7 +2104,7 @@ impl Connection {
                 builder,
                 &mut tokens,
                 stats,
-            )?;
+            );
         }
         let ack_end = builder.len();
 
@@ -2122,7 +2119,7 @@ impl Connection {
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
                 now,
-            )? {
+            ) {
                 builder.enable_padding(true);
             }
         }

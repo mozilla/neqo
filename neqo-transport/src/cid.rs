@@ -532,10 +532,6 @@ impl ConnectionIdManager {
         builder.encode_varint(0u64);
         builder.encode_vec(1, &entry.cid);
         builder.encode(&entry.srt);
-        if builder.len() > builder.limit() {
-            return Err(Error::InternalError(8));
-        }
-
         stats.new_connection_id += 1;
         Ok(true)
     }

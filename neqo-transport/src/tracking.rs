@@ -24,7 +24,6 @@ use crate::{
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
     stats::FrameStats,
-    Error, Res,
 };
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
@@ -724,14 +723,10 @@ impl AckTracker {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         if let Some(space) = self.get_mut(pn_space) {
             space.write_frame(now, rtt, builder, tokens, stats);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(24));
-            }
         }
-        Ok(())
     }
 }
 
@@ -1060,16 +1055,14 @@ mod tests {
 
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
-        tracker
-            .write_frame(
-                PacketNumberSpace::Initial,
-                *NOW,
-                RTT,
-                &mut builder,
-                &mut tokens,
-                &mut stats,
-            )
-            .unwrap();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            *NOW,
+            RTT,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
         assert_eq!(stats.ack, 1);
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -1088,16 +1081,14 @@ mod tests {
         assert!(tracker
             .ack_time(NOW.checked_sub(Duration::from_millis(1)).unwrap())
             .is_none());
-        tracker
-            .write_frame(
-                PacketNumberSpace::Initial,
-                *NOW,
-                RTT,
-                &mut builder,
-                &mut tokens,
-                &mut stats,
-            )
-            .unwrap();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            *NOW,
+            RTT,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
         assert_eq!(stats.ack, 1);
         if let RecoveryToken::Ack(tok) = &tokens[0] {
             tracker.acked(tok); // Should be a noop.
@@ -1121,16 +1112,14 @@ mod tests {
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
-        tracker
-            .write_frame(
-                PacketNumberSpace::Initial,
-                *NOW,
-                RTT,
-                &mut builder,
-                &mut Vec::new(),
-                &mut stats,
-            )
-            .unwrap();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            *NOW,
+            RTT,
+            &mut builder,
+            &mut Vec::new(),
+            &mut stats,
+        );
         assert_eq!(stats.ack, 0);
         assert_eq!(builder.len(), 1); // Only the short packet header has been added.
     }
@@ -1154,16 +1143,14 @@ mod tests {
         builder.set_limit(32);
 
         let mut stats = FrameStats::default();
-        tracker
-            .write_frame(
-                PacketNumberSpace::Initial,
-                *NOW,
-                RTT,
-                &mut builder,
-                &mut Vec::new(),
-                &mut stats,
-            )
-            .unwrap();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            *NOW,
+            RTT,
+            &mut builder,
+            &mut Vec::new(),
+            &mut stats,
+        );
         assert_eq!(stats.ack, 1);
 
         let mut dec = builder.as_decoder();

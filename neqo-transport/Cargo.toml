@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 indexmap = "1.9.3"
 lazy_static = "1.4"
-log = {version = "0.4.17", default-features = false}
+log = { version = "0.4.17", default-features = false }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 qlog = "0.11.0"
@@ -28,3 +28,9 @@ fuzzing = ["neqo-crypto/fuzzing"]
 [[bench]]
 name = "transfer"
 harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "rx_stream_orderer"
+harness = false
+required-features = ["bench"]
