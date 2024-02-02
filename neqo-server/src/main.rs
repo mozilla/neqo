@@ -29,8 +29,6 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use tokio::{net::UdpSocket, time::Sleep};
-
 use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -45,6 +43,7 @@ use neqo_transport::{
     Version,
 };
 use structopt::StructOpt;
+use tokio::{net::UdpSocket, time::Sleep};
 
 use crate::old_https::Http09Server;
 
