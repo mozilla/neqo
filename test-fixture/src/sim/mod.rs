@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Tests with simulated network
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
-
+/// Tests with simulated network components.
 pub mod connection;
 mod delay;
 mod drop;
@@ -26,8 +23,9 @@ use std::{
 use neqo_common::{qdebug, qinfo, qtrace, Datagram, Encoder};
 use neqo_transport::Output;
 use rng::Random;
-use test_fixture::{self, now};
 use NodeState::{Active, Idle, Waiting};
+
+use crate::now;
 
 pub mod network {
     pub use super::{delay::Delay, drop::Drop, taildrop::TailDrop};
@@ -146,7 +144,8 @@ impl Simulator {
     }
 
     /// Seed from a hex string.
-    /// Though this is convenient, it panics if this isn't a 64 character hex string.
+    /// # Panics
+    /// When the provided string is not 32 bytes of hex (64 characters).
     pub fn seed_str(&mut self, seed: impl AsRef<str>) {
         let seed = Encoder::from_hex(seed);
         self.seed(<[u8; 32]>::try_from(seed.as_ref()).unwrap());
@@ -165,6 +164,9 @@ impl Simulator {
     }
 
     /// Runs the simulation.
+    /// # Panics
+    /// When sanity checks fail in unexpected ways; this is a testing function after all.
+    #[allow(clippy::must_use_candidate)] // It's OK to ignore the duration.
     pub fn run(mut self) -> Duration {
         let start = now();
         let mut now = start;

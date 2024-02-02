@@ -56,7 +56,7 @@ impl ConnectionNode {
         goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
     ) -> Self {
         Self {
-            c: test_fixture::new_client(params),
+            c: crate::new_client(params),
             goals: goals.into_iter().collect(),
         }
     }
@@ -66,7 +66,7 @@ impl ConnectionNode {
         goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
     ) -> Self {
         Self {
-            c: test_fixture::new_server(test_fixture::DEFAULT_ALPN, params),
+            c: crate::new_server(crate::DEFAULT_ALPN, params),
             goals: goals.into_iter().collect(),
         }
     }
@@ -160,12 +160,15 @@ impl Debug for ConnectionNode {
     }
 }
 
+/// A target for a connection that involves reaching a given connection state.
 #[derive(Debug, Clone)]
 pub struct ReachState {
     target: State,
 }
 
 impl ReachState {
+    /// Create a new instance that intends to reach the indicated state.
+    #[must_use]
     pub fn new(target: State) -> Self {
         Self { target }
     }
@@ -186,6 +189,7 @@ impl ConnectionGoal for ReachState {
     }
 }
 
+/// A target for a connection that involves sending a given amount of data on the indicated stream.
 #[derive(Debug)]
 pub struct SendData {
     remaining: usize,
@@ -193,6 +197,7 @@ pub struct SendData {
 }
 
 impl SendData {
+    #[must_use]
     pub fn new(amount: usize) -> Self {
         Self {
             remaining: amount,
@@ -276,6 +281,7 @@ pub struct ReceiveData {
 }
 
 impl ReceiveData {
+    #[must_use]
     pub fn new(amount: usize) -> Self {
         Self { remaining: amount }
     }

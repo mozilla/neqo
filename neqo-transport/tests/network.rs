@@ -7,15 +7,17 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-mod sim;
-
 use std::{ops::Range, time::Duration};
 
 use neqo_transport::{ConnectionError, ConnectionParameters, Error, State};
-use sim::{
-    connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-    network::{Delay, Drop, TailDrop},
-    Simulator,
+use test_fixture::{
+    boxed,
+    sim::{
+        connection::{ConnectionNode, ReachState, ReceiveData, SendData},
+        network::{Delay, Drop, TailDrop},
+        Simulator,
+    },
+    simulate,
 };
 
 /// The amount of transfer.  Much more than this takes a surprising amount of time.
@@ -105,10 +107,10 @@ simulate!(
     connect_taildrop_jitter,
     [
         ConnectionNode::default_client(boxed![ReachState::new(State::Confirmed)]),
-        TailDrop::dsl_uplink(),
+        TailDrop::dsl_downlink(),
         Delay::new(ZERO..JITTER),
         ConnectionNode::default_server(boxed![ReachState::new(State::Confirmed)]),
-        TailDrop::dsl_downlink(),
+        TailDrop::dsl_uplink(),
         Delay::new(ZERO..JITTER),
     ],
 );
@@ -117,9 +119,9 @@ simulate!(
     connect_taildrop,
     [
         ConnectionNode::default_client(boxed![ReachState::new(State::Confirmed)]),
-        TailDrop::dsl_uplink(),
-        ConnectionNode::default_server(boxed![ReachState::new(State::Confirmed)]),
         TailDrop::dsl_downlink(),
+        ConnectionNode::default_server(boxed![ReachState::new(State::Confirmed)]),
+        TailDrop::dsl_uplink(),
     ],
 );
 
@@ -139,9 +141,9 @@ simulate!(
     transfer_taildrop,
     [
         ConnectionNode::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
-        TailDrop::dsl_uplink(),
-        ConnectionNode::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
         TailDrop::dsl_downlink(),
+        ConnectionNode::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+        TailDrop::dsl_uplink(),
     ],
 );
 
@@ -149,10 +151,10 @@ simulate!(
     transfer_taildrop_jitter,
     [
         ConnectionNode::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
-        TailDrop::dsl_uplink(),
+        TailDrop::dsl_downlink(),
         Delay::new(ZERO..JITTER),
         ConnectionNode::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
-        TailDrop::dsl_downlink(),
+        TailDrop::dsl_uplink(),
         Delay::new(ZERO..JITTER),
     ],
 );

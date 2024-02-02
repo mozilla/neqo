@@ -58,6 +58,7 @@ pub struct Delay {
 }
 
 impl Delay {
+    #[must_use]
     pub fn new(bounds: Range<Duration>) -> Self {
         Self {
             random: RandomDelay::new(bounds),
