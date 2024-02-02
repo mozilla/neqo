@@ -9,13 +9,14 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 indexmap = "1.9.3"
 lazy_static = "1.4"
-log = {version = "0.4.17", default-features = false}
+log = { version = "0.4.17", default-features = false }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 qlog = "0.11.0"
 smallvec = "1.11.1"
 
 [dev-dependencies]
+criterion = "0.5.1"
 enum-map = "2.7"
 test-fixture = { path = "../test-fixture" }
 
@@ -23,3 +24,8 @@ test-fixture = { path = "../test-fixture" }
 bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+
+[[bench]]
+name = "rx_stream_orderer"
+harness = false
+required-features = ["bench"]
