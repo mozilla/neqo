@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest]
-        rust-toolchain: [1.70.0, stable, beta]
+        rust-toolchain: [1.70.0, stable, nightly]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -109,7 +109,7 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust-toolchain }} build -v --all-targets
+          cargo +${{ matrix.rust-toolchain }} build --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
@@ -134,16 +134,20 @@ jobs:
           RUST_LOG: warn
 
       - name: Check formatting
-        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
+        run: |
+          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
+            export CONFIG_PATH="--config-path=$(mktemp)"
+          fi
+          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --tests -- -D warnings
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
+        continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
       - name: Check rustdoc links
-        run: cargo +${{ matrix.rust-toolchain }} doc --verbose --workspace --no-deps --document-private-items
+        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
         if: success() || failure()
