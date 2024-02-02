@@ -28,3 +28,4 @@ fuzzing = ["neqo-crypto/fuzzing"]
 [[bench]]
 name = "rx_stream_orderer"
 harness = false
+required-features = ["bench"]
