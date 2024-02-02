@@ -18,7 +18,10 @@ use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
 };
 
-use super::{Node, Rng};
+use crate::{
+    boxed,
+    sim::{Node, Rng},
+};
 
 /// The status of the processing of an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +36,7 @@ pub enum GoalStatus {
 
 /// A goal for the connection.
 /// Goals can be accomplished in any order.
-pub trait ConnectionGoal {
+pub trait ConnectionGoal: Debug {
     fn init(&mut self, _c: &mut Connection, _now: Instant) {}
     /// Perform some processing.
     fn process(&mut self, _c: &mut Connection, _now: Instant) -> GoalStatus {
@@ -47,36 +50,49 @@ pub trait ConnectionGoal {
 
 pub struct ConnectionNode {
     c: Connection,
+    setup_goals: Vec<Box<dyn ConnectionGoal>>,
     goals: Vec<Box<dyn ConnectionGoal>>,
 }
 
 impl ConnectionNode {
     pub fn new_client(
         params: ConnectionParameters,
+        setup: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
         goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
     ) -> Self {
         Self {
             c: crate::new_client(params),
+            setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
     }
 
     pub fn new_server(
         params: ConnectionParameters,
+        setup: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
         goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
     ) -> Self {
         Self {
             c: crate::new_server(crate::DEFAULT_ALPN, params),
+            setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
     }
 
     pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
-        Self::new_client(ConnectionParameters::default(), goals)
+        Self::new_client(
+            ConnectionParameters::default(),
+            boxed![ReachState::new(State::Confirmed)],
+            goals,
+        )
     }
 
     pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
-        Self::new_server(ConnectionParameters::default(), goals)
+        Self::new_server(
+            ConnectionParameters::default(),
+            boxed![ReachState::new(State::Confirmed)],
+            goals,
+        )
     }
 
     #[allow(dead_code)]
@@ -89,13 +105,20 @@ impl ConnectionNode {
         self.goals.push(goal);
     }
 
+    /// On the first call to this method, the setup goals will turn into the active goals.
+    /// On the second call, they will be swapped back and the main goals will run.
+    fn setup_goals(&mut self, now: Instant) {
+        std::mem::swap(&mut self.goals, &mut self.setup_goals);
+        for g in &mut self.goals {
+            g.init(&mut self.c, now);
+        }
+    }
+
     /// Process all goals using the given closure and return whether any were active.
     fn process_goals<F>(&mut self, mut f: F) -> bool
     where
         F: FnMut(&mut Box<dyn ConnectionGoal>, &mut Connection) -> GoalStatus,
     {
-        // Waiting on drain_filter...
-        // self.goals.drain_filter(|g| f(g,  &mut self.c, &e)).count();
         let mut active = false;
         let mut i = 0;
         while i < self.goals.len() {
@@ -114,15 +137,14 @@ impl ConnectionNode {
 
 impl Node for ConnectionNode {
     fn init(&mut self, _rng: Rng, now: Instant) {
-        for g in &mut self.goals {
-            g.init(&mut self.c, now);
-        }
+        self.setup_goals(now);
     }
 
-    fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, mut dgram: Option<Datagram>, now: Instant) -> Output {
+        println!("{} process goals = {:?}", self.c, self.goals);
         _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
-            let res = self.c.process(d.take().as_ref(), now);
+            let res = self.c.process(dgram.take().as_ref(), now);
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
@@ -139,10 +161,17 @@ impl Node for ConnectionNode {
             // We also exit if none of the goals were active, as there is
             // no point trying again if they did nothing.
             if matches!(res, Output::Datagram(_)) || !active {
+                println!("{} prepare return goals = {:?}", self.c, self.goals);
                 return res;
             }
             qdebug!([self.c], "no datagram and goal activity, looping");
         }
+    }
+
+    fn prepare(&mut self, now: Instant) {
+        assert!(self.done(), "ConnectionNode::prepare: setup not complete");
+        self.setup_goals(now);
+        assert!(!self.done(), "ConnectionNode::prepare: setup not complete");
     }
 
     fn done(&self) -> bool {
@@ -190,7 +219,7 @@ impl ConnectionGoal for ReachState {
 }
 
 /// A target for a connection that involves sending a given amount of data on the indicated stream.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SendData {
     remaining: usize,
     stream_id: Option<StreamId>,
@@ -253,9 +282,7 @@ impl ConnectionGoal for SendData {
         match e {
             ConnectionEvent::SendStreamCreatable {
                 stream_type: StreamType::UniDi,
-            }
-            // TODO(mt): remove the second condition when #842 is fixed.
-            | ConnectionEvent::StateChange(_) => {
+            } => {
                 self.make_stream(c);
                 GoalStatus::Active
             }
@@ -275,7 +302,7 @@ impl ConnectionGoal for SendData {
 }
 
 /// Receive a prescribed amount of data from any stream.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReceiveData {
     remaining: usize,
 }

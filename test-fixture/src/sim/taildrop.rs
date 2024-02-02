@@ -23,6 +23,7 @@ use super::Node;
 const ONE_SECOND_NS: u128 = 1_000_000_000;
 
 /// This models a link with a tail drop router at the front of it.
+#[derive(Clone)]
 pub struct TailDrop {
     /// An overhead associated with each entry.  This accounts for
     /// layer 2, IP, and UDP overheads.

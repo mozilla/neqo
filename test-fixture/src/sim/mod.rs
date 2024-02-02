@@ -16,6 +16,7 @@ use std::{
     cmp::min,
     convert::TryFrom,
     fmt::Debug,
+    ops::{Deref, DerefMut},
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -76,17 +77,21 @@ pub trait Node: Debug {
     /// Perform processing.  This optionally takes a datagram and produces either
     /// another data, a time that the simulator needs to wait, or nothing.
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output;
+    /// This is called after setup is complete and before the main processing starts.
+    fn prepare(&mut self, _now: Instant) {}
     /// An node can report when it considers itself "done".
+    /// Prior to calling `prepare`, this should return `true` if it is ready.
     fn done(&self) -> bool {
         true
     }
+    /// Print out a summary of the state of the node.
     fn print_summary(&self, _test_name: &str) {}
 }
 
 /// The state of a single node.  Nodes will be activated if they are `Active`
 /// or if the previous node in the loop generated a datagram.  Nodes that return
 /// `true` from `Node::done` will be activated as normal.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum NodeState {
     /// The node just produced a datagram.  It should be activated again as soon as possible.
     Active,
@@ -109,6 +114,19 @@ impl NodeHolder {
             Waiting(t) => t >= now,
             Idle => false,
         }
+    }
+}
+
+impl Deref for NodeHolder {
+    type Target = dyn Node;
+    fn deref(&self) -> &Self::Target {
+        self.node.as_ref()
+    }
+}
+
+impl DerefMut for NodeHolder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.node.as_mut()
     }
 }
 
@@ -163,21 +181,8 @@ impl Simulator {
         next.expect("a node cannot be idle and not done")
     }
 
-    /// Runs the simulation.
-    /// # Panics
-    /// When sanity checks fail in unexpected ways; this is a testing function after all.
-    #[allow(clippy::must_use_candidate)] // It's OK to ignore the duration.
-    pub fn run(mut self) -> Duration {
-        let start = now();
-        let mut now = start;
+    fn process_loop(&mut self, start: Instant, mut now: Instant) -> Instant {
         let mut dgram = None;
-
-        for n in &mut self.nodes {
-            n.node.init(self.rng.clone(), now);
-        }
-        println!("{}: seed {}", self.name, self.rng.borrow().seed_str());
-
-        let real_start = Instant::now();
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
@@ -186,7 +191,7 @@ impl Simulator {
                 }
 
                 qdebug!([self.name], "processing {:?}", n.node);
-                let res = n.node.process(dgram.take(), now);
+                let res = n.process(dgram.take(), now);
                 n.state = match res {
                     Output::Datagram(d) => {
                         qtrace!([self.name], " => datagram {}", d.len());
@@ -200,21 +205,14 @@ impl Simulator {
                     }
                     Output::None => {
                         qtrace!([self.name], " => nothing");
-                        assert!(n.node.done(), "nodes have to be done when they go idle");
+                        assert!(n.done(), "nodes should be done when they go idle");
                         Idle
                     }
                 };
             }
 
-            if self.nodes.iter().all(|n| n.node.done()) {
-                let real_elapsed = real_start.elapsed();
-                println!("{}: real elapsed time: {:?}", self.name, real_elapsed);
-                let elapsed = now - start;
-                println!("{}: simulated elapsed time: {:?}", self.name, elapsed);
-                for n in &self.nodes {
-                    n.node.print_summary(&self.name);
-                }
-                return elapsed;
+            if self.nodes.iter().all(|n| n.done()) {
+                return now;
             }
 
             if dgram.is_none() {
@@ -230,5 +228,67 @@ impl Simulator {
                 }
             }
         }
+    }
+
+    #[must_use]
+    pub fn setup(mut self) -> ReadySimulator {
+        let start = now();
+
+        println!("{}: seed {}", self.name, self.rng.borrow().seed_str());
+        for n in &mut self.nodes {
+            n.init(self.rng.clone(), start);
+        }
+
+        let setup_start = Instant::now();
+        let now = self.process_loop(start, start);
+        let setup_time = now - start;
+        println!(
+            "{t}: Setup took {wall:?} (wall) {setup_time:?} (simulated)",
+            t = self.name,
+            wall = setup_start.elapsed(),
+        );
+
+        for n in &mut self.nodes {
+            n.prepare(now);
+        }
+
+        ReadySimulator {
+            sim: self,
+            start,
+            now,
+        }
+    }
+
+    /// Runs the simulation.
+    /// # Panics
+    /// When sanity checks fail in unexpected ways; this is a testing function after all.
+    pub fn run(self) {
+        self.setup().run();
+    }
+
+    fn print_summary(&self) {
+        for n in &self.nodes {
+            n.print_summary(&self.name);
+        }
+    }
+}
+
+pub struct ReadySimulator {
+    sim: Simulator,
+    start: Instant,
+    now: Instant,
+}
+
+impl ReadySimulator {
+    pub fn run(mut self) {
+        let real_start = Instant::now();
+        let end = self.sim.process_loop(self.start, self.now);
+        let sim_time = end - self.now;
+        println!(
+            "{t}: Simulation took {wall:?} (wall) {sim_time:?} (simulated)",
+            t = self.sim.name,
+            wall = real_start.elapsed(),
+        );
+        self.sim.print_summary();
     }
 }
