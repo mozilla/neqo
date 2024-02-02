@@ -142,7 +142,7 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --tests --benches -- -D warnings
         if: success() || failure()
         continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
