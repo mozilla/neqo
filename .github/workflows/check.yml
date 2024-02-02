@@ -134,9 +134,11 @@ jobs:
           RUST_LOG: warn
 
       - name: Check formatting
-        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
-        env:
-          CONFIG_PATH: ${{ matrix.rust-toolchain != 'nightly' && '--config-path=$(mktemp)' || '' }}
+        run: |
+          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
+            export CONFIG_PATH="--config-path=$(mktemp)"
+          fi
+          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
       - name: Clippy
