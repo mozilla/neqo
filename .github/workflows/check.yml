@@ -109,7 +109,7 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust-toolchain }} build -v --all-targets
+          cargo +${{ matrix.rust-toolchain }} build --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
@@ -142,12 +142,12 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --tests -- -D warnings
         if: success() || failure()
         continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
       - name: Check rustdoc links
-        run: cargo +${{ matrix.rust-toolchain }} doc --verbose --workspace --no-deps --document-private-items
+        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
         if: success() || failure()
