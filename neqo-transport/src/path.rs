@@ -31,7 +31,7 @@ use crate::{
     sender::PacketSender,
     stats::FrameStats,
     tracking::{PacketNumberSpace, SentPacket},
-    Error, Res, Stats,
+    Stats,
 };
 
 /// This is the MTU that we assume when using IPv6.

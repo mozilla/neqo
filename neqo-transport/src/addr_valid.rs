@@ -20,8 +20,7 @@ use neqo_crypto::{
 use smallvec::SmallVec;
 
 use crate::{
-    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error,
-    Res,
+    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Res,
 };
 
 /// A prefix we add to Retry tokens to distinguish them from NEW_TOKEN tokens.
