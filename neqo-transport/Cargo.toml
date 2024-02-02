@@ -24,3 +24,7 @@ test-fixture = { path = "../test-fixture" }
 bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+
+[[bench]]
+name = "transfer"
+harness = false

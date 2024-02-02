@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram};
+use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
@@ -141,7 +141,6 @@ impl Node for ConnectionNode {
     }
 
     fn process(&mut self, mut dgram: Option<Datagram>, now: Instant) -> Output {
-        println!("{} process goals = {:?}", self.c, self.goals);
         _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
             let res = self.c.process(dgram.take().as_ref(), now);
@@ -161,7 +160,6 @@ impl Node for ConnectionNode {
             // We also exit if none of the goals were active, as there is
             // no point trying again if they did nothing.
             if matches!(res, Output::Datagram(_)) || !active {
-                println!("{} prepare return goals = {:?}", self.c, self.goals);
                 return res;
             }
             qdebug!([self.c], "no datagram and goal activity, looping");
@@ -179,7 +177,7 @@ impl Node for ConnectionNode {
     }
 
     fn print_summary(&self, test_name: &str) {
-        println!("{}: {:?}", test_name, self.c.stats());
+        qinfo!("{}: {:?}", test_name, self.c.stats());
     }
 }
 

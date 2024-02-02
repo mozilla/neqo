@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{qinfo, qtrace, Datagram};
 use neqo_transport::Output;
 
 use super::Node;
@@ -178,9 +178,13 @@ impl Node for TailDrop {
     }
 
     fn print_summary(&self, test_name: &str) {
-        println!(
+        qinfo!(
             "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name, self.received, self.dropped, self.delivered, self.maxq,
+            test_name,
+            self.received,
+            self.dropped,
+            self.delivered,
+            self.maxq,
         );
     }
 }

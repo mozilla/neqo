@@ -234,7 +234,7 @@ impl Simulator {
     pub fn setup(mut self) -> ReadySimulator {
         let start = now();
 
-        println!("{}: seed {}", self.name, self.rng.borrow().seed_str());
+        qinfo!("{}: seed {}", self.name, self.rng.borrow().seed_str());
         for n in &mut self.nodes {
             n.init(self.rng.clone(), start);
         }
@@ -242,7 +242,7 @@ impl Simulator {
         let setup_start = Instant::now();
         let now = self.process_loop(start, start);
         let setup_time = now - start;
-        println!(
+        qinfo!(
             "{t}: Setup took {wall:?} (wall) {setup_time:?} (simulated)",
             t = self.name,
             wall = setup_start.elapsed(),
@@ -284,7 +284,7 @@ impl ReadySimulator {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;
-        println!(
+        qinfo!(
             "{t}: Simulation took {wall:?} (wall) {sim_time:?} (simulated)",
             t = self.sim.name,
             wall = real_start.elapsed(),
