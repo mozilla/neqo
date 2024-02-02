@@ -6,6 +6,9 @@
 
 // Functions that handle capturing QLOG traces.
 
+// TODO: Remove this when we move qlog to 0.11.0
+#![allow(dead_code)]
+
 use std::{
     convert::TryFrom,
     ops::{Deref, RangeInclusive},
