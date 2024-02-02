@@ -146,9 +146,10 @@ enum RangeState {
 /// range implies needing-to-be-sent, either initially or as a retransmission.
 #[derive(Debug, Default, PartialEq)]
 struct RangeTracker {
-    // offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
+    /// offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
     used: BTreeMap<u64, (u64, RangeState)>,
-    cached: Option<(u64, Option<u64>)>,
+    /// this is a cache for first_unmarked_range(), which we check a log
+    first_unmarked: Option<(u64, Option<u64>)>,
 }
 
 impl RangeTracker {
@@ -171,8 +172,8 @@ impl RangeTracker {
     fn first_unmarked_range(&mut self) -> (u64, Option<u64>) {
         let mut prev_end = 0;
 
-        if let Some(cached) = self.cached {
-            return cached;
+        if let Some(first_unmarked) = self.first_unmarked {
+            return first_unmarked;
         }
 
         for (cur_off, (cur_len, _)) in &self.used {
@@ -180,16 +181,16 @@ impl RangeTracker {
                 prev_end = cur_off + cur_len;
             } else {
                 let res = (prev_end, Some(cur_off - prev_end));
-                self.cached = Some(res);
+                self.first_unmarked = Some(res);
                 return res;
             }
         }
-        self.cached = Some((prev_end, None));
+        self.first_unmarked = Some((prev_end, None));
         (prev_end, None)
     }
 
-    // Check for the common case of adding to the end.  If we can, do it and
-    // return true.
+    /// Check for the common case of adding to the end.  If we can, do it and
+    /// return true.
     fn extend_final_range(&mut self, new_off: u64, new_len: u64, new_state: RangeState) -> bool {
         if let Some(mut last) = self.used.last_entry() {
             let prev_off = *last.key();
@@ -336,7 +337,7 @@ impl RangeTracker {
             return;
         }
 
-        self.cached = None;
+        self.first_unmarked = None;
         if self.extend_final_range(off, len as u64, state) {
             return;
         }
@@ -355,7 +356,7 @@ impl RangeTracker {
             return;
         }
 
-        self.cached = None;
+        self.first_unmarked = None;
         let len = u64::try_from(len).unwrap();
         let end_off = off + len;
 
