@@ -118,8 +118,8 @@ jobs:
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Benches should at least build
-        run: cargo +${{ matrix.rust-toolchain }} bench --features bench,ci --no-run
-        
+        run: cargo +${{ matrix.rust-toolchain }} build --features bench --benches
+
       - name: Run client/server transfer
         run: |
           cargo +${{ matrix.rust-toolchain }} build --bin neqo-client --bin neqo-server
