@@ -12,7 +12,7 @@ log = {version = "~0.4.17", default-features = false}
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.11.0"
+qlog = "0.9.0"
 static_assertions = "~1.1.0"
 
 [dev-dependencies]

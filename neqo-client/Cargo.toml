@@ -15,7 +15,7 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.11.0"
+qlog = "0.9.0"
 structopt = "0.3"
 url = "~2.5.0"
 
