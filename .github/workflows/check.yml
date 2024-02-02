@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest]
-        rust-toolchain: [1.70.0, stable, beta]
+        rust-toolchain: [1.70.0, stable, nightly]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -134,13 +134,15 @@ jobs:
           RUST_LOG: warn
 
       - name: Check formatting
-        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
+        run: |
+          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check \
+            ${{ matrix.rust-toolchain != 'nightly' && --config-path=/dev/null }}
         if: success() || failure()
 
       - name: Clippy
         run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
+        continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
       - name: Check rustdoc links
         run: cargo +${{ matrix.rust-toolchain }} doc --verbose --workspace --no-deps --document-private-items
