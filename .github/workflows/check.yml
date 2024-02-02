@@ -134,8 +134,7 @@ jobs:
           RUST_LOG: warn
 
       - name: Check formatting
-        run: |
-          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check "$CONFIG_PATH"
+        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         env:
           CONFIG_PATH: ${{ matrix.rust-toolchain != 'nightly' && '--config-path=/dev/null' || '' }}
         if: success() || failure()
