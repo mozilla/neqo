@@ -356,7 +356,7 @@ impl PacketBuilder {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
             debug_assert!(false);
-            return Err(Error::InternalError(5));
+            return Err(Error::InternalError);
         }
 
         self.pad_for_crypto(crypto);

@@ -218,9 +218,6 @@ impl StateSignaling {
         if matches!(self, Self::HandshakeDone) && builder.remaining() >= 1 {
             *self = Self::Idle;
             builder.encode_varint(FRAME_TYPE_HANDSHAKE_DONE);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(14));
-            }
             Ok(Some(RecoveryToken::HandshakeDone))
         } else {
             Ok(None)
