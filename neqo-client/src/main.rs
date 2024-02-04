@@ -7,27 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use common::{qdebug, qinfo, IpTos};
-use futures::{
-    future::{select, Either},
-    FutureExt, TryFutureExt,
-};
-use qlog::{events::EventImportance, streamer::QlogStreamer};
-
-use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
-use neqo_crypto::{
-    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init, AuthenticationStatus, Cipher, ResumptionToken,
-};
-use neqo_http3::{
-    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
-    Priority,
-};
-use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
-};
-
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -44,6 +23,27 @@ use std::{
     time::{Duration, Instant},
 };
 
+use common::IpTos;
+use futures::{
+    future::{select, Either},
+    FutureExt, TryFutureExt,
+};
+use neqo_common::{
+    self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role,
+};
+use neqo_crypto::{
+    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    init, AuthenticationStatus, Cipher, ResumptionToken,
+};
+use neqo_http3::{
+    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
+    Priority,
+};
+use neqo_transport::{
+    CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
+    EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
+};
+use qlog::{events::EventImportance, streamer::QlogStreamer};
 use structopt::StructOpt;
 use tokio::{net::UdpSocket, time::Sleep};
 use url::{Origin, Url};
@@ -1154,19 +1154,17 @@ mod old {
         time::Instant,
     };
 
-    use tokio::{net::UdpSocket, time::Sleep};
-    use url::Url;
-
-    use crate::emit_datagram;
-
     use neqo_common::{event::Provider, qdebug, qinfo, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
         StreamType,
     };
+    use tokio::{net::UdpSocket, time::Sleep};
+    use url::Url;
 
     use super::{get_output_file, qlog_new, read_dgram, ready, Args, KeyUpdateState, Ready, Res};
+    use crate::emit_datagram;
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,
@@ -1440,7 +1438,6 @@ mod old {
                 if let State::Closed(..) = self.client.state() {
                     break;
                 }
-
             }
 
             let token = if self.args.resume {

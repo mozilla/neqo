@@ -1,6 +1,6 @@
 [package]
 name = "test-fixture"
-version = "0.6.9"
+version = "0.7.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"
 rust-version = "1.70.0"
@@ -14,7 +14,7 @@ neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3" }
 neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
-qlog = "0.11.0"
+qlog = { git = "https://github.com/cloudflare/quiche", rev = "09ea4b244096a013071cfe2175bbf2945fb7f8d1" }
 
 [features]
 deny-warnings = []

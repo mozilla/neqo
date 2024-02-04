@@ -18,17 +18,17 @@ pub mod qlog;
 pub mod timer;
 pub mod tos;
 
-pub use self::codec::{Decoder, Encoder};
-pub use self::datagram::Datagram;
-pub use self::header::Header;
-pub use self::incrdecoder::{
-    IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
-};
-pub use self::tos::{IpTos, IpTosDscp, IpTosEcn};
-
 use std::fmt::Write;
 
 use enum_map::Enum;
+
+pub use self::{
+    codec::{Decoder, Encoder},
+    datagram::Datagram,
+    header::Header,
+    incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
+    tos::{IpTos, IpTosDscp, IpTosEcn},
+};
 
 #[must_use]
 pub fn hex(buf: impl AsRef<[u8]>) -> String {

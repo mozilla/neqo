@@ -1,6 +1,6 @@
 [package]
 name = "neqo-qpack"
-version = "0.6.9"
+version = "0.7.0"
 authors = ["Dragana Damjanovic <dragana.damjano@gmail.com>"]
 edition = "2018"
 rust-version = "1.70.0"
@@ -12,7 +12,7 @@ log = {version = "~0.4.17", default-features = false}
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.11.0"
+qlog = { git = "https://github.com/cloudflare/quiche", rev = "09ea4b244096a013071cfe2175bbf2945fb7f8d1" }
 static_assertions = "~1.1.0"
 
 [dev-dependencies]
