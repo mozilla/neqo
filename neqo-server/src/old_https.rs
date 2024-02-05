@@ -7,14 +7,9 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::Instant;
-
-use regex::Regex;
+use std::{
+    cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
+};
 
 use neqo_common::{event::Provider, hex, qdebug, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
@@ -23,6 +18,7 @@ use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State, StreamId,
 };
+use regex::Regex;
 
 use super::{qns_read_response, Args, HttpServer};
 

@@ -1,6 +1,6 @@
 [package]
 name = "neqo-common"
-version = "0.6.8"
+version = "0.7.0"
 authors = ["Bobby Holley <bobbyholley@gmail.com>"]
 edition = "2018"
 rust-version = "1.70.0"
@@ -12,7 +12,7 @@ enum-map = "2.7"
 env_logger = { version = "0.10", default-features = false }
 lazy_static = "1.4"
 log = { version = "0.4", default-features = false }
-qlog = "0.11.0"
+qlog = { git = "https://github.com/cloudflare/quiche", rev = "09ea4b244096a013071cfe2175bbf2945fb7f8d1" }
 time = {version = "0.3.23", features = ["formatting"]}
 
 [dev-dependencies]

@@ -4,14 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::{
-    reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
-};
+use std::mem;
+
 use neqo_common::Encoder;
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::StreamType;
-use std::mem;
 use test_fixture::{default_client, default_server, now};
+
+use crate::frames::{
+    reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
+};
 
 #[allow(clippy::many_single_char_names)]
 pub(crate) fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {

@@ -4,13 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Output, State};
-use super::{connect, connect_force_idle, default_client, default_server, send_something};
-use crate::tparams::{self, TransportParameter};
-use crate::{AppError, ConnectionError, Error, ERROR_APPLICATION_CLOSE};
-
 use std::time::Duration;
+
 use test_fixture::{self, datagram, now};
+
+use super::{
+    super::{Connection, Output, State},
+    connect, connect_force_idle, default_client, default_server, send_something,
+};
+use crate::{
+    tparams::{self, TransportParameter},
+    AppError, ConnectionError, Error, ERROR_APPLICATION_CLOSE,
+};
 
 fn assert_draining(c: &Connection, expected: &Error) {
     assert!(c.state().closed());

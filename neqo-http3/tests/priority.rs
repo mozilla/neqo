@@ -4,14 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::event::Provider;
+use std::time::Instant;
 
+use neqo_common::event::Provider;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State, Priority,
 };
-
-use std::time::Instant;
 use test_fixture::*;
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {

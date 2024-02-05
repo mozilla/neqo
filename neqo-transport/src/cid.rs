@@ -6,15 +6,6 @@
 
 // Representation and management of connection IDs.
 
-use crate::{
-    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Error, Res,
-};
-
-use neqo_common::{hex, hex_with_len, qinfo, Decoder, Encoder};
-use neqo_crypto::random;
-
-use smallvec::SmallVec;
 use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
@@ -22,6 +13,15 @@ use std::{
     convert::{AsRef, TryFrom},
     ops::Deref,
     rc::Rc,
+};
+
+use neqo_common::{hex, hex_with_len, qinfo, Decoder, Encoder};
+use neqo_crypto::random;
+use smallvec::SmallVec;
+
+use crate::{
+    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
+    stats::FrameStats, Error, Res,
 };
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
@@ -421,8 +421,9 @@ pub struct ConnectionIdManager {
     /// The `ConnectionIdGenerator` instance that is used to create connection IDs.
     generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
     /// The connection IDs that we will accept.
-    /// This includes any we advertise in `NEW_CONNECTION_ID` that haven't been bound to a path yet.
-    /// During the handshake at the server, it also includes the randomized DCID pick by the client.
+    /// This includes any we advertise in `NEW_CONNECTION_ID` that haven't been bound to a path
+    /// yet. During the handshake at the server, it also includes the randomized DCID pick by
+    /// the client.
     connection_ids: ConnectionIdStore<()>,
     /// The maximum number of connection IDs this will accept.  This is at least 2 and won't
     /// be more than `LOCAL_ACTIVE_CID_LIMIT`.
@@ -531,10 +532,6 @@ impl ConnectionIdManager {
         builder.encode_varint(0u64);
         builder.encode_vec(1, &entry.cid);
         builder.encode(&entry.srt);
-        if builder.len() > builder.limit() {
-            return Err(Error::InternalError(8));
-        }
-
         stats.new_connection_id += 1;
         Ok(true)
     }
@@ -595,8 +592,9 @@ impl ConnectionIdManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use test_fixture::fixture_init;
+
+    use super::*;
 
     #[test]
     fn generate_initial_cid() {

@@ -4,6 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    mem,
+    time::{Duration, Instant},
+};
+
+use neqo_common::qdebug;
+use neqo_crypto::AuthenticationStatus;
+use test_fixture::{
+    assertions::{assert_handshake, assert_initial},
+    now, split_datagram,
+};
+
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
@@ -21,17 +33,6 @@ use crate::{
     tparams::TransportParameter,
     tracking::DEFAULT_ACK_DELAY,
     StreamType,
-};
-
-use neqo_common::qdebug;
-use neqo_crypto::AuthenticationStatus;
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
-use test_fixture::{
-    assertions::{assert_handshake, assert_initial},
-    now, split_datagram,
 };
 
 #[test]
