@@ -151,6 +151,8 @@ pub struct RangeTracker {
     /// Keys are the offset of the start of the range.
     /// Values is a tuple of the range length and its state.
     used: BTreeMap<u64, (u64, RangeState)>,
+    /// This is a cache for the output of `first_unmarked_range`, which we check a lot.
+    first_unmarked: Option<(u64, Option<u64>)>,
 }
 
 impl RangeTracker {
@@ -166,16 +168,23 @@ impl RangeTracker {
 
     /// Find the first unmarked range. If all are contiguous, this will return
     /// (highest_offset(), None).
-    fn first_unmarked_range(&self) -> (u64, Option<u64>) {
+    fn first_unmarked_range(&mut self) -> (u64, Option<u64>) {
+        if let Some(first_unmarked) = self.first_unmarked {
+            return first_unmarked;
+        }
+
         let mut prev_end = self.acked;
 
         for (&cur_off, &(cur_len, _)) in &self.used {
             if prev_end == cur_off {
                 prev_end = cur_off + cur_len;
             } else {
-                return (prev_end, Some(cur_off - prev_end));
+                let res = (prev_end, Some(cur_off - prev_end));
+                self.first_unmarked = Some(res);
+                return res;
             }
         }
+        self.first_unmarked = Some((prev_end, None));
         (prev_end, None)
     }
 
@@ -397,6 +406,7 @@ impl RangeTracker {
             return;
         }
 
+        self.first_unmarked = None;
         let len = u64::try_from(len).unwrap();
         let end_off = off + len;
 
@@ -485,7 +495,7 @@ impl TxBuffer {
         can_buffer
     }
 
-    pub fn next_bytes(&self) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
         if start == self.retired() + u64::try_from(self.buffered()).unwrap() {
@@ -845,11 +855,13 @@ impl SendStream {
     /// offset.
     fn next_bytes(&mut self, retransmission_only: bool) -> Option<(u64, &[u8])> {
         match self.state {
-            SendStreamState::Send { ref send_buf, .. } => {
-                send_buf.next_bytes().and_then(|(offset, slice)| {
+            SendStreamState::Send {
+                ref mut send_buf, ..
+            } => {
+                let result = send_buf.next_bytes();
+                if let Some((offset, slice)) = result {
                     if retransmission_only {
                         qtrace!(
-                            [self],
                             "next_bytes apply retransmission limit at {}",
                             self.retransmission_offset
                         );
@@ -865,13 +877,16 @@ impl SendStream {
                     } else {
                         Some((offset, slice))
                     }
-                })
+                } else {
+                    None
+                }
             }
             SendStreamState::DataSent {
-                ref send_buf,
+                ref mut send_buf,
                 fin_sent,
                 ..
             } => {
+                let used = send_buf.used(); // immutable first
                 let bytes = send_buf.next_bytes();
                 if bytes.is_some() {
                     bytes
@@ -879,7 +894,7 @@ impl SendStream {
                     None
                 } else {
                     // Send empty stream frame with fin set
-                    Some((send_buf.used(), &[]))
+                    Some((used, &[]))
                 }
             }
             SendStreamState::Ready { .. }

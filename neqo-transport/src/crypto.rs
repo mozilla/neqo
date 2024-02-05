@@ -225,7 +225,7 @@ impl Crypto {
                 self.tls.read_secret(TLS_EPOCH_ZERO_RTT),
             ),
         };
-        let secret = secret.ok_or(Error::InternalError(1))?;
+        let secret = secret.ok_or(Error::InternalError)?;
         self.states
             .set_0rtt_keys(version, dir, &secret, cipher.unwrap());
         Ok(true)
@@ -259,12 +259,12 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_HANDSHAKE)
-            .ok_or(Error::InternalError(2))?;
+            .ok_or(Error::InternalError)?;
         let cipher = match self.tls.info() {
             None => self.tls.preinfo()?.cipher_suite(),
             Some(info) => Some(info.cipher_suite()),
         }
-        .ok_or(Error::InternalError(3))?;
+        .ok_or(Error::InternalError)?;
         self.states
             .set_handshake_keys(self.version, &write_secret, &read_secret, cipher);
         qdebug!([self], "Handshake keys installed");
@@ -288,7 +288,7 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_APPLICATION_DATA)
-            .ok_or(Error::InternalError(4))?;
+            .ok_or(Error::InternalError)?;
         self.states
             .set_application_read_key(version, read_secret, expire_0rtt)?;
         qdebug!([self], "application read keys installed");
@@ -662,7 +662,7 @@ impl CryptoDxState {
         // The numbers in `Self::limit` assume a maximum packet size of 2^11.
         if body.len() > 2048 {
             debug_assert!(false);
-            return Err(Error::InternalError(12));
+            return Err(Error::InternalError);
         }
         self.invoked()?;
 
@@ -1550,9 +1550,6 @@ impl CryptoStreams {
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
             builder.encode_varint(offset);
             builder.encode_vvec(&data[..length]);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(15));
-            }
 
             cs.tx.mark_as_sent(offset, length);
 

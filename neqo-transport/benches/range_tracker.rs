@@ -12,21 +12,23 @@ fn build_coalesce(len: u64) -> RangeTracker {
         // These do not get immediately coalesced when marking since they're not at the end or start
         used.mark_acked(i * CHUNK, CHUNK as usize);
     }
-    return used;
+    used
 }
 
 fn coalesce(c: &mut Criterion, count: u64) {
-    let mut used = build_coalesce(count);
     c.bench_function(
         &format!("coalesce_acked_from_zero {count}+1 entries"),
         |b| {
-            b.iter(|| {
-                let used: &mut RangeTracker = &mut used;
-                used.mark_acked(CHUNK, CHUNK as usize);
-                let tail = (count + 1) * CHUNK;
-                used.mark_sent(tail, CHUNK as usize);
-                used.mark_acked(tail, CHUNK as usize);
-            })
+            b.iter_batched(
+                || build_coalesce(count),
+                |mut used| {
+                    used.mark_acked(CHUNK, CHUNK as usize);
+                    let tail = (count + 1) * CHUNK;
+                    used.mark_sent(tail, CHUNK as usize);
+                    used.mark_acked(tail, CHUNK as usize);
+                },
+                criterion::BatchSize::SmallInput,
+            )
         },
     );
 }

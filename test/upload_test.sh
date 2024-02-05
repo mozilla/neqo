@@ -5,9 +5,14 @@ set -e
 server_address=127.0.0.1
 server_port=4433
 upload_size=8388608
-client="cargo run --release --bin neqo-client -- http://$server_address:$server_port/ --test upload --upload-size $upload_size"
+cc=cubic
+client="cargo run --release --bin neqo-client -- http://$server_address:$server_port/ --test upload --upload-size $upload_size --cc $cc"
 server="cargo run --release --bin neqo-server -- --db ../test-fixture/db $server_address:$server_port"
 server_pid=0
+pacing=true
+if [ "$pacing" = true ]; then
+    client="$client --pacing"
+fi
 
 # Define two indexed arrays to store network conditions
 network_conditions=("cable" "3g_slow" "DSL" "LTE" "fast wifi")
@@ -16,10 +21,6 @@ network_rtts=("14" "200" "25" "35" "10")
 plrs=("0.0001" "0.0005" "0.001" "0.002" "0.005")
 
 runs=1
-
-echo -n "Enter root password: "
-read -s root_password
-echo
 
 setup_network_conditions() {
     bw="$1"
@@ -38,7 +39,8 @@ setup_network_conditions() {
 
     # Convert BDP to kilobytes
     bdp_kb=$(echo "scale=2; $bdp_bits / 8 / 1024" | bc)
-    bdp_kb_rounded_up=$(printf "%.0f" "$bdp_kb")
+    bdp_kb_rounded_up=$(LC_NUMERIC=C printf "%.0f" "$bdp_kb")
+
 
     # if we are on MacOS X, configure the firewall to add delay and queue traffic
     if [ -x /usr/sbin/dnctl ]; then
@@ -50,13 +52,20 @@ setup_network_conditions() {
             "sudo pfctl -e || true"
         )
     else
-        # TODO implement commands for linux
-        return 0
+        bw_in_bits_per_sec="${bw%/s}"
+        bdp_bytes=$(echo "scale=2; $bdp_bits / 8" | bc)
+        bdp_bytes_rounded_up=$(LC_NUMERIC=C printf "%.0f" "$bdp_bytes")
+        plr_p=$(echo "scale=4; $plr * 100" | bc)
+        plr_p=$(LC_NUMERIC=C printf "%.2f" "$plr_p")
+        set_condition_commands=(
+            "sudo tc qdisc add dev lo root handle 1: tbf rate $bw_in_bits_per_sec burst $bdp_bytes_rounded_up limit 30000"
+            "sudo tc qdisc add dev lo parent 1:1 handle 10: netem delay ${delay_ms}ms loss ${plr_p}%"
+        )
     fi
 
     for command in "${set_condition_commands[@]}"; do
-        echo $command
-        echo $root_password | sudo -S bash -c "$command"
+        echo "$command"
+        eval "$command"
     done
 }
 
@@ -67,12 +76,13 @@ stop_network_conditions() {
             "sudo dnctl -q flush"
         )
     else
-        # TODO implement commands for linux
-        return 0
+        stop_condition_commands=(
+            "sudo tc qdisc del dev lo root"
+        )
     fi
 
-    for command in "${set_condition_commands[@]}"; do
-        echo $root_password | sudo -S bash -c "$command"
+    for command in "${stop_condition_commands[@]}"; do
+        eval "$command"
     done
 }
 
@@ -80,7 +90,7 @@ stop_server() {
     echo "stop server"
     server_pid=$(pgrep -f "neqo-server")
     # Kill the server
-    kill $server_pid
+    kill "$server_pid"
 }
 
 start_test() {

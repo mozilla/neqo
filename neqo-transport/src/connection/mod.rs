@@ -36,7 +36,6 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    dump::*,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -61,6 +60,7 @@ use crate::{
     AppError, ConnectionError, Error, Res, StreamId,
 };
 
+mod dump;
 mod idle;
 pub mod params;
 mod saved;
@@ -68,6 +68,7 @@ mod state;
 #[cfg(test)]
 pub mod test_internal;
 
+use dump::dump_packet;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
@@ -1935,9 +1936,6 @@ impl Connection {
                 .as_ref()
                 .unwrap_or(&close)
                 .write_frame(&mut builder);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(10));
-            }
             encoder = builder.build(tx)?;
         }
 
@@ -1982,7 +1980,7 @@ impl Connection {
         if builder.is_full() {
             return Ok(());
         }
-        self.paths.write_frames(builder, tokens, frame_stats)?;
+        self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return Ok(());
         }
@@ -2107,7 +2105,7 @@ impl Connection {
                 builder,
                 &mut tokens,
                 stats,
-            )?;
+            );
         }
         let ack_end = builder.len();
 
@@ -2122,7 +2120,7 @@ impl Connection {
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
                 now,
-            )? {
+            ) {
                 builder.enable_padding(true);
             }
         }

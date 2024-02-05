@@ -5,7 +5,7 @@ on:
     - cron: '42 3 * * 2,5' # Runs at 03:42 UTC (m and h chosen arbitrarily) twice a week.
   workflow_dispatch:
   pull_request:
-    branch: ["main"]
+    branches: ["main"]
     paths:
       - 'qns/**'
       - '.github/workflows/qns.yml'
@@ -13,6 +13,9 @@ jobs:
   docker-image:
     runs-on: ubuntu-latest
     steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -47,3 +50,4 @@ jobs:
             RUST_VERSION=stable
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          platforms: linux/amd64, linux/arm64

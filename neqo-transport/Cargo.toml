@@ -1,6 +1,6 @@
 [package]
 name = "neqo-transport"
-version = "0.6.9"
+version = "0.7.0"
 authors = ["EKR <ekr@rtfm.com>", "Andy Grover <agrover@mozilla.com>"]
 edition = "2018"
 rust-version = "1.70.0"
@@ -9,10 +9,10 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 indexmap = "1.9.3"
 lazy_static = "1.4"
-log = {version = "0.4.17", default-features = false}
+log = { version = "0.4.17", default-features = false }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-qlog = "0.11.0"
+qlog = "0.12.0"
 smallvec = "1.11.1"
 
 [dev-dependencies]
@@ -24,6 +24,16 @@ test-fixture = { path = "../test-fixture" }
 bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+
+[[bench]]
+name = "transfer"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "rx_stream_orderer"
+harness = false
+required-features = ["bench"]
 
 [[bench]]
 name = "range_tracker"

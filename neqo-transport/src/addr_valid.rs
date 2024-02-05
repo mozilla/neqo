@@ -20,8 +20,7 @@ use neqo_crypto::{
 use smallvec::SmallVec;
 
 use crate::{
-    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error,
-    Res,
+    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Res,
 };
 
 /// A prefix we add to Retry tokens to distinguish them from NEW_TOKEN tokens.
@@ -434,9 +433,6 @@ impl NewTokenSender {
 
                 builder.encode_varint(crate::frame::FRAME_TYPE_NEW_TOKEN);
                 builder.encode_vvec(&t.token);
-                if builder.len() > builder.limit() {
-                    return Err(Error::InternalError(7));
-                }
 
                 tokens.push(RecoveryToken::NewToken(t.seqno));
                 stats.new_token += 1;
