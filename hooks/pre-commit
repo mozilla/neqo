@@ -32,12 +32,20 @@ if [[ ./neqo-crypto/bindings/bindings.toml -nt ./neqo-crypto/src/lib.rs ]]; then
     exit 1
 fi
 
+toolchain=nightly
+fmtconfig="$root/.rustfmt.toml"
+if cargo "+$toolchain" version >/dev/null; then
+    echo "warning: A rust $toolchain toolchain is recommended to check formatting."
+    toolchain=stable
+    fmtconfig=/dev/null
+fi
+
 # Check formatting.
 trap 'git stash pop -q' EXIT
 git stash push -k -u -q -m "pre-commit stash"
-if ! errors=($(cargo fmt -- --check -l)); then
+if ! errors=($(cargo "+$toolchain" fmt -- --check -l --config-path="$fmtconfig")); then
     echo "Formatting errors found."
-    echo "Run \`cargo fmt\` to fix the following files:"
+    echo "Run \`cargo fmt +$toolchain\` to fix the following files:"
     for err in "${errors[@]}"; do
         echo "  $err"
     done

@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest]
-        rust-toolchain: [1.70.0, stable, beta]
+        rust-toolchain: [1.70.0, stable, nightly]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -35,8 +35,9 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build
+          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
       # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
@@ -47,13 +48,15 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           csrutil status | grep disabled
-          brew install ninja mercurial cargo-binstall
+          brew install ninja mercurial cargo-binstall llvm
+          echo "/usr/local/opt/llvm/bin" >> "$GITHUB_PATH"
           # python3 -m pip install gyp-next
           # Above does not work, since pypi only has gyp 0.15.0, which is too old
           # for the homebrew python3. Install from source instead.
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           python3 -m pip install packaging
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -65,9 +68,10 @@ jobs:
         run: |
           echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
           echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -83,10 +87,11 @@ jobs:
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
       # (neqo-crypto/build.rs would also need to query pkg-config to get the
       # right build flags rather than building NSS.)
+      # Clone from the main hg repo, because the GitHub mirror can be out of date.
       - name: Fetch NSS and NSPR
         run: |
           hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-          git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
           echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
           echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
         env:
@@ -104,7 +109,7 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust-toolchain }} build -v --all-targets
+          cargo +${{ matrix.rust-toolchain }} build --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
@@ -112,19 +117,44 @@ jobs:
       - name: Run tests and determine coverage
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
+      - name: Benches should at least build
+        run: cargo +${{ matrix.rust-toolchain }} build --features bench --benches
+
+      - name: Run client/server transfer
+        run: |
+          cargo +${{ matrix.rust-toolchain }} build --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} run --bin neqo-server -- $HOST:4433 &
+          PID=$!
+          cargo +${{ matrix.rust-toolchain }} run --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          kill $PID
+          [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+        env:
+          HOST: localhost
+          SIZE: 54321
+          RUST_LOG: warn
+
       - name: Check formatting
-        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
+        run: |
+          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
+            export CONFIG_PATH="--config-path=$(mktemp)"
+          fi
+          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --tests --benches -- -D warnings
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain == 'beta' }}
+        continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
+
+      - name: Check rustdoc links
+        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
+        if: success() || failure()
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           file: lcov.info
           fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}

@@ -8,14 +8,12 @@
 #![deny(clippy::pedantic)]
 #![cfg(not(feature = "fuzzing"))]
 
-use neqo_common::Datagram;
+use std::{cell::RefCell, rc::Rc};
+
 use neqo_transport::{
     Connection, ConnectionParameters, RandomConnectionIdGenerator, State, Version,
 };
-use test_fixture::{self, addr, now};
-
-use std::cell::RefCell;
-use std::rc::Rc;
+use test_fixture::{self, datagram, now};
 
 const INITIAL_PACKET_V2: &[u8] = &[
     0xd7, 0x6b, 0x33, 0x43, 0xcf, 0x08, 0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0x00, 0x00,
@@ -265,9 +263,9 @@ fn make_server(v: Version) -> Connection {
 fn process_client_initial(v: Version, packet: &[u8]) {
     let mut server = make_server(v);
 
-    let dgram = Datagram::new(addr(), addr(), packet);
+    let dgram = datagram(packet.to_vec());
     assert_eq!(*server.state(), State::Init);
-    let out = server.process(Some(dgram), now());
+    let out = server.process(Some(&dgram), now());
     assert_eq!(*server.state(), State::Handshaking);
     assert!(out.dgram().is_some());
 }

@@ -5,16 +5,6 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
-use crate::{
-    cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
-    crypto::{CryptoDxState, CryptoSpace, CryptoStates},
-    version::{Version, WireVersion},
-    Error, Res,
-};
-
-use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
-use neqo_crypto::random;
-
 use std::{
     cmp::min,
     convert::TryFrom,
@@ -22,6 +12,16 @@ use std::{
     iter::ExactSizeIterator,
     ops::{Deref, DerefMut, Range},
     time::Instant,
+};
+
+use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
+use neqo_crypto::random;
+
+use crate::{
+    cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
+    crypto::{CryptoDxState, CryptoSpace, CryptoStates},
+    version::{Version, WireVersion},
+    Error, Res,
 };
 
 pub const PACKET_BIT_LONG: u8 = 0x80;
@@ -245,7 +245,7 @@ impl PacketBuilder {
 
     /// Adjust the limit to ensure that no more data is added.
     pub fn mark_full(&mut self) {
-        self.limit = self.encoder.len()
+        self.limit = self.encoder.len();
     }
 
     /// Mark the packet as needing padding (or not).
@@ -356,7 +356,7 @@ impl PacketBuilder {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
             debug_assert!(false);
-            return Err(Error::InternalError(5));
+            return Err(Error::InternalError);
         }
 
         self.pad_for_crypto(crypto);
@@ -409,7 +409,7 @@ impl PacketBuilder {
     /// Make a retry packet.
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
-    /// this returns a Vec<u8> rather than building on an encoder.
+    /// this returns a [`Vec<u8>`] rather than building on an encoder.
     pub fn retry(
         version: Version,
         dcid: &[u8],
@@ -501,8 +501,8 @@ pub struct PublicPacket<'a> {
     dcid: ConnectionIdRef<'a>,
     /// The source connection ID, if this is a long header packet.
     scid: Option<ConnectionIdRef<'a>>,
-    /// Any token that is included in the packet (Retry always has a token; Initial sometimes does).
-    /// This is empty when there is no token.
+    /// Any token that is included in the packet (Retry always has a token; Initial sometimes
+    /// does). This is empty when there is no token.
     token: &'a [u8],
     /// The size of the header, not including the packet number.
     header_len: usize,
@@ -603,9 +603,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from a supported version.
-        let version = if let Ok(v) = Version::try_from(version) {
-            v
-        } else {
+        let Ok(version) = Version::try_from(version) else {
             return Ok((
                 Self {
                     packet_type: PacketType::OtherVersion,
@@ -675,13 +673,12 @@ impl<'a> PublicPacket<'a> {
         self.packet_type
     }
 
-    pub fn dcid(&self) -> &ConnectionIdRef<'a> {
-        &self.dcid
+    pub fn dcid(&self) -> ConnectionIdRef<'a> {
+        self.dcid
     }
 
-    pub fn scid(&self) -> &ConnectionIdRef<'a> {
+    pub fn scid(&self) -> ConnectionIdRef<'a> {
         self.scid
-            .as_ref()
             .expect("should only be called for long header packets")
     }
 
@@ -868,13 +865,14 @@ impl Deref for DecryptedPacket {
 
 #[cfg(all(test, not(feature = "fuzzing")))]
 mod tests {
+    use neqo_common::Encoder;
+    use test_fixture::{fixture_init, now};
+
     use super::*;
     use crate::{
         crypto::{CryptoDxState, CryptoStates},
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
     };
-    use neqo_common::Encoder;
-    use test_fixture::{fixture_init, now};
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
@@ -1026,7 +1024,8 @@ mod tests {
         assert_eq!(&decrypted[..], SAMPLE_SHORT_PAYLOAD);
     }
 
-    /// By telling the decoder that the connection ID is shorter than it really is, we get a decryption error.
+    /// By telling the decoder that the connection ID is shorter than it really is, we get a
+    /// decryption error.
     #[test]
     fn decode_short_bad_cid() {
         fixture_init();
