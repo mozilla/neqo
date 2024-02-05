@@ -1078,7 +1078,7 @@ async fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match std::net::UdpSocket::bind(&local_addr) {
+        let socket = match std::net::UdpSocket::bind(local_addr) {
             Err(e) => {
                 eprintln!("Unable to bind UDP socket: {e}");
                 exit(1)
@@ -1366,7 +1366,7 @@ mod old {
             origin: &str,
             url_queue: VecDeque<Url>,
             token: Option<ResumptionToken>,
-        ) -> Res<Self> {
+        ) -> Res<ClientRunner<'a>> {
             let alpn = match args.alpn.as_str() {
                 "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.alpn.as_str(),
                 _ => "hq-interop",
