@@ -15,7 +15,7 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = { git = "https://github.com/cloudflare/quiche", rev = "09ea4b244096a013071cfe2175bbf2945fb7f8d1" }
+qlog = "0.12.0"
 structopt = "0.3"
 url = "~2.5.0"
 
