@@ -16,7 +16,7 @@ bindgen = {version = "0.69.1", default-features = false, features= ["runtime"]}
 mozbuild = {version = "0.1", optional = true}
 serde = "1.0.195"
 serde_derive = "1.0.195"
-toml = "0.5.11"
+toml = "0.8.9"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
