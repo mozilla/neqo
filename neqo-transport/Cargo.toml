@@ -12,11 +12,11 @@ lazy_static = "1.4"
 log = { version = "0.4.17", default-features = false }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-qlog = { git = "https://github.com/cloudflare/quiche", rev = "09ea4b244096a013071cfe2175bbf2945fb7f8d1" }
+qlog = "0.12.0"
 smallvec = "1.11.1"
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = { version = "0.5.1", features = ["html_reports"] }
 enum-map = "2.7"
 test-fixture = { path = "../test-fixture" }
 
@@ -24,6 +24,11 @@ test-fixture = { path = "../test-fixture" }
 bench = []
 deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
+
+[[bench]]
+name = "transfer"
+harness = false
+required-features = ["bench"]
 
 [[bench]]
 name = "rx_stream_orderer"
