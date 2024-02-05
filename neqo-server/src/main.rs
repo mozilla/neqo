@@ -829,6 +829,8 @@ async fn main() -> Result<(), io::Error> {
         }
     }
 
+    println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"));
+
     let mut servers_runner = ServersRunner::new(args)?;
     servers_runner.run().await
 }

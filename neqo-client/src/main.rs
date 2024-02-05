@@ -1020,6 +1020,8 @@ fn main() -> Res<()> {
         }
     }
 
+    println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"));
+
     let urls_by_origin = args
         .urls
         .clone()
