@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{qinfo, qtrace, Datagram};
 use neqo_transport::Output;
 
 use super::Node;
@@ -23,6 +23,7 @@ use super::Node;
 const ONE_SECOND_NS: u128 = 1_000_000_000;
 
 /// This models a link with a tail drop router at the front of it.
+#[derive(Clone)]
 pub struct TailDrop {
     /// An overhead associated with each entry.  This accounts for
     /// layer 2, IP, and UDP overheads.
@@ -60,6 +61,7 @@ pub struct TailDrop {
 
 impl TailDrop {
     /// Make a new taildrop node with the given rate, queue capacity, and link delay.
+    #[must_use]
     pub fn new(rate: usize, capacity: usize, delay: Duration) -> Self {
         Self {
             overhead: 64,
@@ -80,12 +82,14 @@ impl TailDrop {
 
     /// A tail drop queue on a 10Mbps link (approximated to 1 million bytes per second)
     /// with a fat 32k buffer (about 30ms), and the default forward delay of 50ms.
-    pub fn dsl_uplink() -> Self {
+    #[must_use]
+    pub fn dsl_downlink() -> Self {
         TailDrop::new(1_000_000, 32_768, Duration::from_millis(50))
     }
 
-    /// Cut downlink to one fifth of the uplink (2Mbps), and reduce the buffer to 1/4.
-    pub fn dsl_downlink() -> Self {
+    /// Cut uplink to one fifth of the downlink (2Mbps), and reduce the buffer to 1/4.
+    #[must_use]
+    pub fn dsl_uplink() -> Self {
         TailDrop::new(200_000, 8_192, Duration::from_millis(50))
     }
 
@@ -174,9 +178,13 @@ impl Node for TailDrop {
     }
 
     fn print_summary(&self, test_name: &str) {
-        println!(
+        qinfo!(
             "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name, self.received, self.dropped, self.delivered, self.maxq,
+            test_name,
+            self.received,
+            self.dropped,
+            self.delivered,
+            self.maxq,
         );
     }
 }
