@@ -35,6 +35,7 @@ use neqo_transport::{
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
+pub mod sim;
 
 /// The path for the database used in tests.
 pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
