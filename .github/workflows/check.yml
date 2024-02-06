@@ -31,13 +31,6 @@ jobs:
         shell: bash
 
     steps:
-      - name: Echo
-        run: |
-          echo "OS: ${{ matrix.os }}"
-          echo "Rust: ${{ matrix.rust-toolchain }}"
-          echo "Type: ${{ matrix.type }}"
-          echo "Build type: $BUILD_TYPE"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
