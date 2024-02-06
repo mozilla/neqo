@@ -117,9 +117,11 @@ jobs:
       - name: Build
         run: |
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci,bench
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
-          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
-          echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
+          echo "${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_PATH"
+        env:
+          LIB_DIR: ${{ matrix.type == 'release' && 'Release' || 'Debug' }}
 
       - name: Run tests and determine coverage
         run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci,bench --no-fail-fast --lcov --output-path lcov.info
