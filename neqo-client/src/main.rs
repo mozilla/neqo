@@ -23,13 +23,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::IpTos;
 use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
 use neqo_common::{
-    self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role,
+    self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, udp, Datagram, Role,
 };
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -45,7 +44,7 @@ use neqo_transport::{
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use structopt::StructOpt;
-use tokio::{net::UdpSocket, time::Sleep};
+use tokio::{io::Interest, net::UdpSocket, time::Sleep};
 use url::{Origin, Url};
 
 #[derive(Debug)]
@@ -350,21 +349,6 @@ impl QuicParameters {
     }
 }
 
-async fn emit_datagram(socket: &UdpSocket, out_dgram: Datagram) -> Result<(), io::Error> {
-    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()).await {
-        Ok(res) => res,
-        Err(ref err) if err.kind() != io::ErrorKind::WouldBlock => {
-            eprintln!("UDP send error: {err:?}");
-            0
-        }
-        Err(e) => return Err(e),
-    };
-    if sent != out_dgram.len() {
-        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
-    }
-    Ok(())
-}
-
 fn get_output_file(
     url: &Url,
     output_dir: &Option<PathBuf>,
@@ -427,11 +411,17 @@ async fn ready(
 }
 
 fn read_dgram(
-    socket: &UdpSocket,
+    socket: &tokio::net::UdpSocket,
+    state: &quinn_udp::UdpSocketState,
     local_address: &SocketAddr,
 ) -> Result<Option<Datagram>, io::Error> {
-    let buf = &mut [0u8; 2048];
-    let (sz, remote_addr) = match socket.try_recv_from(&mut buf[..]) {
+    let mut buf = [0; u16::MAX as usize];
+    let mut tos = 0;
+    let mut ttl = 0;
+
+    let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
+        udp::rx(&socket, state, &mut buf[..], &mut tos, &mut ttl)
+    }) {
         Err(ref err)
             if err.kind() == io::ErrorKind::WouldBlock
                 || err.kind() == io::ErrorKind::Interrupted =>
@@ -444,6 +434,7 @@ fn read_dgram(
         }
         Ok(res) => res,
     };
+    qdebug!("read {}, {:?}", sz, &buf[0..32]);
 
     if sz == buf.len() {
         eprintln!("Might have received more than {} bytes", buf.len());
@@ -456,8 +447,8 @@ fn read_dgram(
         Ok(Some(Datagram::new(
             remote_addr,
             *local_address,
-            IpTos::default(),
-            None,
+            tos.into(),
+            Some(ttl),
             &buf[..sz],
         )))
     }
@@ -811,6 +802,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 struct ClientRunner<'a> {
     local_addr: SocketAddr,
     socket: &'a UdpSocket,
+    socket_state: &'a quinn_udp::UdpSocketState,
     client: Http3Client,
     handler: Handler<'a>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -821,6 +813,7 @@ impl<'a> ClientRunner<'a> {
     async fn new(
         args: &'a mut Args,
         socket: &'a UdpSocket,
+        socket_state: &'a quinn_udp::UdpSocketState,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         hostname: &str,
@@ -856,6 +849,7 @@ impl<'a> ClientRunner<'a> {
         Ok(Self {
             local_addr,
             socket,
+            socket_state,
             client,
             handler,
             timeout: None,
@@ -873,7 +867,7 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = read_dgram(self.socket, &self.local_addr)?;
+                    let dgram = read_dgram(self.socket, self.socket_state, &self.local_addr)?;
                     if dgram.is_none() {
                         break;
                     }
@@ -908,7 +902,8 @@ impl<'a> ClientRunner<'a> {
         loop {
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
-                    emit_datagram(self.socket, dgram).await?;
+                    // TODO: What if this returns WouldBlock?
+                    udp::tx(self.socket, self.socket_state, &dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -1086,6 +1081,7 @@ async fn main() -> Res<()> {
             Ok(s) => s,
         };
         socket.set_nonblocking(true)?;
+        let socket_state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
         let socket = UdpSocket::from_std(socket)?;
 
         let real_local = socket.local_addr().unwrap();
@@ -1112,6 +1108,7 @@ async fn main() -> Res<()> {
                 old::ClientRunner::new(
                     &args,
                     &socket,
+                    &socket_state,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1125,6 +1122,7 @@ async fn main() -> Res<()> {
                 ClientRunner::new(
                     &mut args,
                     &socket,
+                    &socket_state,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1154,7 +1152,7 @@ mod old {
         time::Instant,
     };
 
-    use neqo_common::{event::Provider, qdebug, qinfo, Datagram};
+    use neqo_common::{event::Provider, qdebug, qinfo, Datagram, udp};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
@@ -1164,7 +1162,6 @@ mod old {
     use url::Url;
 
     use super::{get_output_file, qlog_new, read_dgram, ready, Args, KeyUpdateState, Ready, Res};
-    use crate::emit_datagram;
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,
@@ -1351,6 +1348,7 @@ mod old {
     pub struct ClientRunner<'a> {
         local_addr: SocketAddr,
         socket: &'a UdpSocket,
+        socket_state: &'a quinn_udp::UdpSocketState,
         client: Connection,
         handler: HandlerOld<'a>,
         timeout: Option<Pin<Box<Sleep>>>,
@@ -1361,6 +1359,7 @@ mod old {
         pub async fn new(
             args: &'a Args,
             socket: &'a UdpSocket,
+            socket_state: &'a quinn_udp::UdpSocketState,
             local_addr: SocketAddr,
             remote_addr: SocketAddr,
             origin: &str,
@@ -1406,6 +1405,7 @@ mod old {
             Ok(Self {
                 local_addr,
                 socket,
+                socket_state,
                 client,
                 handler,
                 timeout: None,
@@ -1423,7 +1423,7 @@ mod old {
 
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = read_dgram(self.socket, &self.local_addr)?;
+                        let dgram = read_dgram(self.socket, self.socket_state, &self.local_addr)?;
                         if dgram.is_none() {
                             break;
                         }
@@ -1459,7 +1459,8 @@ mod old {
             loop {
                 match self.client.process(dgram.take(), Instant::now()) {
                     Output::Datagram(dgram) => {
-                        emit_datagram(self.socket, dgram).await?;
+                        // TODO: What if this returns WouldBlock?
+                        udp::tx(self.socket, self.socket_state, &dgram)?;
                     }
                     Output::Callback(new_timeout) => {
                         qinfo!("Setting timeout of {:?}", new_timeout);

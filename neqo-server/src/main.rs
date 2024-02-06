@@ -706,6 +706,7 @@ impl ServersRunner {
                 Output::Datagram(dgram) => {
                     qdebug!("writing to {:?}", dgram.source());
                     let (socket, state) = self.find_socket(dgram.source());
+                    // TODO: What if this returns WouldBlock?
                     udp::tx(socket, state, &dgram)?;
                 }
                 Output::Callback(new_timeout) => {

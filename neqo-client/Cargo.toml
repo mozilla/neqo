@@ -11,7 +11,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 futures = "0.3"
 log = {version = "0.4.17", default-features = false}
-neqo-common = { path="./../neqo-common" }
+neqo-common = { path="./../neqo-common", features = ["udp"] }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
@@ -19,6 +19,7 @@ neqo-transport = { path = "./../neqo-transport" }
 qlog = "0.12.0"
 structopt = "0.3"
 tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
+quinn-udp = { git = "https://github.com/quinn-rs/quinn/" }
 url = "~2.5.0"
 
 [features]
