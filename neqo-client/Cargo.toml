@@ -9,7 +9,8 @@ rust-version = "1.70.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-mio = "~0.6.23"
+futures = "0.3"
+log = {version = "0.4.17", default-features = false}
 neqo-common = { path="./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
@@ -17,6 +18,7 @@ neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = "0.12.0"
 structopt = "0.3"
+tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = "~2.5.0"
 
 [features]
