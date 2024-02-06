@@ -24,7 +24,7 @@ jobs:
             rust-toolchain: stable
             type: release
     env:
-      BUILD_TYPE: --${{ matrix.type }}
+      BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
