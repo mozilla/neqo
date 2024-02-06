@@ -1005,9 +1005,10 @@ async fn main() -> Res<()> {
     let mut args = Args::from_args();
 
     if let Some(testcase) = args.qns_test.as_ref() {
-        // Only allow v1 for QNS tests.
+        // Only use v1 for most QNS tests.
         args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
         match testcase.as_str() {
+            // TODO: Add "ecn" when that is ready.
             "http3" => {}
             "handshake" | "transfer" | "retry" => {
                 args.use_old_http = true;
@@ -1036,9 +1037,8 @@ async fn main() -> Res<()> {
             }
             "v2" => {
                 args.use_old_http = true;
-                // Allow v2 for this QNS test.
-                args.quic_parameters.quic_version =
-                    vec![VersionArg(Version::Version1), VersionArg(Version::Version2)];
+                // Use default version set for this test (which allows compatible vneg.)
+                args.quic_parameters.quic_version.clear();
             }
             _ => exit(127),
         }
