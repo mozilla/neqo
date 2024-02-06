@@ -18,12 +18,22 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest]
         rust-toolchain: [1.70.0, stable, nightly]
+        type: [debug]
+        include:
+          - type: release
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
 
     steps:
+      - name: Echo
+        run: |
+          echo "OS: ${{ matrix.os }}"
+          echo "Rust: ${{ matrix.rust-toolchain }}"
+          echo "Type: ${{ matrix.type }}"
+          exit 1
+          
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
