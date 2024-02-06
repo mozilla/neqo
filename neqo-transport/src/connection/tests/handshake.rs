@@ -1169,8 +1169,15 @@ fn emit_authentication_needed_once() {
     // but not yet all required handshake data. It moves to
     // `HandshakeState::AuthenticationPending` and emits a
     // `ConnectionEvent::AuthenticationNeeded` event.
+    //
+    // Note that this is a tiny bit fragile in that it depends on having a certificate
+    // that is within a fairly narrow range of sizes.  It has to fit in a single
+    // packet, but be large enough that the CertificateVerify message does not
+    // also fit in the same packet.  Our default test setup achieves this, but
+    // changes to the setup might invalidate this test.
     let _ = client.process(server1.as_dgram_ref(), now());
     assert_eq!(1, authentication_needed_count(&mut client));
+    assert!(client.peer_certificate().is_some());
 
     // The `AuthenticationNeeded` event is still pending a call to
     // `Connection::authenticated`. On receiving the second packet from the
