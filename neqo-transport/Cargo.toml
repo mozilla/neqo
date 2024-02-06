@@ -34,3 +34,8 @@ required-features = ["bench"]
 name = "rx_stream_orderer"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "range_tracker"
+harness = false
+required-features = ["bench"]
