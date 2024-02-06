@@ -109,17 +109,17 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust-toolchain }} build --all-targets
+          cargo +${{ matrix.rust-toolchain }} build --all-targets --features ci,bench
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest \
+           --all-targets --features ci,bench --no-fail-fast --lcov --output-path lcov.info
 
       - name: Run client/server transfer
         run: |
-          cargo +${{ matrix.rust-toolchain }} build --bin neqo-client --bin neqo-server
           cargo +${{ matrix.rust-toolchain }} run --bin neqo-server -- $HOST:4433 &
           PID=$!
           cargo +${{ matrix.rust-toolchain }} run --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
@@ -139,7 +139,7 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy --tests --benches -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings
         if: success() || failure()
         continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
