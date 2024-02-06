@@ -1135,3 +1135,54 @@ fn implicit_rtt_server() {
     // an RTT estimate from having discarded the Initial packet number space.
     assert_eq!(server.stats().rtt, RTT);
 }
+
+#[test]
+fn emit_authentication_needed_once() {
+    let mut client = default_client();
+
+    let mut server = Connection::new_server(
+        test_fixture::LONG_CERT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
+    )
+    .expect("create a server");
+
+    let client1 = client.process(None, now());
+    assert!(client1.as_dgram_ref().is_some());
+
+    // The entire server flight doesn't fit in a single packet because the
+    // certificate is large, therefore the server will produce 2 packets.
+    let server1 = server.process(client1.as_dgram_ref(), now());
+    assert!(server1.as_dgram_ref().is_some());
+    let server2 = server.process(None, now());
+    assert!(server2.as_dgram_ref().is_some());
+
+    let authentication_needed_count = |client: &mut Connection| {
+        client
+            .events()
+            .filter(|e| matches!(e, ConnectionEvent::AuthenticationNeeded))
+            .count()
+    };
+
+    // Upon receiving the first packet, the client has the server certificate,
+    // but not yet all required handshake data. It moves to
+    // `HandshakeState::AuthenticationPending` and emits a
+    // `ConnectionEvent::AuthenticationNeeded` event.
+    //
+    // Note that this is a tiny bit fragile in that it depends on having a certificate
+    // that is within a fairly narrow range of sizes.  It has to fit in a single
+    // packet, but be large enough that the CertificateVerify message does not
+    // also fit in the same packet.  Our default test setup achieves this, but
+    // changes to the setup might invalidate this test.
+    let _ = client.process(server1.as_dgram_ref(), now());
+    assert_eq!(1, authentication_needed_count(&mut client));
+    assert!(client.peer_certificate().is_some());
+
+    // The `AuthenticationNeeded` event is still pending a call to
+    // `Connection::authenticated`. On receiving the second packet from the
+    // server, the client must not emit a another
+    // `ConnectionEvent::AuthenticationNeeded`.
+    let _ = client.process(server2.as_dgram_ref(), now());
+    assert_eq!(0, authentication_needed_count(&mut client));
+}
