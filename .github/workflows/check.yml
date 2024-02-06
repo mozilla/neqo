@@ -122,8 +122,7 @@ jobs:
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE \
-           --all-targets --features ci,bench --no-fail-fast --lcov --output-path lcov.info
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci,bench --no-fail-fast --lcov --output-path lcov.info
 
       - name: Run client/server transfer
         run: |
