@@ -20,7 +20,9 @@ jobs:
         rust-toolchain: [1.70.0, stable, nightly]
         type: [debug]
         include:
-          - type: release
+          - os: ubuntu-latest
+            rust-toolchain: stable
+            type: release
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -33,7 +35,7 @@ jobs:
           echo "Rust: ${{ matrix.rust-toolchain }}"
           echo "Type: ${{ matrix.type }}"
           exit 1
-          
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
