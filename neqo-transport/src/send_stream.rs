@@ -135,8 +135,8 @@ impl Default for RetransmissionPriority {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-enum RangeState {
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum RangeState {
     Sent,
     Acked,
 }
@@ -144,7 +144,7 @@ enum RangeState {
 /// Track ranges in the stream as sent or acked. Acked implies sent. Not in a
 /// range implies needing-to-be-sent, either initially or as a retransmission.
 #[derive(Debug, Default, PartialEq)]
-struct RangeTracker {
+pub struct RangeTracker {
     /// offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
     used: BTreeMap<u64, (u64, RangeState)>,
     /// this is a cache for first_unmarked_range(), which we check a log
@@ -325,7 +325,7 @@ impl RangeTracker {
         }
     }
 
-    fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
+    pub fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
         if len == 0 {
             qinfo!("mark 0-length range at {}", off);
             return;
