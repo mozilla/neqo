@@ -8,23 +8,21 @@ mod datagrams;
 mod negotiation;
 mod sessions;
 mod streams;
+use std::{cell::RefCell, rc::Rc, time::Duration};
+
 use neqo_common::event::Provider;
+use neqo_crypto::AuthenticationStatus;
+use neqo_transport::{ConnectionParameters, StreamId, StreamType};
+use test_fixture::{
+    addr, anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ALPN_H3,
+    DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+};
 
 use crate::{
     features::extended_connect::SessionCloseReason, Error, Header, Http3Client, Http3ClientEvent,
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
     RecvStreamStats, SendStreamStats, WebTransportEvent, WebTransportRequest,
     WebTransportServerEvent, WebTransportSessionAcceptAction,
-};
-use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{ConnectionParameters, StreamId, StreamType};
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::time::Duration;
-
-use test_fixture::{
-    addr, anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ALPN_H3,
-    DEFAULT_KEYS, DEFAULT_SERVER_NAME,
 };
 
 const DATAGRAM_SIZE: u64 = 1200;

@@ -8,10 +8,11 @@
 #![warn(clippy::pedantic)]
 #![cfg(feature = "fuzzing")]
 
-use super::{connect_force_idle, default_client, default_server};
-use crate::StreamType;
 use neqo_crypto::FIXED_TAG_FUZZING;
 use test_fixture::now;
+
+use super::{connect_force_idle, default_client, default_server};
+use crate::StreamType;
 
 #[test]
 fn no_encryption() {

@@ -379,11 +379,12 @@ impl Drop for Time {
     not(all(any(target_os = "macos", target_os = "windows"), feature = "ci"))
 ))]
 mod test {
-    use super::Time;
     use std::{
         thread::{sleep, spawn},
         time::{Duration, Instant},
     };
+
+    use super::Time;
 
     const ONE: Duration = Duration::from_millis(1);
     const ONE_AND_A_BIT: Duration = Duration::from_micros(1500);

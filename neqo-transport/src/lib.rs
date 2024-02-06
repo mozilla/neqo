@@ -16,7 +16,6 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
-mod dump;
 mod events;
 mod fc;
 mod frame;
@@ -26,8 +25,14 @@ mod path;
 mod qlog;
 mod quic_datagrams;
 mod recovery;
+#[cfg(feature = "bench")]
+pub mod recv_stream;
+#[cfg(not(feature = "bench"))]
 mod recv_stream;
 mod rtt;
+#[cfg(feature = "bench")]
+pub mod send_stream;
+#[cfg(not(feature = "bench"))]
 mod send_stream;
 mod sender;
 pub mod server;
@@ -51,14 +56,11 @@ pub use self::{
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     quic_datagrams::DatagramTracking,
+    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
+    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
-};
-
-pub use self::{
-    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
-    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
 };
 
 pub type TransportError = u64;
@@ -71,7 +73,7 @@ pub enum Error {
     NoError,
     // Each time tihe error is return a different parameter is supply.
     // This will be use to distinguish each occurance of this error.
-    InternalError(u16),
+    InternalError,
     ConnectionRefused,
     FlowControlError,
     StreamLimitError,
@@ -184,7 +186,7 @@ impl From<std::num::TryFromIntError> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::CryptoError(e) => Some(e),
             _ => None,

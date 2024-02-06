@@ -4,19 +4,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{ConnectionError, ConnectionEvent, Output, State, ZeroRttState};
+use std::{mem, time::Duration};
+
+use neqo_common::{event::Provider, Decoder, Encoder};
+use test_fixture::{self, assertions, datagram, now};
+
 use super::{
+    super::{ConnectionError, ConnectionEvent, Output, State, ZeroRttState},
     connect, connect_fail, default_client, default_server, exchange_ticket, new_client, new_server,
     send_something,
 };
-use crate::packet::PACKET_BIT_LONG;
-use crate::tparams::{self, TransportParameter};
-use crate::{ConnectionParameters, Error, Version};
-
-use neqo_common::{event::Provider, Decoder, Encoder};
-use std::mem;
-use std::time::Duration;
-use test_fixture::{self, assertions, datagram, now};
+use crate::{
+    packet::PACKET_BIT_LONG,
+    tparams::{self, TransportParameter},
+    ConnectionParameters, Error, Version,
+};
 
 // The expected PTO duration after the first Initial is sent.
 const INITIAL_PTO: Duration = Duration::from_millis(300);
@@ -217,8 +219,8 @@ fn compatible_upgrade() {
     assert_eq!(server.version(), Version::Version2);
 }
 
-/// When the first packet from the client is gigantic, the server might generate acknowledgment packets in
-/// version 1.  Both client and server need to handle that gracefully.
+/// When the first packet from the client is gigantic, the server might generate acknowledgment
+/// packets in version 1.  Both client and server need to handle that gracefully.
 #[test]
 fn compatible_upgrade_large_initial() {
     let params = ConnectionParameters::default().versions(

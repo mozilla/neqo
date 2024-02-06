@@ -4,19 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::Connection;
-use super::{
-    connect, default_client, default_server, exchange_ticket, new_server, resumed_server,
-    CountingConnectionIdGenerator,
-};
-use crate::events::ConnectionEvent;
-use crate::{ConnectionParameters, Error, StreamType, Version};
+use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
-use std::cell::RefCell;
-use std::rc::Rc;
 use test_fixture::{self, assertions, now};
+
+use super::{
+    super::Connection, connect, default_client, default_server, exchange_ticket, new_server,
+    resumed_server, CountingConnectionIdGenerator,
+};
+use crate::{events::ConnectionEvent, ConnectionParameters, Error, StreamType, Version};
 
 #[test]
 fn zero_rtt_negotiate() {

@@ -7,12 +7,14 @@
 // Pacer
 #![deny(clippy::pedantic)]
 
-use neqo_common::qtrace;
+use std::{
+    cmp::min,
+    convert::TryFrom,
+    fmt::{Debug, Display},
+    time::{Duration, Instant},
+};
 
-use std::cmp::min;
-use std::convert::TryFrom;
-use std::fmt::{Debug, Display};
-use std::time::{Duration, Instant};
+use neqo_common::qtrace;
 
 /// This value determines how much faster the pacer operates than the
 /// congestion window.
@@ -82,7 +84,7 @@ impl Pacer {
     }
 
     /// Spend credit.  This cannot fail; users of this API are expected to call
-    /// next() to determine when to spend.  This takes the current time (`now`),
+    /// `next()` to determine when to spend.  This takes the current time (`now`),
     /// an estimate of the round trip time (`rtt`), the estimated congestion
     /// window (`cwnd`), and the number of bytes that were sent (`count`).
     pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
@@ -123,9 +125,11 @@ impl Debug for Pacer {
 
 #[cfg(test)]
 mod tests {
-    use super::Pacer;
     use std::time::Duration;
+
     use test_fixture::now;
+
+    use super::Pacer;
 
     const RTT: Duration = Duration::from_millis(1000);
     const PACKET: usize = 1000;

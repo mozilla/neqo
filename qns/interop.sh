@@ -13,6 +13,7 @@ case "$ROLE" in
   client)
     /wait-for-it.sh sim:57832 -s -t 30
     sleep 5
+    neqo-client --help | head -n 1
     RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --cc cubic --qns-test "$TESTCASE" \
         --qlog-dir "$QLOGDIR" --output-dir /downloads $REQUESTS
     ;;
@@ -27,6 +28,7 @@ case "$ROLE" in
         -name "$CERT" -passout pass: -out "$P12CERT"
     pk12util -d "sql:$DB" -i "$P12CERT" -W ''
     certutil -L -d "sql:$DB" -n "$CERT"
+    neqo-server --help | head -n 1
     RUST_LOG=info RUST_BACKTRACE=1 neqo-server --cc cubic --qns-test "$TESTCASE" \
         --qlog-dir "$QLOGDIR" -d "$DB" -k "$CERT" [::]:443
     ;;

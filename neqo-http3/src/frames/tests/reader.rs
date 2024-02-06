@@ -4,6 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{fmt::Debug, mem};
+
+use neqo_common::Encoder;
+use neqo_transport::{Connection, StreamId, StreamType};
+use test_fixture::{connect, now};
+
 use crate::{
     frames::{
         reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
@@ -11,11 +17,6 @@ use crate::{
     settings::{HSetting, HSettingType, HSettings},
     Error,
 };
-use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId, StreamType};
-use std::fmt::Debug;
-use std::mem;
-use test_fixture::{connect, now};
 
 struct FrameReaderTest {
     pub fr: FrameReader,

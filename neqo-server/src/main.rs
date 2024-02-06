@@ -26,15 +26,10 @@ use std::{
 };
 
 use futures::{
-    future::{select, Either, select_all},
+    future::{select, select_all, Either},
     FutureExt,
 };
-use tokio::{time::Sleep, io::Interest};
-
-use neqo_transport::ConnectionIdGenerator;
-use structopt::StructOpt;
-
-use neqo_common::{hex, qdebug, qinfo, qwarn, udp, Datagram, Header};
+use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, udp};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -44,8 +39,11 @@ use neqo_http3::{
 };
 use neqo_transport::{
     server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
-    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType, Version,
+    ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
+    Version,
 };
+use structopt::StructOpt;
+use tokio::{time::Sleep, io::Interest};
 
 use crate::old_https::Http09Server;
 
@@ -590,7 +588,7 @@ fn read_dgram(
     let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
         udp::rx(&socket, state, &mut buf[..], &mut tos, &mut ttl)
     }) {
-        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock || err.kind() == io::ErrorKind::Interrupted => return Ok(None),
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
             return Err(err);
@@ -626,56 +624,29 @@ struct ServersRunner {
 
 impl ServersRunner {
     pub fn new(args: Args) -> Result<Self, io::Error> {
-        let server = Self::create_server(&args);
-        let mut runner = Self {
-            args,
-            server,
-            timeout: None,
-            sockets: Vec::new(),
-        };
-        runner.init()?;
-        Ok(runner)
-    }
-
-    /// Init Poll for all hosts. Create sockets, and a map of the
-    /// socketaddrs to instances of the HttpServer handling that addr.
-    fn init(&mut self) -> Result<(), io::Error> {
-        let hosts = self.args.listen_addresses();
+        let hosts = args.listen_addresses();
         if hosts.is_empty() {
             eprintln!("No valid hosts defined");
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
         }
+        let sockets = hosts
+            .into_iter()
+            .map(|host| {
+                let socket = std::net::UdpSocket::bind(host)?;
+                let local_addr = socket.local_addr()?;
+                println!("Server waiting for connection on: {local_addr:?}");
+                let state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
+                Ok((host, tokio::net::UdpSocket::from_std(socket)?, state))
+            })
+            .collect::<Result<_, io::Error>>()?;
+        let server = Self::create_server(&args);
 
-        for host in hosts.into_iter() {
-            let socket = match std::net::UdpSocket::bind(host) {
-                Err(err) => {
-                    eprintln!("Unable to bind UDP socket: {err}");
-                    return Err(err);
-                }
-                Ok(s) => s,
-            };
-
-            let local_addr = match socket.local_addr() {
-                Err(err) => {
-                    eprintln!("Socket local address not bound: {err}");
-                    return Err(err);
-                }
-                Ok(s) => s,
-            };
-
-            print!("Server waiting for connection on: {local_addr:?}");
-
-            let state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
-
-            self.sockets.push((
-                host,
-                tokio::net::UdpSocket::from_std(socket)
-                    .expect("conversion to Tokio socket to succeed"),
-                state,
-            ));
-        }
-
-        Ok(())
+        Ok(Self {
+            args,
+            server,
+            timeout: None,
+            sockets,
+        })
     }
 
     fn create_server(args: &Args) -> Box<dyn HttpServer> {

@@ -6,6 +6,29 @@
 
 // The class implementing a QUIC connection.
 
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    convert::TryFrom,
+    fmt::{self, Debug},
+    mem,
+    net::{IpAddr, SocketAddr},
+    ops::RangeInclusive,
+    rc::{Rc, Weak},
+    time::{Duration, Instant},
+};
+
+use neqo_common::{
+    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+};
+use neqo_crypto::{
+    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
+    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
+    Server, ZeroRttChecker,
+};
+use smallvec::SmallVec;
+
 use crate::{
     addr_valid::{AddressValidation, NewTokenState},
     cid::{
@@ -13,7 +36,6 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    dump::*,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -37,45 +59,24 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
-use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
-};
-use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
-};
-use smallvec::SmallVec;
-use std::{
-    cell::RefCell,
-    cmp::{max, min},
-    convert::TryFrom,
-    fmt::{self, Debug},
-    mem,
-    net::{IpAddr, SocketAddr},
-    ops::RangeInclusive,
-    rc::{Rc, Weak},
-    time::{Duration, Instant},
-};
-
+mod dump;
 mod idle;
 pub mod params;
 mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
-
-pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
+use dump::dump_packet;
+use idle::IdleTimeout;
 pub use params::ConnectionParameters;
+use params::PreferredAddressConfig;
 #[cfg(test)]
 pub use params::ACK_RATIO_SCALE;
-pub use state::{ClosingFrame, State};
-
-use idle::IdleTimeout;
-use params::PreferredAddressConfig;
 use saved::SavedDatagrams;
 use state::StateSignaling;
+pub use state::{ClosingFrame, State};
+
+pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -476,7 +477,9 @@ impl Connection {
     /// Set a local transport parameter, possibly overriding a default value.
     /// This only sets transport parameters without dealing with other aspects of
     /// setting the value.
+    ///
     /// # Panics
+    ///
     /// This panics if the transport parameter is known to this crate.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
         #[cfg(not(test))]
@@ -494,9 +497,9 @@ impl Connection {
     }
 
     /// `odcid` is their original choice for our CID, which we get from the Retry token.
-    /// `remote_cid` is the value from the Source Connection ID field of
-    ///   an incoming packet: what the peer wants us to use now.
-    /// `retry_cid` is what we asked them to use when we sent the Retry.
+    /// `remote_cid` is the value from the Source Connection ID field of an incoming packet: what
+    /// the peer wants us to use now. `retry_cid` is what we asked them to use when we sent the
+    /// Retry.
     pub(crate) fn set_retry_cids(
         &mut self,
         odcid: ConnectionId,
@@ -542,6 +545,26 @@ impl Connection {
             return Err(Error::ConnectionState);
         }
         self.crypto.tls.set_ciphers(ciphers)?;
+        Ok(())
+    }
+
+    /// Enable a set of key exchange groups.
+    pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
+        if self.state != State::Init {
+            qerror!([self], "Cannot enable groups in state {:?}", self.state);
+            return Err(Error::ConnectionState);
+        }
+        self.crypto.tls.set_groups(groups)?;
+        Ok(())
+    }
+
+    /// Set the number of additional key shares to send in the client hello.
+    pub fn send_additional_key_shares(&mut self, count: usize) -> Res<()> {
+        if self.state != State::Init {
+            qerror!([self], "Cannot enable groups in state {:?}", self.state);
+            return Err(Error::ConnectionState);
+        }
+        self.crypto.tls.send_additional_key_shares(count)?;
         Ok(())
     }
 
@@ -622,7 +645,9 @@ impl Connection {
     /// problem for short-lived connections, where the connection is closed before any events are
     /// released. This function retrieves the token, without waiting for a `NEW_TOKEN` frame to
     /// arrive.
+    ///
     /// # Panics
+    ///
     /// If this is called on a server.
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
         assert_eq!(self.role, Role::Client);
@@ -829,8 +854,8 @@ impl Connection {
                     qwarn!([self], "Closing again after error {:?}", err);
                 }
                 State::Init => {
-                    // We have not even sent anything just close the connection without sending any error.
-                    // This may happen when client_start fails.
+                    // We have not even sent anything just close the connection without sending any
+                    // error. This may happen when client_start fails.
                     self.set_state(State::Closed(error));
                 }
                 State::WaitInitial => {
@@ -1652,6 +1677,7 @@ impl Connection {
     /// Either way, the path is probed and will be abandoned if the probe fails.
     ///
     /// # Errors
+    ///
     /// Fails if this is not a client, not confirmed, or there are not enough connection
     /// IDs available to use.
     pub fn migrate(
@@ -1908,9 +1934,6 @@ impl Connection {
                 .as_ref()
                 .unwrap_or(&close)
                 .write_frame(&mut builder);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(10));
-            }
             encoder = builder.build(tx)?;
         }
 
@@ -1955,7 +1978,7 @@ impl Connection {
         if builder.is_full() {
             return Ok(());
         }
-        self.paths.write_frames(builder, tokens, frame_stats)?;
+        self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return Ok(());
         }
@@ -2080,7 +2103,7 @@ impl Connection {
                 builder,
                 &mut tokens,
                 stats,
-            )?;
+            );
         }
         let ack_end = builder.len();
 
@@ -2095,7 +2118,7 @@ impl Connection {
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
                 now,
-            )? {
+            ) {
                 builder.enable_padding(true);
             }
         }
@@ -2260,6 +2283,7 @@ impl Connection {
         }
 
         if encoder.is_empty() {
+            qinfo!("TX blocked, profile={:?} ", profile);
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
@@ -2561,10 +2585,16 @@ impl Connection {
     ) -> Res<()> {
         qtrace!([self], "Handshake space={} data={:0x?}", space, data);
 
+        let was_authentication_pending =
+            *self.crypto.tls.state() == HandshakeState::AuthenticationPending;
         let try_update = data.is_some();
         match self.crypto.handshake(now, space, data)? {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
-            HandshakeState::AuthenticationPending => self.events.authentication_needed(),
+            HandshakeState::AuthenticationPending => {
+                if !was_authentication_pending {
+                    self.events.authentication_needed()
+                }
+            }
             HandshakeState::EchFallbackAuthenticationPending(public_name) => self
                 .events
                 .ech_fallback_authentication_needed(public_name.clone()),
@@ -2941,7 +2971,9 @@ impl Connection {
 
     /// Create a stream.
     /// Returns new stream id
+    ///
     /// # Errors
+    ///
     /// `ConnectionState` if the connecton stat does not allow to create streams.
     /// `StreamLimitError` if we are limiied by server's stream concurence.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
@@ -2963,7 +2995,9 @@ impl Connection {
     }
 
     /// Set the priority of a stream.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` the stream does not exist.
     pub fn stream_priority(
         &mut self,
@@ -2978,7 +3012,9 @@ impl Connection {
     }
 
     /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
+    ///
     /// # Errors
+    ///
     /// Returns InvalidStreamId if the stream id doesn't exist
     pub fn stream_sendorder(
         &mut self,
@@ -2989,7 +3025,9 @@ impl Connection {
     }
 
     /// Set the Fairness of a stream
+    ///
     /// # Errors
+    ///
     /// Returns InvalidStreamId if the stream id doesn't exist
     pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
@@ -3008,7 +3046,9 @@ impl Connection {
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` the stream does not exist,
     /// `InvalidInput` if length of `data` is zero,
     /// `FinalSizeError` if the stream has already been closed.
@@ -3019,7 +3059,9 @@ impl Connection {
     /// Send all data or nothing on a stream. May cause DATA_BLOCKED or
     /// STREAM_DATA_BLOCKED frames to be sent.
     /// Returns true if data was successfully sent, otherwise false.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` the stream does not exist,
     /// `InvalidInput` if length of `data` is zero,
     /// `FinalSizeError` if the stream has already been closed.
@@ -3060,7 +3102,9 @@ impl Connection {
 
     /// Read buffered data from stream. bool says whether read bytes includes
     /// the final data on stream.
+    ///
     /// # Errors
+    ///
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
@@ -3079,7 +3123,9 @@ impl Connection {
     }
 
     /// Increases `max_stream_data` for a `stream_id`.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
     pub fn set_stream_max_data(&mut self, stream_id: StreamId, max_data: u64) -> Res<()> {
@@ -3093,7 +3139,9 @@ impl Connection {
     /// (if `keep` is `true`) or no longer important (if `keep` is `false`).  If any
     /// stream is marked this way, PING frames will be used to keep the connection
     /// alive, even when there is no activity.
+    ///
     /// # Errors
+    ///
     /// Returns `InvalidStreamId` if a stream does not exist or the receiving
     /// side is closed.
     pub fn stream_keep_alive(&mut self, stream_id: StreamId, keep: bool) -> Res<()> {
@@ -3107,7 +3155,9 @@ impl Connection {
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
+    ///
     /// # Error
+    ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_dgram_size = self.quic_datagrams.remote_datagram_size();
@@ -3148,7 +3198,9 @@ impl Connection {
     }
 
     /// Queue a datagram for sending.
+    ///
     /// # Error
+    ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size. The funcion does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during

@@ -6,14 +6,18 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use super::{Node, Rng};
+use std::{
+    collections::BTreeMap,
+    convert::TryFrom,
+    fmt::{self, Debug},
+    ops::Range,
+    time::{Duration, Instant},
+};
+
 use neqo_common::Datagram;
 use neqo_transport::Output;
-use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::fmt::{self, Debug};
-use std::ops::Range;
-use std::time::{Duration, Instant};
+
+use super::{Node, Rng};
 
 /// An iterator that shares a `Random` instance and produces uniformly
 /// random `Duration`s within a specified range.
@@ -54,6 +58,7 @@ pub struct Delay {
 }
 
 impl Delay {
+    #[must_use]
     pub fn new(bounds: Range<Duration>) -> Self {
         Self {
             random: RandomDelay::new(bounds),
