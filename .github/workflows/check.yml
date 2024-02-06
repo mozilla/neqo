@@ -37,7 +37,6 @@ jobs:
           echo "Rust: ${{ matrix.rust-toolchain }}"
           echo "Type: ${{ matrix.type }}"
           echo "Build type: $BUILD_TYPE"
-          exit 1
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
