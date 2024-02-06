@@ -120,6 +120,7 @@ jobs:
 
       - name: Run client/server transfer
         run: |
+          cargo +${{ matrix.rust-toolchain }} build --bin neqo-client --bin neqo-server
           cargo +${{ matrix.rust-toolchain }} run --bin neqo-server -- $HOST:4433 &
           PID=$!
           cargo +${{ matrix.rust-toolchain }} run --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
