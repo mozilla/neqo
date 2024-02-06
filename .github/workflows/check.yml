@@ -23,6 +23,8 @@ jobs:
           - os: ubuntu-latest
             rust-toolchain: stable
             type: release
+    env:
+      BUILD_TYPE: --${{ matrix.type }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -34,6 +36,7 @@ jobs:
           echo "OS: ${{ matrix.os }}"
           echo "Rust: ${{ matrix.rust-toolchain }}"
           echo "Type: ${{ matrix.type }}"
+          echo "Build type: $BUILD_TYPE"
           exit 1
 
       - name: Install Rust
@@ -121,23 +124,23 @@ jobs:
 
       - name: Build
         run: |
-          cargo +${{ matrix.rust-toolchain }} build --all-targets
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
           echo "${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_PATH"
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
+        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --all-targets --no-fail-fast --lcov --output-path lcov.info
 
       - name: Benches should at least build
-        run: cargo +${{ matrix.rust-toolchain }} build --features bench --benches
+        run: cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --features bench --benches
 
       - name: Run client/server transfer
         run: |
-          cargo +${{ matrix.rust-toolchain }} build --bin neqo-client --bin neqo-server
-          cargo +${{ matrix.rust-toolchain }} run --bin neqo-server -- $HOST:4433 &
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
           PID=$!
-          cargo +${{ matrix.rust-toolchain }} run --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
