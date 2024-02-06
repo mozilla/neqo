@@ -2585,10 +2585,16 @@ impl Connection {
     ) -> Res<()> {
         qtrace!([self], "Handshake space={} data={:0x?}", space, data);
 
+        let was_authentication_pending =
+            *self.crypto.tls.state() == HandshakeState::AuthenticationPending;
         let try_update = data.is_some();
         match self.crypto.handshake(now, space, data)? {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
-            HandshakeState::AuthenticationPending => self.events.authentication_needed(),
+            HandshakeState::AuthenticationPending => {
+                if !was_authentication_pending {
+                    self.events.authentication_needed()
+                }
+            }
             HandshakeState::EchFallbackAuthenticationPending(public_name) => self
                 .events
                 .ech_fallback_authentication_needed(public_name.clone()),
