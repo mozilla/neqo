@@ -9,8 +9,6 @@
 
 use std::{ops::Range, time::Duration};
 
-use std::{ops::Range, time::Duration};
-
 use neqo_transport::{ConnectionError, ConnectionParameters, Error, State};
 use test_fixture::{
     boxed,
