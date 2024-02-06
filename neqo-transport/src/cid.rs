@@ -573,7 +573,7 @@ impl ConnectionIdManager {
                     .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
 
                 let entry = ConnectionIdEntry::new(seqno, cid, srt);
-                debug_assert!(self.write_entry(&entry, builder, stats)?);
+                self.write_entry(&entry, builder, stats)?;
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             }
         }
