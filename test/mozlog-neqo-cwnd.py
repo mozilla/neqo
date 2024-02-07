@@ -25,7 +25,7 @@ events = re.compile(PATTERN)
 PATTERN = r" on_packets_acked this=0x([0-9a-f]+), limited=(\d+), bytes_in_flight=(\d+), cwnd=(\d+), state=([a-zA-Z]+), new_acked=(\d+)"
 acked = re.compile(PATTERN)
 #2023-11-02 13:55:02.954909 UTC - [Parent 41203: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] on_packets_lost this=0x7f2864efcc80, bytes_in_flight=690883, cwnd=1520187, state=RecoveryStart
-PATTERN = r" on_packet_lost this=0x([0-9a-f]+), bytes_in_flight=(\d+), cwnd=(\d+), state=([a-zA-Z]+)"
+PATTERN = r" on_packets_lost this=0x([0-9a-f]+), bytes_in_flight=(\d+), cwnd=(\d+), state=([a-zA-Z]+)"
 lost = re.compile(PATTERN)
 
 def get_time(line):
@@ -102,10 +102,10 @@ def main():
             this = result.group(1)
             now = get_time(line)
             data[this]["time"].append(now)
-            data[this]["last_bytes_in_flight"] = int(result.group(3))
+            data[this]["last_bytes_in_flight"] = int(result.group(2))
             data[this]["bif"].append(data[this]["last_bytes_in_flight"])
-            data[this]["cwnd"].append(int(result.group(4)))
-            state = result.group(5)
+            data[this]["cwnd"].append(int(result.group(3)))
+            state = result.group(4)
             if data[this]["last_state"][0] != state:
                 data[this]["bg_state"].append(state)
                 data[this]["bg_time"].append(now)
