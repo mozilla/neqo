@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 lazy_static = "~1.4.0"
-log = {version = "~0.4.17", default-features = false}
+log = { version = "~0.4.17", default-features = false }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }

@@ -1,14 +1,16 @@
 [package]
 name = "neqo-interop"
-version = "0.7.0"
 authors = ["EKR <ekr@rtfm.com>"]
-edition = "2018"
-rust-version = "1.70.0"
-license = "MIT OR Apache-2.0"
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 lazy_static = "1.4"
-neqo-common = { path="./../neqo-common" }
+neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
