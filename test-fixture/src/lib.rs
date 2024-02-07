@@ -86,6 +86,8 @@ pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
+pub const DEFAULT_ADDR: SocketAddr = addr();
+pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 
 // Create a default datagram with the given data.
 #[must_use]
@@ -95,16 +97,15 @@ pub fn datagram(data: Vec<u8>) -> Datagram {
 
 /// Create a default socket address.
 #[must_use]
-pub fn addr() -> SocketAddr {
-    // These could be const functions, but they aren't...
+const fn addr() -> SocketAddr {
     let v6ip = IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1));
     SocketAddr::new(v6ip, 443)
 }
 
 /// An IPv4 version of the default socket address.
 #[must_use]
-pub fn addr_v4() -> SocketAddr {
-    let localhost_v4 = IpAddr::V4(Ipv4Addr::from(0xc000_0201));
+const fn addr_v4() -> SocketAddr {
+    let localhost_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
     SocketAddr::new(localhost_v4, addr().port())
 }
 
