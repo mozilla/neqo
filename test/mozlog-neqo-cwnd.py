@@ -15,47 +15,51 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 
-#2023-11-02 13:32:28.450290 UTC - [Parent 31525: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] packet_sent this=0x7f84d3d31100, pn=111, ps=36
-#2023-11-02 13:32:28.477635 UTC - [Parent 31525: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] packet_acked this=0x7f84d3d31100, pn=111, ps=36, ignored=0, lost=0
-#2023-11-02 13:55:02.954829 UTC - [Parent 41203: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] packet_lost this=0x7f2864efcc80, pn=308694, ps=1337
+# 2023-11-02 13:32:28.450290 UTC - [Parent 31525: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] packet_sent this=0x7f84d3d31100, pn=111, ps=36
+# 2023-11-02 13:32:28.477635 UTC - [Parent 31525: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] packet_acked this=0x7f84d3d31100, pn=111, ps=36, ignored=0, lost=0
+# 2023-11-02 13:55:02.954829 UTC - [Parent 41203: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] packet_lost this=0x7f2864efcc80, pn=308694, ps=1337
 PATTERN = r" ([a-z_]+) this=0x([0-9a-f]+), pn=(\d+), ps=(\d+)"
 events = re.compile(PATTERN)
 
-#2023-11-02 13:32:28.477655 UTC - [Parent 31525: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] on_packets_acked this=0x7f84d3d31100, limited=1, bytes_in_flight=0, cwnd=13370, state=SlowStart, new_acked=36
+# 2023-11-02 13:32:28.477655 UTC - [Parent 31525: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] on_packets_acked this=0x7f84d3d31100, limited=1, bytes_in_flight=0, cwnd=13370, state=SlowStart, new_acked=36
 PATTERN = r" on_packets_acked this=0x([0-9a-f]+), limited=(\d+), bytes_in_flight=(\d+), cwnd=(\d+), state=([a-zA-Z]+), new_acked=(\d+)"
 acked = re.compile(PATTERN)
-#2023-11-02 13:55:02.954909 UTC - [Parent 41203: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] on_packets_lost this=0x7f2864efcc80, bytes_in_flight=690883, cwnd=1520187, state=RecoveryStart
+# 2023-11-02 13:55:02.954909 UTC - [Parent 41203: Socket Thread]: I/neqo_transport::* [neqo_transport::cc::classic_cc] on_packets_lost this=0x7f2864efcc80, bytes_in_flight=690883, cwnd=1520187, state=RecoveryStart
 PATTERN = r" on_packets_lost this=0x([0-9a-f]+), bytes_in_flight=(\d+), cwnd=(\d+), state=([a-zA-Z]+)"
 lost = re.compile(PATTERN)
 
+
 def get_time(line):
     # allow garbage data before timestamp
-    timestamp = line.split(" UTC", 1)[0].split(' ')
+    timestamp = line.split(" UTC", 1)[0].split(" ")
     timestamp = timestamp[-2] + " " + timestamp[-1]
     return datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")
+
 
 def main():
     if len(sys.argv) < 2:
         print("usage:", sys.argv[0], "LOG_FILE")
         return
 
-    data = defaultdict(lambda: {
-        "time": [],
-        "cwnd": [],
-        "bif": [],
-        "bif_limited": [],
-        "bif_limited_time": [],
-        "last_bytes_in_flight": 0,
-        "last_state": ("SlowStart", 0),
-
-        # color background depending on state
-        "bg_state": [],
-        "bg_time": [],
-
-        # event occurences
-        "p": {}, # pn -> y-axis (bytes in flight after packet sent)
-        "ps": defaultdict(lambda: defaultdict(lambda: [])), # x/y coords of packet_sent/_acked/_lost
-    })
+    data = defaultdict(
+        lambda: {
+            "time": [],
+            "cwnd": [],
+            "bif": [],
+            "bif_limited": [],
+            "bif_limited_time": [],
+            "last_bytes_in_flight": 0,
+            "last_state": ("SlowStart", 0),
+            # color background depending on state
+            "bg_state": [],
+            "bg_time": [],
+            # event occurences
+            "p": {},  # pn -> y-axis (bytes in flight after packet sent)
+            "ps": defaultdict(
+                lambda: defaultdict(lambda: [])
+            ),  # x/y coords of packet_sent/_acked/_lost
+        }
+    )
 
     for line in open(sys.argv[1]):
         if (result := acked.search(line)) is not None:
@@ -81,18 +85,22 @@ def main():
             event = result.group(1)
             pn = int(result.group(3))
             packet_size = int(result.group(4))
-            if event == "packet_sent" or event == "packet_acked" or event == "packet_lost":
-                if event == 'packet_sent':
+            if (
+                event == "packet_sent"
+                or event == "packet_acked"
+                or event == "packet_lost"
+            ):
+                if event == "packet_sent":
                     data[this]["last_bytes_in_flight"] += packet_size
                     data[this]["p"][pn] = data[this]["last_bytes_in_flight"]
-                    if data[this]["last_state"][0] == 'RecoveryStart':
-                        data[this]["bg_state"].append('CongestionAvoidance')
+                    if data[this]["last_state"][0] == "RecoveryStart":
+                        data[this]["bg_state"].append("CongestionAvoidance")
                         data[this]["bg_time"].append(now)
-                        data[this]["last_state"] = ('CongestionAvoidance', now)
-                    if data[this]["last_state"] == 'PersistentCongestion':
-                        data[this]["bg_state"].append('SlowStart')
+                        data[this]["last_state"] = ("CongestionAvoidance", now)
+                    if data[this]["last_state"] == "PersistentCongestion":
+                        data[this]["bg_state"].append("SlowStart")
                         data[this]["bg_time"].append(now)
-                        data[this]["last_state"] = ('SlowStart', now)
+                        data[this]["last_state"] = ("SlowStart", now)
                 # only remember events for packets where we sent the packet
                 if pn in data[this]["p"]:
                     data[this]["ps"][event]["time"].append(now)
@@ -119,43 +127,63 @@ def main():
             output = el
     fig, axs = plt.subplots(2, 1)
 
-    data[output]['bg_time'].append(data[output]['time'][-1])
+    data[output]["bg_time"].append(data[output]["time"][-1])
     for ax in axs:
-        color_background(ax, data[output]['bg_time'], data[output]['bg_state'])
+        color_background(ax, data[output]["bg_time"], data[output]["bg_state"])
 
     # add plots
     graph_pn(axs[0], data[output])
     graph_cwnd(axs[1], data[output])
 
-
     # configure graph
-    axs[0].set_title(sys.argv[1].split('/')[-1])
+    axs[0].set_title(sys.argv[1].split("/")[-1])
     for ax in axs:
         ax.legend()
     plt.show()
 
+
 COLORS = {
-        'packet_sent': 'black',
-        'packet_lost': 'red',
-        'packet_acked': 'green',
+    "packet_sent": "black",
+    "packet_lost": "red",
+    "packet_acked": "green",
 }
- 
+
+
 # plot pn graph
 def graph_pn(ax, output_data):
-    for event in ['packet_sent', 'packet_acked', 'packet_lost']:
-        ax.scatter(output_data["ps"][event]["time"], output_data["ps"][event]["pn"], label=event, s=10, color=COLORS[event])
-    ax.set_xlabel('time in s')
-    ax.set_ylabel('packet_number')
+    for event in ["packet_sent", "packet_acked", "packet_lost"]:
+        ax.scatter(
+            output_data["ps"][event]["time"],
+            output_data["ps"][event]["pn"],
+            label=event,
+            s=10,
+            color=COLORS[event],
+        )
+    ax.set_xlabel("time in s")
+    ax.set_ylabel("packet_number")
+
 
 # plot cwnd graph
 def graph_cwnd(ax, output_data):
-    ax.plot(output_data["time"], output_data["cwnd"], label='cwnd')
-    ax.plot(output_data["time"], output_data["bif"], '.-', label='bytes in flight')
-    ax.plot(output_data["bif_limited_time"], output_data["bif_limited"], 's', label='app_limited')
-    for event in ['packet_sent', 'packet_lost']:
-        ax.scatter(output_data["ps"][event]["time"], output_data["ps"][event]["bif"], label=event, s=10, color=COLORS[event])
-    ax.set_xlabel('time in s')
-    ax.set_ylabel('bytes')
+    ax.plot(output_data["time"], output_data["cwnd"], label="cwnd")
+    ax.plot(output_data["time"], output_data["bif"], ".-", label="bytes in flight")
+    ax.plot(
+        output_data["bif_limited_time"],
+        output_data["bif_limited"],
+        "s",
+        label="app_limited",
+    )
+    for event in ["packet_sent", "packet_lost"]:
+        ax.scatter(
+            output_data["ps"][event]["time"],
+            output_data["ps"][event]["bif"],
+            label=event,
+            s=10,
+            color=COLORS[event],
+        )
+    ax.set_xlabel("time in s")
+    ax.set_ylabel("bytes")
+
 
 def color_background(ax, time, states):
     # change background depending on congestion controller state
@@ -167,7 +195,7 @@ def color_background(ax, time, states):
         "PersistentCongestion": "purple",
     }
     legend = set()
-    for (time_from, time_to, state) in zip(time[:-1], time[1:], states):
+    for time_from, time_to, state in zip(time[:-1], time[1:], states):
         color = state_colors[state]
         if state in legend:
             ax.axvspan(time_from, time_to, facecolor=color, alpha=0.3)
@@ -176,5 +204,5 @@ def color_background(ax, time, states):
             ax.axvspan(time_from, time_to, facecolor=color, alpha=0.3, label=state)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
