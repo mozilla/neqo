@@ -24,6 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use clap::Parser;
 use neqo_common::{event::Provider, hex, Datagram, IpTos};
 use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
@@ -31,25 +32,24 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
     Error, Output, State, StreamId, StreamType,
 };
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt, Clone)]
-#[structopt(name = "neqo-interop", about = "A QUIC interop client.")]
+#[derive(Debug, Parser, Clone)]
+#[command(author, version, about, long_about = None)]
 struct Args {
-    #[structopt(short = "p", long)]
+    #[arg(short = 'p', long)]
     // Peers to include
     include: Vec<String>,
 
-    #[structopt(short = "P", long)]
+    #[arg(short = 'P', long)]
     exclude: Vec<String>,
 
-    #[structopt(short = "t", long)]
+    #[arg(short = 't', long)]
     include_tests: Vec<String>,
 
-    #[structopt(short = "T", long)]
+    #[arg(short = 'T', long)]
     exclude_tests: Vec<String>,
 
-    #[structopt(long, default_value = "5")]
+    #[arg(long, default_value = "5")]
     timeout: u64,
 }
 
@@ -905,7 +905,7 @@ const TESTS: [Test; 7] = [
 fn main() {
     let _tests = vec![Test::Connect];
 
-    let args = Args::from_args();
+    let args = Args::parse();
     init();
     Timer::set_timeout(Duration::from_secs(args.timeout));
 

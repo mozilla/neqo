@@ -25,6 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use clap::Parser;
 use futures::{
     future::{select, select_all, Either},
     FutureExt,
@@ -42,7 +43,6 @@ use neqo_transport::{
     ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
     Version,
 };
-use structopt::StructOpt;
 use tokio::{net::UdpSocket, time::Sleep};
 
 use crate::old_https::Http09Server;
@@ -91,66 +91,66 @@ impl Display for ServerError {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "neqo-server", about = "A basic HTTP3 server.")]
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
 struct Args {
     /// List of IP:port to listen on
-    #[structopt(default_value = "[::]:4433")]
+    #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", long, default_value = "16384")]
+    #[arg(name = "encoder-table-size", long, default_value = "16384")]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", long, default_value = "16384")]
+    #[arg(name = "decoder-table-size", long, default_value = "16384")]
     max_table_size_decoder: u64,
 
-    #[structopt(short = "b", long, default_value = "10")]
+    #[arg(short = 'b', long, default_value = "10")]
     max_blocked_streams: u16,
 
-    #[structopt(
-        short = "d",
+    #[arg(
+        short = 'd',
         long,
         default_value = "./test-fixture/db",
-        parse(from_os_str)
+        value_parser=clap::value_parser!(PathBuf)
     )]
     /// NSS database directory.
     db: PathBuf,
 
-    #[structopt(short = "k", long, default_value = "key")]
+    #[arg(short = 'k', long, default_value = "key")]
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3")]
+    #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: String,
 
-    #[structopt(name = "qlog-dir", long)]
+    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
 
-    #[structopt(name = "qns-test", long)]
+    #[arg(name = "qns-test", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_test: Option<String>,
 
-    #[structopt(name = "use-old-http", short = "o", long)]
+    #[arg(name = "use-old-http", short = 'o', long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(flatten)]
+    #[command(flatten)]
     quic_parameters: QuicParameters,
 
-    #[structopt(name = "retry", long)]
+    #[arg(name = "retry", long)]
     /// Force a retry
     retry: bool,
 
-    #[structopt(short = "c", long, number_of_values = 1)]
+    #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
 
-    #[structopt(name = "ech", long)]
+    #[arg(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
@@ -214,39 +214,44 @@ impl FromStr for VersionArg {
     }
 }
 
-#[derive(Debug, StructOpt)]
+fn decode_hex(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    hex::decode(s)
+}
+
+#[derive(Debug, Parser)]
 struct QuicParameters {
-    #[structopt(
-        short = "V",
+    #[arg(
+        short = 'v',
         long,
-        multiple = true,
-        use_delimiter = true,
-        number_of_values = 1
+        num_args = 1..,
+        value_delimiter = ' ',
+        number_of_values = 1,
+        value_parser=decode_hex
     )]
     /// A list of versions to support in order of preference, in hex.
     quic_version: Vec<VersionArg>,
 
-    #[structopt(long, default_value = "16")]
+    #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
     max_streams_bidi: u64,
 
-    #[structopt(long, default_value = "16")]
+    #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
 
-    #[structopt(long = "idle", default_value = "30")]
+    #[arg(long = "idle", default_value = "30")]
     /// The idle timeout for connections, in seconds.
     idle_timeout: u64,
 
-    #[structopt(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
 
-    #[structopt(name = "preferred-address-v4", long)]
+    #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     preferred_address_v4: Option<String>,
 
-    #[structopt(name = "preferred-address-v6", long)]
+    #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     preferred_address_v6: Option<String>,
 }
@@ -781,7 +786,7 @@ enum Ready {
 async fn main() -> Result<(), io::Error> {
     const HQ_INTEROP: &str = "hq-interop";
 
-    let mut args = Args::from_args();
+    let mut args = Args::parse();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
