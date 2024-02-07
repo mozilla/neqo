@@ -581,6 +581,7 @@ fn read_dgram(
     state: &quinn_udp::UdpSocketState,
     local_address: &SocketAddr,
 ) -> Result<Option<Datagram>, io::Error> {
+    // TODO: At least we should be using a buffer pool.
     let mut buf = [0; u16::MAX as usize];
     let mut tos = 0;
     let mut ttl = 0;
