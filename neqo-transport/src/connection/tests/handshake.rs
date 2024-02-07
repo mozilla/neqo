@@ -18,8 +18,8 @@ use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
 use test_fixture::{
-    self, addr, assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now,
-    split_datagram,
+    self, assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now,
+    split_datagram, DEFAULT_ADDR,
 };
 
 use super::{
@@ -122,8 +122,8 @@ fn no_alpn() {
         "example.com",
         &["bad-alpn"],
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         ConnectionParameters::default(),
         now(),
     )
@@ -251,8 +251,8 @@ fn chacha20poly1305() {
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         ConnectionParameters::default(),
         now(),
     )
@@ -730,8 +730,8 @@ fn connect_one_version() {
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            addr(),
-            addr(),
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
             ConnectionParameters::default().versions(version, vec![version]),
             now(),
         )
