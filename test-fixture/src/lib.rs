@@ -92,7 +92,13 @@ pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(addr(), addr(), IpTos::default(), Some(128), data)
+    Datagram::new(
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
+        IpTos::default(),
+        Some(128),
+        data,
+    )
 }
 
 /// Create a default socket address.
@@ -105,8 +111,8 @@ const fn addr() -> SocketAddr {
 /// An IPv4 version of the default socket address.
 #[must_use]
 const fn addr_v4() -> SocketAddr {
-    let localhost_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
-    SocketAddr::new(localhost_v4, addr().port())
+    let v4ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+    SocketAddr::new(v4ip, DEFAULT_ADDR.port())
 }
 
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
@@ -155,8 +161,8 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
@@ -259,8 +265,8 @@ pub fn default_http3_client() -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
@@ -282,8 +288,8 @@ pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         params,
         now(),
     )
