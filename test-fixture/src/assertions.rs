@@ -12,7 +12,7 @@ use std::{
 use neqo_common::{Datagram, Decoder};
 use neqo_transport::{version::WireVersion, Version};
 
-use crate::{addr, addr_v4};
+use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
 
 const PACKET_TYPE_MASK: u8 = 0b1011_0000;
 
@@ -161,7 +161,7 @@ pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
 ///
 /// When the path doesn't use the default v4 socket address at both ends.
 pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
-    assert_path(dgram, addr_v4());
+    assert_path(dgram, DEFAULT_ADDR_V4);
     if padded {
         assert_eq!(dgram.len(), 1357 /* PATH_MTU_V4 */);
     }
@@ -171,7 +171,7 @@ pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
 ///
 /// When the path doesn't use the default v6 socket address at both ends.
 pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
-    assert_path(dgram, addr());
+    assert_path(dgram, DEFAULT_ADDR);
     if padded {
         assert_eq!(dgram.len(), 1337 /* PATH_MTU_V6 */);
     }

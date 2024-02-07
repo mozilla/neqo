@@ -19,9 +19,9 @@ fn coalesce(c: &mut Criterion, count: u64) {
     c.bench_function(
         &format!("coalesce_acked_from_zero {count}+1 entries"),
         |b| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || build_coalesce(count),
-                |mut used| {
+                |used| {
                     used.mark_acked(CHUNK, CHUNK as usize);
                     let tail = (count + 1) * CHUNK;
                     used.mark_sent(tail, CHUNK as usize);

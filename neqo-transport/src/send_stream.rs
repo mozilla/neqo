@@ -228,7 +228,11 @@ impl RangeTracker {
         let end = new_off + u64::try_from(new_len).unwrap();
         let new_off = max(self.acked, new_off);
         let mut new_len = end.saturating_sub(new_off);
+        if new_len == 0 {
+            return;
+        }
 
+        self.first_unmarked = None;
         if new_off == self.acked {
             self.acked += new_len;
             self.coalesce_acked();
@@ -324,6 +328,8 @@ impl RangeTracker {
         if new_len == 0 {
             return;
         }
+
+        self.first_unmarked = None;
 
         // Get all existing ranges that start within this new range.
         let covered = self
@@ -1673,16 +1679,16 @@ impl SendStreams {
 
         // Iterate the map, but only those without fairness, then iterate
         // OrderGroups, then iterate each group
-        qdebug!("processing streams...  unfair:");
+        qtrace!("processing streams...  unfair:");
         for stream in self.map.values_mut() {
             if !stream.is_fair() {
-                qdebug!("   {}", stream);
+                qtrace!("   {}", stream);
                 if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                     break;
                 }
             }
         }
-        qdebug!("fair streams:");
+        qtrace!("fair streams:");
         let stream_ids = self.regular.iter().chain(
             self.sendordered
                 .values_mut()
@@ -1692,9 +1698,9 @@ impl SendStreams {
         for stream_id in stream_ids {
             let stream = self.map.get_mut(&stream_id).unwrap();
             if let Some(order) = stream.sendorder() {
-                qdebug!("   {} ({})", stream_id, order)
+                qtrace!("   {} ({})", stream_id, order)
             } else {
-                qdebug!("   None")
+                qtrace!("   None")
             }
             if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                 break;

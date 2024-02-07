@@ -18,7 +18,7 @@ use std::{
 use enum_map::enum_map;
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{self, addr, fixture_init, new_neqo_qlog, now};
+use test_fixture::{self, fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
 use super::{Connection, ConnectionError, ConnectionId, Output, State};
 use crate::{
@@ -107,8 +107,8 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         params,
         now(),
     )
