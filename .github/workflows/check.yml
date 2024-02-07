@@ -31,6 +31,14 @@ jobs:
         shell: bash
 
     steps:
+      - name: Use sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Enable sscache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
