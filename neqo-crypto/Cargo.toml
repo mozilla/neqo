@@ -1,6 +1,6 @@
 [package]
 name = "neqo-crypto"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
+authors.workspace = true
 build = "build.rs"
 homepage.workspace = true
 repository.workspace = true

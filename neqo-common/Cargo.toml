@@ -1,6 +1,6 @@
 [package]
 name = "neqo-common"
-authors = ["Bobby Holley <bobbyholley@gmail.com>"]
+authors.workspace = true
 build = "build.rs"
 homepage.workspace = true
 repository.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "test-fixture"
-authors = ["Martin Thomson <mt@lowentropy.net>"]
+authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 version.workspace = true

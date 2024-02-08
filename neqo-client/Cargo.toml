@@ -1,10 +1,6 @@
 [package]
 name = "neqo-client"
-authors = [
-	"Martin Thomson <mt@lowentropy.net>",
-	"Dragana Damjanovic <dragana.damjano@gmail.com>",
-	"Andy Grover <agrover@mozilla.com>",
-]
+authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 version.workspace = true

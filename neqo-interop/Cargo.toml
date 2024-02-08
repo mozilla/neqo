@@ -1,6 +1,6 @@
 [package]
 name = "neqo-interop"
-authors = ["EKR <ekr@rtfm.com>"]
+authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 version.workspace = true
