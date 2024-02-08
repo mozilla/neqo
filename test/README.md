@@ -31,3 +31,5 @@ The `upload_test.sh` script automates testing network conditions for `neqo-clien
 3. **Automated Test Execution**: The script sets up network conditions and runs `neqo-client` and `neqo-server` tests.
 4. **Cleanup**: At the end, it resets network conditions and stops the server.
 
+## Visualize log file
+Run `./mozlog-neqo-cwnd.py upload.log` to view the logs with matplotlib and python.
