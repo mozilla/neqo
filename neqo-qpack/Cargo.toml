@@ -9,13 +9,14 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-lazy_static = "~1.4.0"
-log = { version = "~0.4.17", default-features = false }
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+lazy_static = "1.4"
+log = { version = "0.4", default-features = false }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.12.0"
-static_assertions = "~1.1.0"
+qlog = "0.12"
+static_assertions = "1.1"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
