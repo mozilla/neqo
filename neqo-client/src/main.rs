@@ -10,6 +10,7 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
+    convert::TryFrom,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, Write},
@@ -85,6 +86,8 @@ impl Display for ClientError {
         Ok(())
     }
 }
+
+impl std::error::Error for ClientError {}
 
 type Res<T> = Result<T, ClientError>;
 
@@ -232,25 +235,27 @@ impl Args {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VersionArg(Version);
+fn from_str(s: &str) -> Res<Version> {
+    let v = u32::from_str_radix(s, 16)
+        .map_err(|_| ClientError::ArgumentError("versions need to be specified in hex"))?;
+    Version::try_from(v).map_err(|_| ClientError::ArgumentError("unknown version"))
+}
 
 #[derive(Debug, Parser)]
 struct QuicParameters {
     #[arg(
-        short = 'v',
+        short = 'Q',
         long,
         num_args = 1..,
         value_delimiter = ' ',
         number_of_values = 1,
-        value_parser = |s: &str| hex::decode(s)
-    )]
+        value_parser = from_str)]
     /// A list of versions to support, in hex.
     /// The first is the version to attempt.
     /// Adding multiple values adds versions in order of preference.
     /// If the first listed version appears in the list twice, the position
     /// of the second entry determines the preference order of that version.
-    quic_version: Vec<VersionArg>,
+    quic_version: Vec<Version>,
 
     #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
@@ -288,7 +293,7 @@ impl QuicParameters {
             } else {
                 &self.quic_version
             };
-            params.versions(first.0, all.iter().map(|&x| x.0).collect())
+            params.versions(first, all.to_vec())
         } else {
             let version = match alpn {
                 "h3" | "hq-interop" => Version::Version1,
@@ -959,7 +964,7 @@ async fn main() -> Res<()> {
 
     if let Some(testcase) = args.qns_test.as_ref() {
         // Only use v1 for most QNS tests.
-        args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+        args.quic_parameters.quic_version = vec![Version::Version1];
         match testcase.as_str() {
             // TODO: Add "ecn" when that is ready.
             "http3" => {}

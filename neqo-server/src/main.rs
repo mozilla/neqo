@@ -14,14 +14,12 @@ use std::{
     convert::TryFrom,
     fmt::{self, Display},
     fs::OpenOptions,
-    io,
-    io::Read,
+    io::{self, Read},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     pin::Pin,
     process::exit,
     rc::Rc,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -90,6 +88,8 @@ impl Display for ServerError {
         Ok(())
     }
 }
+
+impl std::error::Error for ServerError {}
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -195,32 +195,24 @@ impl Args {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VersionArg(Version);
-impl FromStr for VersionArg {
-    type Err = ServerError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v = u32::from_str_radix(s, 16)
-            .map_err(|_| ServerError::ArgumentError("versions need to be specified in hex"))?;
-        Ok(Self(Version::try_from(v).map_err(|_| {
-            ServerError::ArgumentError("unknown version")
-        })?))
-    }
+fn from_str(s: &str) -> Result<Version, ServerError> {
+    let v = u32::from_str_radix(s, 16)
+        .map_err(|_| ServerError::ArgumentError("versions need to be specified in hex"))?;
+    Version::try_from(v).map_err(|_| ServerError::ArgumentError("unknown version"))
 }
 
 #[derive(Debug, Parser)]
 struct QuicParameters {
     #[arg(
-        short = 'v',
+        short = 'Q',
         long,
         num_args = 1..,
         value_delimiter = ' ',
         number_of_values = 1,
-        value_parser = |s: &str| hex::decode(s)
+        value_parser = from_str
     )]
     /// A list of versions to support in order of preference, in hex.
-    quic_version: Vec<VersionArg>,
+    quic_version: Vec<Version>,
 
     #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
@@ -308,7 +300,7 @@ impl QuicParameters {
         }
 
         if let Some(first) = self.quic_version.first() {
-            params = params.versions(first.0, self.quic_version.iter().map(|&v| v.0).collect());
+            params = params.versions(*first, self.quic_version.to_vec());
         }
         params
     }
@@ -788,7 +780,7 @@ async fn main() -> Result<(), io::Error> {
             // only. Exceptions are testcases `versionnegotiation` (not yet
             // implemented) and `v2`.
             if testcase != "v2" {
-                args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+                args.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
             qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
