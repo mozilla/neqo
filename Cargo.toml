@@ -10,3 +10,12 @@ members = [
   "neqo-interop",
   "test-fixture",
 ]
+
+[workspace.package]
+homepage = "https://github.com/mozilla/neqo/"
+repository = "https://github.com/mozilla/neqo/"
+authors = ["The Neqo Authors <necko@mozilla.com>"]
+version = "0.7.0"
+edition = "2018"
+rust-version = "1.70.0"
+license = "MIT OR Apache-2.0"
