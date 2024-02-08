@@ -111,7 +111,6 @@ struct Args {
         short = 'd',
         long,
         default_value = "./test-fixture/db",
-        value_parser=clap::value_parser!(PathBuf)
     )]
     /// NSS database directory.
     db: PathBuf,
