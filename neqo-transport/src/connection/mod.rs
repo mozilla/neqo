@@ -59,6 +59,7 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
+
 mod dump;
 mod idle;
 pub mod params;
@@ -66,6 +67,7 @@ mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
+
 use dump::dump_packet;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
