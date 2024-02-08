@@ -31,6 +31,12 @@ jobs:
         shell: bash
 
     steps:
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust-toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
+
       - name: Use sccache
         uses: mozilla-actions/sccache-action@v0.0.4
 
@@ -38,12 +44,6 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
