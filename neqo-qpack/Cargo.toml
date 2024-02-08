@@ -1,6 +1,5 @@
 [package]
 name = "neqo-qpack"
-build = "build.rs"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
