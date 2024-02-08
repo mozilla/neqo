@@ -107,11 +107,7 @@ struct Args {
     #[arg(short = 'b', long, default_value = "10")]
     max_blocked_streams: u16,
 
-    #[arg(
-        short = 'd',
-        long,
-        default_value = "./test-fixture/db",
-    )]
+    #[arg(short = 'd', long, default_value = "./test-fixture/db")]
     /// NSS database directory.
     db: PathBuf,
 
@@ -213,10 +209,6 @@ impl FromStr for VersionArg {
     }
 }
 
-fn decode_hex(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
-    hex::decode(s)
-}
-
 #[derive(Debug, Parser)]
 struct QuicParameters {
     #[arg(
@@ -225,7 +217,7 @@ struct QuicParameters {
         num_args = 1..,
         value_delimiter = ' ',
         number_of_values = 1,
-        value_parser=decode_hex
+        value_parser = |s: &str| hex::decode(s)
     )]
     /// A list of versions to support in order of preference, in hex.
     quic_version: Vec<VersionArg>,

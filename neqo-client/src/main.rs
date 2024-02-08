@@ -121,19 +121,6 @@ impl KeyUpdateState {
     }
 }
 
-#[derive(Debug, Clone)]
-struct HexArg(Vec<u8>);
-
-impl AsRef<[u8]> for HexArg {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-fn decode_hex(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
-    hex::decode(s)
-}
-
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
@@ -179,11 +166,11 @@ pub struct Args {
     /// Output received data to stdout
     output_read_data: bool,
 
-    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
+    #[arg(name = "qlog-dir", long)]
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
 
-    #[arg(name = "output-dir", long, value_parser=clap::value_parser!(PathBuf))]
+    #[arg(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
 
@@ -206,10 +193,10 @@ pub struct Args {
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
 
-    #[arg(name = "ech", long, value_parser=decode_hex)]
+    #[arg(name = "ech", long, value_parser = |s: &str| hex::decode(s))]
     /// Enable encrypted client hello (ECH).
     /// This takes an encoded ECH configuration in hexadecimal format.
-    ech: Option<HexArg>,
+    ech: Option<Vec<u8>>,
 
     #[command(flatten)]
     quic_parameters: QuicParameters,
@@ -256,7 +243,7 @@ struct QuicParameters {
         num_args = 1..,
         value_delimiter = ' ',
         number_of_values = 1,
-        value_parser=decode_hex
+        value_parser = |s: &str| hex::decode(s)
     )]
     /// A list of versions to support, in hex.
     /// The first is the version to attempt.
