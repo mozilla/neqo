@@ -45,25 +45,24 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
 
+      # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
         run: |
-          # Disable turboboost
           echo 1 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          # Disable hyperthreading
           echo off > sudo tee /sys/devices/system/cpu/smt/control
-          # Use performance governor
           sudo cpupower frequency-set -g performance
 
+      # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
-        run: sudo nice -n -10 taskset -c 0 cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+        run: |
+          sudo -E nice -n -20 taskset -c 0 \
+            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
+      # Enable turboboost, hyperthreading and use powersave governor
       - name: Restore machine
         run: |
-          # Enable turboboost
           echo 0 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          # Enable hyperthreading
           echo on > sudo tee /sys/devices/system/cpu/smt/control
-          # Use powersave governor
           sudo cpupower frequency-set -g powersave
 
       - name: Download previous benchmark results
