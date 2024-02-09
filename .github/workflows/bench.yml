@@ -63,8 +63,10 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          sudo nice -n -20 taskset -c 0 sudo -i -u "$USER" -D ${{ github.workspace }} \
+          sudo nice -n -20 taskset -c 0 sudo -i -u "$USER" -D "$PWD" \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+        env:
+          PWD: $(pwd)
 
       # Enable turboboost, hyperthreading and use powersave governor
       - name: Restore machine
