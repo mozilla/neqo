@@ -1026,14 +1026,7 @@ async fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match std::net::UdpSocket::bind(local_addr) {
-            Err(e) => {
-                eprintln!("Unable to bind UDP socket: {e}");
-                exit(1)
-            }
-            Ok(s) => s,
-        };
-
+        let socket = udp::Socket::bind(local_addr)?;
         let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
@@ -1041,8 +1034,6 @@ async fn main() -> Res<()> {
             real_local,
             remote_addr,
         );
-
-        let socket = udp::Socket::new(socket)?;
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;

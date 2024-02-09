@@ -593,11 +593,11 @@ impl ServersRunner {
         let sockets = hosts
             .into_iter()
             .map(|host| {
-                let socket = std::net::UdpSocket::bind(host)?;
+                let socket = udp::Socket::bind(host)?;
                 let local_addr = socket.local_addr()?;
                 println!("Server waiting for connection on: {local_addr:?}");
 
-                Ok((host, udp::Socket::new(socket)?))
+                Ok((host, socket))
             })
             .collect::<Result<_, io::Error>>()?;
         let server = Self::create_server(&args);

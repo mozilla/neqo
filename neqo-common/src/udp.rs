@@ -6,7 +6,7 @@
 
 use std::{
     io::{self, IoSliceMut},
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     slice,
 };
 
@@ -21,11 +21,13 @@ pub struct Socket {
 }
 
 impl Socket {
-    pub fn new(socket: std::net::UdpSocket) -> Result<Self, io::Error> {
-        let state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
-        let socket = tokio::net::UdpSocket::from_std(socket)?;
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
+        let socket = std::net::UdpSocket::bind(addr)?;
 
-        Ok(Self { socket, state })
+        Ok(Self {
+            state: quinn_udp::UdpSocketState::new((&socket).into()).unwrap(),
+            socket: tokio::net::UdpSocket::from_std(socket)?,
+        })
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
