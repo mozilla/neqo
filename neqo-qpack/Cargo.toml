@@ -9,7 +9,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-lazy_static = "~1.4.0"
 log = { version = "~0.4.17", default-features = false }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }

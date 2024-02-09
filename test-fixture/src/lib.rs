@@ -8,7 +8,7 @@
 #![warn(clippy::pedantic)]
 
 use std::{
-    cell::RefCell,
+    cell::{OnceCell, RefCell},
     cmp::max,
     convert::TryFrom,
     io::{Cursor, Result, Write},
@@ -19,7 +19,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use lazy_static::lazy_static;
 use neqo_common::{
     event::Provider,
     hex,
@@ -51,13 +50,13 @@ pub fn fixture_init() {
 // NSS operates in milliseconds and halves any value it is provided.
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
-lazy_static! {
-    static ref BASE_TIME: Instant = Instant::now();
-}
-
+/// A baseline time for all tests.  This needs to be earlier than what `now()` produces
+/// because of the need to have a span of time elapse for anti-replay purposes.
 fn earlier() -> Instant {
+    // Note: It is only OK to have a different base time for each thread because our tests are single-threaded.
+    thread_local!(static EARLIER: OnceCell<Instant> = OnceCell::new());
     fixture_init();
-    *BASE_TIME
+    EARLIER.with(|b| *b.get_or_init(Instant::now))
 }
 
 /// The current time for the test.  Which is in the future,
