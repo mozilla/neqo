@@ -43,11 +43,11 @@ impl Socket {
     }
 
     /// Send the UDP datagram on the specified socket.
-    pub fn send(&self, d: &Datagram) -> io::Result<usize> {
+    pub fn send(&self, d: Datagram) -> io::Result<usize> {
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-            contents: d[..].to_vec().into(),
+            contents: d.into_data().into(),
             segment_size: None,
             // TODO
             src_ip: None,
@@ -57,7 +57,11 @@ impl Socket {
             self.state
                 .send((&self.socket).into(), slice::from_ref(&transmit))
         })?;
-        // TODO Check that n == datagram.len
+
+        if transmit.contents.len() != n {
+            return Err(io::Error::new(io::ErrorKind::Other, "failed to send datagram as a whole"));
+        }
+
         Ok(n)
     }
 

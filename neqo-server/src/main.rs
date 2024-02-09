@@ -665,7 +665,7 @@ impl ServersRunner {
                     qdebug!("writing to {:?}", dgram.source());
                     let socket = self.find_socket(dgram.source());
                     socket.writable().await?;
-                    socket.send(&dgram)?;
+                    socket.send(dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);

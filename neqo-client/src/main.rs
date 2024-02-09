@@ -856,7 +856,7 @@ impl<'a> ClientRunner<'a> {
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
-                    self.socket.send(&dgram)?;
+                    self.socket.send(dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -1398,7 +1398,7 @@ mod old {
                 match self.client.process(dgram.take(), Instant::now()) {
                     Output::Datagram(dgram) => {
                         self.socket.writable().await?;
-                        self.socket.send(&dgram)?;
+                        self.socket.send(dgram)?;
                     }
                     Output::Callback(new_timeout) => {
                         qinfo!("Setting timeout of {:?}", new_timeout);

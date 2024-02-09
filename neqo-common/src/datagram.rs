@@ -53,6 +53,11 @@ impl Datagram {
     pub fn ttl(&self) -> Option<u8> {
         self.ttl
     }
+
+    #[must_use]
+    pub fn into_data(self) -> Vec<u8> {
+        self.d
+    }
 }
 
 impl Deref for Datagram {
