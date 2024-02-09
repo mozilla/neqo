@@ -63,7 +63,7 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          sudo nice -n -20 taskset -c 0 sudo -i -u "$USER" \
+          sudo nice -n -20 taskset -c 0 sudo -s -u "$USER" \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Enable turboboost, hyperthreading and use powersave governor
