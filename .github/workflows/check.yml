@@ -158,9 +158,8 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
       - name: Check rustdoc links
         run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
