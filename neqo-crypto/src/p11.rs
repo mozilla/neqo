@@ -10,6 +10,7 @@
 #![allow(non_snake_case)]
 
 use std::{
+    cell::RefCell,
     convert::TryFrom,
     mem,
     ops::{Deref, DerefMut},
@@ -302,6 +303,40 @@ pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     buf
 }
 
+struct RandomCache {
+    cache: [u8; Self::SIZE],
+    used: usize,
+}
+
+impl RandomCache {
+    const SIZE: usize = 256;
+    const CUTOFF: usize = 32;
+
+    fn new() -> Self {
+        RandomCache {
+            cache: [0; Self::SIZE],
+            used: Self::SIZE,
+        }
+    }
+
+    fn randomize<B: AsMut<[u8]>>(&mut self, mut buf: B) -> B {
+        let m_buf = buf.as_mut();
+        let avail = Self::SIZE - self.used;
+        if m_buf.len() <= avail {
+            m_buf.copy_from_slice(&self.cache[self.used..self.used + m_buf.len()]);
+            self.used += m_buf.len();
+        } else {
+            if avail > 0 {
+                m_buf[..avail].copy_from_slice(&self.cache[self.used..]);
+            }
+            randomize(&mut self.cache[..]);
+            self.used = m_buf.len() - avail;
+            m_buf[avail..].copy_from_slice(&self.cache[..self.used]);
+        }
+        buf
+    }
+}
+
 /// Generate a randomized array.
 ///
 /// # Panics
@@ -309,8 +344,14 @@ pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
 /// When `size` is too large or NSS fails.
 #[must_use]
 pub fn random<const N: usize>() -> [u8; N] {
+    thread_local! { static CACHE: RefCell<RandomCache> = RefCell::new(RandomCache::new()) };
+
     let buf = [0; N];
-    randomize(buf)
+    if N <= RandomCache::CUTOFF {
+        CACHE.with_borrow_mut(|c| c.randomize(buf))
+    } else {
+        randomize(buf)
+    }
 }
 
 #[cfg(test)]
@@ -325,5 +366,6 @@ mod test {
         // If any of these ever fail, there is either a bug, or it's time to buy a lottery ticket.
         assert_ne!(random::<16>(), randomize([0; 16]));
         assert_ne!([0; 16], random::<16>());
+        assert_ne!([0; 64], random::<64>());
     }
 }
