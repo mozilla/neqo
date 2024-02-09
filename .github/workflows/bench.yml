@@ -37,6 +37,7 @@ jobs:
             git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev \
             linux-tools-common linux-tools-generic linux-tools-$(uname -r)
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          echo "$HOME/.cargo/bin"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Checkout
@@ -52,7 +53,9 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          sudo -E nice -n -20 taskset -c 0 \
+          #sudo -E nice -n -20
+          env
+          taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Enable turboboost, hyperthreading and use powersave governor
