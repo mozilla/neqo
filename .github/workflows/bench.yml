@@ -48,23 +48,23 @@ jobs:
       - name: Prepare machine
         run: |
           # Disable turboboost
-          echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo
+          echo 1 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
           # Disable hyperthreading
-          echo off > /sys/devices/system/cpu/smt/control
+          echo off > sudo tee /sys/devices/system/cpu/smt/control
           # Use performance governor
-          cpupower frequency-set -g performance
+          sudo cpupower frequency-set -g performance
 
       - name: Benchmark
-        run: nice -n -10 taskset -c 0 cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+        run: sudo nice -n -10 taskset -c 0 cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       - name: Restore machine
         run: |
           # Enable turboboost
-          echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo
+          echo 0 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
           # Enable hyperthreading
-          echo on > /sys/devices/system/cpu/smt/control
+          echo on > sudo tee /sys/devices/system/cpu/smt/control
           # Use powersave governor
-          cpupower frequency-set -g powersave
+          sudo cpupower frequency-set -g powersave
 
       - name: Download previous benchmark results
         uses: actions/cache@v4
