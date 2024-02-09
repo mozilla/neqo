@@ -1,11 +1,19 @@
 name: Bench
 on:
+  # temporarily:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  TOOLCHAIN: nightly
 
 jobs:
   bench:
@@ -16,7 +24,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: $TOOLCHAIN
           # components: rustfmt, clippy, llvm-tools-preview
 
       - name: Use sccache
@@ -27,7 +35,7 @@ jobs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
-      - name: Install dependencies (Linux)
+      - name: Install dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -39,7 +47,23 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
 
-      - name: Build
-        run: |
-          cargo bench --features ci,bench
+      - name: Benchmark
+        run: cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+
+      - name: Download previous benchmark results
+        uses: actions/cache@v4
+        with:
+          path: ./cache
+          key: ${{ runner.os }}-benchmark
+
+      - name: Store current benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'cargo'
+          output-file-path: output.txt
+          external-data-json-path: ./cache/benchmark-data.json
+          fail-on-alert: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment-on-alert: true
+          summary-always: true
 
