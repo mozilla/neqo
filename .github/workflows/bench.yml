@@ -1,8 +1,15 @@
 name: Bench
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+# on:
+#   workflow_run:
+#     workflows: [CI]
+#     types: [completed]
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -12,7 +19,7 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
         shell: bash
@@ -34,7 +41,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get install -y --no-install-recommends \
-            git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev \
+            git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev libclang-dev \
             linux-tools-common linux-tools-generic linux-tools-$(uname -r)
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
           echo "$HOME/.cargo/bin"
@@ -53,9 +60,8 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          #sudo -E nice -n -20
-          env
-          taskset -c 0 \
+          cargo +$TOOLCHAIN bench --features ci,bench --no-run
+          sudo nice -n -20 sudo -u "$USER" taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Enable turboboost, hyperthreading and use powersave governor
