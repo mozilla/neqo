@@ -139,7 +139,6 @@ impl PrivateKey {
     /// When the values are too large to fit.  So never.
     pub fn key_data(&self) -> Res<Vec<u8>> {
         let mut key_item = Item::make_empty();
-        #[allow(clippy::useless_conversion)] // TODO: Remove when we bump the MSRV to 1.74.0.
         secstatus_to_res(unsafe {
             PK11_ReadRawAttribute(
                 PK11ObjectType::PK11_TypePrivKey,

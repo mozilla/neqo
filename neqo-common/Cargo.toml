@@ -10,12 +10,13 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = "2.7"
 env_logger = { version = "0.10", default-features = false }
 lazy_static = "1.4"
 log = { version = "0.4", default-features = false }
-qlog = "0.12.0"
-time = { version = "0.3.23", features = ["formatting"] }
+qlog = "0.12"
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
