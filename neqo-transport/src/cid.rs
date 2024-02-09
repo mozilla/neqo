@@ -77,12 +77,6 @@ impl From<SmallVec<[u8; MAX_CONNECTION_ID_LEN]>> for ConnectionId {
     }
 }
 
-impl From<Vec<u8>> for ConnectionId {
-    fn from(cid: Vec<u8>) -> Self {
-        Self::from(SmallVec::from(cid))
-    }
-}
-
 impl<T: AsRef<[u8]> + ?Sized> From<&T> for ConnectionId {
     fn from(buf: &T) -> Self {
         Self::from(SmallVec::from(buf.as_ref()))
