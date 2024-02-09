@@ -19,7 +19,6 @@ neqo-transport = { path = "./../neqo-transport" }
 qlog = "0.12.0"
 structopt = "0.3"
 tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
-quinn-udp = { git = "https://github.com/quinn-rs/quinn/" }
 url = "~2.5.0"
 
 [features]

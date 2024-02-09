@@ -44,7 +44,7 @@ use neqo_transport::{
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use structopt::StructOpt;
-use tokio::{net::UdpSocket, time::Sleep};
+use tokio::time::Sleep;
 use url::{Origin, Url};
 
 #[derive(Debug)]
@@ -398,7 +398,7 @@ enum Ready {
 
 // Wait for the socket to be readable or the timeout to fire.
 async fn ready(
-    socket: &UdpSocket,
+    socket: &udp::Socket,
     mut timeout: Option<&mut Pin<Box<Sleep>>>,
 ) -> Result<Ready, io::Error> {
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
@@ -757,8 +757,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 
 struct ClientRunner<'a> {
     local_addr: SocketAddr,
-    socket: &'a UdpSocket,
-    socket_state: &'a quinn_udp::UdpSocketState,
+    socket: &'a udp::Socket,
     client: Http3Client,
     handler: Handler<'a>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -768,8 +767,7 @@ struct ClientRunner<'a> {
 impl<'a> ClientRunner<'a> {
     async fn new(
         args: &'a mut Args,
-        socket: &'a UdpSocket,
-        socket_state: &'a quinn_udp::UdpSocketState,
+        socket: &'a udp::Socket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         hostname: &str,
@@ -805,7 +803,6 @@ impl<'a> ClientRunner<'a> {
         Ok(Self {
             local_addr,
             socket,
-            socket_state,
             client,
             handler,
             timeout: None,
@@ -823,7 +820,7 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = udp::rx(self.socket, self.socket_state, &self.local_addr)?;
+                    let dgram = self.socket.recv(&self.local_addr)?;
                     if dgram.is_none() {
                         break;
                     }
@@ -859,7 +856,7 @@ impl<'a> ClientRunner<'a> {
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
-                    udp::tx(self.socket, self.socket_state, &dgram)?;
+                    self.socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -1036,9 +1033,6 @@ async fn main() -> Res<()> {
             }
             Ok(s) => s,
         };
-        socket.set_nonblocking(true)?;
-        let socket_state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
-        let socket = UdpSocket::from_std(socket)?;
 
         let real_local = socket.local_addr().unwrap();
         println!(
@@ -1047,6 +1041,8 @@ async fn main() -> Res<()> {
             real_local,
             remote_addr,
         );
+
+        let socket = udp::Socket::new(socket)?;
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
@@ -1064,7 +1060,6 @@ async fn main() -> Res<()> {
                 old::ClientRunner::new(
                     &args,
                     &socket,
-                    &socket_state,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1078,7 +1073,6 @@ async fn main() -> Res<()> {
                 ClientRunner::new(
                     &mut args,
                     &socket,
-                    &socket_state,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1114,7 +1108,7 @@ mod old {
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
         StreamType,
     };
-    use tokio::{net::UdpSocket, time::Sleep};
+    use tokio::time::Sleep;
     use url::Url;
 
     use super::{get_output_file, qlog_new, ready, Args, KeyUpdateState, Ready, Res};
@@ -1303,8 +1297,7 @@ mod old {
 
     pub struct ClientRunner<'a> {
         local_addr: SocketAddr,
-        socket: &'a UdpSocket,
-        socket_state: &'a quinn_udp::UdpSocketState,
+        socket: &'a udp::Socket,
         client: Connection,
         handler: HandlerOld<'a>,
         timeout: Option<Pin<Box<Sleep>>>,
@@ -1314,8 +1307,7 @@ mod old {
     impl<'a> ClientRunner<'a> {
         pub async fn new(
             args: &'a Args,
-            socket: &'a UdpSocket,
-            socket_state: &'a quinn_udp::UdpSocketState,
+            socket: &'a udp::Socket,
             local_addr: SocketAddr,
             remote_addr: SocketAddr,
             origin: &str,
@@ -1361,7 +1353,6 @@ mod old {
             Ok(Self {
                 local_addr,
                 socket,
-                socket_state,
                 client,
                 handler,
                 timeout: None,
@@ -1379,7 +1370,7 @@ mod old {
 
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = udp::rx(self.socket, self.socket_state, &self.local_addr)?;
+                        let dgram = self.socket.recv(&self.local_addr)?;
                         if dgram.is_none() {
                             break;
                         }
@@ -1416,7 +1407,7 @@ mod old {
                 match self.client.process(dgram.take(), Instant::now()) {
                     Output::Datagram(dgram) => {
                         self.socket.writable().await?;
-                        udp::tx(self.socket, self.socket_state, &dgram)?;
+                        self.socket.send(&dgram)?;
                     }
                     Output::Callback(new_timeout) => {
                         qinfo!("Setting timeout of {:?}", new_timeout);

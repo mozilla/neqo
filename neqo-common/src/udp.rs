@@ -15,105 +15,90 @@ use tokio::io::Interest;
 
 use crate::{Datagram, IpTos};
 
-/// Send the UDP datagram on the specified socket.
-///
-/// # Arguments
-///
-/// * `socket` - The UDP socket to send the datagram on.
-/// * `d` - The datagram to send.
-///
-/// # Returns
-///
-/// An `io::Result` indicating whether the datagram was sent successfully.
-///
-/// # Errors
-///
-/// Returns an `io::Error` if the UDP socket fails to send the datagram.
-///
-/// # Panics
-///
-/// Panics if the datagram is too large to send.
-pub fn tx(
-    socket: &tokio::net::UdpSocket,
-    state: &UdpSocketState,
-    d: &Datagram,
-) -> io::Result<usize> {
-    let transmit = Transmit {
-        destination: d.destination(),
-        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d[..].to_vec().into(),
-        segment_size: None,
-        // TODO
-        src_ip: None,
-    };
-
-    let n = (&socket).try_io(Interest::WRITABLE, || {
-        state.send((&socket).into(), slice::from_ref(&transmit))
-    })?;
-    Ok(n)
+pub struct Socket {
+    socket: tokio::net::UdpSocket,
+    state: UdpSocketState,
 }
 
-/// Receive a UDP datagram on the specified socket.
-///
-/// # Arguments
-///
-/// * `socket` - The UDP socket to receive the datagram on.
-/// * `buf` - The buffer to receive the datagram into.
-/// * `tos` - The type-of-service (TOS) or traffic class (TC) value of the received datagram.
-/// * `ttl` - The time-to-live (TTL) or hop limit (HL) value of the received datagram.
-///
-/// # Returns
-///
-/// An `io::Result` indicating the size of the received datagram and the source address.
-///
-/// # Errors
-///
-/// Returns an `io::Error` if the UDP socket fails to receive the datagram.
-///
-/// # Panics
-///
-/// Panics if the datagram is too large to receive.
-pub fn rx(
-    socket: &tokio::net::UdpSocket,
-    state: &UdpSocketState,
-    local_address: &SocketAddr,
-) -> Result<Option<Datagram>, io::Error> {
-    // TODO: At least we should be using a buffer pool.
-    let mut buf = [0; u16::MAX as usize];
+impl Socket {
+    pub fn new(socket: std::net::UdpSocket) -> Result<Self, io::Error> {
+        let state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
+        let socket = tokio::net::UdpSocket::from_std(socket)?;
 
-    let mut meta = RecvMeta::default();
-
-    let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
-        state.recv(
-            (&socket).into(),
-            &mut [IoSliceMut::new(&mut buf)],
-            slice::from_mut(&mut meta),
-        )
-    }) {
-        Err(ref err)
-            if err.kind() == io::ErrorKind::WouldBlock
-                || err.kind() == io::ErrorKind::Interrupted =>
-        {
-            return Ok(None)
-        }
-        Err(err) => {
-            eprintln!("UDP recv error: {err:?}");
-            return Err(err);
-        }
-        Ok(n) => {
-            assert_eq!(n, 1, "only passed one slice");
-            (meta.len, meta.addr)
-        }
-    };
-
-    if sz == buf.len() {
-        eprintln!("Might have received more than {} bytes", buf.len());
+        Ok(Self { socket, state })
     }
 
-    if sz == 0 {
-        eprintln!("zero length datagram received?");
-        Ok(None)
-    } else {
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.socket.local_addr()
+    }
+
+    pub async fn writable(&self) -> Result<(), io::Error> {
+        self.socket.writable().await
+    }
+
+    pub async fn readable(&self) -> Result<(), io::Error> {
+        self.socket.readable().await
+    }
+
+    /// Send the UDP datagram on the specified socket.
+    pub fn send(&self, d: &Datagram) -> io::Result<usize> {
+        let transmit = Transmit {
+            destination: d.destination(),
+            ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
+            contents: d[..].to_vec().into(),
+            segment_size: None,
+            // TODO
+            src_ip: None,
+        };
+
+        let n = (&self.socket).try_io(Interest::WRITABLE, || {
+            self.state
+                .send((&self.socket).into(), slice::from_ref(&transmit))
+        })?;
+        // TODO Check that n == datagram.len
+        Ok(n)
+    }
+
+    /// Receive a UDP datagram on the specified socket.
+    pub fn recv(&self, local_address: &SocketAddr) -> Result<Option<Datagram>, io::Error> {
+        // TODO: At least we should be using a buffer pool.
+        let mut buf = [0; u16::MAX as usize];
+
+        let mut meta = RecvMeta::default();
+
+        let (sz, remote_addr) = match (&self.socket).try_io(Interest::READABLE, || {
+            self.state.recv(
+                (&self.socket).into(),
+                &mut [IoSliceMut::new(&mut buf)],
+                slice::from_mut(&mut meta),
+            )
+        }) {
+            Err(ref err)
+                if err.kind() == io::ErrorKind::WouldBlock
+                    || err.kind() == io::ErrorKind::Interrupted =>
+            {
+                return Ok(None)
+            }
+            Err(err) => {
+                eprintln!("UDP recv error: {err:?}");
+                return Err(err);
+            }
+            Ok(n) => {
+                assert_eq!(n, 1, "only passed one slice");
+
+                if meta.len == 0 {
+                    eprintln!("zero length datagram received?");
+                    return Ok(None);
+                }
+
+                (meta.len, meta.addr)
+            }
+        };
+
+        if sz == buf.len() {
+            eprintln!("Might have received more than {} bytes", buf.len());
+        }
+
         Ok(Some(Datagram::new(
             remote_addr,
             *local_address,

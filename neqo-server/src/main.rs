@@ -580,7 +580,7 @@ struct ServersRunner {
     args: Args,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, tokio::net::UdpSocket, quinn_udp::UdpSocketState)>,
+    sockets: Vec<(SocketAddr, udp::Socket)>,
 }
 
 impl ServersRunner {
@@ -596,8 +596,8 @@ impl ServersRunner {
                 let socket = std::net::UdpSocket::bind(host)?;
                 let local_addr = socket.local_addr()?;
                 println!("Server waiting for connection on: {local_addr:?}");
-                let state = quinn_udp::UdpSocketState::new((&socket).into()).unwrap();
-                Ok((host, tokio::net::UdpSocket::from_std(socket)?, state))
+
+                Ok((host, udp::Socket::new(socket)?))
             })
             .collect::<Result<_, io::Error>>()?;
         let server = Self::create_server(&args);
@@ -644,20 +644,17 @@ impl ServersRunner {
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(
-        &mut self,
-        addr: SocketAddr,
-    ) -> (&mut tokio::net::UdpSocket, &mut quinn_udp::UdpSocketState) {
-        let ((_host, first_socket, first_state), rest) = self.sockets.split_first_mut().unwrap();
+    fn find_socket(&mut self, addr: SocketAddr) -> &mut udp::Socket {
+        let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
         rest.iter_mut()
-            .map(|(_host, socket, state)| (socket, state))
-            .find(|(socket, _state)| {
+            .map(|(_host, socket)| socket)
+            .find(|socket| {
                 socket
                     .local_addr()
                     .ok()
                     .map_or(false, |socket_addr| socket_addr == addr)
             })
-            .unwrap_or((first_socket, first_state))
+            .unwrap_or(first_socket)
     }
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
@@ -666,9 +663,9 @@ impl ServersRunner {
             match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
                     qdebug!("writing to {:?}", dgram.source());
-                    let (socket, state) = self.find_socket(dgram.source());
+                    let socket = self.find_socket(dgram.source());
                     socket.writable().await?;
-                    udp::tx(&socket, state, &dgram)?;
+                    socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -689,7 +686,7 @@ impl ServersRunner {
         let sockets_ready = select_all(
             self.sockets
                 .iter()
-                .map(|(_host, socket, _state)| Box::pin(socket.readable())),
+                .map(|(_host, socket)| Box::pin(socket.readable())),
         )
         .map(|(res, inx, _)| match res {
             Ok(()) => Ok(Ready::Socket(inx)),
@@ -712,8 +709,8 @@ impl ServersRunner {
                     qdebug!("socket {} ready", inx);
                     loop {
                         qdebug!("reading from {}", inx);
-                        let (host, socket, state) = self.sockets.get_mut(inx).unwrap();
-                        let dgram = udp::rx(socket, state, host)?;
+                        let (host, socket) = self.sockets.get_mut(inx).unwrap();
+                        let dgram = socket.recv(host)?;
                         if dgram.is_none() {
                             break;
                         }
