@@ -53,7 +53,8 @@ pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
 fn earlier() -> Instant {
-    // Note: It is only OK to have a different base time for each thread because our tests are single-threaded.
+    // Note: It is only OK to have a different base time for each thread because our tests are
+    // single-threaded.
     thread_local!(static EARLIER: OnceCell<Instant> = OnceCell::new());
     fixture_init();
     EARLIER.with(|b| *b.get_or_init(Instant::now))
