@@ -131,7 +131,7 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let mut r = random(20);
+        let mut r = random::<20>();
         // Randomize length, but ensure that the connection ID is long
         // enough to pass for an original destination connection ID.
         r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
