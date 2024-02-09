@@ -12,7 +12,6 @@ license.workspace = true
 [dependencies]
 # neqo-interop is not used in Firefox, so we can be liberal with dependency versions
 clap = { version = "4.4", features = ["derive"] }
-lazy_static = "1.4"
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
