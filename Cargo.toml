@@ -21,3 +21,8 @@ license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
 rust-version = "1.74.0"
+
+[profile.bench]
+# Inherits from the "release" profile, so just provide overrides here:
+# https://doc.rust-lang.org/cargo/reference/profiles.html#release
+debug = true
