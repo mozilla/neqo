@@ -17,7 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest]
-        rust-toolchain: [1.70.0, stable, nightly]
+        # Don't increase beyond what Firefox is currently using:
+        # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
+        rust-toolchain: [1.74.0, stable, nightly]
         type: [debug]
         include:
           - os: ubuntu-latest

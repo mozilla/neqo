@@ -1,25 +1,28 @@
 [package]
 name = "neqo-client"
-version = "0.7.0"
-authors = ["Martin Thomson <mt@lowentropy.net>",
-	"Dragana Damjanovic <dragana.damjano@gmail.com>",
-	"Andy Grover <agrover@mozilla.com>"]
-edition = "2018"
-rust-version = "1.70.0"
-license = "MIT OR Apache-2.0"
+description = "A basic QUIC HTTP/0.9 and HTTP/3 client."
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
+# neqo-client is not used in Firefox, so we can be liberal with dependency versions
+clap = { version = "4.4", features = ["derive"] }
 futures = "0.3"
-log = {version = "0.4.17", default-features = false}
-neqo-common = { path="./../neqo-common" }
+hex = "0.4"
+log = { version = "0.4", default-features = false }
+neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.12.0"
-structopt = "0.3"
+qlog = "0.12"
 tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
-url = "~2.5.0"
+url = "2.5"
 
 [features]
 deny-warnings = []

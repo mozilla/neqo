@@ -79,7 +79,6 @@ pub fn import_key(version: Version, buf: &[u8]) -> Res<SymKey> {
         return Err(Error::UnsupportedVersion);
     }
     let slot = Slot::internal()?;
-    #[allow(clippy::useless_conversion)] // TODO: Remove when we bump the MSRV to 1.74.0.
     let key_ptr = unsafe {
         PK11_ImportDataKey(
             *slot,
