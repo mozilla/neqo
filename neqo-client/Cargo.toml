@@ -10,18 +10,19 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-clap = { version = "4.4.18", features = ["derive"] }
+# neqo-client is not used in Firefox, so we can be liberal with dependency versions
+clap = { version = "4.4", features = ["derive"] }
 futures = "0.3"
-hex = "0.4.3"
-log = { version = "0.4.17", default-features = false }
+hex = "0.4"
+log = { version = "0.4", default-features = false }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.12.0"
+qlog = "0.12"
 tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
-url = "~2.5.0"
+url = "2.5"
 
 [features]
 deny-warnings = []
