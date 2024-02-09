@@ -12,13 +12,13 @@ use std::{
     ops::Deref,
     os::raw::c_void,
     pin::Pin,
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
 use crate::{
     agentio::as_c_void,
     err::{Error, Res},
-    once::OnceResult,
     ssl::{PRFileDesc, SSLTimeFunc},
 };
 
@@ -67,14 +67,13 @@ impl TimeZero {
     }
 }
 
-static mut BASE_TIME: OnceResult<TimeZero> = OnceResult::new();
+static BASE_TIME: OnceLock<TimeZero> = OnceLock::new();
 
 fn get_base() -> &'static TimeZero {
-    let f = || TimeZero {
+    BASE_TIME.get_or_init(|| TimeZero {
         instant: Instant::now(),
         prtime: unsafe { PR_Now() },
-    };
-    unsafe { BASE_TIME.call_once(f) }
+    })
 }
 
 pub(crate) fn init() {
@@ -97,9 +96,8 @@ impl Deref for Time {
 impl From<Instant> for Time {
     /// Convert from an Instant into a Time.
     fn from(t: Instant) -> Self {
-        // Call `TimeZero::baseline(t)` so that time zero can be set.
-        let f = || TimeZero::baseline(t);
-        _ = unsafe { BASE_TIME.call_once(f) };
+        // Initialize `BASE_TIME` using `TimeZero::baseline(t)`.
+        BASE_TIME.get_or_init(|| TimeZero::baseline(t));
         Self { t }
     }
 }
