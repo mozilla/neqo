@@ -19,10 +19,10 @@ use std::{
     pin::Pin,
     process::exit,
     rc::Rc,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
+use clap::Parser;
 use common::IpTos;
 use futures::{
     future::{select, Either},
@@ -44,7 +44,6 @@ use neqo_transport::{
     EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
-use structopt::StructOpt;
 use tokio::{net::UdpSocket, time::Sleep};
 use url::{Origin, Url};
 
@@ -88,6 +87,8 @@ impl Display for ClientError {
     }
 }
 
+impl std::error::Error for ClientError {}
+
 type Res<T> = Result<T, ClientError>;
 
 /// Track whether a key update is needed.
@@ -123,45 +124,10 @@ impl KeyUpdateState {
     }
 }
 
-#[derive(Debug)]
-struct HexArg(Vec<u8>);
-impl FromStr for HexArg {
-    type Err = ClientError;
-
-    fn from_str(s: &str) -> Res<Self> {
-        fn v(c: u8) -> Res<u8> {
-            match c {
-                b'A'..=b'F' => Ok(c - b'A' + 10),
-                b'a'..=b'f' => Ok(c - b'a' + 10),
-                b'0'..=b'9' => Ok(c - b'0'),
-                _ => Err(ClientError::ArgumentError("non-hex character")),
-            }
-        }
-        let s: &[u8] = s.as_ref();
-        if s.len() % 2 != 0 {
-            return Err(ClientError::ArgumentError("invalid length"));
-        }
-        let mut buf = vec![0; s.len() / 2];
-        for i in 0..buf.len() {
-            buf[i] = (v(s[i * 2])? << 4) | v(s[i * 2 + 1])?;
-        }
-        Ok(Self(buf))
-    }
-}
-
-impl AsRef<[u8]> for HexArg {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-#[derive(Debug, StructOpt)]
-#[structopt(
-    name = "neqo-client",
-    about = "A basic QUIC HTTP/0.9 and HTTP/3 client."
-)]
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3")]
+    #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
@@ -169,89 +135,89 @@ pub struct Args {
 
     urls: Vec<Url>,
 
-    #[structopt(short = "m", default_value = "GET")]
+    #[arg(short = 'm', default_value = "GET")]
     method: String,
 
-    #[structopt(short = "h", long, number_of_values = 2)]
+    #[arg(short = 'H', long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", long, default_value = "16384")]
+    #[arg(name = "encoder-table-size", long, default_value = "16384")]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", long, default_value = "16384")]
+    #[arg(name = "decoder-table-size", long, default_value = "16384")]
     max_table_size_decoder: u64,
 
-    #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "10")]
+    #[arg(name = "max-blocked-streams", short = 'b', long, default_value = "10")]
     max_blocked_streams: u16,
 
-    #[structopt(name = "max-push", short = "p", long, default_value = "10")]
+    #[arg(name = "max-push", short = 'p', long, default_value = "10")]
     max_concurrent_push_streams: u64,
 
-    #[structopt(name = "use-old-http", short = "o", long)]
+    #[arg(name = "use-old-http", short = 'o', long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(name = "download-in-series", long)]
+    #[arg(name = "download-in-series", long)]
     /// Download resources in series using separate connections.
     download_in_series: bool,
 
-    #[structopt(name = "concurrency", long, default_value = "100")]
+    #[arg(name = "concurrency", long, default_value = "100")]
     /// The maximum number of requests to have outstanding at one time.
     concurrency: usize,
 
-    #[structopt(name = "output-read-data", long)]
+    #[arg(name = "output-read-data", long)]
     /// Output received data to stdout
     output_read_data: bool,
 
-    #[structopt(name = "qlog-dir", long)]
+    #[arg(name = "qlog-dir", long)]
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
 
-    #[structopt(name = "output-dir", long)]
+    #[arg(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
 
-    #[structopt(name = "qns-test", long)]
+    #[arg(name = "qns-test", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_test: Option<String>,
 
-    #[structopt(short = "r", long)]
+    #[arg(short = 'r', long)]
     /// Client attempts to resume by making multiple connections to servers.
     /// Requires that 2 or more URLs are listed for each server.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
     resume: bool,
 
-    #[structopt(name = "key-update", long)]
+    #[arg(name = "key-update", long)]
     /// Attempt to initiate a key update immediately after confirming the connection.
     key_update: bool,
 
-    #[structopt(short = "c", long, number_of_values = 1)]
+    #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
 
-    #[structopt(name = "ech", long)]
+    #[arg(name = "ech", long, value_parser = |s: &str| hex::decode(s))]
     /// Enable encrypted client hello (ECH).
     /// This takes an encoded ECH configuration in hexadecimal format.
-    ech: Option<HexArg>,
+    ech: Option<Vec<u8>>,
 
-    #[structopt(flatten)]
+    #[command(flatten)]
     quic_parameters: QuicParameters,
 
-    #[structopt(name = "ipv4-only", short = "4", long)]
+    #[arg(name = "ipv4-only", short = '4', long)]
     /// Connect only over IPv4
     ipv4_only: bool,
 
-    #[structopt(name = "ipv6-only", short = "6", long)]
+    #[arg(name = "ipv6-only", short = '6', long)]
     /// Connect only over IPv6
     ipv6_only: bool,
 
     /// The test that this client will run. Currently, we only support "upload".
-    #[structopt(name = "test", long)]
+    #[arg(name = "test", long)]
     test: Option<String>,
 
     /// The request size that will be used for upload test.
-    #[structopt(name = "upload-size", long, default_value = "100")]
+    #[arg(name = "upload-size", long, default_value = "100")]
     upload_size: usize,
 }
 
@@ -269,53 +235,45 @@ impl Args {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VersionArg(Version);
-impl FromStr for VersionArg {
-    type Err = ClientError;
-
-    fn from_str(s: &str) -> Res<Self> {
-        let v = u32::from_str_radix(s, 16)
-            .map_err(|_| ClientError::ArgumentError("versions need to be specified in hex"))?;
-        Ok(Self(Version::try_from(v).map_err(|_| {
-            ClientError::ArgumentError("unknown version")
-        })?))
-    }
+fn from_str(s: &str) -> Res<Version> {
+    let v = u32::from_str_radix(s, 16)
+        .map_err(|_| ClientError::ArgumentError("versions need to be specified in hex"))?;
+    Version::try_from(v).map_err(|_| ClientError::ArgumentError("unknown version"))
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct QuicParameters {
-    #[structopt(
-        short = "V",
+    #[arg(
+        short = 'Q',
         long,
-        multiple = true,
-        use_delimiter = true,
-        number_of_values = 1
-    )]
+        num_args = 1..,
+        value_delimiter = ' ',
+        number_of_values = 1,
+        value_parser = from_str)]
     /// A list of versions to support, in hex.
     /// The first is the version to attempt.
     /// Adding multiple values adds versions in order of preference.
     /// If the first listed version appears in the list twice, the position
     /// of the second entry determines the preference order of that version.
-    quic_version: Vec<VersionArg>,
+    quic_version: Vec<Version>,
 
-    #[structopt(long, default_value = "16")]
+    #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
     max_streams_bidi: u64,
 
-    #[structopt(long, default_value = "16")]
+    #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
 
-    #[structopt(long = "idle", default_value = "30")]
+    #[arg(long = "idle", default_value = "30")]
     /// The idle timeout for connections, in seconds.
     idle_timeout: u64,
 
-    #[structopt(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
 
-    #[structopt(long = "pacing")]
+    #[arg(long = "pacing")]
     /// Whether pacing is enabled.
     pacing: bool,
 }
@@ -335,7 +293,7 @@ impl QuicParameters {
             } else {
                 &self.quic_version
             };
-            params.versions(first.0, all.iter().map(|&x| x.0).collect())
+            params.versions(first, all.to_vec())
         } else {
             let version = match alpn {
                 "h3" | "hq-interop" => Version::Version1,
@@ -1002,11 +960,11 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
 async fn main() -> Res<()> {
     init();
 
-    let mut args = Args::from_args();
+    let mut args = Args::parse();
 
     if let Some(testcase) = args.qns_test.as_ref() {
         // Only use v1 for most QNS tests.
-        args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+        args.quic_parameters.quic_version = vec![Version::Version1];
         match testcase.as_str() {
             // TODO: Add "ecn" when that is ready.
             "http3" => {}
