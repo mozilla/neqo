@@ -13,6 +13,10 @@ jobs:
     name: Benchmark
     runs-on: self-hosted
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -31,7 +35,9 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld python-is-python3 zlib1g-dev
+          sudo apt-get install -y --no-install-recommends \
+            git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev \
+            linux-tools-common linux-tools-generic linux-tools-$(uname -r)
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Checkout
@@ -39,8 +45,26 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
 
+      - name: Prepare machine
+        run: |
+          # Disable turboboost
+          echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo
+          # Disable hyperthreading
+          echo off > /sys/devices/system/cpu/smt/control
+          # Use performance governor
+          cpupower frequency-set -g performance
+
       - name: Benchmark
-        run: cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+        run: nice -n -10 taskset -c 0 cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+
+      - name: Restore machine
+        run: |
+          # Enable turboboost
+          echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo
+          # Enable hyperthreading
+          echo on > /sys/devices/system/cpu/smt/control
+          # Use powersave governor
+          cpupower frequency-set -g powersave
 
       - name: Download previous benchmark results
         uses: actions/cache@v4
