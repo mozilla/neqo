@@ -56,8 +56,8 @@ jobs:
       # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
         run: |
-          echo 1 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          echo off > sudo tee /sys/devices/system/cpu/smt/control
+          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+          echo off | sudo tee /sys/devices/system/cpu/smt/control
           sudo cpupower frequency-set -g performance
 
       # Pin the benchmark to core 0 and run it at elevated priority.
@@ -69,8 +69,8 @@ jobs:
       # Enable turboboost, hyperthreading and use powersave governor
       - name: Restore machine
         run: |
-          echo 0 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          echo on > sudo tee /sys/devices/system/cpu/smt/control
+          echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+          echo on | sudo tee /sys/devices/system/cpu/smt/control
           sudo cpupower frequency-set -g powersave
         if: success() || failure()
 
