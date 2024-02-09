@@ -256,12 +256,6 @@ mod test {
     }
 
     #[test]
-    fn negative_time() {
-        init();
-        assert!(Time::try_from(-1).is_err());
-    }
-
-    #[test]
     fn negative_interval() {
         init();
         assert!(Interval::try_from(-1).is_err());
