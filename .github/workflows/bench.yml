@@ -49,9 +49,11 @@ jobs:
           echo "$HOME/.cargo/bin"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Checkout and build
+      - name: Checkout
         uses: actions/checkout@v4
-      - run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
+
+      - name: Build
+        run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
 
       # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
@@ -61,10 +63,11 @@ jobs:
           sudo cpupower frequency-set -g performance
 
       # Pin the benchmark to core 0 and run it at elevated priority.
+      # TODO: Figure out a way to run this with nice -20.
       - name: Benchmark
         run: |
-          sudo nice -n -20 taskset -c 0 sudo -i -u "$USER" sh -c \
-            "cd $(pwd) && cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt"
+          taskset -c 0 \
+            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Enable turboboost, hyperthreading and use powersave governor
       - name: Restore machine
