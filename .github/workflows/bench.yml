@@ -1,12 +1,5 @@
 name: Bench
 on:
-  # temporarily:
-  push:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-  pull_request:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -25,7 +18,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: $TOOLCHAIN
-          # components: rustfmt, clippy, llvm-tools-preview
 
       - name: Use sccache
         uses: mozilla-actions/sccache-action@v0.0.4
