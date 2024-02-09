@@ -43,7 +43,7 @@ use neqo_transport::{
     Version,
 };
 use structopt::StructOpt;
-use tokio::{io::Interest, time::Sleep};
+use tokio::time::Sleep;
 
 use crate::old_https::Http09Server;
 
@@ -576,51 +576,6 @@ impl HttpServer for SimpleServer {
     }
 }
 
-fn read_dgram(
-    socket: &tokio::net::UdpSocket,
-    state: &quinn_udp::UdpSocketState,
-    local_address: &SocketAddr,
-) -> Result<Option<Datagram>, io::Error> {
-    // TODO: At least we should be using a buffer pool.
-    let mut buf = [0; u16::MAX as usize];
-    let mut tos = 0;
-    let mut ttl = 0;
-
-    let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
-        udp::rx(&socket, state, &mut buf[..], &mut tos, &mut ttl)
-    }) {
-        Err(ref err)
-            if err.kind() == io::ErrorKind::WouldBlock
-                || err.kind() == io::ErrorKind::Interrupted =>
-        {
-            return Ok(None)
-        }
-        Err(err) => {
-            eprintln!("UDP recv error: {err:?}");
-            return Err(err);
-        }
-        Ok(res) => res,
-    };
-    qdebug!("read {}, {:?}", sz, &buf[0..32]);
-
-    if sz == buf.len() {
-        eprintln!("Might have received more than {} bytes", buf.len());
-    }
-
-    if sz == 0 {
-        eprintln!("zero length datagram received?");
-        Ok(None)
-    } else {
-        Ok(Some(Datagram::new(
-            remote_addr,
-            *local_address,
-            tos.into(),
-            Some(ttl),
-            &buf[..sz],
-        )))
-    }
-}
-
 struct ServersRunner {
     args: Args,
     server: Box<dyn HttpServer>,
@@ -713,7 +668,7 @@ impl ServersRunner {
                     qdebug!("writing to {:?}", dgram.source());
                     let (socket, state) = self.find_socket(dgram.source());
                     socket.writable().await?;
-                    (&socket).try_io(Interest::WRITABLE, || udp::tx(&socket, state, &dgram))?;
+                    udp::tx(&socket, state, &dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -758,7 +713,7 @@ impl ServersRunner {
                     loop {
                         qdebug!("reading from {}", inx);
                         let (host, socket, state) = self.sockets.get_mut(inx).unwrap();
-                        let dgram = read_dgram(socket, state, host)?;
+                        let dgram = udp::rx(socket, state, host)?;
                         if dgram.is_none() {
                             break;
                         }

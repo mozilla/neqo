@@ -44,7 +44,7 @@ use neqo_transport::{
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use structopt::StructOpt;
-use tokio::{io::Interest, net::UdpSocket, time::Sleep};
+use tokio::{net::UdpSocket, time::Sleep};
 use url::{Origin, Url};
 
 #[derive(Debug)]
@@ -408,50 +408,6 @@ async fn ready(
         .unwrap_or(Either::Right(futures::future::pending()))
         .map(|()| Ok(Ready::Timeout));
     select(socket_ready, timeout_ready).await.factor_first().0
-}
-
-fn read_dgram(
-    socket: &tokio::net::UdpSocket,
-    state: &quinn_udp::UdpSocketState,
-    local_address: &SocketAddr,
-) -> Result<Option<Datagram>, io::Error> {
-    let mut buf = [0; u16::MAX as usize];
-    let mut tos = 0;
-    let mut ttl = 0;
-
-    let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
-        udp::rx(&socket, state, &mut buf[..], &mut tos, &mut ttl)
-    }) {
-        Err(ref err)
-            if err.kind() == io::ErrorKind::WouldBlock
-                || err.kind() == io::ErrorKind::Interrupted =>
-        {
-            return Ok(None)
-        }
-        Err(err) => {
-            eprintln!("UDP recv error: {err:?}");
-            return Err(err);
-        }
-        Ok(res) => res,
-    };
-    qdebug!("read {}, {:?}", sz, &buf[0..32]);
-
-    if sz == buf.len() {
-        eprintln!("Might have received more than {} bytes", buf.len());
-    }
-
-    if sz == 0 {
-        eprintln!("zero length datagram received?");
-        Ok(None)
-    } else {
-        Ok(Some(Datagram::new(
-            remote_addr,
-            *local_address,
-            tos.into(),
-            Some(ttl),
-            &buf[..sz],
-        )))
-    }
 }
 
 trait StreamHandler {
@@ -867,7 +823,7 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = read_dgram(self.socket, self.socket_state, &self.local_addr)?;
+                    let dgram = udp::rx(self.socket, self.socket_state, &self.local_addr)?;
                     if dgram.is_none() {
                         break;
                     }
@@ -902,7 +858,7 @@ impl<'a> ClientRunner<'a> {
         loop {
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
-                    // TODO: What if this returns WouldBlock?
+                    self.socket.writable().await?;
                     udp::tx(self.socket, self.socket_state, &dgram)?;
                 }
                 Output::Callback(new_timeout) => {
@@ -1152,7 +1108,7 @@ mod old {
         time::Instant,
     };
 
-    use neqo_common::{event::Provider, qdebug, qinfo, Datagram, udp};
+    use neqo_common::{event::Provider, qdebug, qinfo, udp, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
@@ -1161,7 +1117,7 @@ mod old {
     use tokio::{net::UdpSocket, time::Sleep};
     use url::Url;
 
-    use super::{get_output_file, qlog_new, read_dgram, ready, Args, KeyUpdateState, Ready, Res};
+    use super::{get_output_file, qlog_new, ready, Args, KeyUpdateState, Ready, Res};
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,
@@ -1423,7 +1379,7 @@ mod old {
 
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = read_dgram(self.socket, self.socket_state, &self.local_addr)?;
+                        let dgram = udp::rx(self.socket, self.socket_state, &self.local_addr)?;
                         if dgram.is_none() {
                             break;
                         }
@@ -1459,7 +1415,7 @@ mod old {
             loop {
                 match self.client.process(dgram.take(), Instant::now()) {
                     Output::Datagram(dgram) => {
-                        // TODO: What if this returns WouldBlock?
+                        self.socket.writable().await?;
                         udp::tx(self.socket, self.socket_state, &dgram)?;
                     }
                     Output::Callback(new_timeout) => {

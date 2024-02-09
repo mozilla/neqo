@@ -7,11 +7,11 @@
 use std::{
     io::{self, IoSliceMut},
     net::SocketAddr,
-    os::fd::AsFd,
     slice,
 };
 
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+use tokio::io::Interest;
 
 use crate::{Datagram, IpTos};
 
@@ -33,7 +33,11 @@ use crate::{Datagram, IpTos};
 /// # Panics
 ///
 /// Panics if the datagram is too large to send.
-pub fn tx(socket: impl AsFd, state: &UdpSocketState, d: &Datagram) -> io::Result<usize> {
+pub fn tx(
+    socket: &tokio::net::UdpSocket,
+    state: &UdpSocketState,
+    d: &Datagram,
+) -> io::Result<usize> {
     let transmit = Transmit {
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
@@ -42,9 +46,10 @@ pub fn tx(socket: impl AsFd, state: &UdpSocketState, d: &Datagram) -> io::Result
         // TODO
         src_ip: None,
     };
-    let n = state
-        .send((&socket).into(), slice::from_ref(&transmit))
-        .unwrap();
+
+    let n = (&socket).try_io(Interest::WRITABLE, || {
+        state.send((&socket).into(), slice::from_ref(&transmit))
+    })?;
     Ok(n)
 }
 
@@ -69,35 +74,53 @@ pub fn tx(socket: impl AsFd, state: &UdpSocketState, d: &Datagram) -> io::Result
 ///
 /// Panics if the datagram is too large to receive.
 pub fn rx(
-    socket: impl AsFd,
+    socket: &tokio::net::UdpSocket,
     state: &UdpSocketState,
-    buf: &mut [u8],
-    // TODO: Can these be return values instead of mutable inputs?
-    tos: &mut u8,
-    ttl: &mut u8,
-) -> io::Result<(usize, SocketAddr)> {
-    let mut meta = RecvMeta::default();
-    // TODO: needed?
-    // #[cfg(test)]
-    // // `UdpSocketState` switches to non-blocking mode, undo that for the tests.
-    // socket.set_nonblocking(false).unwrap();
+    local_address: &SocketAddr,
+) -> Result<Option<Datagram>, io::Error> {
+    // TODO: At least we should be using a buffer pool.
+    let mut buf = [0; u16::MAX as usize];
 
-    match state.recv(
-        (&socket).into(),
-        &mut [IoSliceMut::new(buf)],
-        slice::from_mut(&mut meta),
-    ) {
-        Err(e) => Err(e),
+    let mut meta = RecvMeta::default();
+
+    let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
+        state.recv(
+            (&socket).into(),
+            &mut [IoSliceMut::new(&mut buf)],
+            slice::from_mut(&mut meta),
+        )
+    }) {
+        Err(ref err)
+            if err.kind() == io::ErrorKind::WouldBlock
+                || err.kind() == io::ErrorKind::Interrupted =>
+        {
+            return Ok(None)
+        }
+        Err(err) => {
+            eprintln!("UDP recv error: {err:?}");
+            return Err(err);
+        }
         Ok(n) => {
             assert_eq!(n, 1, "only passed one slice");
-            *tos = if meta.ecn.is_some() {
-                meta.ecn.unwrap() as u8
-            } else {
-                IpTos::default().into()
-            };
-            *ttl = 0xff; // TODO: get the real TTL
-            Ok((meta.len, meta.addr))
+            (meta.len, meta.addr)
         }
+    };
+
+    if sz == buf.len() {
+        eprintln!("Might have received more than {} bytes", buf.len());
+    }
+
+    if sz == 0 {
+        eprintln!("zero length datagram received?");
+        Ok(None)
+    } else {
+        Ok(Some(Datagram::new(
+            remote_addr,
+            *local_address,
+            meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+            Some(0xff), // TODO: get the real TTL),
+            &buf[..sz],
+        )))
     }
 }
 
