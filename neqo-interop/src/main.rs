@@ -14,12 +14,12 @@ use std::{
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
     rc::Rc,
+    sync::OnceLock,
 };
 // use std::path::PathBuf;
 use std::{
     str::FromStr,
     string::ParseError,
-    sync::Mutex,
     thread,
     time::{Duration, Instant},
 };
@@ -67,22 +67,21 @@ fn emit_datagram(socket: &UdpSocket, d: Datagram) {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref TEST_TIMEOUT: Mutex<Duration> = Mutex::new(Duration::from_secs(5));
-}
-
+static TEST_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 struct Timer {
     end: Instant,
 }
 impl Timer {
     pub fn new() -> Self {
         Self {
-            end: Instant::now() + *TEST_TIMEOUT.lock().unwrap(),
+            end: Instant::now() + *TEST_TIMEOUT.get_or_init(|| Duration::from_secs(5)),
         }
     }
 
     pub fn set_timeout(t: Duration) {
-        *TEST_TIMEOUT.lock().unwrap() = t;
+        TEST_TIMEOUT
+            .set(t)
+            .expect("failed to set a timeout because one was already set");
     }
 
     pub fn check(&self) -> Result<Duration, String> {
