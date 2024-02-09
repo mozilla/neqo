@@ -31,7 +31,7 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
+          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld python-is-python3
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Checkout
