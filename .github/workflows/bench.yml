@@ -11,6 +11,7 @@ on:
 #     workflows: [CI]
 #     types: [completed]
 env:
+  CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
@@ -29,6 +30,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: $TOOLCHAIN
+          components: rustfmt
 
       - name: Use sccache
         uses: mozilla-actions/sccache-action@v0.0.4
@@ -47,8 +49,9 @@ jobs:
           echo "$HOME/.cargo/bin"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Checkout
+      - name: Checkout and build
         uses: actions/checkout@v4
+      - run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
 
       # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
@@ -60,7 +63,6 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          cargo +$TOOLCHAIN bench --features ci,bench --no-run
           sudo nice -n -20 sudo -u "$USER" taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
