@@ -3,21 +3,15 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-  # push:
-  #   branches: ["main"]
-  #   paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-  # pull_request:
-  #   branches: ["main"]
-  #   paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  on-success:
+  bench:
     name: Benchmark
     runs-on: self-hosted
-
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
