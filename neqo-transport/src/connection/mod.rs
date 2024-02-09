@@ -23,7 +23,7 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
+    agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
     HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
     Server, ZeroRttChecker,
 };
@@ -2406,7 +2406,7 @@ impl Connection {
             } else {
                 // The other side didn't provide a stateless reset token.
                 // That's OK, they can try guessing this.
-                <[u8; 16]>::try_from(&random(16)[..]).unwrap()
+                ConnectionIdEntry::random_srt()
             };
             self.paths
                 .primary()

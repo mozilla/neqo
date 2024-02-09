@@ -79,7 +79,7 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let mut r = random(20);
+        let mut r = random::<20>();
         r[0] = 8;
         r[1] = u8::try_from(self.counter >> 24).unwrap();
         r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();

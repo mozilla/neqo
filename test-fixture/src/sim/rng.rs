@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{convert::TryFrom, ops::Range};
+use std::ops::Range;
 
 use neqo_common::Decoder;
 
@@ -16,7 +16,7 @@ pub struct Random {
 impl Random {
     #[must_use]
     #[allow(clippy::missing_panics_doc)] // These are impossible.
-    pub fn new(seed: [u8; 32]) -> Self {
+    pub fn new(seed: &[u8; 32]) -> Self {
         assert!(seed.iter().any(|&x| x != 0));
         let mut dec = Decoder::from(&seed);
         Self {
@@ -78,7 +78,6 @@ impl Random {
 
 impl Default for Random {
     fn default() -> Self {
-        let buf = neqo_crypto::random(32);
-        Random::new(<[u8; 32]>::try_from(&buf[..]).unwrap())
+        Random::new(&neqo_crypto::random::<32>())
     }
 }

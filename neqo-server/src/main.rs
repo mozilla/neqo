@@ -585,7 +585,7 @@ impl HttpServer for SimpleServer {
     fn enable_ech(&mut self) -> &[u8] {
         let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
         self.server
-            .enable_ech(random(1)[0], "public.example", &sk, &pk)
+            .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
             .unwrap();
         self.server.ech_config()
     }

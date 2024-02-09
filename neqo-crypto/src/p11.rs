@@ -290,31 +290,40 @@ impl Item {
     }
 }
 
-/// Generate a randomized buffer.
+/// Fill a buffer with randomness.
+///
+/// # Panics
+///
+/// When `size` is too large or NSS fails.
+pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
+    let m_buf = buf.as_mut();
+    let len = c_int::try_from(m_buf.len()).unwrap();
+    secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
+    buf
+}
+
+/// Generate a randomized array.
 ///
 /// # Panics
 ///
 /// When `size` is too large or NSS fails.
 #[must_use]
-pub fn random(size: usize) -> Vec<u8> {
-    let mut buf = vec![0; size];
-    secstatus_to_res(unsafe {
-        PK11_GenerateRandom(buf.as_mut_ptr(), c_int::try_from(buf.len()).unwrap())
-    })
-    .unwrap();
-    buf
+pub fn random<const N: usize>() -> [u8; N] {
+    let buf = [0; N];
+    randomize(buf)
 }
 
 #[cfg(test)]
 mod test {
     use test_fixture::fixture_init;
 
-    use super::random;
+    use crate::{random, randomize};
 
     #[test]
     fn randomness() {
         fixture_init();
-        // If this ever fails, there is either a bug, or it's time to buy a lottery ticket.
-        assert_ne!(random(16), random(16));
+        // If any of these ever fail, there is either a bug, or it's time to buy a lottery ticket.
+        assert_ne!(random::<16>(), randomize([0; 16]));
+        assert_ne!([0; 16], random::<16>());
     }
 }

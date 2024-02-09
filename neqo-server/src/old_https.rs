@@ -246,7 +246,7 @@ impl HttpServer for Http09Server {
     fn enable_ech(&mut self) -> &[u8] {
         let (sk, pk) = generate_ech_keys().expect("generate ECH keys");
         self.server
-            .enable_ech(random(1)[0], "public.example", &sk, &pk)
+            .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
             .expect("enable ECH");
         self.server.ech_config()
     }
