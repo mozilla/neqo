@@ -106,14 +106,17 @@ impl TryFrom<PRTime> for Time {
     type Error = Error;
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
-        if let Some(delta) = prtime.checked_sub(base.prtime) {
-            let d = Duration::from_micros(delta.try_into()?);
-            base.instant
-                .checked_add(d)
-                .map_or(Err(Error::TimeTravelError), |t| Ok(Self { t }))
+        let delta = prtime
+            .checked_sub(base.prtime)
+            .ok_or(Error::TimeTravelError)?;
+        let d = Duration::from_micros(u64::try_from(delta.abs())?);
+        let t = if delta >= 0 {
+            base.instant.checked_add(d)
         } else {
-            Err(Error::TimeTravelError)
-        }
+            base.instant.checked_sub(d)
+        };
+        let t = t.ok_or(Error::TimeTravelError)?;
+        Ok(Self { t })
     }
 }
 
@@ -121,14 +124,21 @@ impl TryInto<PRTime> for Time {
     type Error = Error;
     fn try_into(self) -> Res<PRTime> {
         let base = get_base();
-        let delta = self
-            .t
-            .checked_duration_since(base.instant)
-            .ok_or(Error::TimeTravelError)?;
-        if let Ok(d) = PRTime::try_from(delta.as_micros()) {
-            d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
+
+        if let Some(delta) = self.t.checked_duration_since(base.instant) {
+            if let Ok(d) = PRTime::try_from(delta.as_micros()) {
+                d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
+            } else {
+                Err(Error::TimeTravelError)
+            }
         } else {
-            Err(Error::TimeTravelError)
+            // Try to go backwards from the base time.
+            let backwards = base.instant - self.t; // infallible
+            if let Ok(d) = PRTime::try_from(backwards.as_micros()) {
+                base.prtime.checked_sub(d).ok_or(Error::TimeTravelError)
+            } else {
+                Err(Error::TimeTravelError)
+            }
         }
     }
 }
@@ -226,16 +236,23 @@ mod test {
     }
 
     #[test]
-    fn past_time() {
+    fn past_prtime() {
+        const DELTA: Duration = Duration::from_secs(1);
         init();
         let base = get_base();
-        assert!(Time::try_from(base.prtime - 1).is_err());
+        let delta_micros = PRTime::try_from(DELTA.as_micros()).unwrap();
+        println!("{} - {}", base.prtime, delta_micros);
+        let t = Time::try_from(base.prtime - delta_micros).unwrap();
+        assert_eq!(Instant::from(t) + DELTA, base.instant);
     }
 
     #[test]
-    fn negative_time() {
+    fn past_instant() {
+        const DELTA: Duration = Duration::from_secs(1);
         init();
-        assert!(Time::try_from(-1).is_err());
+        let base = get_base();
+        let t = Time::from(base.instant.checked_sub(DELTA).unwrap());
+        assert_eq!(Instant::from(t) + DELTA, base.instant);
     }
 
     #[test]
