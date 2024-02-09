@@ -29,7 +29,7 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, udp};
+use neqo_common::{hex, qdebug, qinfo, qwarn, udp, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -43,7 +43,7 @@ use neqo_transport::{
     Version,
 };
 use structopt::StructOpt;
-use tokio::{time::Sleep, io::Interest};
+use tokio::{io::Interest, time::Sleep};
 
 use crate::old_https::Http09Server;
 
@@ -589,7 +589,12 @@ fn read_dgram(
     let (sz, remote_addr) = match (&socket).try_io(Interest::READABLE, || {
         udp::rx(&socket, state, &mut buf[..], &mut tos, &mut ttl)
     }) {
-        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock || err.kind() == io::ErrorKind::Interrupted => return Ok(None),
+        Err(ref err)
+            if err.kind() == io::ErrorKind::WouldBlock
+                || err.kind() == io::ErrorKind::Interrupted =>
+        {
+            return Ok(None)
+        }
         Err(err) => {
             eprintln!("UDP recv error: {err:?}");
             return Err(err);
@@ -707,8 +712,8 @@ impl ServersRunner {
                 Output::Datagram(dgram) => {
                     qdebug!("writing to {:?}", dgram.source());
                     let (socket, state) = self.find_socket(dgram.source());
-                    // TODO: What if this returns WouldBlock?
-                    udp::tx(socket, state, &dgram)?;
+                    socket.writable().await?;
+                    (&socket).try_io(Interest::WRITABLE, || udp::tx(&socket, state, &dgram))?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
