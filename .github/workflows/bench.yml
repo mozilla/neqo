@@ -25,9 +25,7 @@ jobs:
 
       - name: Use sccache
         uses: mozilla-actions/sccache-action@v0.0.4
-
-      - name: Enable sscache
-        run: |
+      - run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
@@ -39,11 +37,10 @@ jobs:
             git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev \
             linux-tools-common linux-tools-generic linux-tools-$(uname -r)
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_branch }}
 
       # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
@@ -64,6 +61,7 @@ jobs:
           echo 0 > sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
           echo on > sudo tee /sys/devices/system/cpu/smt/control
           sudo cpupower frequency-set -g powersave
+        if: success() || failure()
 
       - name: Download previous benchmark results
         uses: actions/cache@v4
