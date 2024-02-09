@@ -1578,7 +1578,6 @@ impl Connection {
     /// During connection setup, the first path needs to be setup.
     /// This uses the connection IDs that were provided during the handshake
     /// to setup that path.
-    #[allow(clippy::or_fun_call)] // Remove when MSRV >= 1.59
     fn setup_handshake_path(&mut self, path: &PathRef, now: Instant) {
         self.paths.make_permanent(
             path,
