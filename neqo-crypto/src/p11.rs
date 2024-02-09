@@ -321,6 +321,7 @@ impl RandomCache {
 
     fn randomize<B: AsMut<[u8]>>(&mut self, mut buf: B) -> B {
         let m_buf = buf.as_mut();
+        debug_assert!(m_buf.len() <= Self::CUTOFF);
         let avail = Self::SIZE - self.used;
         if m_buf.len() <= avail {
             m_buf.copy_from_slice(&self.cache[self.used..self.used + m_buf.len()]);
@@ -358,6 +359,7 @@ pub fn random<const N: usize>() -> [u8; N] {
 mod test {
     use test_fixture::fixture_init;
 
+    use super::RandomCache;
     use crate::{random, randomize};
 
     #[test]
@@ -367,5 +369,29 @@ mod test {
         assert_ne!(random::<16>(), randomize([0; 16]));
         assert_ne!([0; 16], random::<16>());
         assert_ne!([0; 64], random::<64>());
+    }
+
+    #[test]
+    fn cache_random_lengths() {
+        const ZERO: [u8; 256] = [0; 256];
+
+        fixture_init();
+        let mut cache = RandomCache::new();
+        let mut buf = [0; 256];
+        let bits = usize::BITS - (RandomCache::CUTOFF - 1).leading_zeros();
+        let mask = 0xff >> (u8::BITS - bits);
+
+        for _ in 0..100 {
+            let len = loop {
+                let len = usize::from(random::<1>()[0] & mask) + 1;
+                if len <= RandomCache::CUTOFF {
+                    break len;
+                }
+            };
+            buf.fill(0);
+            if len >= 16 {
+                assert_ne!(&cache.randomize(&mut buf[..len])[..len], &ZERO[..len]);
+            }
+        }
     }
 }
