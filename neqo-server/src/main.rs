@@ -689,16 +689,14 @@ impl ServersRunner {
     async fn run(&mut self) -> Result<(), io::Error> {
         loop {
             match self.ready().await? {
-                Ready::Socket(inx) => {
-                    loop {
-                        let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                        let dgram = socket.recv(host)?;
-                        if dgram.is_none() {
-                            break;
-                        }
-                        self.process(dgram.as_ref()).await?;
+                Ready::Socket(inx) => loop {
+                    let (host, socket) = self.sockets.get_mut(inx).unwrap();
+                    let dgram = socket.recv(host)?;
+                    if dgram.is_none() {
+                        break;
                     }
-                }
+                    self.process(dgram.as_ref()).await?;
+                },
                 Ready::Timeout => {
                     self.timeout = None;
                     self.process(None).await?;
