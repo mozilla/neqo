@@ -14,17 +14,16 @@ use std::{
     convert::TryFrom,
     fmt::{self, Display},
     fs::OpenOptions,
-    io,
-    io::Read,
+    io::{self, Read},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     pin::Pin,
     process::exit,
     rc::Rc,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
+use clap::Parser;
 use futures::{
     future::{select, select_all, Either},
     FutureExt,
@@ -42,7 +41,6 @@ use neqo_transport::{
     ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
     Version,
 };
-use structopt::StructOpt;
 use tokio::time::Sleep;
 
 use crate::old_https::Http09Server;
@@ -91,66 +89,63 @@ impl Display for ServerError {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "neqo-server", about = "A basic HTTP3 server.")]
+impl std::error::Error for ServerError {}
+
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
 struct Args {
     /// List of IP:port to listen on
-    #[structopt(default_value = "[::]:4433")]
+    #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", long, default_value = "16384")]
+    #[arg(name = "encoder-table-size", long, default_value = "16384")]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", long, default_value = "16384")]
+    #[arg(name = "decoder-table-size", long, default_value = "16384")]
     max_table_size_decoder: u64,
 
-    #[structopt(short = "b", long, default_value = "10")]
+    #[arg(short = 'b', long, default_value = "10")]
     max_blocked_streams: u16,
 
-    #[structopt(
-        short = "d",
-        long,
-        default_value = "./test-fixture/db",
-        parse(from_os_str)
-    )]
+    #[arg(short = 'd', long, default_value = "./test-fixture/db")]
     /// NSS database directory.
     db: PathBuf,
 
-    #[structopt(short = "k", long, default_value = "key")]
+    #[arg(short = 'k', long, default_value = "key")]
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3")]
+    #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: String,
 
-    #[structopt(name = "qlog-dir", long)]
+    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
 
-    #[structopt(name = "qns-test", long)]
+    #[arg(name = "qns-test", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_test: Option<String>,
 
-    #[structopt(name = "use-old-http", short = "o", long)]
+    #[arg(name = "use-old-http", short = 'o', long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(flatten)]
+    #[command(flatten)]
     quic_parameters: QuicParameters,
 
-    #[structopt(name = "retry", long)]
+    #[arg(name = "retry", long)]
     /// Force a retry
     retry: bool,
 
-    #[structopt(short = "c", long, number_of_values = 1)]
+    #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
 
-    #[structopt(name = "ech", long)]
+    #[arg(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
@@ -200,53 +195,46 @@ impl Args {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VersionArg(Version);
-impl FromStr for VersionArg {
-    type Err = ServerError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v = u32::from_str_radix(s, 16)
-            .map_err(|_| ServerError::ArgumentError("versions need to be specified in hex"))?;
-        Ok(Self(Version::try_from(v).map_err(|_| {
-            ServerError::ArgumentError("unknown version")
-        })?))
-    }
+fn from_str(s: &str) -> Result<Version, ServerError> {
+    let v = u32::from_str_radix(s, 16)
+        .map_err(|_| ServerError::ArgumentError("versions need to be specified in hex"))?;
+    Version::try_from(v).map_err(|_| ServerError::ArgumentError("unknown version"))
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct QuicParameters {
-    #[structopt(
-        short = "V",
+    #[arg(
+        short = 'Q',
         long,
-        multiple = true,
-        use_delimiter = true,
-        number_of_values = 1
+        num_args = 1..,
+        value_delimiter = ' ',
+        number_of_values = 1,
+        value_parser = from_str
     )]
     /// A list of versions to support in order of preference, in hex.
-    quic_version: Vec<VersionArg>,
+    quic_version: Vec<Version>,
 
-    #[structopt(long, default_value = "16")]
+    #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_BIDI limit.
     max_streams_bidi: u64,
 
-    #[structopt(long, default_value = "16")]
+    #[arg(long, default_value = "16")]
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
 
-    #[structopt(long = "idle", default_value = "30")]
+    #[arg(long = "idle", default_value = "30")]
     /// The idle timeout for connections, in seconds.
     idle_timeout: u64,
 
-    #[structopt(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
     congestion_control: CongestionControlAlgorithm,
 
-    #[structopt(name = "preferred-address-v4", long)]
+    #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     preferred_address_v4: Option<String>,
 
-    #[structopt(name = "preferred-address-v6", long)]
+    #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     preferred_address_v6: Option<String>,
 }
@@ -312,7 +300,7 @@ impl QuicParameters {
         }
 
         if let Some(first) = self.quic_version.first() {
-            params = params.versions(first.0, self.quic_version.iter().map(|&v| v.0).collect());
+            params = params.versions(*first, self.quic_version.to_vec());
         }
         params
     }
@@ -570,7 +558,7 @@ impl HttpServer for SimpleServer {
     fn enable_ech(&mut self) -> &[u8] {
         let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
         self.server
-            .enable_ech(random(1)[0], "public.example", &sk, &pk)
+            .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
             .unwrap();
         self.server.ech_config()
     }
@@ -739,7 +727,7 @@ enum Ready {
 async fn main() -> Result<(), io::Error> {
     const HQ_INTEROP: &str = "hq-interop";
 
-    let mut args = Args::from_args();
+    let mut args = Args::parse();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
@@ -750,7 +738,7 @@ async fn main() -> Result<(), io::Error> {
             // only. Exceptions are testcases `versionnegotiation` (not yet
             // implemented) and `v2`.
             if testcase != "v2" {
-                args.quic_parameters.quic_version = vec![VersionArg(Version::Version1)];
+                args.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
             qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");

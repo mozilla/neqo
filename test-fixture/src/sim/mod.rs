@@ -158,7 +158,7 @@ impl Simulator {
     }
 
     pub fn seed(&mut self, seed: [u8; 32]) {
-        self.rng = Rc::new(RefCell::new(Random::new(seed)));
+        self.rng = Rc::new(RefCell::new(Random::new(&seed)));
     }
 
     /// Seed from a hex string.

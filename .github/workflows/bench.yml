@@ -1,0 +1,91 @@
+name: Bench
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+env:
+  CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  TOOLCHAIN: nightly
+
+jobs:
+  bench:
+    name: Benchmark
+    runs-on: self-hosted
+    # if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: $TOOLCHAIN
+          components: rustfmt
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Enable sccache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev libclang-dev \
+            linux-tools-common linux-tools-generic linux-tools-$(uname -r)
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          echo "$HOME/.cargo/bin"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
+
+      # Disable turboboost, hyperthreading and use performance governor
+      - name: Prepare machine
+        run: |
+          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+          echo off | sudo tee /sys/devices/system/cpu/smt/control
+          sudo cpupower frequency-set -g performance
+
+      # Pin the benchmark to core 0 and run it at elevated priority.
+      # TODO: Figure out a way to run this with nice -20.
+      - name: Benchmark
+        run: |
+          taskset -c 0 \
+            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+
+      # Enable turboboost, hyperthreading and use powersave governor
+      - name: Restore machine
+        run: |
+          echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+          echo on | sudo tee /sys/devices/system/cpu/smt/control
+          sudo cpupower frequency-set -g powersave
+        if: success() || failure()
+
+      - name: Download previous benchmark results
+        uses: actions/cache@v4
+        with:
+          path: ./cache
+          key: ${{ runner.os }}-benchmark
+
+      # - name: Store current benchmark results
+      #   uses: benchmark-action/github-action-benchmark@v1
+      #   with:
+      #     tool: 'cargo'
+      #     output-file-path: output.txt
+      #     external-data-json-path: ./cache/benchmark-data.json
+      #     fail-on-alert: true
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     comment-on-alert: true
+      #     summary-always: true
+

@@ -17,7 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest]
-        rust-toolchain: [1.70.0, stable, nightly]
+        # Don't increase beyond what Firefox is currently using:
+        # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
+        rust-toolchain: [1.74.0, stable, nightly]
         type: [debug]
         include:
           - os: ubuntu-latest
@@ -36,6 +38,14 @@ jobs:
         with:
           toolchain: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Use sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Enable sscache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -148,9 +158,8 @@ jobs:
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings
+        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
         if: success() || failure()
-        continue-on-error: ${{ matrix.rust-toolchain == 'nightly' }}
 
       - name: Check rustdoc links
         run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
@@ -164,3 +173,4 @@ jobs:
           file: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'

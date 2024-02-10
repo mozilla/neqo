@@ -1,22 +1,24 @@
 [package]
 name = "neqo-transport"
-version = "0.7.0"
-authors = ["EKR <ekr@rtfm.com>", "Andy Grover <agrover@mozilla.com>"]
-edition = "2018"
-rust-version = "1.70.0"
-license = "MIT OR Apache-2.0"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
-indexmap = "1.9.3"
-lazy_static = "1.4"
-log = { version = "0.4.17", default-features = false }
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+indexmap = "1.9"
+log = { version = "0.4", default-features = false }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-qlog = "0.12.0"
-smallvec = "1.11.1"
+qlog = "0.12"
+smallvec = "1.11"
 
 [dev-dependencies]
-criterion = { version = "0.5.1", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["html_reports"] }
 enum-map = "2.7"
 test-fixture = { path = "../test-fixture" }
 

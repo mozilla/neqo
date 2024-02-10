@@ -23,7 +23,7 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
-    agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
+    agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
     HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
     Server, ZeroRttChecker,
 };
@@ -59,6 +59,7 @@ use crate::{
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
+
 mod dump;
 mod idle;
 pub mod params;
@@ -66,6 +67,7 @@ mod saved;
 mod state;
 #[cfg(test)]
 pub mod test_internal;
+
 use dump::dump_packet;
 use idle::IdleTimeout;
 pub use params::ConnectionParameters;
@@ -1576,7 +1578,6 @@ impl Connection {
     /// During connection setup, the first path needs to be setup.
     /// This uses the connection IDs that were provided during the handshake
     /// to setup that path.
-    #[allow(clippy::or_fun_call)] // Remove when MSRV >= 1.59
     fn setup_handshake_path(&mut self, path: &PathRef, now: Instant) {
         self.paths.make_permanent(
             path,
@@ -2404,7 +2405,7 @@ impl Connection {
             } else {
                 // The other side didn't provide a stateless reset token.
                 // That's OK, they can try guessing this.
-                <[u8; 16]>::try_from(&random(16)[..]).unwrap()
+                ConnectionIdEntry::random_srt()
             };
             self.paths
                 .primary()

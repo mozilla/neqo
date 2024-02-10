@@ -8,7 +8,7 @@
 #![warn(clippy::pedantic)]
 
 use std::{
-    cell::RefCell,
+    cell::{OnceCell, RefCell},
     cmp::max,
     convert::TryFrom,
     io::{Cursor, Result, Write},
@@ -19,7 +19,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use lazy_static::lazy_static;
 use neqo_common::{
     event::Provider,
     hex,
@@ -51,13 +50,14 @@ pub fn fixture_init() {
 // NSS operates in milliseconds and halves any value it is provided.
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
-lazy_static! {
-    static ref BASE_TIME: Instant = Instant::now();
-}
-
+/// A baseline time for all tests.  This needs to be earlier than what `now()` produces
+/// because of the need to have a span of time elapse for anti-replay purposes.
 fn earlier() -> Instant {
+    // Note: It is only OK to have a different base time for each thread because our tests are
+    // single-threaded.
+    thread_local!(static EARLIER: OnceCell<Instant> = OnceCell::new());
     fixture_init();
-    *BASE_TIME
+    EARLIER.with(|b| *b.get_or_init(Instant::now))
 }
 
 /// The current time for the test.  Which is in the future,
@@ -86,26 +86,33 @@ pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
+pub const DEFAULT_ADDR: SocketAddr = addr();
+pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(addr(), addr(), IpTos::default(), Some(128), data)
+    Datagram::new(
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
+        IpTos::default(),
+        Some(128),
+        data,
+    )
 }
 
 /// Create a default socket address.
 #[must_use]
-pub fn addr() -> SocketAddr {
-    // These could be const functions, but they aren't...
+const fn addr() -> SocketAddr {
     let v6ip = IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1));
     SocketAddr::new(v6ip, 443)
 }
 
 /// An IPv4 version of the default socket address.
 #[must_use]
-pub fn addr_v4() -> SocketAddr {
-    let localhost_v4 = IpAddr::V4(Ipv4Addr::from(0xc000_0201));
-    SocketAddr::new(localhost_v4, addr().port())
+const fn addr_v4() -> SocketAddr {
+    let v4ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+    SocketAddr::new(v4ip, DEFAULT_ADDR.port())
 }
 
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
@@ -124,7 +131,7 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let mut r = random(20);
+        let mut r = random::<20>();
         // Randomize length, but ensure that the connection ID is long
         // enough to pass for an original destination connection ID.
         r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
@@ -154,8 +161,8 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         params.ack_ratio(255), // Tests work better with this set this way.
         now(),
     )
@@ -258,8 +265,8 @@ pub fn default_http3_client() -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
@@ -281,8 +288,8 @@ pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        addr(),
-        addr(),
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
         params,
         now(),
     )
