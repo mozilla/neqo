@@ -646,11 +646,9 @@ impl ServersRunner {
     }
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
-        qdebug!("process with {:?}", dgram);
         loop {
             match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
-                    qdebug!("writing to {:?}", dgram.source());
                     let socket = self.find_socket(dgram.source());
                     socket.writable().await?;
                     socket.send(dgram)?;
@@ -661,7 +659,6 @@ impl ServersRunner {
                     break;
                 }
                 Output::None => {
-                    qdebug!("Output::None");
                     break;
                 }
             }
@@ -691,12 +688,9 @@ impl ServersRunner {
 
     async fn run(&mut self) -> Result<(), io::Error> {
         loop {
-            qdebug!("iteration");
             match self.ready().await? {
                 Ready::Socket(inx) => {
-                    qdebug!("socket {} ready", inx);
                     loop {
-                        qdebug!("reading from {}", inx);
                         let (host, socket) = self.sockets.get_mut(inx).unwrap();
                         let dgram = socket.recv(host)?;
                         if dgram.is_none() {
@@ -707,7 +701,6 @@ impl ServersRunner {
                 }
                 Ready::Timeout => {
                     self.timeout = None;
-                    qdebug!("timeout fired");
                     self.process(None).await?;
                 }
             }
