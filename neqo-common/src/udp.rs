@@ -124,7 +124,7 @@ mod tests {
     async fn datagram_tos() -> Result<(), io::Error> {
         let sender = Socket::bind("127.0.0.1:0")?;
         let receiver_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let receiver = Socket::bind(&receiver_addr)?;
+        let receiver = Socket::bind(receiver_addr)?;
 
         let tos_tx = IpTos::from((IpTosDscp::Le, IpTosEcn::Ce));
         let datagram = Datagram::new(
