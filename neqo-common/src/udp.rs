@@ -107,12 +107,13 @@ impl Socket {
             meta.addr,
             *local_address,
             meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-            Some(0xff), // TODO: get the real TTL),
+            Some(0xff), // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
             &buf[..meta.len],
         )))
     }
 }
 
+// TODO
 #[cfg(test)]
 mod tests {
     use crate::{IpTos, IpTosDscp, IpTosEcn};
