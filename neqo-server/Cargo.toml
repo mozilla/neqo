@@ -13,8 +13,8 @@ license.workspace = true
 # neqo-server is not used in Firefox, so we can be liberal with dependency versions
 clap = { version = "4.4", features = ["derive"] }
 futures = "0.3"
-log = {version = "0.4", default-features = false}
-neqo-common = { path="./../neqo-common", features = ["udp"] }
+log = { version = "0.4", default-features = false }
+neqo-common = { path = "./../neqo-common", features = ["udp"] }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
