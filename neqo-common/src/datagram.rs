@@ -55,7 +55,7 @@ impl Datagram {
     }
 
     #[must_use]
-    pub fn into_data(self) -> Vec<u8> {
+    pub(crate) fn into_data(self) -> Vec<u8> {
         self.d
     }
 }
