@@ -4,6 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+
 use std::{
     io::{self, IoSliceMut},
     net::{SocketAddr, ToSocketAddrs},
@@ -21,23 +24,27 @@ pub struct Socket {
 }
 
 impl Socket {
+    /// Calls [`std::net::UdpSocket::bind`] and instantiates [`quinn_udp::UdpSocketState`].
     pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         let socket = std::net::UdpSocket::bind(addr)?;
 
         Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into()).unwrap(),
+            state: quinn_udp::UdpSocketState::new((&socket).into())?,
             socket: tokio::net::UdpSocket::from_std(socket)?,
         })
     }
 
+    /// See [`tokio::net::UdpSocket::local_addr`].
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.socket.local_addr()
     }
 
+    /// See [`tokio::net::UdpSocket::writable`].
     pub async fn writable(&self) -> Result<(), io::Error> {
         self.socket.writable().await
     }
 
+    /// See [`tokio::net::UdpSocket::readable`].
     pub async fn readable(&self) -> Result<(), io::Error> {
         self.socket.readable().await
     }
@@ -52,7 +59,7 @@ impl Socket {
             src_ip: None,
         };
 
-        let n = (&self.socket).try_io(Interest::WRITABLE, || {
+        let n = self.socket.try_io(Interest::WRITABLE, || {
             self.state
                 .send((&self.socket).into(), slice::from_ref(&transmit))
         })?;
@@ -68,7 +75,7 @@ impl Socket {
 
         let mut meta = RecvMeta::default();
 
-        match (&self.socket).try_io(Interest::READABLE, || {
+        match self.socket.try_io(Interest::READABLE, || {
             self.state.recv(
                 (&self.socket).into(),
                 &mut [IoSliceMut::new(&mut buf)],
@@ -116,14 +123,14 @@ mod tests {
 
     #[tokio::test]
     async fn datagram_tos() -> Result<(), io::Error> {
-        let sender = Socket::bind("127.0.0.1:0").unwrap();
+        let sender = Socket::bind("127.0.0.1:0")?;
         let receiver_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let receiver = Socket::bind(&receiver_addr).unwrap();
+        let receiver = Socket::bind(&receiver_addr)?;
 
         let tos_tx = IpTos::from((IpTosDscp::Le, IpTosEcn::Ce));
         let datagram = Datagram::new(
-            sender.local_addr().unwrap(),
-            receiver.local_addr().unwrap(),
+            sender.local_addr()?,
+            receiver.local_addr()?,
             tos_tx,
             None,
             "Hello, world!".as_bytes().to_vec(),
@@ -139,7 +146,10 @@ mod tests {
             .expect("receive to yield datagram");
 
         // Assert that the ECN is correct.
-        assert_eq!(IpTosEcn::from(datagram.tos()), IpTosEcn::from(received_datagram.tos()));
+        assert_eq!(
+            IpTosEcn::from(datagram.tos()),
+            IpTosEcn::from(received_datagram.tos())
+        );
 
         Ok(())
     }
