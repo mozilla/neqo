@@ -57,12 +57,7 @@ impl Socket {
                 .send((&self.socket).into(), slice::from_ref(&transmit))
         })?;
 
-        if transmit.contents.len() != n {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to send datagram as a whole",
-            ));
-        }
+        assert_eq!(n, 1, "only passed one slice");
 
         Ok(n)
     }
@@ -113,54 +108,39 @@ impl Socket {
     }
 }
 
-// TODO
 #[cfg(test)]
 mod tests {
     use crate::{IpTos, IpTosDscp, IpTosEcn};
 
     use super::*;
 
-    #[test]
-    fn datagram_io() {
-        // Create UDP sockets for testing.
-        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let receiver = UdpSocket::bind("127.0.0.1:8080").unwrap();
+    #[tokio::test]
+    async fn datagram_tos() -> Result<(), io::Error> {
+        let sender = Socket::bind("127.0.0.1:0").unwrap();
+        let receiver_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let receiver = Socket::bind(&receiver_addr).unwrap();
 
-        // Create a sample datagram.
         let tos_tx = IpTos::from((IpTosDscp::Le, IpTosEcn::Ce));
-        let ttl_tx = 128;
         let datagram = Datagram::new(
             sender.local_addr().unwrap(),
             receiver.local_addr().unwrap(),
             tos_tx,
-            Some(ttl_tx),
+            None,
             "Hello, world!".as_bytes().to_vec(),
         );
 
-        // Call the emit_datagram function.
-        let result = tx(&sender, &datagram);
+        sender.writable().await?;
+        sender.send(datagram.clone())?;
 
-        // Assert that the datagram was sent successfully.
-        assert!(result.is_ok());
+        receiver.readable().await?;
+        let received_datagram = receiver
+            .recv(&receiver_addr)
+            .expect("receive to succeed")
+            .expect("receive to yield datagram");
 
-        // Create a buffer for receiving the datagram.
-        let mut buf = [0; u16::MAX as usize];
+        // Assert that the ECN is correct.
+        assert_eq!(IpTosEcn::from(datagram.tos()), IpTosEcn::from(received_datagram.tos()));
 
-        // Create variables for storing TOS and TTL values.
-        let mut tos_rx = 0;
-        let mut ttl_rx = 0;
-
-        // Call the recv_datagram function.
-        let result = rx(&receiver, &mut buf, &mut tos_rx, &mut ttl_rx);
-
-        // Assert that the datagram was received successfully.
-        println!("Received {result:?}");
-        assert!(result.is_ok());
-
-        // Assert that the ECN and TTL values are correct.
-        // TODO: Also check DSCP once quinn-udp supports it.
-        // assert_eq!(IpTosEcn::from(u8::from(tos_tx)), IpTosEcn::from(tos_rx));
-        // assert_eq!(tos_tx, tos_rx.into());
-        assert_ne!(ttl_tx, ttl_rx);
+        Ok(())
     }
 }

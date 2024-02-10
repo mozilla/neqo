@@ -46,6 +46,12 @@ impl From<u8> for IpTosEcn {
     }
 }
 
+impl From<IpTos> for IpTosEcn {
+    fn from(value: IpTos) -> Self {
+        IpTosEcn::from(value.0 & 0x3)
+    }
+}
+
 /// Diffserv Codepoints, mapped to the upper six bits of the TOS field.
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
 #[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug)]
@@ -156,6 +162,12 @@ impl From<u8> for IpTosDscp {
             0b0000_0100 => IpTosDscp::Le,
             _ => unreachable!(),
         }
+    }
+}
+
+impl From<IpTos> for IpTosDscp {
+    fn from(value: IpTos) -> Self {
+        IpTosDscp::from(value.0 & 0xfc)
     }
 }
 
