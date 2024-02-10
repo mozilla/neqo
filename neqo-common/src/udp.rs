@@ -49,7 +49,6 @@ impl Socket {
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
             contents: d.into_data().into(),
             segment_size: None,
-            // TODO
             src_ip: None,
         };
 
@@ -59,7 +58,10 @@ impl Socket {
         })?;
 
         if transmit.contents.len() != n {
-            return Err(io::Error::new(io::ErrorKind::Other, "failed to send datagram as a whole"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "failed to send datagram as a whole",
+            ));
         }
 
         Ok(n)
@@ -67,18 +69,20 @@ impl Socket {
 
     /// Receive a UDP datagram on the specified socket.
     pub fn recv(&self, local_address: &SocketAddr) -> Result<Option<Datagram>, io::Error> {
-        // TODO: At least we should be using a buffer pool.
         let mut buf = [0; u16::MAX as usize];
 
         let mut meta = RecvMeta::default();
 
-        let (sz, remote_addr) = match (&self.socket).try_io(Interest::READABLE, || {
+        match (&self.socket).try_io(Interest::READABLE, || {
             self.state.recv(
                 (&self.socket).into(),
                 &mut [IoSliceMut::new(&mut buf)],
                 slice::from_mut(&mut meta),
             )
         }) {
+            Ok(n) => {
+                assert_eq!(n, 1, "only passed one slice");
+            }
             Err(ref err)
                 if err.kind() == io::ErrorKind::WouldBlock
                     || err.kind() == io::ErrorKind::Interrupted =>
@@ -86,31 +90,25 @@ impl Socket {
                 return Ok(None)
             }
             Err(err) => {
-                eprintln!("UDP recv error: {err:?}");
                 return Err(err);
-            }
-            Ok(n) => {
-                assert_eq!(n, 1, "only passed one slice");
-
-                if meta.len == 0 {
-                    eprintln!("zero length datagram received?");
-                    return Ok(None);
-                }
-
-                (meta.len, meta.addr)
             }
         };
 
-        if sz == buf.len() {
+        if meta.len == 0 {
+            eprintln!("zero length datagram received?");
+            return Ok(None);
+        }
+
+        if meta.len == buf.len() {
             eprintln!("Might have received more than {} bytes", buf.len());
         }
 
         Ok(Some(Datagram::new(
-            remote_addr,
+            meta.addr,
             *local_address,
             meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
             Some(0xff), // TODO: get the real TTL),
-            &buf[..sz],
+            &buf[..meta.len],
         )))
     }
 }
