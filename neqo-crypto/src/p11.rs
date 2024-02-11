@@ -15,12 +15,15 @@ use std::{
     mem,
     ops::{Deref, DerefMut},
     os::raw::{c_int, c_uint},
-    ptr::null_mut,
+    ptr::{null, null_mut},
 };
 
 use neqo_common::hex_with_len;
 
-use crate::err::{secstatus_to_res, Error, Res};
+use crate::{
+    err::{secstatus_to_res, Error, Res},
+    null_safe_slice,
+};
 
 #[allow(clippy::upper_case_acronyms)]
 #[allow(clippy::unreadable_literal)]
@@ -148,9 +151,7 @@ impl PrivateKey {
                 &mut key_item,
             )
         })?;
-        let slc = unsafe {
-            std::slice::from_raw_parts(key_item.data, usize::try_from(key_item.len).unwrap())
-        };
+        let slc = unsafe { null_safe_slice(key_item.data, key_item.len) };
         let key = Vec::from(slc);
         // The data that `key_item` refers to needs to be freed, but we can't
         // use the scoped `Item` implementation.  This is OK as long as nothing
@@ -206,7 +207,7 @@ impl SymKey {
         // This is accessing a value attached to the key, so we can treat this as a borrow.
         match unsafe { key_item.as_mut() } {
             None => Err(Error::InternalError),
-            Some(key) => Ok(unsafe { std::slice::from_raw_parts(key.data, key.len as usize) }),
+            Some(key) => Ok(unsafe { null_safe_slice(key.data, key.len) }),
         }
     }
 }
@@ -285,7 +286,7 @@ impl Item {
         let b = self.ptr.as_ref().unwrap();
         // Sanity check the type, as some types don't count bytes in `Item::len`.
         assert_eq!(b.type_, SECItemType::siBuffer);
-        let slc = std::slice::from_raw_parts(b.data, usize::try_from(b.len).unwrap());
+        let slc = null_safe_slice(b.data, b.len);
         Vec::from(slc)
     }
 }
