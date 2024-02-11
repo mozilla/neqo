@@ -7,7 +7,6 @@
 use std::{
     convert::TryFrom,
     ptr::{addr_of, NonNull},
-    slice,
 };
 
 use neqo_common::qerror;

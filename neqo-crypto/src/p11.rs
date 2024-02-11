@@ -15,7 +15,7 @@ use std::{
     mem,
     ops::{Deref, DerefMut},
     os::raw::{c_int, c_uint},
-    ptr::{null, null_mut},
+    ptr::null_mut,
 };
 
 use neqo_common::hex_with_len;

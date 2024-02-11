@@ -1117,7 +1117,7 @@ impl Server {
                 // Don't bother propagating errors from this, because it should be caught in
                 // testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
-                let slc = null_safe_slice(retry_token, tok.len());
+                let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
                 *retry_token_len = c_uint::try_from(tok.len()).unwrap();
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
