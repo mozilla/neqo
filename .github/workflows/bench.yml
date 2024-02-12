@@ -43,20 +43,20 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # Pin the benchmark to core 0 and run it at elevated priority.
+      # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Benchmark
         run: |
           nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
-      # Pin the transfer benchmark to core 0 and run at elevated priority, generating a perf profile.
+      # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       - name: Perf transfer benchmark
         run: |
           nice -n -20 taskset -c 0 \
             perf record -F997 --call-graph=lbr -o perf.data \
             cargo +$TOOLCHAIN bench --features ci,bench --bench transfer
 
-      # Enable turboboost, hyperthreading and use powersave governor.
+      # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
         if: success() || failure()
@@ -79,13 +79,12 @@ jobs:
       #     summary-always: true
 
       - name: Convert perf data
-        run: |
-          perf script -F +pid | zstd > perf.ff.data.zstd
-          zstd perf.data
+        run: perf script -F +pid | zstd > perf.ff.data.zstd
+      - run: zstd perf.data
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ runner.os }}-perf
+          name: ${{ github.head_ref || github.ref_name }}-perf
           path: "*.zstd"
           compression-level: 0
