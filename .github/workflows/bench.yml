@@ -79,7 +79,10 @@ jobs:
       #     summary-always: true
 
       - name: Convert perf data
-        run: perf script -F +pid | zstd > perf.ff.data.zstd
+        run: |
+          ls -la
+          file perf.data
+          perf script -v -F +pid | zstd > perf.ff.data.zstd
       - run: zstd perf.data
 
       - name: Archive perf data
