@@ -177,4 +177,4 @@ jobs:
 
   bench:
     needs: [check]
-    uses: .github/workflows/bench.yml
+    uses: .github/workflows/bench.yml@latest
