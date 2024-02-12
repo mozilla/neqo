@@ -392,6 +392,14 @@ impl ToString for SharedVec {
 /// Panics if the log cannot be created.
 #[must_use]
 pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
+    #[cfg(feature = "bench")]
+    return (
+        NeqoQlog::disabled(),
+        SharedVec {
+            buf: Arc::default(),
+        },
+    );
+
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
