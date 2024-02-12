@@ -1,6 +1,7 @@
 name: Bench
 on:
   workflow_call:
+  workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -23,7 +24,9 @@ jobs:
           components: rustfmt
 
       - name: Configure Rust
-        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
+        run: |
+          cargo install flamegraph
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
@@ -47,7 +50,7 @@ jobs:
       - name: Benchmark
         run: |
           nice -n -20 taskset -c 0 \
-            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+            cargo +$TOOLCHAIN flamegraph --features ci,bench -- --bench | tee output.txt
 
       # Enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
