@@ -37,6 +37,7 @@ mod ssl;
 mod time;
 
 use std::{
+    convert::TryFrom,
     ffi::CString,
     path::{Path, PathBuf},
     ptr::null,
@@ -199,4 +200,28 @@ pub fn assert_initialized() {
     INITIALIZED
         .get()
         .expect("NSS not initialized with init or init_db");
+}
+
+/// NSS tends to return empty "slices" with a null pointer, which will cause
+/// `std::slice::from_raw_parts` to panic if passed directly.  This wrapper avoids
+/// that issue.  It also performs conversion for lengths, as a convenience.
+///
+/// # Panics
+/// If the provided length doesn't fit into a `usize`.
+///
+/// # Safety
+/// The caller must adhere to the safety constraints of `std::slice::from_raw_parts`,
+/// except that this will accept a null value for `data`.
+unsafe fn null_safe_slice<'a, T>(data: *const u8, len: T) -> &'a [u8]
+where
+    usize: TryFrom<T>,
+{
+    if data.is_null() {
+        &[]
+    } else if let Ok(len) = usize::try_from(len) {
+        #[allow(clippy::disallowed_methods)]
+        std::slice::from_raw_parts(data, len)
+    } else {
+        panic!("null_safe_slice: size overflow");
+    }
 }
