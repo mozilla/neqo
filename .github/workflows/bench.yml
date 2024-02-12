@@ -25,6 +25,9 @@ jobs:
           toolchain: $TOOLCHAIN
           components: rustfmt
 
+      - name: Configure Rust
+        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
 
@@ -32,17 +35,6 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-
-      - name: Install dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev libclang-dev \
-            linux-tools-common linux-tools-generic linux-tools-$(uname -r)
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-          echo "$HOME/.cargo/bin"
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,10 +44,7 @@ jobs:
 
       # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
-        run: |
-          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          echo off | sudo tee /sys/devices/system/cpu/smt/control
-          sudo cpupower frequency-set -g performance
+        run: /home/lars/bin/prep.sh
 
       # Pin the benchmark to core 0 and run it at elevated priority.
       # TODO: Figure out a way to run this with nice -20.
@@ -66,10 +55,7 @@ jobs:
 
       # Enable turboboost, hyperthreading and use powersave governor
       - name: Restore machine
-        run: |
-          echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          echo on | sudo tee /sys/devices/system/cpu/smt/control
-          sudo cpupower frequency-set -g powersave
+        run: /home/lars/bin/unprep.sh
         if: success() || failure()
 
       - name: Download previous benchmark results
