@@ -35,8 +35,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Build
         run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
