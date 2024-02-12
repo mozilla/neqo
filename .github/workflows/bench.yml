@@ -49,13 +49,13 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          nice -n -20 taskset -c 0 \
+          /bin/nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Pin the benchmark to core 0 and run transfer flamegraph at elevated priority.
       - name: Benchmark
         run: |
-          nice -n -20 taskset -c 0 \
+          /bin/nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN flamegraph --features ci,bench --bench transfer -- --bench
 
       # Enable turboboost, hyperthreading and use powersave governor.
