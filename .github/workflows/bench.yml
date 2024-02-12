@@ -1,8 +1,14 @@
 name: Bench
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  # workflow_run:
+  #   workflows: [CI]
+  #   types: [completed]
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
