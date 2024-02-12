@@ -53,10 +53,9 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       # Pin the benchmark to core 0 and run it at elevated priority.
-      # TODO: Figure out a way to run this with nice -20.
       - name: Benchmark
         run: |
-          taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Enable turboboost, hyperthreading and use powersave governor
