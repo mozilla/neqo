@@ -13,7 +13,7 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    # if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
         shell: bash
@@ -25,6 +25,9 @@ jobs:
           toolchain: $TOOLCHAIN
           components: rustfmt
 
+      - name: Configure Rust
+        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
 
@@ -33,43 +36,25 @@ jobs:
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
-      - name: Install dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            git gyp mercurial ninja-build lld python-is-python3 zlib1g-dev libclang-dev \
-            linux-tools-common linux-tools-generic linux-tools-$(uname -r)
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-          echo "$HOME/.cargo/bin"
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Build
         run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
 
-      # Disable turboboost, hyperthreading and use performance governor
+      # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
-        run: |
-          echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          echo off | sudo tee /sys/devices/system/cpu/smt/control
-          sudo cpupower frequency-set -g performance
+        run: sudo /root/bin/prep.sh
 
       # Pin the benchmark to core 0 and run it at elevated priority.
-      # TODO: Figure out a way to run this with nice -20.
       - name: Benchmark
         run: |
-          taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
-      # Enable turboboost, hyperthreading and use powersave governor
+      # Enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
-        run: |
-          echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-          echo on | sudo tee /sys/devices/system/cpu/smt/control
-          sudo cpupower frequency-set -g powersave
+        run: sudo /root/bin/unprep.sh
         if: success() || failure()
 
       - name: Download previous benchmark results
