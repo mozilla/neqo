@@ -176,5 +176,6 @@ jobs:
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
   bench:
+    name: "Benchmark"
     needs: [check]
     uses: ./.github/workflows/bench.yml
