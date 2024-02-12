@@ -1,14 +1,8 @@
 name: Bench
 on:
-  push:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-  pull_request:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-  # workflow_run:
-  #   workflows: [CI]
-  #   types: [completed]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -19,7 +13,7 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    # if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
         shell: bash
@@ -48,20 +42,19 @@ jobs:
       - name: Build
         run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
 
-      # Disable turboboost, hyperthreading and use performance governor
+      # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
-        run: /home/lars/bin/prep.sh
+        run: sudo /root/bin/prep.sh
 
       # Pin the benchmark to core 0 and run it at elevated priority.
-      # TODO: Figure out a way to run this with nice -20.
       - name: Benchmark
         run: |
-          taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
-      # Enable turboboost, hyperthreading and use powersave governor
+      # Enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
-        run: /home/lars/bin/unprep.sh
+        run: sudo /root/bin/unprep.sh
         if: success() || failure()
 
       - name: Download previous benchmark results
