@@ -80,9 +80,6 @@ pub use state::{ClosingFrame, State};
 
 pub use crate::send_stream::{RetransmissionPriority, SendStreamStats, TransmissionPriority};
 
-#[derive(Debug, Default)]
-struct Packet(Vec<u8>);
-
 /// The number of Initial packets that the client will send in response
 /// to receiving an undecryptable packet during the early part of the
 /// handshake.  This is a hack, but a useful one.
