@@ -1,7 +1,6 @@
 name: Bench
 on:
   workflow_call:
-  workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -24,9 +23,7 @@ jobs:
           components: rustfmt
 
       - name: Configure Rust
-        run: |
-          cargo install flamegraph
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
+        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
@@ -49,13 +46,13 @@ jobs:
       # Pin the benchmark to core 0 and run it at elevated priority.
       - name: Benchmark
         run: |
-          /bin/nice -n -20 taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
-      # Pin the benchmark to core 0 and run transfer flamegraph at elevated priority.
-      - name: Transfer benchmark
+      # Pin the transfer benchmark to core 0 and run at elevated priority, generating a perf profile.
+      - name: Perf transfer benchmark
         run: |
-          /bin/nice -n -20 taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             perf record -F997 --call-graph=lbr \
             cargo +$TOOLCHAIN bench --features ci,bench --bench transfer
 
@@ -86,9 +83,9 @@ jobs:
           perf script -F +pid | zstd > perf.ff.data.zstd
           zstd perf.data
 
-      - name: Archive perf dats
+      - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-perf
-          path: *.zstd
+          path: "*.zstd"
           compression-level: 0
