@@ -1,8 +1,9 @@
 name: Bench
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  workflow_call:
+  # workflow_run:
+  #   workflows: [CI]
+  #   types: [completed]
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -38,6 +39,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Build
         run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
