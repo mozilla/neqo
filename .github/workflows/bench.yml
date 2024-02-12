@@ -1,8 +1,6 @@
 name: Bench
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  workflow_call:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -13,7 +11,6 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
         shell: bash
@@ -26,7 +23,7 @@ jobs:
           components: rustfmt
 
       - name: Configure Rust
-        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
