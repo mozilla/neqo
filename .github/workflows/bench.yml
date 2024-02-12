@@ -44,10 +44,10 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
-      - name: Benchmark
-        run: |
-          nice -n -20 taskset -c 0 \
-            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+      # - name: Benchmark
+      #   run: |
+      #     nice -n -20 taskset -c 0 \
+      #       cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       - name: Perf transfer benchmark
@@ -80,10 +80,8 @@ jobs:
 
       - name: Convert perf data
         run: |
-          ls -la
-          file perf.data
-          perf script -v -F +pid | zstd > perf.ff.data.zstd
-      - run: zstd perf.data
+          perf script -i perf.data -F +pid | zstd > perf.ff.data.zstd
+          zstd perf.data
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
