@@ -50,7 +50,7 @@ jobs:
 
       # Disable turboboost, hyperthreading and use performance governor
       - name: Prepare machine
-        run: /home/lars/bin/prep.sh
+        run: sudo /root/bin/prep.sh
 
       # Pin the benchmark to core 0 and run it at elevated priority.
       # TODO: Figure out a way to run this with nice -20.
@@ -61,7 +61,7 @@ jobs:
 
       # Enable turboboost, hyperthreading and use powersave governor
       - name: Restore machine
-        run: /home/lars/bin/unprep.sh
+        run: sudo /root/bin/unprep.sh
         if: success() || failure()
 
       - name: Download previous benchmark results
