@@ -53,7 +53,7 @@ jobs:
       - name: Perf transfer benchmark
         run: |
           nice -n -20 taskset -c 0 \
-            perf record -F997 --call-graph=lbr \
+            perf record -F997 --call-graph=lbr -o perf.data \
             cargo +$TOOLCHAIN bench --features ci,bench --bench transfer
 
       # Enable turboboost, hyperthreading and use powersave governor.
