@@ -67,7 +67,7 @@ jobs:
           path: ./cache
           key: ${{ runner.os }}-benchmark
 
-      # TODO: White for this action to be allowlisted. And then figure out how to only upload
+      # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
       # benchmark data when the main branch is being updated.
       # - name: Store current benchmark results
       #   uses: benchmark-action/github-action-benchmark@v1
