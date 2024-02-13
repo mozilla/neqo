@@ -706,8 +706,9 @@ impl Connection {
         );
         let mut dec = Decoder::from(token.as_ref());
 
-        let version =
-            Version::try_from(dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)? as u32)?;
+        let version = Version::try_from(u32::try_from(
+            dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)?,
+        )?)?;
         qtrace!([self], "  version {:?}", version);
         if !self.conn_params.get_versions().all().contains(&version) {
             return Err(Error::DisabledVersion);

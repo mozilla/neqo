@@ -231,7 +231,7 @@ impl TransportParameter {
             if v == 0 {
                 Err(Error::TransportParameterError)
             } else {
-                Ok(v as WireVersion)
+                Ok(WireVersion::try_from(v)?)
             }
         }
 
@@ -455,7 +455,8 @@ impl TransportParameters {
         let rbuf = random::<4>();
         let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
-        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
+        let grease =
+            (u32::try_from(dec.decode_uint(4).unwrap()).unwrap()) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
         for &v in versions.all() {
             if role == Role::Client && !versions.initial().is_compatible(v) {

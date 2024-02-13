@@ -34,6 +34,7 @@ use crate::{
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
 // Export as usize for consistency with SEND_BUFFER_SIZE
+#[allow(clippy::cast_possible_truncation)] // Yeah, nope.
 pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 #[derive(Debug, Default)]
@@ -301,8 +302,10 @@ impl RxStreamOrderer {
                     false
                 }
             })
-            .map(|(_, data_len)| data_len as usize)
-            .sum()
+            // Accumulate, but saturate at usize::MAX.
+            .fold(0, |acc: usize, (_, data_len)| {
+                acc.saturating_add(usize::try_from(data_len).unwrap_or(usize::MAX))
+            })
     }
 
     /// Bytes read by the application.

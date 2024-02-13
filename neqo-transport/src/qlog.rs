@@ -38,6 +38,7 @@ use crate::{
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
     qlog.add_event_data(|| {
         let remote = tph.remote();
+        #[allow(clippy::cast_possible_truncation)] // Nope.
         let ev_data = EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: None,
@@ -391,6 +392,8 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 
 // Helper functions
 
+#[allow(clippy::too_many_lines)] // Yeah, bit it's a nice match.
+#[allow(clippy::cast_possible_truncation)] // Sure, but not really.
 fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     match frame {
         Frame::Padding => QuicFrame::Padding,

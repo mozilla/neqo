@@ -2220,7 +2220,7 @@ mod tests {
 
         // Mark almost all as sent. Get what's left
         let one_byte_from_end = SEND_BUFFER_SIZE as u64 - 1;
-        txb.mark_as_sent(0, one_byte_from_end as usize);
+        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
                          && start == one_byte_from_end
@@ -2249,7 +2249,7 @@ mod tests {
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, five_bytes_from_end as usize);
+        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
@@ -2283,7 +2283,7 @@ mod tests {
         // As above
         let forty_bytes_from_end = SEND_BUFFER_SIZE as u64 - 40;
 
-        txb.mark_as_acked(0, forty_bytes_from_end as usize);
+        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                  Some((start, x)) if x.len() == 40
                  && start == forty_bytes_from_end
@@ -2311,7 +2311,7 @@ mod tests {
 
         // Ack entire first slice and into second slice
         let ten_bytes_past_end = SEND_BUFFER_SIZE as u64 + 10;
-        txb.mark_as_acked(0, ten_bytes_past_end as usize);
+        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
