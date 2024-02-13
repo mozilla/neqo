@@ -791,7 +791,7 @@ async fn main() -> Result<(), io::Error> {
                 args.alpn = String::from(HQ_INTEROP);
                 args.quic_parameters.max_streams_bidi = 100;
             }
-            "handshake" | "transfer" | "resumption" | "multiconnect" => {
+            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" => {
                 args.use_old_http = true;
                 args.alpn = String::from(HQ_INTEROP);
             }
@@ -806,10 +806,6 @@ async fn main() -> Result<(), io::Error> {
                 args.use_old_http = true;
                 args.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
-            }
-            "v2" => {
-                args.use_old_http = true;
-                args.alpn = String::from(HQ_INTEROP);
             }
             _ => exit(127),
         }
