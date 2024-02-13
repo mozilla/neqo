@@ -567,8 +567,8 @@ struct URLHandler<'a> {
 }
 
 impl<'a> URLHandler<'a> {
-    fn stream_handler(&mut self, stream_id: &StreamId) -> Option<&mut Box<dyn StreamHandler>> {
-        self.stream_handlers.get_mut(stream_id)
+    fn stream_handler(&mut self, stream_id: StreamId) -> Option<&mut Box<dyn StreamHandler>> {
+        self.stream_handlers.get_mut(&stream_id)
     }
 
     fn process_urls(&mut self, client: &mut Http3Client) {
@@ -677,7 +677,7 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    if let Some(handler) = self.url_handler.stream_handler(&stream_id) {
+                    if let Some(handler) = self.url_handler.stream_handler(stream_id) {
                         handler.process_header_ready(stream_id, fin, headers);
                     } else {
                         println!("Data on unexpected stream: {stream_id}");
@@ -689,7 +689,7 @@ impl<'a> Handler<'a> {
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     let mut stream_done = false;
-                    match self.url_handler.stream_handler(&stream_id) {
+                    match self.url_handler.stream_handler(stream_id) {
                         None => {
                             println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
@@ -724,7 +724,7 @@ impl<'a> Handler<'a> {
                     }
                 }
                 Http3ClientEvent::DataWritable { stream_id } => {
-                    match self.url_handler.stream_handler(&stream_id) {
+                    match self.url_handler.stream_handler(stream_id) {
                         None => {
                             println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
