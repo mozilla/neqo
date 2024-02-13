@@ -357,6 +357,8 @@ impl ConnectionParameters {
         self
     }
 
+    /// # Errors
+    /// When a connection ID cannot be obtained.
     /// # Panics
     /// Only when this code includes a transport parameter that is invalid.
     pub fn create_transport_parameter(
