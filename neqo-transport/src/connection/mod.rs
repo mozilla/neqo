@@ -2628,7 +2628,7 @@ impl Connection {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
             HandshakeState::AuthenticationPending => {
                 if !was_authentication_pending {
-                    self.events.authentication_needed()
+                    self.events.authentication_needed();
                 }
             }
             HandshakeState::EchFallbackAuthenticationPending(public_name) => self

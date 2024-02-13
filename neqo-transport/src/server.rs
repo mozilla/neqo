@@ -522,7 +522,7 @@ impl Server {
                         &mut self.create_qlog_trace(attempt_key.odcid.as_cid_ref()),
                         self.conn_params.get_versions().all(),
                         initial.version.wire_version(),
-                    )
+                    );
                 }
                 None
             }

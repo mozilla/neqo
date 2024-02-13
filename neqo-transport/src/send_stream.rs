@@ -534,7 +534,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
-        self.ranges.mark_sent(offset, len)
+        self.ranges.mark_sent(offset, len);
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
@@ -1698,9 +1698,9 @@ impl SendStreams {
         for stream_id in stream_ids {
             let stream = self.map.get_mut(&stream_id).unwrap();
             if let Some(order) = stream.sendorder() {
-                qtrace!("   {} ({})", stream_id, order)
+                qtrace!("   {} ({})", stream_id, order);
             } else {
-                qtrace!("   None")
+                qtrace!("   None");
             }
             if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                 break;
