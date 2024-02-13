@@ -32,13 +32,7 @@ pub mod selfencrypt;
 mod ssl;
 mod time;
 
-use std::{
-    convert::TryFrom,
-    ffi::CString,
-    path::{Path, PathBuf},
-    ptr::null,
-    sync::OnceLock,
-};
+use std::{convert::TryFrom, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
 #[cfg(not(feature = "fuzzing"))]
 pub use self::aead::RealAead as Aead;
@@ -83,7 +77,7 @@ fn secstatus_to_res(code: nss::SECStatus) -> Res<()> {
 enum NssLoaded {
     External,
     NoDb,
-    Db(Box<Path>),
+    Db,
 }
 
 impl Drop for NssLoaded {
@@ -185,7 +179,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
         #[cfg(debug_assertions)]
         enable_ssl_trace();
 
-        NssLoaded::Db(path.into_boxed_path())
+        NssLoaded::Db
     });
 }
 
