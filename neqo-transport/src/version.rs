@@ -179,6 +179,8 @@ pub struct VersionConfig {
 }
 
 impl VersionConfig {
+    /// # Panics
+    /// When `all` does not include `initial`.
     #[must_use]
     pub fn new(initial: Version, all: Vec<Version>) -> Self {
         assert!(all.contains(&initial));

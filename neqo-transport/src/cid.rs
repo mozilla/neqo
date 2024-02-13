@@ -39,6 +39,8 @@ pub struct ConnectionId {
 }
 
 impl ConnectionId {
+    /// # Panics
+    /// When `len` is larger than `MAX_CONNECTION_ID_LEN`.
     #[must_use]
     pub fn generate(len: usize) -> Self {
         assert!(matches!(len, 0..=MAX_CONNECTION_ID_LEN));

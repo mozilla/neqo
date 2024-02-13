@@ -353,6 +353,8 @@ impl TransportParameters {
     }
 
     // Get an integer type or a default.
+    /// # Panics
+    /// When the transport parameter isn't recognized as being an integer.
     #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
         let default = match tp {
@@ -379,6 +381,8 @@ impl TransportParameters {
     }
 
     // Set an integer type or a default.
+    /// # Panics
+    /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
         match tp {
             IDLE_TIMEOUT
@@ -400,6 +404,8 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the transport parameter isn't recognized as containing bytes.
     #[must_use]
     pub fn get_bytes(&self, tp: TransportParameterId) -> Option<&[u8]> {
         match tp {
@@ -417,6 +423,8 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the transport parameter isn't recognized as containing bytes.
     pub fn set_bytes(&mut self, tp: TransportParameterId, value: Vec<u8>) {
         match tp {
             ORIGINAL_DESTINATION_CONNECTION_ID
@@ -429,6 +437,8 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the transport parameter isn't recognized as being empty.
     pub fn set_empty(&mut self, tp: TransportParameterId) {
         match tp {
             DISABLE_MIGRATION | GREASE_QUIC_BIT => {
@@ -439,6 +449,8 @@ impl TransportParameters {
     }
 
     /// Set version information.
+    /// # Panics
+    /// Never.  But rust doesn't know that.
     pub fn set_versions(&mut self, role: Role, versions: &VersionConfig) {
         let rbuf = random::<4>();
         let mut other = Vec::with_capacity(versions.all().len() + 1);
@@ -469,6 +481,9 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the indicated transport parameter is present but NOT empty.
+    /// This should not happen if the parsing code in `TransportParameter::decode` is correct.
     #[must_use]
     pub fn get_empty(&self, tipe: TransportParameterId) -> bool {
         match self.params.get(&tipe) {
@@ -592,6 +607,9 @@ impl TransportParametersHandler {
         self.local.set_versions(self.role, &self.versions);
     }
 
+    /// # Panics
+    /// When this function is called before the peer has provided transport parameters.
+    /// Do not call this function if you are not also able to send data.
     #[must_use]
     pub fn remote(&self) -> &TransportParameters {
         match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
