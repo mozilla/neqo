@@ -63,6 +63,7 @@ jobs:
             cargo +$TOOLCHAIN bench --features bench | tee output.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
+      # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
       - name: Perf transfer benchmark
         run: |
           nice -n -20 taskset -c 0 \
@@ -93,14 +94,16 @@ jobs:
       #     comment-on-alert: true
       #     summary-always: true
 
-      - name: Convert perf data
-        run: |
-          perf script -i perf.data -F +pid | zstd > perf.ff.data.zst
-          zstd perf.data
+      - name: Convert for profiler.firefox.com
+        run: perf script -i perf.data -F +pid > perf.firefox.data
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.head_ref || github.ref_name }}-perf
-          path: "*.zst"
-          compression-level: 0
+          path: |
+            flamegraph.svg
+            perf*.data
+            output.txt
+            target/criterion
+          compression-level: 9
