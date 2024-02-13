@@ -233,6 +233,50 @@ impl Args {
             })
             .collect::<Vec<_>>()
     }
+
+    fn update_for_tests(&mut self) {
+        let Some(testcase) = self.qns_test.as_ref() else {
+            return;
+        };
+
+        // Only use v1 for most QNS tests.
+        self.quic_parameters.quic_version = vec![Version::Version1];
+        match testcase.as_str() {
+            // TODO: Add "ecn" when that is ready.
+            "http3" => {}
+            "handshake" | "transfer" | "retry" => {
+                self.use_old_http = true;
+            }
+            "zerortt" | "resumption" => {
+                if self.urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127);
+                }
+                self.use_old_http = true;
+                self.resume = true;
+            }
+            "multiconnect" => {
+                self.use_old_http = true;
+                self.download_in_series = true;
+            }
+            "chacha20" => {
+                self.use_old_http = true;
+                self.ciphers.clear();
+                self.ciphers
+                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
+            }
+            "keyupdate" => {
+                self.use_old_http = true;
+                self.key_update = true;
+            }
+            "v2" => {
+                self.use_old_http = true;
+                // Use default version set for this test (which allows compatible vneg.)
+                self.quic_parameters.quic_version.clear();
+            }
+            _ => exit(127),
+        }
+    }
 }
 
 fn from_str(s: &str) -> Res<Version> {
@@ -963,46 +1007,7 @@ async fn main() -> Res<()> {
     init();
 
     let mut args = Args::parse();
-
-    if let Some(testcase) = args.qns_test.as_ref() {
-        // Only use v1 for most QNS tests.
-        args.quic_parameters.quic_version = vec![Version::Version1];
-        match testcase.as_str() {
-            // TODO: Add "ecn" when that is ready.
-            "http3" => {}
-            "handshake" | "transfer" | "retry" => {
-                args.use_old_http = true;
-            }
-            "zerortt" | "resumption" => {
-                if args.urls.len() < 2 {
-                    eprintln!("Warning: resumption tests won't work without >1 URL");
-                    exit(127);
-                }
-                args.use_old_http = true;
-                args.resume = true;
-            }
-            "multiconnect" => {
-                args.use_old_http = true;
-                args.download_in_series = true;
-            }
-            "chacha20" => {
-                args.use_old_http = true;
-                args.ciphers.clear();
-                args.ciphers
-                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
-            }
-            "keyupdate" => {
-                args.use_old_http = true;
-                args.key_update = true;
-            }
-            "v2" => {
-                args.use_old_http = true;
-                // Use default version set for this test (which allows compatible vneg.)
-                args.quic_parameters.quic_version.clear();
-            }
-            _ => exit(127),
-        }
-    }
+    args.update_for_tests();
 
     let urls_by_origin = args
         .urls
