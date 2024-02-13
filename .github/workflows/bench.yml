@@ -76,11 +76,11 @@ jobs:
 
       - name: Benchmark a client/server transfer
         run: |
-          mkdir server && \
+          { mkdir server && \
             cd server && \
             nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 &
+              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 ; } &
           PID=$!
           ps -ef
           echo $PID
@@ -92,6 +92,7 @@ jobs:
           ps -ef
           kill -INT $PID
           ps -ef
+          fg $PID
           cd ${{ github.workspace }}
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
