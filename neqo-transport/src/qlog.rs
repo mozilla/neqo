@@ -356,6 +356,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
         let mut pacing_rate: Option<u64> = None;
 
         for metric in updated_metrics {
+            #[allow(clippy::cast_precision_loss)] // Nought to do here.
             match metric {
                 QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
                 QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
@@ -393,7 +394,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 // Helper functions
 
 #[allow(clippy::too_many_lines)] // Yeah, bit it's a nice match.
-#[allow(clippy::cast_possible_truncation)] // Sure, but not really.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
 fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     match frame {
         Frame::Padding => QuicFrame::Padding,
