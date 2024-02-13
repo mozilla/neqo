@@ -15,7 +15,7 @@ members = [
 homepage = "https://github.com/mozilla/neqo/"
 repository = "https://github.com/mozilla/neqo/"
 authors = ["The Neqo Authors <necko@mozilla.com>"]
-version = "0.7.0"
+version = "0.7.1"
 edition = "2018"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
