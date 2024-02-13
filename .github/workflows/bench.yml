@@ -1,6 +1,8 @@
 name: Bench
 on:
   workflow_call:
+  push:
+  pull_request:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -95,7 +97,7 @@ jobs:
       - name: Convert for profiler.firefox.com
         run: perf script -i perf.data -F +pid > perf.firefox.data
 
-      - name: Archive perf data
+      - name: Archive all benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.head_ref || github.ref_name }}-perf
@@ -104,4 +106,11 @@ jobs:
             perf*.data
             output.txt
             target/criterion
+          compression-level: 9
+
+      - name: Archive for profiler.firefox.com
+        uses: actions/upload-artifact@v4
+        with:
+          name: profiler.firefox.com
+          path: perf.firefox.data
           compression-level: 9
