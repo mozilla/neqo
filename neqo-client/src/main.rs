@@ -378,8 +378,7 @@ async fn ready(
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
     let timeout_ready = timeout
         .as_mut()
-        .map(Either::Left)
-        .unwrap_or(Either::Right(futures::future::pending()))
+        .map_or(Either::Right(futures::future::pending()), Either::Left)
         .map(|()| Ok(Ready::Timeout));
     select(socket_ready, timeout_ready).await.factor_first().0
 }
