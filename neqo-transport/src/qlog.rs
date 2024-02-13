@@ -393,7 +393,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 
 // Helper functions
 
-#[allow(clippy::too_many_lines)] // Yeah, bit it's a nice match.
+#[allow(clippy::too_many_lines)] // Yeah, but it's a nice match.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
 fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     match frame {
