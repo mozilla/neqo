@@ -2213,7 +2213,8 @@ mod tests {
         assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
 
         // Fill the buffer
-        assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
+        let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
+        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
                          Some((0, x)) if x.len()==SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
@@ -2275,7 +2276,8 @@ mod tests {
         assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
 
         // Fill the buffer
-        assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
+        let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
+        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
                          Some((0, x)) if x.len()==SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
@@ -2349,22 +2351,23 @@ mod tests {
         }
 
         // Should hit stream flow control limit before filling up send buffer
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let big_buf = vec![4; SEND_BUFFER_SIZE + 100];
+        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         conn_fc.borrow_mut().update(SEND_BUFFER_SIZE as u64);
-        let res = s.send(&[4; SEND_BUFFER_SIZE + 100]).unwrap();
+        let res = s.send(&big_buf).unwrap();
         assert_eq!(res, SEND_BUFFER_SIZE - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
@@ -2435,10 +2438,8 @@ mod tests {
         // tx buffer size.
         assert_eq!(s.avail(), SEND_BUFFER_SIZE - 4);
 
-        assert_eq!(
-            s.send(&[b'a'; SEND_BUFFER_SIZE]).unwrap(),
-            SEND_BUFFER_SIZE - 4
-        );
+        let big_buf = vec![b'a'; SEND_BUFFER_SIZE];
+        assert_eq!(s.send(&big_buf).unwrap(), SEND_BUFFER_SIZE - 4);
 
         // No event because still blocked by tx buffer full
         s.set_max_stream_data(2_000_000_000);

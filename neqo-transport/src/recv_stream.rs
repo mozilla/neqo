@@ -1447,8 +1447,8 @@ mod tests {
         let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
-        s.inbound_stream_frame(false, 0, &[0; RECV_BUFFER_SIZE])
-            .unwrap();
+        let big_buf = vec![0; RECV_BUFFER_SIZE];
+        s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         assert!(!s.has_frames_to_write());
         assert_eq!(s.read(&mut buf).unwrap(), (RECV_BUFFER_SIZE, false));
         assert!(!s.data_ready());
@@ -1479,8 +1479,8 @@ mod tests {
     fn stream_max_stream_data() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
         assert!(!s.has_frames_to_write());
-        s.inbound_stream_frame(false, 0, &[0; RECV_BUFFER_SIZE])
-            .unwrap();
+        let big_buf = vec![0; RECV_BUFFER_SIZE];
+        s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
             .unwrap_err();
     }
@@ -1523,9 +1523,10 @@ mod tests {
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        s.inbound_stream_frame(false, 0, &[0; RECV_BUFFER_SIZE])
-            .unwrap();
-        let mut buf = [0; RECV_BUFFER_SIZE];
+        let mut buf = vec![0; RECV_BUFFER_SIZE];
+        // Write from buf at first.
+        s.inbound_stream_frame(false, 0, &buf).unwrap();
+        // Then read into it.
         s.read(&mut buf).unwrap();
         assert!(s.has_frames_to_write());
         s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, &[])
