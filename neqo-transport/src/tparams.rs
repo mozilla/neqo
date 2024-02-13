@@ -88,6 +88,8 @@ impl PreferredAddress {
     }
 
     /// A generic version of `new()` for testing.
+    /// # Panics
+    /// When the addresses are the wrong type.
     #[must_use]
     #[cfg(test)]
     pub fn new_any(v4: Option<std::net::SocketAddr>, v6: Option<std::net::SocketAddr>) -> Self {
