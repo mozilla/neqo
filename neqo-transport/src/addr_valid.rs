@@ -210,10 +210,9 @@ impl AddressValidation {
             if self.validation == ValidateAddress::Never {
                 qinfo!("AddressValidation: no token; accepting");
                 return AddressValidationResult::Pass;
-            } else {
-                qinfo!("AddressValidation: no token; validating");
-                return AddressValidationResult::Validate;
             }
+            qinfo!("AddressValidation: no token; validating");
+            return AddressValidationResult::Validate;
         }
         if token.len() <= TOKEN_IDENTIFIER_RETRY.len() {
             // Treat bad tokens strictly.

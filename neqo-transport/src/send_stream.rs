@@ -1255,9 +1255,9 @@ impl SendStream {
             if atomic {
                 self.send_blocked_if_space_needed(buf.len());
                 return Ok(0);
-            } else {
-                &buf[..self.avail()]
             }
+
+            &buf[..self.avail()]
         } else {
             buf
         };
