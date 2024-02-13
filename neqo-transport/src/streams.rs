@@ -153,7 +153,7 @@ impl Streams {
             } => {
                 stats.stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
-                    rs.inbound_stream_frame(*fin, *offset, *data)?;
+                    rs.inbound_stream_frame(*fin, *offset, data)?;
                 }
             }
             Frame::MaxData { maximum_data } => {
