@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 use neqo_common::qinfo;
 use neqo_crypto::Error as CryptoError;

@@ -26,6 +26,5 @@ toml = "0.5"
 test-fixture = { path = "../test-fixture" }
 
 [features]
-deny-warnings = []
 gecko = ["mozbuild"]
 fuzzing = []
