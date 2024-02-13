@@ -27,9 +27,14 @@ impl Socket {
     /// Calls [`std::net::UdpSocket::bind`] and instantiates [`quinn_udp::UdpSocketState`].
     pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         let socket = std::net::UdpSocket::bind(addr)?;
+        let state = quinn_udp::UdpSocketState::new((&socket).into())?;
+
+        // Reverse non-blocking flag set by `UdpSocketState` to make the test non-racy
+        #[cfg(test)]
+        socket.set_nonblocking(false)?;
 
         Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            state,
             socket: tokio::net::UdpSocket::from_std(socket)?,
         })
     }
