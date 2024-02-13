@@ -121,7 +121,7 @@ impl Streams {
 
     /// # Errors
     /// When the frame is invalid.
-    pub fn input_frame(&mut self, frame: Frame, stats: &mut FrameStats) -> Res<()> {
+    pub fn input_frame(&mut self, frame: &Frame, stats: &mut FrameStats) -> Res<()> {
         match frame {
             Frame::ResetStream {
                 stream_id,
@@ -129,8 +129,8 @@ impl Streams {
                 final_size,
             } => {
                 stats.reset_stream += 1;
-                if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
-                    rs.reset(application_error_code, final_size)?;
+                if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
+                    rs.reset(*application_error_code, *final_size)?;
                 }
             }
             Frame::StopSending {
@@ -139,9 +139,9 @@ impl Streams {
             } => {
                 stats.stop_sending += 1;
                 self.events
-                    .send_stream_stop_sending(stream_id, application_error_code);
-                if let (Some(ss), _) = self.obtain_stream(stream_id)? {
-                    ss.reset(application_error_code);
+                    .send_stream_stop_sending(*stream_id, *application_error_code);
+                if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
+                    ss.reset(*application_error_code);
                 }
             }
             Frame::Stream {
@@ -152,13 +152,13 @@ impl Streams {
                 ..
             } => {
                 stats.stream += 1;
-                if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
-                    rs.inbound_stream_frame(fin, offset, data)?;
+                if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
+                    rs.inbound_stream_frame(*fin, *offset, *data)?;
                 }
             }
             Frame::MaxData { maximum_data } => {
                 stats.max_data += 1;
-                self.handle_max_data(maximum_data);
+                self.handle_max_data(*maximum_data);
             }
             Frame::MaxStreamData {
                 stream_id,
@@ -166,12 +166,12 @@ impl Streams {
             } => {
                 qtrace!(
                     "Stream {} Received MaxStreamData {}",
-                    stream_id,
-                    maximum_stream_data
+                    *stream_id,
+                    *maximum_stream_data
                 );
                 stats.max_stream_data += 1;
-                if let (Some(ss), _) = self.obtain_stream(stream_id)? {
-                    ss.set_max_stream_data(maximum_stream_data);
+                if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
+                    ss.set_max_stream_data(*maximum_stream_data);
                 }
             }
             Frame::MaxStreams {
@@ -179,7 +179,7 @@ impl Streams {
                 maximum_streams,
             } => {
                 stats.max_streams += 1;
-                self.handle_max_streams(stream_type, maximum_streams);
+                self.handle_max_streams(*stream_type, *maximum_streams);
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to max
@@ -196,7 +196,7 @@ impl Streams {
                     return Err(Error::StreamStateError);
                 }
 
-                if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
+                if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.send_flowc_update();
                 }
             }

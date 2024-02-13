@@ -867,7 +867,7 @@ mod tests {
     /// This takes a `TransportParameter::PreferredAddress` that has been mutilated.
     /// It then encodes it, working from the knowledge that the `encode` function
     /// doesn't care about validity, and decodes it.  The result should be failure.
-    fn assert_invalid_spa(spa: TransportParameter) {
+    fn assert_invalid_spa(spa: &TransportParameter) {
         let mut enc = Encoder::new();
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         assert_eq!(
@@ -877,40 +877,40 @@ mod tests {
     }
 
     /// This is for those rare mutations that are acceptable.
-    fn assert_valid_spa(spa: TransportParameter) {
+    fn assert_valid_spa(spa: &TransportParameter) {
         let mut enc = Encoder::new();
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
         assert_eq!(id, PREFERRED_ADDRESS);
-        assert_eq!(decoded, spa);
+        assert_eq!(&decoded, spa);
     }
 
     #[test]
     fn preferred_address_zero_address() {
         // Either port being zero is bad.
-        assert_invalid_spa(mutate_spa(|v4, _, _| {
+        assert_invalid_spa(&mutate_spa(|v4, _, _| {
             v4.as_mut().unwrap().set_port(0);
         }));
-        assert_invalid_spa(mutate_spa(|_, v6, _| {
+        assert_invalid_spa(&mutate_spa(|_, v6, _| {
             v6.as_mut().unwrap().set_port(0);
         }));
         // Either IP being zero is bad.
-        assert_invalid_spa(mutate_spa(|v4, _, _| {
+        assert_invalid_spa(&mutate_spa(|v4, _, _| {
             v4.as_mut().unwrap().set_ip(Ipv4Addr::from(0));
         }));
-        assert_invalid_spa(mutate_spa(|_, v6, _| {
+        assert_invalid_spa(&mutate_spa(|_, v6, _| {
             v6.as_mut().unwrap().set_ip(Ipv6Addr::from(0));
         }));
         // Either address being absent is OK.
-        assert_valid_spa(mutate_spa(|v4, _, _| {
+        assert_valid_spa(&mutate_spa(|v4, _, _| {
             *v4 = None;
         }));
-        assert_valid_spa(mutate_spa(|_, v6, _| {
+        assert_valid_spa(&mutate_spa(|_, v6, _| {
             *v6 = None;
         }));
         // Both addresses being absent is bad.
-        assert_invalid_spa(mutate_spa(|v4, v6, _| {
+        assert_invalid_spa(&mutate_spa(|v4, v6, _| {
             *v4 = None;
             *v6 = None;
         }));
@@ -918,10 +918,10 @@ mod tests {
 
     #[test]
     fn preferred_address_bad_cid() {
-        assert_invalid_spa(mutate_spa(|_, _, cid| {
+        assert_invalid_spa(&mutate_spa(|_, _, cid| {
             *cid = ConnectionId::from(&[]);
         }));
-        assert_invalid_spa(mutate_spa(|_, _, cid| {
+        assert_invalid_spa(&mutate_spa(|_, _, cid| {
             *cid = ConnectionId::from(&[0x0c; 21]);
         }));
     }

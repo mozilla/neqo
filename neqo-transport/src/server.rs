@@ -267,7 +267,7 @@ impl Server {
 
     fn process_connection(
         &mut self,
-        c: StateRef,
+        c: &StateRef,
         dgram: Option<&Datagram>,
         now: Instant,
     ) -> Option<Datagram> {
@@ -392,7 +392,7 @@ impl Server {
                 attempt_key
             );
             let c = Rc::clone(c);
-            self.process_connection(c, Some(dgram), now)
+            self.process_connection(&c, Some(dgram), now)
         } else {
             self.accept_connection(attempt_key, initial, dgram, orig_dcid, now)
         }
@@ -461,9 +461,9 @@ impl Server {
         }
         if let Some(odcid) = orig_dcid {
             // There was a retry, so set the connection IDs for.
-            c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
+            c.set_retry_cids(&odcid, initial.src_cid, &initial.dst_cid);
         }
-        c.set_validation(Rc::clone(&self.address_validation));
+        c.set_validation(&self.address_validation);
         c.set_qlog(self.create_qlog_trace(attempt_key.odcid.as_cid_ref()));
         if let Some(cfg) = &self.ech_config {
             if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
@@ -510,10 +510,10 @@ impl Server {
                     last_timer: now,
                     active_attempt: Some(attempt_key.clone()),
                 }));
-                cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
+                cid_mgr.borrow_mut().set_connection(&c);
                 let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
                 debug_assert!(previous_attempt.is_none());
-                self.process_connection(c, Some(dgram), now)
+                self.process_connection(&c, Some(dgram), now)
             }
             Err(e) => {
                 qwarn!([self], "Unable to create connection");
@@ -549,7 +549,7 @@ impl Server {
                 attempt_key
             );
             let c = Rc::clone(c);
-            self.process_connection(c, Some(dgram), now)
+            self.process_connection(&c, Some(dgram), now)
         } else {
             qdebug!([self], "Dropping 0-RTT for unknown connection");
             None
@@ -569,7 +569,7 @@ impl Server {
 
         // Finding an existing connection. Should be the most common case.
         if let Some(c) = self.connection(packet.dcid()) {
-            return self.process_connection(c, Some(dgram), now);
+            return self.process_connection(&c, Some(dgram), now);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -642,13 +642,13 @@ impl Server {
     fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
         qtrace!([self], "No packet to send, look at waiting connections");
         while let Some(c) = self.waiting.pop_front() {
-            if let Some(d) = self.process_connection(c, None, now) {
+            if let Some(d) = self.process_connection(&c, None, now) {
                 return Some(d);
             }
         }
         qtrace!([self], "No packet to send still, run timers");
         while let Some(c) = self.timers.take_next(now) {
-            if let Some(d) = self.process_connection(c, None, now) {
+            if let Some(d) = self.process_connection(&c, None, now) {
                 return Some(d);
             }
         }
@@ -689,7 +689,7 @@ impl Server {
         mem::take(&mut self.active).into_iter().collect()
     }
 
-    pub fn add_to_waiting(&mut self, c: ActiveConnectionRef) {
+    pub fn add_to_waiting(&mut self, c: &ActiveConnectionRef) {
         self.waiting.push_back(c.connection());
     }
 }
@@ -738,13 +738,13 @@ struct ServerConnectionIdGenerator {
 }
 
 impl ServerConnectionIdGenerator {
-    pub fn set_connection(&mut self, c: StateRef) {
+    pub fn set_connection(&mut self, c: &StateRef) {
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
             qtrace!("ServerConnectionIdGenerator inserting saved cid {}", cid);
-            self.insert_cid(cid, Rc::clone(&c));
+            self.insert_cid(cid, Rc::clone(c));
         }
-        self.c = Rc::downgrade(&c);
+        self.c = Rc::downgrade(c);
     }
 
     fn insert_cid(&mut self, cid: ConnectionId, rc: StateRef) {

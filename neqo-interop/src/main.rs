@@ -59,7 +59,7 @@ trait Handler {
     }
 }
 
-fn emit_datagram(socket: &UdpSocket, d: Datagram) {
+fn emit_datagram(socket: &UdpSocket, d: &Datagram) {
     let sent = socket.send(&d[..]).expect("Error sending datagram");
     if sent != d.len() {
         eprintln!("Unable to send all {} bytes of datagram", d.len());
@@ -114,7 +114,7 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-                    emit_datagram(&nctx.socket, dgram);
+                    emit_datagram(&nctx.socket, &dgram);
                 }
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
@@ -283,7 +283,7 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&nctx.socket, dgram),
+                Output::Datagram(dgram) => emit_datagram(&nctx.socket, &dgram),
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();

@@ -151,7 +151,7 @@ impl Http3Server {
         active_conns.dedup();
         active_conns
             .iter()
-            .for_each(|conn| self.server.add_to_waiting(conn.clone()));
+            .for_each(|conn| self.server.add_to_waiting(conn));
         for mut conn in active_conns {
             self.process_events(&mut conn, now);
         }

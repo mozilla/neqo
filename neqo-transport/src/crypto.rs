@@ -274,7 +274,7 @@ impl Crypto {
     fn maybe_install_application_write_key(&mut self, version: Version) -> Res<()> {
         qtrace!([self], "Attempt to install application write key");
         if let Some(secret) = self.tls.write_secret(TLS_EPOCH_APPLICATION_DATA) {
-            self.states.set_application_write_key(version, secret)?;
+            self.states.set_application_write_key(version, &secret)?;
             qdebug!([self], "Application write key installed");
         }
         Ok(())
@@ -290,7 +290,7 @@ impl Crypto {
             .read_secret(TLS_EPOCH_APPLICATION_DATA)
             .ok_or(Error::InternalError)?;
         self.states
-            .set_application_read_key(version, read_secret, expire_0rtt)?;
+            .set_application_read_key(version, &read_secret, expire_0rtt)?;
         qdebug!([self], "application read keys installed");
         Ok(())
     }
@@ -767,7 +767,7 @@ impl CryptoDxAppData {
     pub fn new(
         version: Version,
         dir: CryptoDxDirection,
-        secret: SymKey,
+        secret: &SymKey,
         cipher: Cipher,
         fuzzing: bool,
     ) -> Res<Self> {
@@ -1111,7 +1111,7 @@ impl CryptoStates {
         });
     }
 
-    pub fn set_application_write_key(&mut self, version: Version, secret: SymKey) -> Res<()> {
+    pub fn set_application_write_key(&mut self, version: Version, secret: &SymKey) -> Res<()> {
         debug_assert!(self.app_write.is_none());
         debug_assert_ne!(self.cipher, 0);
         let mut app = CryptoDxAppData::new(
@@ -1134,7 +1134,7 @@ impl CryptoStates {
     pub fn set_application_read_key(
         &mut self,
         version: Version,
-        secret: SymKey,
+        secret: &SymKey,
         expire_0rtt: Instant,
     ) -> Res<()> {
         debug_assert!(self.app_write.is_some(), "should have write keys installed");

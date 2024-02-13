@@ -347,7 +347,7 @@ fn reorder_05rtt_with_0rtt() {
     let mut server = default_server();
     let validation = AddressValidation::new(now(), ValidateAddress::NoToken).unwrap();
     let validation = Rc::new(RefCell::new(validation));
-    server.set_validation(Rc::clone(&validation));
+    server.set_validation(&validation);
     let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
 
     // Include RTT in sending the ticket or the ticket age reported by the

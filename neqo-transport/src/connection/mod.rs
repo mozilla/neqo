@@ -515,9 +515,9 @@ impl Connection {
     /// Retry.
     pub(crate) fn set_retry_cids(
         &mut self,
-        odcid: ConnectionId,
+        odcid: &ConnectionId,
         remote_cid: ConnectionId,
-        retry_cid: ConnectionId,
+        retry_cid: &ConnectionId,
     ) {
         debug_assert_eq!(self.role, Role::Server);
         qtrace!(
@@ -755,10 +755,10 @@ impl Connection {
         Ok(())
     }
 
-    pub(crate) fn set_validation(&mut self, validation: Rc<RefCell<AddressValidation>>) {
+    pub(crate) fn set_validation(&mut self, validation: &Rc<RefCell<AddressValidation>>) {
         qtrace!([self], "Enabling NEW_TOKEN");
         assert_eq!(self.role, Role::Server);
-        self.address_validation = AddressValidationInfo::Server(Rc::downgrade(&validation));
+        self.address_validation = AddressValidationInfo::Server(Rc::downgrade(validation));
     }
 
     /// Send a TLS session ticket AND a `NEW_TOKEN` frame (if possible).
@@ -1848,7 +1848,7 @@ impl Connection {
             State::Closing { .. } | State::Draining { .. } | State::Closed(_) => {
                 if let Some(details) = self.state_signaling.close_frame() {
                     let path = Rc::clone(details.path());
-                    let res = self.output_close(details);
+                    let res = self.output_close(&details);
                     self.capture_error(Some(path), now, 0, res)
                 } else {
                     Ok(SendOption::default())
@@ -1925,7 +1925,7 @@ impl Connection {
         }
     }
 
-    fn output_close(&mut self, close: ClosingFrame) -> Res<SendOption> {
+    fn output_close(&mut self, close: &ClosingFrame) -> Res<SendOption> {
         let mut encoder = Encoder::with_capacity(256);
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
@@ -2679,7 +2679,7 @@ impl Connection {
         if frame.is_stream() {
             return self
                 .streams
-                .input_frame(frame, &mut self.stats.borrow_mut().frame_rx);
+                .input_frame(&frame, &mut self.stats.borrow_mut().frame_rx);
         }
         match frame {
             Frame::Padding => {
