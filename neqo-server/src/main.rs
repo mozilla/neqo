@@ -245,25 +245,25 @@ impl QuicParameters {
     {
         let addr = opt
             .iter()
-            .flat_map(|spa| spa.to_socket_addrs().ok())
+            .filter_map(|spa| spa.to_socket_addrs().ok())
             .flatten()
             .find(f);
-        if opt.is_some() != addr.is_some() {
-            panic!(
-                "unable to resolve '{}' to an {} address",
-                opt.as_ref().unwrap(),
-                v
-            );
-        }
+        assert_eq!(
+            opt.is_some(),
+            addr.is_some(),
+            "unable to resolve '{}' to an {} address",
+            opt.as_ref().unwrap(),
+            v,
+        );
         addr
     }
 
     fn preferred_address_v4(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", |addr| addr.is_ipv4())
+        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", SocketAddr::is_ipv4)
     }
 
     fn preferred_address_v6(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", |addr| addr.is_ipv6())
+        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", SocketAddr::is_ipv6)
     }
 
     fn preferred_address(&self) -> Option<PreferredAddress> {
