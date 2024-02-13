@@ -20,3 +20,4 @@ qlog = "0.12"
 
 [features]
 deny-warnings = []
+bench = []

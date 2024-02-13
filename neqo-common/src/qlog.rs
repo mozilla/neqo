@@ -93,10 +93,6 @@ impl NeqoQlog {
         F: FnOnce(&mut QlogStreamer) -> Result<(), qlog::Error>,
     {
         if let Some(inner) = self.inner.borrow_mut().as_mut() {
-            // TODO: Hack.
-            if inner.qlog_path == Path::new("") {
-                return;
-            }
             if let Err(e) = f(&mut inner.streamer) {
                 crate::do_log!(
                     ::log::Level::Error,
