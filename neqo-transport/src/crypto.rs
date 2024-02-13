@@ -101,10 +101,10 @@ impl Crypto {
             version,
             protocols,
             tls: agent,
-            streams: Default::default(),
+            streams: CryptoStreams::default(),
             states: CryptoStates {
                 fuzzing,
-                ..Default::default()
+                ..CryptoStates::default()
             },
         })
     }
