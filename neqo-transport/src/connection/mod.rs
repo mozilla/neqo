@@ -1269,6 +1269,7 @@ impl Connection {
 
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
+    #[allow(clippy::too_many_lines)] // Yeah, it's a work in progress.
     fn preprocess_packet(
         &mut self,
         packet: &PublicPacket,
@@ -1381,17 +1382,17 @@ impl Connection {
             }
             State::WaitInitial => PreprocessResult::Continue,
             State::WaitVersion | State::Handshaking | State::Connected | State::Confirmed => {
-                if !self.cid_manager.is_valid(packet.dcid()) {
-                    self.stats
-                        .borrow_mut()
-                        .pkt_dropped(format!("Invalid DCID {:?}", packet.dcid()));
-                    PreprocessResult::Next
-                } else {
+                if self.cid_manager.is_valid(packet.dcid()) {
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
                         // Server has received a Handshake packet -> discard Initial keys and states
                         self.discard_keys(PacketNumberSpace::Initial, now);
                     }
                     PreprocessResult::Continue
+                } else {
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped(format!("Invalid DCID {:?}", packet.dcid()));
+                    PreprocessResult::Next
                 }
             }
             State::Closing { .. } => {

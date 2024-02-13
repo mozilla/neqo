@@ -239,14 +239,14 @@ impl Crypto {
 
     /// Returns true if new handshake keys were installed.
     pub fn install_keys(&mut self, role: Role) -> Res<bool> {
-        if !self.tls.state().is_final() {
+        if self.tls.state().is_final() {
+            Ok(false)
+        } else {
             let installed_hs = self.install_handshake_keys()?;
             if role == Role::Server {
                 self.maybe_install_application_write_key(self.version)?;
             }
             Ok(installed_hs)
-        } else {
-            Ok(false)
         }
     }
 
