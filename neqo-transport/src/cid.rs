@@ -601,9 +601,11 @@ mod tests {
         fixture_init();
         for _ in 0..100 {
             let cid = ConnectionId::generate_initial();
-            if !matches!(cid.len(), 8..=MAX_CONNECTION_ID_LEN) {
-                panic!("connection ID {:?}", cid);
-            }
+            assert!(
+                matches!(cid.len(), 8..=MAX_CONNECTION_ID_LEN),
+                "connection ID length {:?}",
+                cid,
+            );
         }
     }
 }
