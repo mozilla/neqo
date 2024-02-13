@@ -402,7 +402,7 @@ impl Server {
         if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.clone();
 
-            qlog_path.push(format!("{}.qlog", odcid));
+            qlog_path.push(format!("{odcid}.qlog"));
 
             // The original DCID is chosen by the client. Using create_new()
             // prevents attackers from overwriting existing logs.
