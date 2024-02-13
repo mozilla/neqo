@@ -80,7 +80,7 @@ jobs:
             cd server && \
             nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- $HOST:4433 &
+              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 &
           PID=$!
           mkdir client && \
             cd client && \
@@ -96,7 +96,7 @@ jobs:
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
-        if: success() || failure()
+        if: success() || failure() || cancelled()
 
       - name: Download previous benchmark results
         uses: actions/cache@v4
