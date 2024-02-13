@@ -1,5 +1,7 @@
 name: Bench
 on:
+  push:
+  pull_request:
   workflow_call:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
@@ -22,19 +24,28 @@ jobs:
           toolchain: $TOOLCHAIN
           components: rustfmt
 
-      - name: Configure Rust
-        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
-
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
 
-      - name: Enable sccache
+      - name: Configure Rust
         run: |
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          cargo install flamegraph
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fetch NSS and NSPR
+        run: |
+          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
+          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
+        env:
+          NSS_DIR: ${{ github.workspace }}/nss
+          NSPR_DIR: ${{ github.workspace }}/nspr
 
       - name: Build
         run: cargo +$TOOLCHAIN bench --features bench --no-run
@@ -53,9 +64,8 @@ jobs:
       - name: Perf transfer benchmark
         run: |
           /usr/bin/nice -n -20 taskset -c 0 \
-            perf record -F997 --call-graph=lbr -o perf.data \
-            cargo +$TOOLCHAIN bench --features bench --bench transfer -- \
-              --exact "Run multiple transfers with varying seeds"
+            cargo +$TOOLCHAIN flamegraph -v -F 997 --features bench --bench transfer -- \
+              --bench --exact "Run multiple transfers with varying seeds"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
