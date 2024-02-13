@@ -1703,7 +1703,7 @@ impl SendStreams {
     }
 
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
-        for (id, ss) in self.map.iter_mut() {
+        for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
                 remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
