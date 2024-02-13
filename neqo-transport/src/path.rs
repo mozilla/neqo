@@ -156,7 +156,7 @@ impl Paths {
 
     /// Get a reference to the primary path.  Use this prior to handshake completion.
     pub fn primary_fallible(&self) -> Option<PathRef> {
-        self.primary.as_ref().map(Rc::clone)
+        self.primary.clone()
     }
 
     /// Returns true if the path is not permanent.
@@ -341,7 +341,7 @@ impl Paths {
                     None
                 }
             })
-            .or_else(|| self.primary.as_ref().map(Rc::clone))
+            .or_else(|| self.primary.clone())
     }
 
     /// A `PATH_RESPONSE` was received.

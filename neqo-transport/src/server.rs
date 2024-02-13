@@ -313,7 +313,7 @@ impl Server {
     }
 
     fn connection(&self, cid: ConnectionIdRef) -> Option<StateRef> {
-        self.connections.borrow().get(&cid[..]).map(Rc::clone)
+        self.connections.borrow().get(&cid[..]).cloned()
     }
 
     fn handle_initial(
