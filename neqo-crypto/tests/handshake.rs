@@ -127,6 +127,7 @@ fn zero_rtt_setup(
     }
 }
 
+#[must_use]
 pub fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, ResumptionToken) {
     fixture_init();
 

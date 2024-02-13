@@ -133,6 +133,7 @@ pub enum Error {
 }
 
 impl Error {
+    #[must_use]
     pub fn code(&self) -> TransportError {
         match self {
             Self::NoError
@@ -209,6 +210,7 @@ pub enum ConnectionError {
 }
 
 impl ConnectionError {
+    #[must_use]
     pub fn app_code(&self) -> Option<AppError> {
         match self {
             Self::Application(e) => Some(*e),

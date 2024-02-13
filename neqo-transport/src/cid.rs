@@ -39,6 +39,7 @@ pub struct ConnectionId {
 }
 
 impl ConnectionId {
+    #[must_use]
     pub fn generate(len: usize) -> Self {
         assert!(matches!(len, 0..=MAX_CONNECTION_ID_LEN));
         let mut cid = smallvec![0; len];
@@ -47,6 +48,7 @@ impl ConnectionId {
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
+    #[must_use]
     pub fn generate_initial() -> Self {
         let v = random::<1>()[0];
         // Bias selection toward picking 8 (>50% of the time).
@@ -54,6 +56,7 @@ impl ConnectionId {
         Self::generate(len)
     }
 
+    #[must_use]
     pub fn as_cid_ref(&self) -> ConnectionIdRef {
         ConnectionIdRef::from(&self.cid[..])
     }
@@ -205,6 +208,7 @@ pub struct RandomConnectionIdGenerator {
 }
 
 impl RandomConnectionIdGenerator {
+    #[must_use]
     pub fn new(len: usize) -> Self {
         Self { len }
     }

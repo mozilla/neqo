@@ -118,6 +118,7 @@ impl Output {
     }
 
     /// Get a reference to the Datagram, if any.
+    #[must_use]
     pub fn as_dgram_ref(&self) -> Option<&Datagram> {
         match self {
             Self::Datagram(dg) => Some(dg),
@@ -446,6 +447,7 @@ impl Connection {
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
+    #[must_use]
     pub fn ech_config(&self) -> &[u8] {
         self.crypto.ech_config()
     }
@@ -469,6 +471,7 @@ impl Connection {
     /// Get the original destination connection id for this connection. This
     /// will always be present for Role::Client but not if Role::Server is in
     /// State::Init.
+    #[must_use]
     pub fn odcid(&self) -> Option<&ConnectionId> {
         self.original_destination_cid.as_ref()
     }
@@ -773,6 +776,7 @@ impl Connection {
         }
     }
 
+    #[must_use]
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
         self.crypto.tls.info()
     }
@@ -782,6 +786,7 @@ impl Connection {
     }
 
     /// Get the peer's certificate chain and other info.
+    #[must_use]
     pub fn peer_certificate(&self) -> Option<CertificateInfo> {
         self.crypto.tls.peer_certificate()
     }
@@ -801,26 +806,31 @@ impl Connection {
     }
 
     /// Get the role of the connection.
+    #[must_use]
     pub fn role(&self) -> Role {
         self.role
     }
 
     /// Get the state of the connection.
+    #[must_use]
     pub fn state(&self) -> &State {
         &self.state
     }
 
     /// The QUIC version in use.
+    #[must_use]
     pub fn version(&self) -> Version {
         self.version
     }
 
     /// Get the 0-RTT state of the connection.
+    #[must_use]
     pub fn zero_rtt_state(&self) -> ZeroRttState {
         self.zero_rtt_state
     }
 
     /// Get a snapshot of collected statistics.
+    #[must_use]
     pub fn stats(&self) -> Stats {
         let mut v = self.stats.borrow().clone();
         if let Some(p) = self.paths.primary_fallible() {
@@ -2317,6 +2327,7 @@ impl Connection {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub fn get_epochs(&self) -> (Option<usize>, Option<usize>) {
         self.crypto.states.get_epochs()
     }
@@ -2375,6 +2386,7 @@ impl Connection {
         );
     }
 
+    #[must_use]
     pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
         self.streams.is_stream_id_allowed(stream_id)
     }
@@ -3146,6 +3158,7 @@ impl Connection {
         self.streams.keep_alive(stream_id, keep)
     }
 
+    #[must_use]
     pub fn remote_datagram_size(&self) -> u64 {
         self.quic_datagrams.remote_datagram_size()
     }

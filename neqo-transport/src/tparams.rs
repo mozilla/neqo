@@ -353,6 +353,7 @@ impl TransportParameters {
     }
 
     // Get an integer type or a default.
+    #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
         let default = match tp {
             IDLE_TIMEOUT
@@ -399,6 +400,7 @@ impl TransportParameters {
         }
     }
 
+    #[must_use]
     pub fn get_bytes(&self, tp: TransportParameterId) -> Option<&[u8]> {
         match tp {
             ORIGINAL_DESTINATION_CONNECTION_ID
@@ -467,6 +469,7 @@ impl TransportParameters {
         }
     }
 
+    #[must_use]
     pub fn get_empty(&self, tipe: TransportParameterId) -> bool {
         match self.params.get(&tipe) {
             None => false,
@@ -568,6 +571,7 @@ pub struct TransportParametersHandler {
 }
 
 impl TransportParametersHandler {
+    #[must_use]
     pub fn new(role: Role, versions: VersionConfig) -> Self {
         let mut local = TransportParameters::default();
         local.set_versions(role, &versions);
@@ -588,6 +592,7 @@ impl TransportParametersHandler {
         self.local.set_versions(self.role, &self.versions);
     }
 
+    #[must_use]
     pub fn remote(&self) -> &TransportParameters {
         match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
             (Some(tp), _) | (_, Some(tp)) => tp,
@@ -596,6 +601,7 @@ impl TransportParametersHandler {
     }
 
     /// Get the version as set (or as determined by a compatible upgrade).
+    #[must_use]
     pub fn version(&self) -> Version {
         self.versions.initial()
     }

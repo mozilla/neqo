@@ -66,6 +66,7 @@ impl State {
         )
     }
 
+    #[must_use]
     pub fn error(&self) -> Option<&ConnectionError> {
         if let Self::Closing { error, .. } | Self::Draining { error, .. } | Self::Closed(error) =
             self

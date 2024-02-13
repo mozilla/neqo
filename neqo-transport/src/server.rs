@@ -251,6 +251,7 @@ impl Server {
         Ok(())
     }
 
+    #[must_use]
     pub fn ech_config(&self) -> &[u8] {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
@@ -695,6 +696,7 @@ pub struct ActiveConnectionRef {
 }
 
 impl ActiveConnectionRef {
+    #[must_use]
     pub fn borrow(&self) -> impl Deref<Target = Connection> + '_ {
         std::cell::Ref::map(self.c.borrow(), |c| &c.c)
     }
@@ -703,6 +705,7 @@ impl ActiveConnectionRef {
         std::cell::RefMut::map(self.c.borrow_mut(), |c| &mut c.c)
     }
 
+    #[must_use]
     pub fn connection(&self) -> StateRef {
         Rc::clone(&self.c)
     }

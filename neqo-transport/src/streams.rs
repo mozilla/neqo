@@ -95,6 +95,7 @@ impl Streams {
         }
     }
 
+    #[must_use]
     pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
         self.remote_stream_limits[stream_id.stream_type()].is_allowed(stream_id)
     }

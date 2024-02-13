@@ -78,6 +78,7 @@ impl CloseError {
         }
     }
 
+    #[must_use]
     pub fn code(&self) -> u64 {
         match self {
             Self::Transport(c) | Self::Application(c) => *c,
