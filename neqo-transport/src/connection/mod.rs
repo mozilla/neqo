@@ -302,6 +302,8 @@ impl Connection {
     const LOOSE_TIMER_RESOLUTION: Duration = Duration::from_millis(50);
 
     /// Create a new QUIC connection with Client role.
+    /// # Errors
+    /// When NSS fails and an agent cannot be created.
     pub fn new_client(
         server_name: impl Into<String>,
         protocols: &[impl AsRef<str>],
@@ -338,6 +340,8 @@ impl Connection {
     }
 
     /// Create a new QUIC connection with Server role.
+    /// # Errors
+    /// When NSS fails and an agent cannot be created.
     pub fn new_server(
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
@@ -427,6 +431,8 @@ impl Connection {
         Ok(c)
     }
 
+    /// # Errors
+    /// When the operation fails.
     pub fn server_enable_0rtt(
         &mut self,
         anti_replay: &AntiReplay,
@@ -436,6 +442,8 @@ impl Connection {
             .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
     }
 
+    /// # Errors
+    /// When the operation fails.
     pub fn server_enable_ech(
         &mut self,
         config: u8,
@@ -452,6 +460,8 @@ impl Connection {
         self.crypto.ech_config()
     }
 
+    /// # Errors
+    /// When the operation fails.    
     pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
         self.crypto.client_enable_ech(ech_config_list)
     }
@@ -480,8 +490,9 @@ impl Connection {
     /// This only sets transport parameters without dealing with other aspects of
     /// setting the value.
     ///
+    /// # Errors
+    /// When the transport parameter is invalid.
     /// # Panics
-    ///
     /// This panics if the transport parameter is known to this crate.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
         #[cfg(not(test))]
@@ -535,12 +546,16 @@ impl Connection {
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
     /// higher preference.
+    /// # Errors
+    /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         self.crypto.tls.set_alpn(protocols)?;
         Ok(())
     }
 
     /// Enable a set of ciphers.
+    /// # Errors
+    /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "Cannot enable ciphers in state {:?}", self.state);
@@ -551,6 +566,8 @@ impl Connection {
     }
 
     /// Enable a set of key exchange groups.
+    /// # Errors
+    /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "Cannot enable groups in state {:?}", self.state);
@@ -561,6 +578,8 @@ impl Connection {
     }
 
     /// Set the number of additional key shares to send in the client hello.
+    /// # Errors
+    /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn send_additional_key_shares(&mut self, count: usize) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "Cannot enable groups in state {:?}", self.state);
@@ -669,6 +688,8 @@ impl Connection {
     /// This can only be called once and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
+    /// # Errors
+    /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "set token in state {:?}", self.state);
@@ -741,6 +762,8 @@ impl Connection {
     }
 
     /// Send a TLS session ticket AND a `NEW_TOKEN` frame (if possible).
+    /// # Errors
+    /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         if self.role == Role::Client {
             return Err(Error::WrongRole);
@@ -781,6 +804,8 @@ impl Connection {
         self.crypto.tls.info()
     }
 
+    /// # Errors
+    /// When there is no information to obtain.
     pub fn tls_preinfo(&self) -> Res<SecretAgentPreInfo> {
         Ok(self.crypto.tls.preinfo()?)
     }
@@ -2310,6 +2335,8 @@ impl Connection {
         }
     }
 
+    /// # Errors
+    /// When connection state is not valid.
     pub fn initiate_key_update(&mut self) -> Res<()> {
         if self.state == State::Confirmed {
             let la = self
@@ -3020,8 +3047,7 @@ impl Connection {
     /// Set the `SendOrder` of a stream.  Re-enqueues to keep the ordering correct
     ///
     /// # Errors
-    ///
-    /// Returns `InvalidStreamId` if the stream id doesn't exist
+    /// When the stream does not exist.
     pub fn stream_sendorder(
         &mut self,
         stream_id: StreamId,
@@ -3033,16 +3059,19 @@ impl Connection {
     /// Set the Fairness of a stream
     ///
     /// # Errors
-    ///
-    /// Returns `InvalidStreamId` if the stream id doesn't exist
+    /// When the stream does not exist.
     pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
         self.streams.get_send_stream(stream_id).map(|s| s.stats())
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn recv_stream_stats(&mut self, stream_id: StreamId) -> Res<RecvStreamStats> {
         let stream = self.streams.get_recv_stream_mut(stream_id)?;
 
@@ -3090,17 +3119,23 @@ impl Connection {
     /// Bytes that `stream_send()` is guaranteed to accept for sending.
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
+    /// # Errors
+    /// When the stream ID is invalid.
     pub fn stream_avail_send_space(&self, stream_id: StreamId) -> Res<usize> {
         Ok(self.streams.get_send_stream(stream_id)?.avail())
     }
 
     /// Close the stream. Enqueued data will be sent.
+    /// # Errors
+    /// When the stream ID is invalid.
     pub fn stream_close_send(&mut self, stream_id: StreamId) -> Res<()> {
         self.streams.get_send_stream_mut(stream_id)?.close();
         Ok(())
     }
 
     /// Abandon transmission of in-flight and future stream data.
+    /// # Errors
+    /// When the stream ID is invalid.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
         self.streams.get_send_stream_mut(stream_id)?.reset(err);
         Ok(())
@@ -3121,6 +3156,8 @@ impl Connection {
     }
 
     /// Application is no longer interested in this stream.
+    /// # Errors
+    /// When the stream ID is invalid.
     pub fn stream_stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
         let stream = self.streams.get_recv_stream_mut(stream_id)?;
 
@@ -3163,7 +3200,7 @@ impl Connection {
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
     ///
-    /// # Error
+    /// # Errors
     /// The function returns `NotAvailable` if datagrams are not enabled.
     /// # Panics
     /// Basically never, because that unwrap won't fail.
@@ -3207,7 +3244,7 @@ impl Connection {
 
     /// Queue a datagram for sending.
     ///
-    /// # Error
+    /// # Errors
     ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size. The funcion does not check if the
@@ -3217,7 +3254,6 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-
     pub fn send_datagram(&mut self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())

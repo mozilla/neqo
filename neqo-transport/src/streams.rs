@@ -119,6 +119,8 @@ impl Streams {
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
 
+    /// # Errors
+    /// When the frame is invalid.
     pub fn input_frame(&mut self, frame: Frame, stats: &mut FrameStats) -> Res<()> {
         match frame {
             Frame::ResetStream {
@@ -402,6 +404,8 @@ impl Streams {
 
     /// Get or make a stream, and implicitly open additional streams as
     /// indicated by its stream id.
+    /// # Errors
+    /// When the stream cannot be created due to stream limits.
     pub fn obtain_stream(
         &mut self,
         stream_id: StreamId,
@@ -413,14 +417,20 @@ impl Streams {
         ))
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.send.set_sendorder(stream_id, sendorder)
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.send.set_fairness(stream_id, fairness)
     }
 
+    /// # Errors
+    /// When a stream cannot be created, which might be temporary.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         match self.local_stream_limits.take_stream_id(st) {
             None => Err(Error::StreamLimitError),
@@ -526,18 +536,26 @@ impl Streams {
         }
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn get_send_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut SendStream> {
         self.send.get_mut(stream_id)
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn get_send_stream(&self, stream_id: StreamId) -> Res<&SendStream> {
         self.send.get(stream_id)
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn get_recv_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
         self.recv.get_mut(stream_id)
     }
 
+    /// # Errors
+    /// When the stream does not exist.
     pub fn keep_alive(&mut self, stream_id: StreamId, keep: bool) -> Res<()> {
         self.recv.keep_alive(stream_id, keep)
     }

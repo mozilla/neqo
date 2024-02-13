@@ -195,6 +195,8 @@ impl Server {
     ///   OK.
     /// * `cid_generator` is responsible for generating connection IDs and parsing them; connection
     ///   IDs produced by the manager cannot be zero-length.
+    /// # Errors
+    /// When address validation state cannot be created.
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
@@ -240,6 +242,8 @@ impl Server {
         self.ciphers = Vec::from(ciphers.as_ref());
     }
 
+    /// # Errors
+    /// When the configuration is invalid.
     pub fn enable_ech(
         &mut self,
         config: u8,
