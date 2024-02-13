@@ -4,9 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
-use std::{any::Any, cell::RefCell, collections::BTreeSet, mem, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc};
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
@@ -472,10 +470,6 @@ impl HttpRecvStream for Rc<RefCell<WebTransportSession>> {
 
     fn priority_update_sent(&mut self) {
         self.borrow_mut().priority_update_sent();
-    }
-
-    fn any(&self) -> &dyn Any {
-        self
     }
 }
 

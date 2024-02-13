@@ -160,7 +160,7 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use std::{any::Any, cell::RefCell, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 use buffered_send_stream::BufferedStream;
 pub use client_events::{Http3ClientEvent, WebTransportEvent};
@@ -509,8 +509,6 @@ trait HttpRecvStream: RecvStream {
     fn extended_connect_wait_for_response(&self) -> bool {
         false
     }
-
-    fn any(&self) -> &dyn Any;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -627,7 +625,6 @@ trait HttpSendStream: SendStream {
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()>;
     fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}
-    fn any(&self) -> &dyn Any;
 }
 
 trait SendStreamEvents: Debug {
