@@ -776,12 +776,12 @@ impl CryptoDxAppData {
                 version,
                 dir,
                 TLS_EPOCH_APPLICATION_DATA,
-                &secret,
+                secret,
                 cipher,
                 fuzzing,
             ),
             cipher,
-            next_secret: Self::update_secret(cipher, &secret)?,
+            next_secret: Self::update_secret(cipher, secret)?,
             fuzzing,
         })
     }

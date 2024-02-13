@@ -276,24 +276,24 @@ impl Server {
         match out {
             Output::Datagram(_) => {
                 qtrace!([self], "Sending packet, added to waiting connections");
-                self.waiting.push_back(Rc::clone(&c));
+                self.waiting.push_back(Rc::clone(c));
             }
             Output::Callback(delay) => {
                 let next = now + delay;
                 if next != c.borrow().last_timer {
                     qtrace!([self], "Change timer to {:?}", next);
-                    self.remove_timer(&c);
+                    self.remove_timer(c);
                     c.borrow_mut().last_timer = next;
-                    self.timers.add(next, Rc::clone(&c));
+                    self.timers.add(next, Rc::clone(c));
                 }
             }
             Output::None => {
-                self.remove_timer(&c);
+                self.remove_timer(c);
             }
         }
         if c.borrow().has_events() {
             qtrace!([self], "Connection active: {:?}", c);
-            self.active.insert(ActiveConnectionRef { c: Rc::clone(&c) });
+            self.active.insert(ActiveConnectionRef { c: Rc::clone(c) });
         }
 
         if *c.borrow().state() > State::Handshaking {
@@ -307,7 +307,7 @@ impl Server {
             c.borrow_mut().set_qlog(NeqoQlog::disabled());
             self.connections
                 .borrow_mut()
-                .retain(|_, v| !Rc::ptr_eq(v, &c));
+                .retain(|_, v| !Rc::ptr_eq(v, c));
         }
         out.dgram()
     }

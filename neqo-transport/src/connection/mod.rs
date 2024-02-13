@@ -1967,7 +1967,7 @@ impl Connection {
             };
             sanitized
                 .as_ref()
-                .unwrap_or(&close)
+                .unwrap_or(close)
                 .write_frame(&mut builder);
             encoder = builder.build(tx)?;
         }
