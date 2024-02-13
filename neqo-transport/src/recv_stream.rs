@@ -314,7 +314,7 @@ impl RxStreamOrderer {
         self.received
     }
 
-    /// Data bytes buffered. Could be more than bytes_readable if there are
+    /// Data bytes buffered. Could be more than `bytes_readable` if there are
     /// ranges missing.
     fn buffered(&self) -> u64 {
         self.data_ranges
@@ -1634,7 +1634,7 @@ mod tests {
         assert_eq!(fc.retired(), retired);
     }
 
-    /// Test consuming the flow control in RecvStreamState::Recv
+    /// Test consuming the flow control in `RecvStreamState::Recv`
     #[test]
     fn fc_state_recv_1() {
         const SW: u64 = 1024;
@@ -1651,7 +1651,7 @@ mod tests {
         check_fc(s.fc().unwrap(), SW / 4, 0);
     }
 
-    /// Test consuming the flow control in RecvStreamState::Recv
+    /// Test consuming the flow control in `RecvStreamState::Recv`
     /// with multiple streams
     #[test]
     fn fc_state_recv_2() {
@@ -1678,7 +1678,7 @@ mod tests {
         check_fc(s2.fc().unwrap(), SW / 4, 0);
     }
 
-    /// Test retiring the flow control in RecvStreamState::Recv
+    /// Test retiring the flow control in `RecvStreamState::Recv`
     /// with multiple streams
     #[test]
     fn fc_state_recv_3() {
@@ -1730,7 +1730,7 @@ mod tests {
         check_fc(s2.fc().unwrap(), SW / 4, SW / 4);
     }
 
-    /// Test consuming the flow control in RecvStreamState::Recv - duplicate data
+    /// Test consuming the flow control in `RecvStreamState::Recv` - duplicate data
     #[test]
     fn fc_state_recv_4() {
         const SW: u64 = 1024;
@@ -1753,7 +1753,7 @@ mod tests {
         check_fc(s.fc().unwrap(), SW / 4, 0);
     }
 
-    /// Test consuming the flow control in RecvStreamState::Recv - filling a gap in the
+    /// Test consuming the flow control in `RecvStreamState::Recv` - filling a gap in the
     /// data stream.
     #[test]
     fn fc_state_recv_5() {
@@ -1774,7 +1774,7 @@ mod tests {
         check_fc(s.fc().unwrap(), SW / 4, 0);
     }
 
-    /// Test consuming the flow control in RecvStreamState::Recv - receiving frame past
+    /// Test consuming the flow control in `RecvStreamState::Recv` - receiving frame past
     /// the flow control will cause an error.
     #[test]
     fn fc_state_recv_6() {
@@ -1859,7 +1859,7 @@ mod tests {
         assert_eq!(stats.max_stream_data, 1);
     }
 
-    /// Test flow control in RecvStreamState::SizeKnown
+    /// Test flow control in `RecvStreamState::SizeKnown`
     #[test]
     fn fc_state_size_known() {
         const SW: u64 = 1024;
@@ -1916,7 +1916,7 @@ mod tests {
         assert!(s.fc().is_none());
     }
 
-    /// Test flow control in RecvStreamState::DataRecvd
+    /// Test flow control in `RecvStreamState::DataRecvd`
     #[test]
     fn fc_state_data_recv() {
         const SW: u64 = 1024;
@@ -1961,7 +1961,7 @@ mod tests {
         assert!(s.fc().is_none());
     }
 
-    /// Test flow control in RecvStreamState::DataRead
+    /// Test flow control in `RecvStreamState::DataRead`
     #[test]
     fn fc_state_data_read() {
         const SW: u64 = 1024;
@@ -1999,7 +1999,7 @@ mod tests {
         assert!(s.fc().is_none());
     }
 
-    /// Test flow control in RecvStreamState::AbortReading and final size is known
+    /// Test flow control in `RecvStreamState::AbortReading` and final size is known
     #[test]
     fn fc_state_abort_reading_1() {
         const SW: u64 = 1024;
@@ -2041,7 +2041,7 @@ mod tests {
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
     }
 
-    /// Test flow control in RecvStreamState::AbortReading and final size is unknown
+    /// Test flow control in `RecvStreamState::AbortReading` and final size is unknown
     #[test]
     fn fc_state_abort_reading_2() {
         const SW: u64 = 1024;
@@ -2099,7 +2099,7 @@ mod tests {
         check_fc(s.fc().unwrap(), SW / 2 + 20, SW / 2 + 20);
     }
 
-    /// Test flow control in RecvStreamState::WaitForReset
+    /// Test flow control in `RecvStreamState::WaitForReset`
     #[test]
     fn fc_state_wait_for_reset() {
         const SW: u64 = 1024;

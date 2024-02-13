@@ -43,7 +43,7 @@ pub enum InitialResult {
     Retry(Vec<u8>),
 }
 
-/// MIN_INITIAL_PACKET_SIZE is the smallest packet that can be used to establish
+/// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
 /// a new connection across all QUIC versions this server supports.
 const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 /// The size of timer buckets.  This is higher than the actual timer granularity

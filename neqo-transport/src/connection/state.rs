@@ -185,13 +185,13 @@ impl ClosingFrame {
     }
 }
 
-/// `StateSignaling` manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
+/// `StateSignaling` manages whether we need to send `HANDSHAKE_DONE` and `CONNECTION_CLOSE`.
 /// Valid state transitions are:
-/// * Idle -> HandshakeDone: at the server when the handshake completes
-/// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
+/// * Idle -> `HandshakeDone`: at the server when the handshake completes
+/// * `HandshakeDone` -> Idle: when a `HANDSHAKE_DONE` frame is sent
 /// * Idle/HandshakeDone -> Closing/Draining: when closing or draining
-/// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
-/// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
+/// * Closing/Draining -> `CloseSent`: after sending `CONNECTION_CLOSE`
+/// * `CloseSent` -> Closing: any time a new `CONNECTION_CLOSE` is needed
 /// * -> Reset: from any state in case of a stateless reset
 #[derive(Debug, Clone)]
 pub enum StateSignaling {

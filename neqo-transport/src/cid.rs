@@ -202,7 +202,7 @@ impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
     }
 }
 
-/// An RandomConnectionIdGenerator produces connection IDs of
+/// An `RandomConnectionIdGenerator` produces connection IDs of
 /// a fixed length and random content.  No effort is made to
 /// prevent collisions.
 pub struct RandomConnectionIdGenerator {
@@ -238,7 +238,7 @@ impl ConnectionIdGenerator for RandomConnectionIdGenerator {
     }
 }
 
-/// A single connection ID, as saved from NEW_CONNECTION_ID.
+/// A single connection ID, as saved from `NEW_CONNECTION_ID`.
 /// This is templated so that the connection ID entries from a peer can be
 /// saved with a stateless reset token.  Local entries don't need that.
 #[derive(Debug, PartialEq, Eq, Clone)]

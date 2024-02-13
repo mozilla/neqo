@@ -95,7 +95,7 @@ pub enum ZeroRttState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// Type returned from process() and `process_output()`. Users are required to
+/// Type returned from `process()` and `process_output()`. Users are required to
 /// call these repeatedly until `Callback` or `None` is returned.
 pub enum Output {
     /// Connection requires no action.
@@ -136,7 +136,7 @@ impl Output {
     }
 }
 
-/// Used by inner functions like Connection::output.
+/// Used by inner functions like `Connection::output`.
 enum SendOption {
     /// Yes, please send this datagram.
     Yes(Datagram),
@@ -469,8 +469,8 @@ impl Connection {
     }
 
     /// Get the original destination connection id for this connection. This
-    /// will always be present for Role::Client but not if Role::Server is in
-    /// State::Init.
+    /// will always be present for `Role::Client` but not if `Role::Server` is in
+    /// `State::Init`.
     #[must_use]
     pub fn odcid(&self) -> Option<&ConnectionId> {
         self.original_destination_cid.as_ref()
@@ -740,7 +740,7 @@ impl Connection {
         self.address_validation = AddressValidationInfo::Server(Rc::downgrade(&validation));
     }
 
-    /// Send a TLS session ticket AND a NEW_TOKEN frame (if possible).
+    /// Send a TLS session ticket AND a `NEW_TOKEN` frame (if possible).
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         if self.role == Role::Client {
             return Err(Error::WrongRole);
@@ -897,7 +897,7 @@ impl Connection {
         res
     }
 
-    /// For use with process_input(). Errors there can be ignored, but this
+    /// For use with `process_input()`. Errors there can be ignored, but this
     /// needs to ensure that the state is updated.
     fn absorb_error<T>(&mut self, now: Instant, res: Res<T>) -> Option<T> {
         self.capture_error(None, now, 0, res).ok()
@@ -1385,7 +1385,7 @@ impl Connection {
         Ok(res)
     }
 
-    /// After a Initial, Handshake, ZeroRtt, or Short packet is successfully processed.
+    /// After a Initial, Handshake, `ZeroRtt`, or Short packet is successfully processed.
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
@@ -1624,7 +1624,7 @@ impl Connection {
         }
     }
 
-    /// After an error, a permanent path is needed to send the CONNECTION_CLOSE.
+    /// After an error, a permanent path is needed to send the `CONNECTION_CLOSE`.
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
     fn ensure_error_path(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) {
@@ -3021,11 +3021,11 @@ impl Connection {
         Ok(())
     }
 
-    /// Set the SendOrder of a stream.  Re-enqueues to keep the ordering correct
+    /// Set the `SendOrder` of a stream.  Re-enqueues to keep the ordering correct
     ///
     /// # Errors
     ///
-    /// Returns InvalidStreamId if the stream id doesn't exist
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
     pub fn stream_sendorder(
         &mut self,
         stream_id: StreamId,
@@ -3038,7 +3038,7 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// Returns InvalidStreamId if the stream id doesn't exist
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
     pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
     }
@@ -3066,8 +3066,8 @@ impl Connection {
         self.streams.get_send_stream_mut(stream_id)?.send(data)
     }
 
-    /// Send all data or nothing on a stream. May cause DATA_BLOCKED or
-    /// STREAM_DATA_BLOCKED frames to be sent.
+    /// Send all data or nothing on a stream. May cause `DATA_BLOCKED` or
+    /// `STREAM_DATA_BLOCKED` frames to be sent.
     /// Returns true if data was successfully sent, otherwise false.
     ///
     /// # Errors
@@ -3091,7 +3091,7 @@ impl Connection {
         val.map(|v| v == data.len())
     }
 
-    /// Bytes that stream_send() is guaranteed to accept for sending.
+    /// Bytes that `stream_send()` is guaranteed to accept for sending.
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
     pub fn stream_avail_send_space(&self, stream_id: StreamId) -> Res<usize> {

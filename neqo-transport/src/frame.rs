@@ -304,7 +304,7 @@ impl<'a> Frame<'a> {
         )
     }
 
-    /// Converts AckRanges as encoded in a ACK frame (see -transport
+    /// Converts `AckRanges` as encoded in a ACK frame (see -transport
     /// 19.3.1) into ranges of acked packets (end, start), inclusive of
     /// start and end values.
     pub fn decode_ack_frame(

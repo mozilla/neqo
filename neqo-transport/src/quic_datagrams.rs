@@ -103,7 +103,7 @@ impl QuicDatagrams {
 
     /// This function tries to write a datagram frame into a packet.
     /// If the frame does not fit into the packet, the datagram will
-    /// be dropped and a DatagramLost event will be posted.
+    /// be dropped and a `DatagramLost` event will be posted.
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,

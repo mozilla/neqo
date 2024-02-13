@@ -167,7 +167,7 @@ impl RangeTracker {
     }
 
     /// Find the first unmarked range. If all are contiguous, this will return
-    /// (highest_offset(), None).
+    /// (`highest_offset()`, None).
     fn first_unmarked_range(&mut self) -> (u64, Option<u64>) {
         if let Some(first_unmarked) = self.first_unmarked {
             return first_unmarked;
@@ -491,7 +491,7 @@ impl TxBuffer {
         Self::default()
     }
 
-    /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
+    /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
     pub fn send(&mut self, buf: &[u8]) -> usize {
         let can_buffer = min(SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
@@ -1784,7 +1784,7 @@ mod tests {
         assert_eq!(rt.acked_from_zero(), 400);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   SSS  SSSAAASSS
     /// +    AAAAAAAAA
@@ -1807,7 +1807,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   SSS  SSS   AAA
     /// +   AAAAAAAAA
@@ -1828,7 +1828,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///    AASSS  AAAA
     /// + AAAAAAAAA
@@ -1850,7 +1850,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///      SSS
     /// + AAAA
@@ -1871,7 +1871,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   AAAAAASSS
     /// +    AAA
@@ -1893,7 +1893,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///      AAA  AAA  AAA
     /// +       AAAAAAA
@@ -1913,7 +1913,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///      AAA  AAA
     /// +       AAA
@@ -1932,7 +1932,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   SSSSSSSS
     /// +   AAAA
@@ -1952,7 +1952,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///        SSS
     /// + AAA
@@ -1973,7 +1973,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   AAA   AAA   SSS
     /// + SSSSSSSSSSSS
@@ -1998,7 +1998,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   AAASS AAA S SSSS
     /// + SSSSSSSSSSSSS
@@ -2025,7 +2025,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   AAA  AAA
     /// +   SSSS
@@ -2048,7 +2048,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   SSS  AAA  SS
     /// +   SSSSSSSS
@@ -2070,7 +2070,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///     AAA
     /// +   SSSSSS
@@ -2089,7 +2089,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   SSSSS
     /// +  SSS

@@ -172,7 +172,7 @@ impl PacketBuilder {
     }
 
     /// Start building a long header packet.
-    /// For an Initial packet you will need to call initial_token(),
+    /// For an Initial packet you will need to call `initial_token()`,
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
@@ -495,7 +495,7 @@ impl From<PacketBuilder> for Encoder {
     }
 }
 
-/// PublicPacket holds information from packets that is public only.  This allows for
+/// `PublicPacket` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
 pub struct PublicPacket<'a> {
     /// The packet type.
