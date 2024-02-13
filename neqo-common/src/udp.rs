@@ -117,6 +117,10 @@ impl Socket {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tokio::time::sleep;
+
     use super::*;
     use crate::{IpTos, IpTosDscp, IpTosEcn};
 
@@ -125,6 +129,8 @@ mod tests {
         let sender = Socket::bind("127.0.0.1:0")?;
         let receiver_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let receiver = Socket::bind(receiver_addr)?;
+
+        sleep(Duration::from_millis(100)).await;
 
         let tos_tx = IpTos::from((IpTosDscp::Le, IpTosEcn::Ce));
         let datagram = Datagram::new(
@@ -137,6 +143,8 @@ mod tests {
 
         sender.writable().await?;
         sender.send(datagram.clone())?;
+
+        sleep(Duration::from_millis(100)).await;
 
         receiver.readable().await?;
         let received_datagram = receiver
