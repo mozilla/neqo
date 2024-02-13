@@ -641,6 +641,7 @@ impl<'a> URLHandler<'a> {
 }
 
 struct Handler<'a> {
+    #[allow(clippy::struct_field_names)]
     url_handler: URLHandler<'a>,
     key_update: KeyUpdateState,
     token: Option<ResumptionToken>,
