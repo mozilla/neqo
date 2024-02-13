@@ -399,10 +399,6 @@ impl Peer {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         }
     }
-
-    fn test_enabled(&self, _test: &Test) -> bool {
-        true
-    }
 }
 
 impl ToSocketAddrs for Peer {
@@ -774,10 +770,6 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     let mut children = Vec::new();
 
     for test in &TESTS {
-        if !peer.test_enabled(test) {
-            continue;
-        }
-
         if !args.include_tests.is_empty() && !args.include_tests.contains(&test.label()) {
             continue;
         }

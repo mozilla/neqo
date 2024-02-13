@@ -298,6 +298,23 @@ impl ConnectionIdEntry<[u8; 16]> {
     pub fn sequence_number(&self) -> u64 {
         self.seqno
     }
+
+    /// Write the entry out in a `NEW_CONNECTION_ID` frame.
+    /// Returns `true` if the frame was written, `false` if there is insufficient space.
+    pub fn write(&self, builder: &mut PacketBuilder, stats: &mut FrameStats) -> bool {
+        let len = 1 + Encoder::varint_len(self.seqno) + 1 + 1 + self.cid.len() + 16;
+        if builder.remaining() < len {
+            return false;
+        }
+
+        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
+        builder.encode_varint(self.seqno);
+        builder.encode_varint(0u64);
+        builder.encode_vec(1, &self.cid);
+        builder.encode(&self.srt);
+        stats.new_connection_id += 1;
+        true
+    }
 }
 
 impl ConnectionIdEntry<()> {
@@ -520,26 +537,6 @@ impl ConnectionIdManager {
         );
     }
 
-    fn write_entry(
-        &mut self,
-        entry: &ConnectionIdEntry<[u8; 16]>,
-        builder: &mut PacketBuilder,
-        stats: &mut FrameStats,
-    ) -> bool {
-        let len = 1 + Encoder::varint_len(entry.seqno) + 1 + 1 + entry.cid.len() + 16;
-        if builder.remaining() < len {
-            return false;
-        }
-
-        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
-        builder.encode_varint(entry.seqno);
-        builder.encode_varint(0u64);
-        builder.encode_vec(1, &entry.cid);
-        builder.encode(&entry.srt);
-        stats.new_connection_id += 1;
-        true
-    }
-
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -552,7 +549,7 @@ impl ConnectionIdManager {
         }
 
         while let Some(entry) = self.lost_new_connection_id.pop() {
-            if self.write_entry(&entry, builder, stats) {
+            if entry.write(builder, stats) {
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             } else {
                 // This shouldn't happen often.
@@ -577,7 +574,7 @@ impl ConnectionIdManager {
                     .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
 
                 let entry = ConnectionIdEntry::new(seqno, cid, srt);
-                self.write_entry(&entry, builder, stats);
+                entry.write(builder, stats);
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             }
         }
