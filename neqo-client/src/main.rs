@@ -786,7 +786,7 @@ impl<'a> ClientRunner<'a> {
         hostname: &str,
         url_queue: VecDeque<Url>,
         resumption_token: Option<ResumptionToken>,
-    ) -> Res<ClientRunner<'a>> {
+    ) -> ClientRunner<'a> {
         if let Some(testcase) = &args.test {
             if testcase.as_str() != "upload" {
                 eprintln!("Unsupported test case: {testcase}");
@@ -813,14 +813,14 @@ impl<'a> ClientRunner<'a> {
         };
         let handler = Handler::new(url_handler, key_update, args.output_read_data);
 
-        Ok(Self {
+        Self {
             local_addr,
             socket,
             client,
             handler,
             timeout: None,
             args,
-        })
+        }
     }
 
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
@@ -1094,7 +1094,7 @@ async fn main() -> Res<()> {
                     &hostname,
                     to_request,
                     token,
-                )?
+                )
                 .run()
                 .await?
             };
