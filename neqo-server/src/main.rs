@@ -730,8 +730,7 @@ impl ServersRunner {
         let timeout_ready = self
             .timeout
             .as_mut()
-            .map(Either::Left)
-            .unwrap_or(Either::Right(futures::future::pending()))
+            .map_or(Either::Right(futures::future::pending()), Either::Left)
             .map(|()| Ok(Ready::Timeout));
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
