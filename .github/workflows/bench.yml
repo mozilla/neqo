@@ -56,7 +56,7 @@ jobs:
       - name: Prepare machine
         run: |
           sudo /root/bin/prep.sh
-          echo 'PERF_CMD="record -o perf.data -F997 --call-graph dwarf,16384 -g"' >> "$GITHUB_ENV"
+          echo "PERF_CMD=record -o perf.data -F997 --call-graph dwarf,16384 -g" >> "$GITHUB_ENV"
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Benchmark
@@ -77,13 +77,17 @@ jobs:
           cargo +$TOOLCHAIN build --profile bench --features bench --bin neqo-client --bin neqo-server
           mkdir server && \
             cd server && \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --bin neqo-server -- $HOST:4433 &
+            nice -n -20 taskset -c 0 \
+            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-server -- $HOST:4433 &
           PID=$!
           mkdir client && \
             cd client && \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+            nice -n -20 taskset -c 1 \
+            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
           kill $PID
-          [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+          [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
           SIZE: 7654321
@@ -113,15 +117,23 @@ jobs:
       #     summary-always: true
 
       - name: Convert for profiler.firefox.com
-        run: perf script -i perf.data -F +pid > perf.firefox.data
+        run: |
+          mv flamegraph.svg transfer.svg
+          mv client/flamegraph.svg client.svg
+          mv server/flamegraph.svg server.svg
+          mv perf.data transfer.perf && perf script -i transfer.perf -F +pid > transfer.firefox.perf &
+          mv client/perf.data client.perf && perf script -i client.perf -F +pid > client.firefox.perf &
+          mv server/perf.data server.perf && perf script -i server.perf -F +pid > server.firefox.perf &
+          wait
+          rm neqo.svg
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.head_ref || github.ref_name }}-perf
           path: |
-            flamegraph.svg
-            perf*.data
+            *.svg
+            *.perf
             output.txt
             target/criterion
           compression-level: 9
