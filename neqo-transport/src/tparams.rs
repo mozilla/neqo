@@ -1002,7 +1002,6 @@ mod tests {
 
     #[test]
     fn compatible_0rtt_integers() {
-        let mut tps_a = TransportParameters::default();
         const INTEGER_KEYS: &[TransportParameterId] = &[
             INITIAL_MAX_DATA,
             INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
@@ -1014,6 +1013,8 @@ mod tests {
             MIN_ACK_DELAY,
             MAX_DATAGRAM_FRAME_SIZE,
         ];
+
+        let mut tps_a = TransportParameters::default();
         for i in INTEGER_KEYS {
             tps_a.set(*i, TransportParameter::Integer(12));
         }
