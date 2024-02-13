@@ -48,7 +48,9 @@ jobs:
           NSPR_DIR: ${{ github.workspace }}/nspr
 
       - name: Build
-        run: cargo +$TOOLCHAIN bench --features bench --no-run
+        run: |
+          cargo +$TOOLCHAIN bench --features bench --no-run
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -57,13 +59,13 @@ jobs:
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Benchmark
         run: |
-          /usr/bin/nice -n -20 taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features bench | tee output.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       - name: Perf transfer benchmark
         run: |
-          /usr/bin/nice -n -20 taskset -c 0 \
+          nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN flamegraph -v -F 997 --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds"
 
