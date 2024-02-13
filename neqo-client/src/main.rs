@@ -778,7 +778,7 @@ struct ClientRunner<'a> {
 }
 
 impl<'a> ClientRunner<'a> {
-    async fn new(
+    fn new(
         args: &'a mut Args,
         socket: &'a UdpSocket,
         local_addr: SocketAddr,
@@ -1082,8 +1082,7 @@ async fn main() -> Res<()> {
                     &hostname,
                     to_request,
                     token,
-                )
-                .await?
+                )?
                 .run()
                 .await?
             } else {
@@ -1095,8 +1094,7 @@ async fn main() -> Res<()> {
                     &hostname,
                     to_request,
                     token,
-                )
-                .await?
+                )?
                 .run()
                 .await?
             };
@@ -1323,7 +1321,7 @@ mod old {
     }
 
     impl<'a> ClientRunner<'a> {
-        pub async fn new(
+        pub fn new(
             args: &'a Args,
             socket: &'a UdpSocket,
             local_addr: SocketAddr,
