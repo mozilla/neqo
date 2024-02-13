@@ -11,6 +11,7 @@ use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
     convert::TryFrom,
+    fmt::Display,
     io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -363,7 +364,7 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     )
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SharedVec {
     buf: Arc<Mutex<Cursor<Vec<u8>>>>,
 }
@@ -377,9 +378,9 @@ impl Write for SharedVec {
     }
 }
 
-impl ToString for SharedVec {
-    fn to_string(&self) -> String {
-        String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap()
+impl Display for SharedVec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap())
     }
 }
 
@@ -395,9 +396,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
-    let buf = SharedVec {
-        buf: Arc::default(),
-    };
+    let buf = SharedVec::default();
     let contents = buf.clone();
     let streamer = QlogStreamer::new(
         qlog::QLOG_VERSION.to_string(),

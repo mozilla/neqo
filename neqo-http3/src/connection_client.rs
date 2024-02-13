@@ -1997,7 +1997,7 @@ mod tests {
     // The response header from PUSH_DATA (0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x34) are
     // decoded into:
     fn check_push_response_header(header: &[Header]) {
-        let expected_push_response_header = vec![
+        let expected_push_response_header = [
             Header::new(":status", "200"),
             Header::new("content-length", "4"),
         ];
