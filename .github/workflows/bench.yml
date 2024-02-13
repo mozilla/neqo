@@ -50,7 +50,8 @@ jobs:
       - name: Build
         run: |
           cargo +$TOOLCHAIN bench --features bench --no-run
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
+          cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Release/lib" >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -74,7 +75,6 @@ jobs:
 
       - name: Benchmark a client/server transfer
         run: |
-          cargo +$TOOLCHAIN build --profile bench --features bench --bin neqo-client --bin neqo-server
           mkdir server && \
             cd server && \
             nice -n -20 taskset -c 0 \
@@ -118,13 +118,13 @@ jobs:
 
       - name: Convert for profiler.firefox.com
         run: |
+          perf script -i perf.data -F +pid > transfer.perf &
+          perf script -i client/perf.data -F +pid > client.perf &
+          perf script -i server/perf.data -F +pid > server.perf &
+          wait
           mv flamegraph.svg transfer.svg
           mv client/flamegraph.svg client.svg
           mv server/flamegraph.svg server.svg
-          mv perf.data transfer.perf && perf script -i transfer.perf -F +pid > transfer.firefox.perf &
-          mv client/perf.data client.perf && perf script -i client.perf -F +pid > client.firefox.perf &
-          mv server/perf.data server.perf && perf script -i server.perf -F +pid > server.firefox.perf &
-          wait
           rm neqo.svg
 
       - name: Archive perf data
