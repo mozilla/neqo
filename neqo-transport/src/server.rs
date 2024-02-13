@@ -400,7 +400,7 @@ impl Server {
 
     fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> NeqoQlog {
         if let Some(qlog_dir) = &self.qlog_dir {
-            let mut qlog_path = qlog_dir.to_path_buf();
+            let mut qlog_path = qlog_dir.clone();
 
             qlog_path.push(format!("{}.qlog", odcid));
 

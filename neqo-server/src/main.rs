@@ -299,7 +299,7 @@ impl QuicParameters {
         }
 
         if let Some(first) = self.quic_version.first() {
-            params = params.versions(*first, self.quic_version.to_vec());
+            params = params.versions(*first, self.quic_version.clone());
         }
         params
     }

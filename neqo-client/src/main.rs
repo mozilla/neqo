@@ -931,7 +931,7 @@ fn create_http3_client(
 
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
-        let mut qlog_path = qlog_dir.to_path_buf();
+        let mut qlog_path = qlog_dir.clone();
         let filename = format!("{hostname}-{cid}.sqlog");
         qlog_path.push(filename);
 
