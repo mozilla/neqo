@@ -66,7 +66,7 @@ jobs:
       - name: Perf transfer benchmark
         run: |
           nice -n -20 taskset -c 0 \
-            cargo +$TOOLCHAIN flamegraph -v -F 997 --features bench --bench transfer -- \
+            cargo +$TOOLCHAIN flamegraph -v -c "record -o perf.data -F997 --call-graph dwarf,16384 -g" --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
