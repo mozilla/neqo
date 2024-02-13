@@ -893,8 +893,6 @@ const TESTS: [Test; 7] = [
 ];
 
 fn main() {
-    let _tests = vec![Test::Connect];
-
     let args = Args::parse();
     init();
     Timer::set_timeout(Duration::from_secs(args.timeout));
