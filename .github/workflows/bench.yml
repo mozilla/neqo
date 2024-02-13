@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build
-        run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
+        run: cargo +$TOOLCHAIN bench --features bench --no-run
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -46,15 +46,16 @@ jobs:
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Benchmark
         run: |
-          nice -n -20 taskset -c 0 \
-            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+          /usr/bin/nice -n -20 taskset -c 0 \
+            cargo +$TOOLCHAIN bench --features bench | tee output.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       - name: Perf transfer benchmark
         run: |
-          nice -n -20 taskset -c 0 \
+          /usr/bin/nice -n -20 taskset -c 0 \
             perf record -F997 --call-graph=lbr -o perf.data \
-            cargo +$TOOLCHAIN bench --features ci,bench --bench transfer
+            cargo +$TOOLCHAIN bench --features bench --bench transfer -- \
+              --exact "Run multiple transfers with varying seeds"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
@@ -68,7 +69,7 @@ jobs:
           key: ${{ runner.os }}-benchmark
 
       # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
-      # benchmark data when the main branch is being updated.
+      # benchmark data when the main branch is being updated (e.g., if: ${{ github.ref == "refs/heads/main" }})
       # - name: Store current benchmark results
       #   uses: benchmark-action/github-action-benchmark@v1
       #   with:
