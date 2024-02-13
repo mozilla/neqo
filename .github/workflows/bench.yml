@@ -5,6 +5,7 @@ on:
   workflow_call:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
+  CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
@@ -51,7 +52,7 @@ jobs:
         run: |
           cargo +$TOOLCHAIN bench --features bench --no-run
           cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Release/lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
