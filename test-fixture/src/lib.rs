@@ -396,8 +396,9 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         buf: Arc::default(),
     };
 
-    #[cfg(feature = "bench")]
-    return (NeqoQlog::disabled(), buf);
+    if cfg!(feature = "bench") {
+        return (NeqoQlog::disabled(), buf);
+    }
 
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
