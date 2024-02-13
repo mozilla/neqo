@@ -1371,8 +1371,12 @@ mod tests {
     #[test]
     fn build_vn() {
         fixture_init();
-        let mut vn =
-            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a0a0a, &Version::all());
+        let mut vn = PacketBuilder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+        );
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
@@ -1385,8 +1389,12 @@ mod tests {
     #[test]
     fn vn_do_not_repeat_client_grease() {
         fixture_init();
-        let vn =
-            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a0a0a, &Version::all());
+        let vn = PacketBuilder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+        );
         assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
 
