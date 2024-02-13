@@ -177,6 +177,7 @@ impl PacketBuilder {
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
     #[allow(clippy::reversed_empty_ranges)] // For initializing an empty range.
+    #[allow(clippy::similar_names)] // For dcid and scid, which are fine here.
     pub fn long(
         mut encoder: Encoder,
         pt: PacketType,
@@ -410,6 +411,7 @@ impl PacketBuilder {
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
     /// this returns a [`Vec<u8>`] rather than building on an encoder.
+    #[allow(clippy::similar_names)] // scid and dcid are fine here.
     pub fn retry(
         version: Version,
         dcid: &[u8],
@@ -441,6 +443,7 @@ impl PacketBuilder {
     }
 
     /// Make a Version Negotiation packet.
+    #[allow(clippy::similar_names)] // scid and dcid are fine here.
     pub fn version_negotiation(
         dcid: &[u8],
         scid: &[u8],
@@ -552,6 +555,7 @@ impl<'a> PublicPacket<'a> {
 
     /// Decode the common parts of a packet.  This provides minimal parsing and validation.
     /// Returns a tuple of a `PublicPacket` and a slice with any remainder from the datagram.
+    #[allow(clippy::similar_names)] // For dcid and scid, which are fine.
     pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_byte())?;

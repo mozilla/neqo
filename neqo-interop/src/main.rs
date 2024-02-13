@@ -496,9 +496,9 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
 
 fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-    let req: String = "GET /10\r\n".to_string();
+    let request: String = "GET /10\r\n".to_string();
     client
-        .stream_send(client_stream_id, req.as_bytes())
+        .stream_send(client_stream_id, request.as_bytes())
         .unwrap();
     let mut hc = H9Handler::default();
     hc.streams.insert(client_stream_id);

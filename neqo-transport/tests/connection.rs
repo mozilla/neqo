@@ -133,6 +133,7 @@ fn reorder_server_initial() {
 }
 
 /// Overflow the crypto buffer.
+#[allow(clippy::similar_names)] // For ..._scid and ..._dcid, which are fine.
 #[test]
 fn overflow_crypto() {
     let mut client = new_client(
