@@ -134,14 +134,16 @@ jobs:
           LIB_DIR: ${{ matrix.type == 'release' && 'Release' || 'Debug' }}
 
       - name: Run tests and determine coverage
-        run: cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci,bench --no-fail-fast --lcov --output-path lcov.info
+        run: |
+          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
+          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
         run: |
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --features ci,bench --bin neqo-client --bin neqo-server
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE  --features ci,bench --bin neqo-server -- $HOST:4433 &
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
           PID=$!
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --features ci,bench --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
