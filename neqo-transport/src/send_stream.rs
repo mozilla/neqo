@@ -1420,25 +1420,19 @@ impl OrderGroup {
     }
 
     pub fn insert(&mut self, stream_id: StreamId) {
-        match self.vec.binary_search(&stream_id) {
-            Ok(_) => {
-                // element already in vector @ `pos`
-                panic!("Duplicate stream_id {}", stream_id)
-            }
-            Err(pos) => self.vec.insert(pos, stream_id),
-        }
+        let Err(pos) = self.vec.binary_search(&stream_id) else {
+            // element already in vector @ `pos`
+            panic!("Duplicate stream_id {}", stream_id);
+        };
+        self.vec.insert(pos, stream_id);
     }
 
     pub fn remove(&mut self, stream_id: StreamId) {
-        match self.vec.binary_search(&stream_id) {
-            Ok(pos) => {
-                self.vec.remove(pos);
-            }
-            Err(_) => {
-                // element already in vector @ `pos`
-                panic!("Missing stream_id {}", stream_id)
-            }
-        }
+        let Ok(pos) = self.vec.binary_search(&stream_id) else {
+            // element already in vector @ `pos`
+            panic!("Missing stream_id {}", stream_id);
+        };
+        self.vec.remove(pos);
     }
 }
 
