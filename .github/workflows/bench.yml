@@ -84,15 +84,15 @@ jobs:
           PID=$!
           mkdir client && \
             cd client && \
-            nice -n -20 taskset -c 1 \
+            time nice -n -20 taskset -c 1 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
               --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
-          kill $PID
+          kill -INT $PID
           cd ${{ github.workspace }}
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
-          SIZE: 7654321
+          SIZE: 87654321
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
@@ -120,11 +120,11 @@ jobs:
 
       - name: Convert for profiler.firefox.com
         run: |
-          perf script -i perf.data -F +pid > transfer.perf &
+          # perf script -i perf.data -F +pid > transfer.perf &
           perf script -i client/perf.data -F +pid > client.perf &
           perf script -i server/perf.data -F +pid > server.perf &
           wait
-          mv flamegraph.svg transfer.svg
+          # mv flamegraph.svg transfer.svg
           mv client/flamegraph.svg client.svg
           mv server/flamegraph.svg server.svg
           rm neqo.svg
