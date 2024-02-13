@@ -48,6 +48,7 @@ use crate::{
     recovery::{LossRecovery, RecoveryToken, SendProfile},
     recv_stream::RecvStreamStats,
     rtt::GRANULARITY,
+    send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
@@ -3071,7 +3072,9 @@ impl Connection {
     /// # Errors
     /// When the stream does not exist.
     pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<SendStreamStats> {
-        self.streams.get_send_stream(stream_id).map(|s| s.stats())
+        self.streams
+            .get_send_stream(stream_id)
+            .map(SendStream::stats)
     }
 
     /// # Errors
