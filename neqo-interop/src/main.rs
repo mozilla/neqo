@@ -927,7 +927,7 @@ fn main() {
                 }
             }
         }
-        let mut letter_str = String::from("");
+        let mut letter_str = String::new();
         for l in &['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
             if all_letters.contains(l) {
                 letter_str.push(*l);
