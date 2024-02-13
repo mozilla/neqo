@@ -55,7 +55,7 @@ pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 fn earlier() -> Instant {
     // Note: It is only OK to have a different base time for each thread because our tests are
     // single-threaded.
-    thread_local!(static EARLIER: OnceCell<Instant> = OnceCell::new());
+    thread_local!(static EARLIER: OnceCell<Instant> = const { OnceCell::new() });
     fixture_init();
     EARLIER.with(|b| *b.get_or_init(Instant::now))
 }

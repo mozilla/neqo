@@ -340,9 +340,7 @@ impl Time {
     /// The handle can also be used to update the resolution.
     #[must_use]
     pub fn get(period: Duration) -> Handle {
-        thread_local! {
-            static HR_TIME: RefCell<Weak<RefCell<Time>>> = RefCell::default();
-        }
+        thread_local!(static HR_TIME: RefCell<Weak<RefCell<Time>>> = RefCell::default());
 
         HR_TIME.with(|r| {
             let mut b = r.borrow_mut();
