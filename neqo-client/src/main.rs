@@ -611,9 +611,11 @@ impl<'a> URLHandler<'a> {
                 self.stream_handlers.insert(client_stream_id, handler);
                 true
             }
-            Err(Error::TransportError(TransportError::StreamLimitError))
-            | Err(Error::StreamLimitError)
-            | Err(Error::Unavailable) => {
+            Err(
+                Error::TransportError(TransportError::StreamLimitError)
+                | Error::StreamLimitError
+                | Error::Unavailable,
+            ) => {
                 self.url_queue.push_front(url);
                 false
             }
@@ -1174,7 +1176,7 @@ mod old {
                     self.streams.insert(client_stream_id, out_file);
                     true
                 }
-                Err(e @ Error::StreamLimitError) | Err(e @ Error::ConnectionState) => {
+                Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {
                     println!("Cannot create stream {e:?}");
                     self.url_queue.push_front(url);
                     false
@@ -1288,9 +1290,9 @@ mod old {
                             self.download_urls(client);
                         }
                     }
-                    ConnectionEvent::StateChange(State::WaitInitial)
-                    | ConnectionEvent::StateChange(State::Handshaking)
-                    | ConnectionEvent::StateChange(State::Connected) => {
+                    ConnectionEvent::StateChange(
+                        State::WaitInitial | State::Handshaking | State::Connected,
+                    ) => {
                         println!("{event:?}");
                         self.download_urls(client);
                     }
