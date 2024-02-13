@@ -1954,11 +1954,11 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
-    ) -> Res<()> {
+    ) {
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
-            if let Some(t) = self.state_signaling.write_done(builder)? {
+            if let Some(t) = self.state_signaling.write_done(builder) {
                 tokens.push(t);
                 frame_stats.handshake_done += 1;
             }
@@ -1967,7 +1967,7 @@ impl Connection {
         self.streams
             .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         self.streams.write_frames(
@@ -1977,36 +1977,35 @@ impl Connection {
             frame_stats,
         );
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
-        self.cid_manager
-            .write_frames(builder, tokens, frame_stats)?;
+        self.cid_manager.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
         self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         self.streams
             .write_frames(TransmissionPriority::High, builder, tokens, frame_stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         self.streams
             .write_frames(TransmissionPriority::Normal, builder, tokens, frame_stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
         self.quic_datagrams.write_frames(builder, tokens, stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         let frame_stats = &mut stats.frame_tx;
@@ -2017,13 +2016,13 @@ impl Connection {
             builder,
             tokens,
             frame_stats,
-        )?;
+        );
         if builder.is_full() {
-            return Ok(());
+            return;
         }
-        self.new_token.write_frames(builder, tokens, frame_stats)?;
+        self.new_token.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return Ok(());
+            return;
         }
 
         self.streams
@@ -2035,8 +2034,6 @@ impl Connection {
                 w.write_frames(builder);
             }
         }
-
-        Ok(())
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
@@ -2097,7 +2094,7 @@ impl Connection {
         profile: &SendProfile,
         builder: &mut PacketBuilder,
         now: Instant,
-    ) -> Res<(Vec<RecoveryToken>, bool, bool)> {
+    ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2133,16 +2130,15 @@ impl Connection {
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send acks!
-            return Ok((tokens, false, false));
+            return (tokens, false, false);
         }
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                self.write_appdata_frames(builder, &mut tokens)?;
+                self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
-                self.crypto
-                    .write_frame(space, builder, &mut tokens, stats)?;
+                self.crypto.write_frame(space, builder, &mut tokens, stats);
             }
         }
 
@@ -2166,7 +2162,7 @@ impl Connection {
         };
 
         stats.all += tokens.len();
-        Ok((tokens, ack_eliciting, padded))
+        (tokens, ack_eliciting, padded)
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -2225,7 +2221,7 @@ impl Connection {
             // Add frames to the packet.
             let payload_start = builder.len();
             let (tokens, ack_eliciting, padded) =
-                self.write_frames(path, *space, &profile, &mut builder, now)?;
+                self.write_frames(path, *space, &profile, &mut builder, now);
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();

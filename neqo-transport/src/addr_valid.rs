@@ -350,11 +350,10 @@ impl NewTokenState {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         if let Self::Server(ref mut sender) = self {
-            sender.write_frames(builder, tokens, stats)?;
+            sender.write_frames(builder, tokens, stats);
         }
-        Ok(())
     }
 
     /// If this a server, buffer a `NEW_TOKEN` for sending.
@@ -425,8 +424,8 @@ impl NewTokenSender {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
-        for t in self.tokens.iter_mut() {
+    ) {
+        for t in &mut self.tokens {
             if t.needs_sending && t.len() <= builder.remaining() {
                 t.needs_sending = false;
 
@@ -437,11 +436,10 @@ impl NewTokenSender {
                 stats.new_token += 1;
             }
         }
-        Ok(())
     }
 
     pub fn lost(&mut self, seqno: usize) {
-        for t in self.tokens.iter_mut() {
+        for t in &mut self.tokens {
             if t.seqno == seqno {
                 t.needs_sending = true;
                 break;

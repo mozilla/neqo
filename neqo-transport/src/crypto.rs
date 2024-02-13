@@ -313,8 +313,8 @@ impl Crypto {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
-        self.streams.write_frame(space, builder, tokens, stats)
+    ) {
+        self.streams.write_frame(space, builder, tokens, stats);
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -1530,14 +1530,14 @@ impl CryptoStreams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         let cs = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
             // Don't bother if there isn't room for the header and some data.
             if builder.remaining() < header_len + 1 {
-                return Ok(());
+                return;
             }
             // Calculate length of data based on the minimum of:
             // - available data
@@ -1561,7 +1561,6 @@ impl CryptoStreams {
             }));
             stats.crypto += 1;
         }
-        Ok(())
     }
 }
 
