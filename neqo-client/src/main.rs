@@ -125,6 +125,7 @@ impl KeyUpdateState {
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
+#[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
     #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
