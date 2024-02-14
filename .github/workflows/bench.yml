@@ -68,7 +68,7 @@ jobs:
       - name: Prepare machine
         run: |
           sudo /root/bin/prep.sh
-          echo "PERF_CMD=record -o perf.data -F997 --call-graph dwarf,16384 -g" >> "$GITHUB_ENV"
+          echo "PERF_CMD=record -o perf.data -F997 --call-graph lbr -g" >> "$GITHUB_ENV"
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Run cargo bench
