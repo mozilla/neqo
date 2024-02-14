@@ -38,6 +38,7 @@ use crate::{
 pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHandler) {
     qlog.add_event_data(|| {
         let remote = tph.remote();
+        #[allow(clippy::cast_possible_truncation)] // Nope.
         let ev_data = EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: None,
@@ -206,7 +207,7 @@ pub fn packet_sent(
         let mut frames = SmallVec::new();
         while d.remaining() > 0 {
             if let Ok(f) = Frame::decode(&mut d) {
-                frames.push(frame_to_qlogframe(&f))
+                frames.push(frame_to_qlogframe(&f));
             } else {
                 qinfo!("qlog: invalid frame");
                 break;
@@ -300,7 +301,7 @@ pub fn packet_received(
 
         while d.remaining() > 0 {
             if let Ok(f) = Frame::decode(&mut d) {
-                frames.push(frame_to_qlogframe(&f))
+                frames.push(frame_to_qlogframe(&f));
             } else {
                 qinfo!("qlog: invalid frame");
                 break;
@@ -355,6 +356,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
         let mut pacing_rate: Option<u64> = None;
 
         for metric in updated_metrics {
+            #[allow(clippy::cast_precision_loss)] // Nought to do here.
             match metric {
                 QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
                 QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
@@ -391,6 +393,8 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 
 // Helper functions
 
+#[allow(clippy::too_many_lines)] // Yeah, but it's a nice match.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
 fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     match frame {
         Frame::Padding => QuicFrame::Padding,

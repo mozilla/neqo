@@ -249,7 +249,7 @@ where
         }
     }
 
-    /// This function is called when STREAM_DATA_BLOCKED frame is received.
+    /// This function is called when `STREAM_DATA_BLOCKED` frame is received.
     /// The flow control will try to send an update if possible.
     pub fn send_flowc_update(&mut self) {
         if self.retired + self.max_active > self.max_allowed {

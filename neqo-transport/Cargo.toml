@@ -24,7 +24,6 @@ test-fixture = { path = "../test-fixture" }
 
 [features]
 bench = []
-deny-warnings = []
 fuzzing = ["neqo-crypto/fuzzing"]
 
 [[bench]]

@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
 
 use std::{
     cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
@@ -178,7 +177,7 @@ impl Http09Server {
                         .unwrap();
                     qdebug!("Wrote {}", sent);
                     *offset += sent;
-                    self.server.add_to_waiting(conn.clone());
+                    self.server.add_to_waiting(conn);
                     if *offset == data.len() {
                         eprintln!("Sent {sent} on {stream_id}, closing");
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();

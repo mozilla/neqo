@@ -25,5 +25,4 @@ url = "2.5"
 test-fixture = { path = "../test-fixture" }
 
 [features]
-deny-warnings = []
 fuzzing = ["neqo-transport/fuzzing", "neqo-crypto/fuzzing"]

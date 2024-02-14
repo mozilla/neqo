@@ -278,7 +278,7 @@ fn exchange_ticket(
 ) -> ResumptionToken {
     let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
     let validation = Rc::new(RefCell::new(validation));
-    server.set_validation(Rc::clone(&validation));
+    server.set_validation(&validation);
     server.send_ticket(now, &[]).expect("can send ticket");
     let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());

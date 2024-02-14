@@ -34,7 +34,7 @@ fi
 
 toolchain=nightly
 fmtconfig="$root/.rustfmt.toml"
-if cargo "+$toolchain" version >/dev/null; then
+if ! cargo "+$toolchain" version >/dev/null; then
     echo "warning: A rust $toolchain toolchain is recommended to check formatting."
     toolchain=stable
     fmtconfig=/dev/null
