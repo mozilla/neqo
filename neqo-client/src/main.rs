@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
 
 use std::{
     cell::RefCell,
@@ -125,6 +124,7 @@ impl KeyUpdateState {
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
+#[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
     #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
@@ -231,6 +231,50 @@ impl Args {
                 _ => None,
             })
             .collect::<Vec<_>>()
+    }
+
+    fn update_for_tests(&mut self) {
+        let Some(testcase) = self.qns_test.as_ref() else {
+            return;
+        };
+
+        // Only use v1 for most QNS tests.
+        self.quic_parameters.quic_version = vec![Version::Version1];
+        match testcase.as_str() {
+            // TODO: Add "ecn" when that is ready.
+            "http3" => {}
+            "handshake" | "transfer" | "retry" => {
+                self.use_old_http = true;
+            }
+            "zerortt" | "resumption" => {
+                if self.urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127);
+                }
+                self.use_old_http = true;
+                self.resume = true;
+            }
+            "multiconnect" => {
+                self.use_old_http = true;
+                self.download_in_series = true;
+            }
+            "chacha20" => {
+                self.use_old_http = true;
+                self.ciphers.clear();
+                self.ciphers
+                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
+            }
+            "keyupdate" => {
+                self.use_old_http = true;
+                self.key_update = true;
+            }
+            "v2" => {
+                self.use_old_http = true;
+                // Use default version set for this test (which allows compatible vneg.)
+                self.quic_parameters.quic_version.clear();
+            }
+            _ => exit(127),
+        }
     }
 }
 
@@ -362,8 +406,7 @@ async fn ready(
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
     let timeout_ready = timeout
         .as_mut()
-        .map(Either::Left)
-        .unwrap_or(Either::Right(futures::future::pending()))
+        .map_or(Either::Right(futures::future::pending()), Either::Left)
         .map(|()| Ok(Ready::Timeout));
     select(socket_ready, timeout_ready).await.factor_first().0
 }
@@ -515,8 +558,8 @@ struct URLHandler<'a> {
 }
 
 impl<'a> URLHandler<'a> {
-    fn stream_handler(&mut self, stream_id: &StreamId) -> Option<&mut Box<dyn StreamHandler>> {
-        self.stream_handlers.get_mut(stream_id)
+    fn stream_handler(&mut self, stream_id: StreamId) -> Option<&mut Box<dyn StreamHandler>> {
+        self.stream_handlers.get_mut(&stream_id)
     }
 
     fn process_urls(&mut self, client: &mut Http3Client) {
@@ -559,9 +602,11 @@ impl<'a> URLHandler<'a> {
                 self.stream_handlers.insert(client_stream_id, handler);
                 true
             }
-            Err(Error::TransportError(TransportError::StreamLimitError))
-            | Err(Error::StreamLimitError)
-            | Err(Error::Unavailable) => {
+            Err(
+                Error::TransportError(TransportError::StreamLimitError)
+                | Error::StreamLimitError
+                | Error::Unavailable,
+            ) => {
                 self.url_queue.push_front(url);
                 false
             }
@@ -587,6 +632,11 @@ impl<'a> URLHandler<'a> {
 }
 
 struct Handler<'a> {
+    #[allow(
+        unknown_lints,
+        clippy::struct_field_names,
+        clippy::redundant_field_names
+    )]
     url_handler: URLHandler<'a>,
     key_update: KeyUpdateState,
     token: Option<ResumptionToken>,
@@ -625,7 +675,7 @@ impl<'a> Handler<'a> {
                     fin,
                     ..
                 } => {
-                    if let Some(handler) = self.url_handler.stream_handler(&stream_id) {
+                    if let Some(handler) = self.url_handler.stream_handler(stream_id) {
                         handler.process_header_ready(stream_id, fin, headers);
                     } else {
                         println!("Data on unexpected stream: {stream_id}");
@@ -637,7 +687,7 @@ impl<'a> Handler<'a> {
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     let mut stream_done = false;
-                    match self.url_handler.stream_handler(&stream_id) {
+                    match self.url_handler.stream_handler(stream_id) {
                         None => {
                             println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
@@ -672,7 +722,7 @@ impl<'a> Handler<'a> {
                     }
                 }
                 Http3ClientEvent::DataWritable { stream_id } => {
-                    match self.url_handler.stream_handler(&stream_id) {
+                    match self.url_handler.stream_handler(stream_id) {
                         None => {
                             println!("Data on unexpected stream: {stream_id}");
                             return Ok(false);
@@ -723,7 +773,7 @@ struct ClientRunner<'a> {
 }
 
 impl<'a> ClientRunner<'a> {
-    async fn new(
+    fn new(
         args: &'a mut Args,
         socket: &'a udp::Socket,
         local_addr: SocketAddr,
@@ -731,7 +781,7 @@ impl<'a> ClientRunner<'a> {
         hostname: &str,
         url_queue: VecDeque<Url>,
         resumption_token: Option<ResumptionToken>,
-    ) -> Res<ClientRunner<'a>> {
+    ) -> ClientRunner<'a> {
         if let Some(testcase) = &args.test {
             if testcase.as_str() != "upload" {
                 eprintln!("Unsupported test case: {testcase}");
@@ -758,14 +808,14 @@ impl<'a> ClientRunner<'a> {
         };
         let handler = Handler::new(url_handler, key_update, args.output_read_data);
 
-        Ok(Self {
+        Self {
             local_addr,
             socket,
             client,
             handler,
             timeout: None,
             args,
-        })
+        }
     }
 
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
@@ -877,7 +927,7 @@ fn create_http3_client(
 
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
-        let mut qlog_path = qlog_dir.to_path_buf();
+        let mut qlog_path = qlog_dir.clone();
         let filename = format!("{hostname}-{cid}.sqlog");
         qlog_path.push(filename);
 
@@ -909,46 +959,7 @@ async fn main() -> Res<()> {
     init();
 
     let mut args = Args::parse();
-
-    if let Some(testcase) = args.qns_test.as_ref() {
-        // Only use v1 for most QNS tests.
-        args.quic_parameters.quic_version = vec![Version::Version1];
-        match testcase.as_str() {
-            // TODO: Add "ecn" when that is ready.
-            "http3" => {}
-            "handshake" | "transfer" | "retry" => {
-                args.use_old_http = true;
-            }
-            "zerortt" | "resumption" => {
-                if args.urls.len() < 2 {
-                    eprintln!("Warning: resumption tests won't work without >1 URL");
-                    exit(127);
-                }
-                args.use_old_http = true;
-                args.resume = true;
-            }
-            "multiconnect" => {
-                args.use_old_http = true;
-                args.download_in_series = true;
-            }
-            "chacha20" => {
-                args.use_old_http = true;
-                args.ciphers.clear();
-                args.ciphers
-                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
-            }
-            "keyupdate" => {
-                args.use_old_http = true;
-                args.key_update = true;
-            }
-            "v2" => {
-                args.use_old_http = true;
-                // Use default version set for this test (which allows compatible vneg.)
-                args.quic_parameters.quic_version.clear();
-            }
-            _ => exit(127),
-        }
-    }
+    args.update_for_tests();
 
     let urls_by_origin = args
         .urls
@@ -1019,8 +1030,7 @@ async fn main() -> Res<()> {
                     &hostname,
                     to_request,
                     token,
-                )
-                .await?
+                )?
                 .run()
                 .await?
             } else {
@@ -1033,7 +1043,6 @@ async fn main() -> Res<()> {
                     to_request,
                     token,
                 )
-                .await?
                 .run()
                 .await?
             };
@@ -1113,7 +1122,7 @@ mod old {
                     self.streams.insert(client_stream_id, out_file);
                     true
                 }
-                Err(e @ Error::StreamLimitError) | Err(e @ Error::ConnectionState) => {
+                Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {
                     println!("Cannot create stream {e:?}");
                     self.url_queue.push_front(url);
                     false
@@ -1227,9 +1236,9 @@ mod old {
                             self.download_urls(client);
                         }
                     }
-                    ConnectionEvent::StateChange(State::WaitInitial)
-                    | ConnectionEvent::StateChange(State::Handshaking)
-                    | ConnectionEvent::StateChange(State::Connected) => {
+                    ConnectionEvent::StateChange(
+                        State::WaitInitial | State::Handshaking | State::Connected,
+                    ) => {
                         println!("{event:?}");
                         self.download_urls(client);
                     }
@@ -1259,7 +1268,7 @@ mod old {
     }
 
     impl<'a> ClientRunner<'a> {
-        pub async fn new(
+        pub fn new(
             args: &'a Args,
             socket: &'a udp::Socket,
             local_addr: SocketAddr,

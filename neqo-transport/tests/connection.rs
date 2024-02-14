@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
 
 mod common;
 
@@ -133,6 +132,7 @@ fn reorder_server_initial() {
 }
 
 /// Overflow the crypto buffer.
+#[allow(clippy::similar_names)] // For ..._scid and ..._dcid, which are fine.
 #[test]
 fn overflow_crypto() {
     let mut client = new_client(

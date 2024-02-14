@@ -23,7 +23,6 @@ tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-th
 test-fixture = { path = "../test-fixture" }
 
 [features]
-deny-warnings = []
 ci = []
 udp = ["dep:quinn-udp", "dep:tokio"]
 

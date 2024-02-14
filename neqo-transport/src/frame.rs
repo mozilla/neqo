@@ -78,6 +78,7 @@ impl CloseError {
         }
     }
 
+    #[must_use]
     pub fn code(&self) -> u64 {
         match self {
             Self::Transport(c) | Self::Application(c) => *c,
@@ -303,7 +304,7 @@ impl<'a> Frame<'a> {
         )
     }
 
-    /// Converts AckRanges as encoded in a ACK frame (see -transport
+    /// Converts `AckRanges` as encoded in a ACK frame (see -transport
     /// 19.3.1) into ranges of acked packets (end, start), inclusive of
     /// start and end values.
     pub fn decode_ack_frame(
@@ -387,6 +388,7 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
         /// Maximum ACK Range Count in ACK Frame
         ///
@@ -430,7 +432,7 @@ impl<'a> Frame<'a> {
                     }
                 })?;
                 let fa = dv(dec)?;
-                let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
+                let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
                 for _ in 0..nr {
                     let ar = AckRange {
                         gap: dv(dec)?,

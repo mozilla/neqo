@@ -1,8 +1,6 @@
 name: Bench
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  workflow_call:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_TERM_COLOR: always
@@ -13,7 +11,6 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
         shell: bash
@@ -26,7 +23,7 @@ jobs:
           components: rustfmt
 
       - name: Configure Rust
-        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
@@ -46,13 +43,20 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # Pin the benchmark to core 0 and run it at elevated priority.
+      # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Benchmark
         run: |
           nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
 
-      # Enable turboboost, hyperthreading and use powersave governor.
+      # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
+      - name: Perf transfer benchmark
+        run: |
+          nice -n -20 taskset -c 0 \
+            perf record -F997 --call-graph=lbr -o perf.data \
+            cargo +$TOOLCHAIN bench --features ci,bench --bench transfer
+
+      # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
         if: success() || failure()
@@ -63,6 +67,8 @@ jobs:
           path: ./cache
           key: ${{ runner.os }}-benchmark
 
+      # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
+      # benchmark data when the main branch is being updated.
       # - name: Store current benchmark results
       #   uses: benchmark-action/github-action-benchmark@v1
       #   with:
@@ -74,3 +80,14 @@ jobs:
       #     comment-on-alert: true
       #     summary-always: true
 
+      - name: Convert perf data
+        run: |
+          perf script -i perf.data -F +pid | zstd > perf.ff.data.zst
+          zstd perf.data
+
+      - name: Archive perf data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.head_ref || github.ref_name }}-perf
+          path: "*.zst"
+          compression-level: 0

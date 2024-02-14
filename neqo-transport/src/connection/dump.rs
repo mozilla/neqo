@@ -31,7 +31,7 @@ pub fn dump_packet(
         return;
     }
 
-    let mut s = String::from("");
+    let mut s = String::new();
     let mut d = Decoder::from(payload);
     while d.remaining() > 0 {
         let Ok(f) = Frame::decode(&mut d) else {

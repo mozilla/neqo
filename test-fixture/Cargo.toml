@@ -18,5 +18,3 @@ neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
 qlog = "0.12"
 
-[features]
-deny-warnings = []

@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
 
 use std::{
     cell::RefCell,
@@ -60,7 +59,7 @@ trait Handler {
     }
 }
 
-fn emit_datagram(socket: &UdpSocket, d: Datagram) {
+fn emit_datagram(socket: &UdpSocket, d: &Datagram) {
     let sent = socket.send(&d[..]).expect("Error sending datagram");
     if sent != d.len() {
         eprintln!("Unable to send all {} bytes of datagram", d.len());
@@ -115,7 +114,7 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => {
                     let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-                    emit_datagram(&nctx.socket, dgram);
+                    emit_datagram(&nctx.socket, &dgram);
                 }
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
@@ -284,7 +283,7 @@ fn process_loop_h3(
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&nctx.socket, dgram),
+                Output::Datagram(dgram) => emit_datagram(&nctx.socket, &dgram),
                 Output::Callback(duration) => {
                     let delay = min(timer.check()?, duration);
                     nctx.socket.set_read_timeout(Some(delay)).unwrap();
@@ -399,10 +398,6 @@ impl Peer {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         }
     }
-
-    fn test_enabled(&self, _test: &Test) -> bool {
-        true
-    }
 }
 
 impl ToSocketAddrs for Peer {
@@ -496,9 +491,9 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
 
 fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-    let req: String = "GET /10\r\n".to_string();
+    let request: String = "GET /10\r\n".to_string();
     client
-        .stream_send(client_stream_id, req.as_bytes())
+        .stream_send(client_stream_id, request.as_bytes())
         .unwrap();
     let mut hc = H9Handler::default();
     hc.streams.insert(client_stream_id);
@@ -774,10 +769,6 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     let mut children = Vec::new();
 
     for test in &TESTS {
-        if !peer.test_enabled(test) {
-            continue;
-        }
-
         if !args.include_tests.is_empty() && !args.include_tests.contains(&test.label()) {
             continue;
         }
@@ -902,8 +893,6 @@ const TESTS: [Test; 7] = [
 ];
 
 fn main() {
-    let _tests = vec![Test::Connect];
-
     let args = Args::parse();
     init();
     Timer::set_timeout(Duration::from_secs(args.timeout));
@@ -935,7 +924,7 @@ fn main() {
                 }
             }
         }
-        let mut letter_str = String::from("");
+        let mut letter_str = String::new();
         for l in &['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
             if all_letters.contains(l) {
                 letter_str.push(*l);
