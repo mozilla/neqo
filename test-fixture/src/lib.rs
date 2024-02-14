@@ -4,13 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
     convert::TryFrom,
+    fmt::Display,
     io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -55,7 +56,7 @@ pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 fn earlier() -> Instant {
     // Note: It is only OK to have a different base time for each thread because our tests are
     // single-threaded.
-    thread_local!(static EARLIER: OnceCell<Instant> = OnceCell::new());
+    thread_local!(static EARLIER: OnceCell<Instant> = const { OnceCell::new() });
     fixture_init();
     EARLIER.with(|b| *b.get_or_init(Instant::now))
 }
@@ -363,7 +364,7 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     )
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SharedVec {
     buf: Arc<Mutex<Cursor<Vec<u8>>>>,
 }
@@ -377,9 +378,9 @@ impl Write for SharedVec {
     }
 }
 
-impl ToString for SharedVec {
-    fn to_string(&self) -> String {
-        String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap()
+impl Display for SharedVec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&String::from_utf8(self.buf.lock().unwrap().clone().into_inner()).unwrap())
     }
 }
 
@@ -395,9 +396,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
-    let buf = SharedVec {
-        buf: Arc::default(),
-    };
+    let buf = SharedVec::default();
     let contents = buf.clone();
     let streamer = QlogStreamer::new(
         qlog::QLOG_VERSION.to_string(),

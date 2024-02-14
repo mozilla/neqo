@@ -167,7 +167,7 @@ impl RangeTracker {
     }
 
     /// Find the first unmarked range. If all are contiguous, this will return
-    /// (highest_offset(), None).
+    /// (`highest_offset()`, None).
     fn first_unmarked_range(&mut self) -> (u64, Option<u64>) {
         if let Some(first_unmarked) = self.first_unmarked {
             return first_unmarked;
@@ -491,7 +491,7 @@ impl TxBuffer {
         Self::default()
     }
 
-    /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
+    /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
     pub fn send(&mut self, buf: &[u8]) -> usize {
         let can_buffer = min(SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
@@ -534,7 +534,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
-        self.ranges.mark_sent(offset, len)
+        self.ranges.mark_sent(offset, len);
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
@@ -1255,9 +1255,9 @@ impl SendStream {
             if atomic {
                 self.send_blocked_if_space_needed(buf.len());
                 return Ok(0);
-            } else {
-                &buf[..self.avail()]
             }
+
+            &buf[..self.avail()]
         } else {
             buf
         };
@@ -1420,25 +1420,19 @@ impl OrderGroup {
     }
 
     pub fn insert(&mut self, stream_id: StreamId) {
-        match self.vec.binary_search(&stream_id) {
-            Ok(_) => {
-                // element already in vector @ `pos`
-                panic!("Duplicate stream_id {}", stream_id)
-            }
-            Err(pos) => self.vec.insert(pos, stream_id),
-        }
+        let Err(pos) = self.vec.binary_search(&stream_id) else {
+            // element already in vector @ `pos`
+            panic!("Duplicate stream_id {}", stream_id);
+        };
+        self.vec.insert(pos, stream_id);
     }
 
     pub fn remove(&mut self, stream_id: StreamId) {
-        match self.vec.binary_search(&stream_id) {
-            Ok(pos) => {
-                self.vec.remove(pos);
-            }
-            Err(_) => {
-                // element already in vector @ `pos`
-                panic!("Missing stream_id {}", stream_id)
-            }
-        }
+        let Ok(pos) = self.vec.binary_search(&stream_id) else {
+            // element already in vector @ `pos`
+            panic!("Missing stream_id {}", stream_id);
+        };
+        self.vec.remove(pos);
     }
 }
 
@@ -1698,9 +1692,9 @@ impl SendStreams {
         for stream_id in stream_ids {
             let stream = self.map.get_mut(&stream_id).unwrap();
             if let Some(order) = stream.sendorder() {
-                qtrace!("   {} ({})", stream_id, order)
+                qtrace!("   {} ({})", stream_id, order);
             } else {
-                qtrace!("   None")
+                qtrace!("   None");
             }
             if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                 break;
@@ -1709,7 +1703,7 @@ impl SendStreams {
     }
 
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
-        for (id, ss) in self.map.iter_mut() {
+        for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
                 assert!(!id.is_remote_initiated(Role::Client));
                 remote.get_integer(tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
@@ -1784,7 +1778,7 @@ mod tests {
         assert_eq!(rt.acked_from_zero(), 400);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   SSS  SSSAAASSS
     /// +    AAAAAAAAA
@@ -1807,7 +1801,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   SSS  SSS   AAA
     /// +   AAAAAAAAA
@@ -1828,7 +1822,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///    AASSS  AAAA
     /// + AAAAAAAAA
@@ -1850,7 +1844,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///      SSS
     /// + AAAA
@@ -1871,7 +1865,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   AAAAAASSS
     /// +    AAA
@@ -1893,7 +1887,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///      AAA  AAA  AAA
     /// +       AAAAAAA
@@ -1913,7 +1907,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///      AAA  AAA
     /// +       AAA
@@ -1932,7 +1926,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///   SSSSSSSS
     /// +   AAAA
@@ -1952,7 +1946,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_acked correctly handles all paths.
+    /// Check that `marked_acked` correctly handles all paths.
     /// ```ignore
     ///        SSS
     /// + AAA
@@ -1973,7 +1967,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   AAA   AAA   SSS
     /// + SSSSSSSSSSSS
@@ -1998,7 +1992,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   AAASS AAA S SSSS
     /// + SSSSSSSSSSSSS
@@ -2025,7 +2019,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   AAA  AAA
     /// +   SSSS
@@ -2048,7 +2042,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   SSS  AAA  SS
     /// +   SSSSSSSS
@@ -2070,7 +2064,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///     AAA
     /// +   SSSSSS
@@ -2089,7 +2083,7 @@ mod tests {
         assert_eq!(rt, canon);
     }
 
-    /// Check that marked_sent correctly handles all paths.
+    /// Check that `marked_sent` correctly handles all paths.
     /// ```ignore
     ///   SSSSS
     /// +  SSS
@@ -2213,14 +2207,15 @@ mod tests {
         assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
 
         // Fill the buffer
-        assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
+        let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
+        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
                          Some((0, x)) if x.len()==SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
         let one_byte_from_end = SEND_BUFFER_SIZE as u64 - 1;
-        txb.mark_as_sent(0, one_byte_from_end as usize);
+        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
                          && start == one_byte_from_end
@@ -2249,7 +2244,7 @@ mod tests {
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, five_bytes_from_end as usize);
+        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
@@ -2275,7 +2270,8 @@ mod tests {
         assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
 
         // Fill the buffer
-        assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
+        let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
+        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
                          Some((0, x)) if x.len()==SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
@@ -2283,7 +2279,7 @@ mod tests {
         // As above
         let forty_bytes_from_end = SEND_BUFFER_SIZE as u64 - 40;
 
-        txb.mark_as_acked(0, forty_bytes_from_end as usize);
+        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
         assert!(matches!(txb.next_bytes(),
                  Some((start, x)) if x.len() == 40
                  && start == forty_bytes_from_end
@@ -2311,7 +2307,7 @@ mod tests {
 
         // Ack entire first slice and into second slice
         let ten_bytes_past_end = SEND_BUFFER_SIZE as u64 + 10;
-        txb.mark_as_acked(0, ten_bytes_past_end as usize);
+        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
@@ -2349,22 +2345,23 @@ mod tests {
         }
 
         // Should hit stream flow control limit before filling up send buffer
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let big_buf = vec![4; SEND_BUFFER_SIZE + 100];
+        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         conn_fc.borrow_mut().update(SEND_BUFFER_SIZE as u64);
-        let res = s.send(&[4; SEND_BUFFER_SIZE + 100]).unwrap();
+        let res = s.send(&big_buf).unwrap();
         assert_eq!(res, SEND_BUFFER_SIZE - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
@@ -2435,10 +2432,8 @@ mod tests {
         // tx buffer size.
         assert_eq!(s.avail(), SEND_BUFFER_SIZE - 4);
 
-        assert_eq!(
-            s.send(&[b'a'; SEND_BUFFER_SIZE]).unwrap(),
-            SEND_BUFFER_SIZE - 4
-        );
+        let big_buf = vec![b'a'; SEND_BUFFER_SIZE];
+        assert_eq!(s.send(&big_buf).unwrap(), SEND_BUFFER_SIZE - 4);
 
         // No event because still blocked by tx buffer full
         s.set_max_stream_data(2_000_000_000);

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{any::Any, cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
@@ -331,10 +331,6 @@ impl HttpSendStream for SendMessage {
     fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
         self.stream_type = Http3StreamType::ExtendedConnect;
         self.conn_events = conn_events;
-    }
-
-    fn any(&self) -> &dyn Any {
-        self
     }
 }
 

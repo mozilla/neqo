@@ -345,7 +345,7 @@ impl RandomCache {
 /// When `size` is too large or NSS fails.
 #[must_use]
 pub fn random<const N: usize>() -> [u8; N] {
-    thread_local! { static CACHE: RefCell<RandomCache> = RefCell::new(RandomCache::new()) };
+    thread_local!(static CACHE: RefCell<RandomCache> = RefCell::new(RandomCache::new()));
 
     let buf = [0; N];
     if N <= RandomCache::CUTOFF {
