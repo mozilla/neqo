@@ -54,6 +54,18 @@ jobs:
           cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
+      - name: Download criterion results
+        uses: actions/cache/restore@v4
+        with:
+          path: ./target/criterion
+          key: neqo-${{ runner.os }}-main-criterion
+
+      - name: Download github-action-benchmark results
+        uses: actions/cache/restore@v4
+        with:
+          path: ./cache
+          key: neqo-${{ runner.os }}-main-github-action-benchmark
+
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
         run: |
@@ -98,12 +110,6 @@ jobs:
         run: sudo /root/bin/unprep.sh
         if: success() || failure() || cancelled()
 
-      - name: Download previous benchmark results
-        uses: actions/cache@v4
-        with:
-          path: ./cache
-          key: ${{ runner.os }}-benchmark
-
       # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
       # benchmark data when the main branch is being updated (e.g., if: ${{ github.ref == "refs/heads/main" }})
       # - name: Store current benchmark results
@@ -127,6 +133,21 @@ jobs:
           mv client/flamegraph.svg client.svg
           mv server/flamegraph.svg server.svg
           rm neqo.svg
+
+      - name: Upload criterion results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ./target/criterion
+          key: neqo-${{ runner.os }}-main-criterion
+
+      - name: Upload github-action-benchmark results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ./cache
+          key: neqo-${{ runner.os }}-main-github-action-benchmark
+
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
