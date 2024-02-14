@@ -81,13 +81,12 @@ jobs:
             nice -n -20 taskset -c 0 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
               --bin neqo-server -- --db ../test-fixture/db $HOST:4433 || true; } &
-          PID=$!
           mkdir client; \
             cd client; \
             time nice -n -20 taskset -c 1 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
               --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
-          kill -INT $PID
+          killall -INT neqo-server
           cd ${{ github.workspace }}
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
