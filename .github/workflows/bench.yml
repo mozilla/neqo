@@ -1,7 +1,5 @@
 name: Bench
 on:
-  push:
-  pull_request:
   workflow_call:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
@@ -73,20 +71,20 @@ jobs:
           echo "PERF_CMD=record -o perf.data -F997 --call-graph dwarf,16384 -g" >> "$GITHUB_ENV"
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
-      - name: Benchmark
+      - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN bench --features bench | tee output.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
-      - name: Perf transfer benchmark
+      - name: Profile cargo bench transfer
         run: |
           taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds"
 
-      - name: Benchmark a client/server transfer
+      - name: Profile client/server transfer
         run: |
           { mkdir server; \
             cd server; \
@@ -103,7 +101,7 @@ jobs:
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
-          SIZE: 536870912 # 512 MB
+          SIZE: 1073741824 # 1 GB
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
@@ -147,7 +145,6 @@ jobs:
         with:
           path: ./cache
           key: neqo-${{ runner.os }}-main-github-action-benchmark
-
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
