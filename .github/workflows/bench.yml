@@ -53,7 +53,6 @@ jobs:
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       - name: Download criterion results
-        id: cache-criterion-restore
         uses: actions/cache/restore@v4
         with:
           path: ./target/criterion
@@ -61,7 +60,6 @@ jobs:
           restore-keys: neqo-${{ runner.os }}-main-criterion
 
       - name: Download github-action-benchmark results
-        id: cache-action-benchmark-restore
         uses: actions/cache/restore@v4
         with:
           path: ./cache
