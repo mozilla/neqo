@@ -24,6 +24,7 @@ runs:
       uses: mozilla-actions/sccache-action@v0.0.4
 
     - name: Enable sscache
+      shell: bash
       run: |
         echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"

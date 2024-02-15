@@ -4,6 +4,7 @@ runs:
   using: composite
   steps:
     - name: Fetch NSS and NSPR
+      shell: bash
       run: |
         hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
         hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
