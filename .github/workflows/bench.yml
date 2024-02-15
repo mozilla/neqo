@@ -41,18 +41,20 @@ jobs:
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       - name: Download criterion results
+        id: criterion-cache
         uses: actions/cache/restore@v4
         with:
           path: ./target/criterion
-          key: neqo-${{ runner.os }}-${{ github.run_id}}
-          restore-keys: neqo-${{ runner.os }}-main-criterion
+          key: criterion-${{ runner.os }}-${{ hashFiles('./target/criterion/**.json') }}
+          restore-keys: criterion-${{ runner.os }}-
 
-      - name: Download github-action-benchmark results
-        uses: actions/cache/restore@v4
-        with:
-          path: ./cache
-          key: neqo-${{ runner.os}}-${{ github.run_id}}
-          restore-keys: neqo-${{ runner.os }}-main-action-benchmark
+      # - name: Download github-action-benchmark results
+      #   id: benchmark-cache
+      #   uses: actions/cache/restore@v4
+      #   with:
+      #     path: ./cache
+      #     key: action-benchmark-${{ runner.os}}-${{ hashFiles('./cache/**.TODO') }}
+      #     restore-keys: action-benchmark-${{ runner.os }}-
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -127,14 +129,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ./target/criterion
-          key: neqo-${{ runner.os }}-main-criterion
+          key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
 
-      - name: Upload github-action-benchmark results
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ./cache
-          key: neqo-${{ runner.os }}-main-action-benchmark
+      # - name: Upload github-action-benchmark results
+      #   if: github.ref == 'refs/heads/main'
+      #   uses: actions/cache/save@v4
+      #   with:
+      #     path: ./cache
+      #     key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
