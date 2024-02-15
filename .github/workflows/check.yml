@@ -44,7 +44,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
+          components: 'rustfmt, clippy, llvm-tools-preview'
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
