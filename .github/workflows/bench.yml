@@ -18,33 +18,21 @@ jobs:
 
     steps:
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: ./.github/actions/my-composite-action
         with:
-          toolchain: $TOOLCHAIN
-          components: rustfmt
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
+          rust-version: $TOOLCHAIN
+          rust-components: rustfmt
 
       - name: Configure Rust
         run: |
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           cargo install flamegraph
 
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Fetch NSS and NSPR
-        run: |
-          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
-          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
-        env:
-          NSS_DIR: ${{ github.workspace }}/nss
-          NSPR_DIR: ${{ github.workspace }}/nspr
+        uses: ./.github/actions/nss
 
       - name: Build
         run: |

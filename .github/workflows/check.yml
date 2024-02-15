@@ -10,6 +10,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Build & test
@@ -34,18 +38,10 @@ jobs:
 
     steps:
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: ./.github/actions/my-composite-action
         with:
-          toolchain: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
-
-      - name: Use sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
-
-      - name: Enable sscache
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          rust-version: ${{ matrix.rust-toolchain }}
+          rust-components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -107,14 +103,7 @@ jobs:
       # right build flags rather than building NSS.)
       # Clone from the main hg repo, because the GitHub mirror can be out of date.
       - name: Fetch NSS and NSPR
-        run: |
-          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
-          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
-        env:
-          NSS_DIR: ${{ github.workspace }}/nss
-          NSPR_DIR: ${{ github.workspace }}/nspr
+        uses: ./.github/actions/nss
 
       - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
