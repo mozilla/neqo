@@ -51,7 +51,7 @@ pub(crate) const MIN_OUTSTANDING_UNACK: usize = 16;
 /// The scale we use for the fast PTO feature.
 pub const FAST_PTO_SCALE: u8 = 100;
 
-pub(crate) type RecoveryTokenVec = SmallVec<[RecoveryToken; 4]>;
+pub(crate) type RecoveryTokenVec = SmallVec<[RecoveryToken; 1]>;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
