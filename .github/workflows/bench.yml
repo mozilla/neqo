@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Install Rust
-        uses: ./.github/actions/rust.yml
+        uses: ./.github/actions/rust
         with:
           rust-version: $TOOLCHAIN
           rust-components: rustfmt
@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Fetch NSS and NSPR
-        uses: ./.github/actions/nss.yml
+        uses: ./.github/actions/nss
 
       - name: Build
         run: |
