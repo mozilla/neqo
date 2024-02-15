@@ -174,7 +174,7 @@ impl LossRecoverySpace {
             .iter_mut()
             .filter_map(|sent| {
                 if sent.pto() {
-                    qtrace!("PTO: marking packet {} lost ", sent.pn);
+                    qtrace!("PTO: marking packet {} lost ", sent.pn());
                     Some(&*sent)
                 } else {
                     None
@@ -259,7 +259,7 @@ impl LossRecoverySpace {
         let mut eliciting = false;
         let mut acked = Vec::new();
         for range in acked_ranges {
-            acked.extend(self.sent_packets.take_range(range));
+            self.sent_packets.take_range(range, &mut acked);
         }
         for p in &acked {
             self.remove_packet(p);
@@ -327,20 +327,20 @@ impl LossRecoverySpace {
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|p| p.pn < largest_acked.unwrap_or(PacketNumber::MAX))
+            .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {:?}",
-                    packet.pn,
+                    packet.pn(),
                     packet.time_sent,
                     loss_delay
                 );
-            } else if largest_acked >= Some(packet.pn + PACKET_THRESHOLD) {
+            } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
                 qtrace!(
                     "lost={}, is >= {} from largest acked {:?}",
-                    packet.pn,
+                    packet.pn(),
                     PACKET_THRESHOLD,
                     largest_acked
                 );
@@ -546,7 +546,7 @@ impl LossRecovery {
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
         let pn_space = PacketNumberSpace::from(sent_packet.pt);
-        qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn);
+        qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
             path.borrow_mut().packet_sent(&mut sent_packet);
             space.on_packet_sent(sent_packet);
@@ -555,7 +555,7 @@ impl LossRecovery {
                 [self],
                 "ignoring {}-{} from dropped space",
                 pn_space,
-                sent_packet.pn
+                sent_packet.pn()
             );
         }
     }
@@ -1160,7 +1160,10 @@ mod tests {
     }
 
     fn match_acked(acked: &[SentPacket], expected: &[PacketNumber]) {
-        assert_eq!(acked.iter().map(|p| p.pn).collect::<Vec<_>>(), expected);
+        assert_eq!(
+            acked.iter().map(SentPacket::pn).collect::<Vec<_>>(),
+            expected
+        );
     }
 
     #[test]

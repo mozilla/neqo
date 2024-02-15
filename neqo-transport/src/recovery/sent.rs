@@ -56,6 +56,11 @@ impl SentPacket {
         }
     }
 
+    /// The number of the packet.
+    pub fn pn(&self) -> PacketNumber {
+        self.pn
+    }
+
     /// Returns `true` if the packet will elicit an ACK.
     pub fn ack_eliciting(&self) -> bool {
         self.ack_eliciting
@@ -155,7 +160,7 @@ impl SentPackets {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut SentPacket> {
-        self.packets.iter_mut().filter_map(Option::as_mut)
+        self.packets.iter_mut().flatten()
     }
 
     /// Take values from a specified range of packet numbers.
@@ -163,25 +168,40 @@ impl SentPackets {
     /// The values returned will be reversed, so that the most recent packet appears first.
     /// This is because ACK frames arrive with ranges starting from the largest acknowledged
     /// and we want to match that.
-    pub fn take_range(
-        &mut self,
-        r: RangeInclusive<PacketNumber>,
-    ) -> impl Iterator<Item = SentPacket> + '_ {
+    pub fn take_range(&mut self, r: RangeInclusive<PacketNumber>, store: &mut Vec<SentPacket>) {
         let start = usize::try_from((*r.start()).saturating_sub(self.offset)).unwrap();
         let end = min(
             usize::try_from((*r.end() + 1).saturating_sub(self.offset)).unwrap(),
             self.packets.len(),
         );
 
-        let len_ref = &mut self.len;
-        self.packets[start..end]
-            .iter_mut()
-            .rev()
-            .filter_map(Option::take)
-            .inspect(move |_| {
-                // Decrement the length for any values that are taken.
-                *len_ref -= 1;
-            })
+        let before = store.len();
+        if self.packets[..start].iter().all(Option::is_none) {
+            // If there are extra empty slots, split those off too.
+            let extra = self.packets[end..]
+                .iter()
+                .take_while(|&p| p.is_none())
+                .count();
+            self.offset += u64::try_from(end + extra).unwrap();
+            let mut other = self.packets.split_off(end + extra);
+            std::mem::swap(&mut self.packets, &mut other);
+            store.extend(
+                other
+                    .into_iter()
+                    .rev()
+                    .skip(extra)
+                    .take(end - start)
+                    .flatten(),
+            );
+        } else {
+            store.extend(
+                self.packets[start..end]
+                    .iter_mut()
+                    .rev()
+                    .filter_map(Option::take),
+            );
+        }
+        self.len -= store.len() - before;
     }
 
     /// Empty out the packets, but keep the offset.
@@ -275,7 +295,9 @@ mod tests {
 
     fn remove_one(pkts: &mut SentPackets, idx: PacketNumber) {
         assert_eq!(pkts.len(), 3);
-        let mut it = pkts.take_range(idx..=idx);
+        let mut store = Vec::new();
+        pkts.take_range(idx..=idx, &mut store);
+        let mut it = store.into_iter();
         assert_eq!(idx, it.next().unwrap().pn());
         assert!(it.next().is_none());
         std::mem::drop(it);
@@ -303,15 +325,17 @@ mod tests {
 
         {
             // Reverse the expectations here as this iterator reverses its output.
-            let mut it = pkts.take_range(0..=2);
+            let mut store = Vec::new();
+            pkts.take_range(0..=2, &mut store);
+            let mut it = store.into_iter();
             assert_eq!(it.next().unwrap().pn(), 2);
             assert_eq!(it.next().unwrap().pn(), 0);
             assert!(it.next().is_none());
         };
 
         // The None values are still there in this case, so offset is 0.
-        assert_eq!(pkts.offset, 0);
-        assert_eq!(pkts.packets.len(), 3);
+        assert_eq!(pkts.offset, 3);
+        assert_eq!(pkts.packets.len(), 0);
         assert_eq!(pkts.len(), 0);
     }
 
