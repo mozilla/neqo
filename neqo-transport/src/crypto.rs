@@ -28,7 +28,7 @@ use neqo_crypto::{
 use crate::{
     cid::ConnectionIdRef,
     packet::{PacketBuilder, PacketNumber},
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, RecoveryTokenVec},
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     stats::FrameStats,
@@ -311,7 +311,7 @@ impl Crypto {
         &mut self,
         space: PacketNumberSpace,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         self.streams.write_frame(space, builder, tokens, stats);
@@ -1528,7 +1528,7 @@ impl CryptoStreams {
         &mut self,
         space: PacketNumberSpace,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         let cs = self.get_mut(space).unwrap();

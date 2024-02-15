@@ -26,7 +26,7 @@ use crate::{
     fc::SenderFlowControl,
     frame::{Frame, FRAME_TYPE_RESET_STREAM},
     packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    recovery::{RecoveryToken, RecoveryTokenVec, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::StreamId,
     streams::SendOrder,
@@ -753,7 +753,7 @@ impl SendStream {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
@@ -768,7 +768,7 @@ impl SendStream {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) -> bool {
         if !self.write_reset_frame(priority, builder, tokens, stats) {
@@ -937,7 +937,7 @@ impl SendStream {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         let retransmission = if priority == self.priority {
@@ -1034,7 +1034,7 @@ impl SendStream {
         &mut self,
         p: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) -> bool {
         if let SendStreamState::ResetSent {
@@ -1082,7 +1082,7 @@ impl SendStream {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         // Send STREAM_DATA_BLOCKED at normal priority always.
@@ -1636,7 +1636,7 @@ impl SendStreams {
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         qtrace!("write STREAM frames at priority {:?}", priority);
@@ -2479,7 +2479,7 @@ mod tests {
         let mut ss = SendStreams::default();
         ss.insert(StreamId::from(0), s);
 
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
 
         // Write a small frame: no fin.
@@ -2568,7 +2568,7 @@ mod tests {
         let mut ss = SendStreams::default();
         ss.insert(StreamId::from(0), s);
 
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         ss.write_frames(
             TransmissionPriority::default(),
@@ -2648,7 +2648,7 @@ mod tests {
 
         // This doesn't report blocking yet.
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
             TransmissionPriority::default(),
@@ -2701,7 +2701,7 @@ mod tests {
 
         // Assert that STREAM_DATA_BLOCKED is sent.
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
             TransmissionPriority::default(),
@@ -2788,7 +2788,7 @@ mod tests {
 
         // No frame should be sent here.
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
             TransmissionPriority::default(),
@@ -2851,7 +2851,7 @@ mod tests {
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
             TransmissionPriority::default(),
@@ -2952,7 +2952,7 @@ mod tests {
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);
-            let mut tokens = Vec::new();
+            let mut tokens = RecoveryTokenVec::new();
             let mut stats = FrameStats::default();
             s.write_stream_frame(
                 TransmissionPriority::default(),

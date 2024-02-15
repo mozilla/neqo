@@ -25,6 +25,7 @@ use crate::{
         CongestionControl, MAX_DATAGRAM_SIZE, MAX_DATAGRAM_SIZE_F64,
     },
     packet::PacketType,
+    recovery::RecoveryTokenVec,
     rtt::RttEstimate,
     tracking::SentPacket,
 };
@@ -42,11 +43,11 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
     while cc.bytes_in_flight() < cc.cwnd() {
         let sent = SentPacket::new(
             PacketType::Short,
-            next_pn,           // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            next_pn,                 // pn
+            now,                     // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         );
         cc.on_packet_sent(&sent);
         next_pn += 1;
@@ -57,11 +58,11 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
 fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
     let acked = SentPacket::new(
         PacketType::Short,
-        pn,                // pn
-        now,               // time sent
-        true,              // ack eliciting
-        Vec::new(),        // tokens
-        MAX_DATAGRAM_SIZE, // size
+        pn,                      // pn
+        now,                     // time sent
+        true,                    // ack eliciting
+        RecoveryTokenVec::new(), // tokens
+        MAX_DATAGRAM_SIZE,       // size
     );
     cc.on_packets_acked(&[acked], &RTT_ESTIMATE, now);
 }
@@ -70,11 +71,11 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
     const PTO: Duration = Duration::from_millis(120);
     let p_lost = SentPacket::new(
         PacketType::Short,
-        pn,                // pn
-        now(),             // time sent
-        true,              // ack eliciting
-        Vec::new(),        // tokens
-        MAX_DATAGRAM_SIZE, // size
+        pn,                      // pn
+        now(),                   // time sent
+        true,                    // ack eliciting
+        RecoveryTokenVec::new(), // tokens
+        MAX_DATAGRAM_SIZE,       // size
     );
     cc.on_packets_lost(None, None, PTO, &[p_lost]);
 }

@@ -14,7 +14,7 @@ use crate::{
     events::OutgoingDatagramOutcome,
     frame::{FRAME_TYPE_DATAGRAM, FRAME_TYPE_DATAGRAM_WITH_LEN},
     packet::PacketBuilder,
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, RecoveryTokenVec},
     ConnectionEvents, Error, Res, Stats,
 };
 
@@ -107,7 +107,7 @@ impl QuicDatagrams {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut Stats,
     ) {
         while let Some(dgram) = self.datagrams.pop_front() {

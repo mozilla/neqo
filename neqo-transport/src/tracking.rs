@@ -22,7 +22,7 @@ use smallvec::{smallvec, SmallVec};
 
 use crate::{
     packet::{PacketBuilder, PacketNumber, PacketType},
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, RecoveryTokenVec},
     stats::FrameStats,
 };
 
@@ -140,7 +140,7 @@ pub struct SentPacket {
     ack_eliciting: bool,
     pub time_sent: Instant,
     primary_path: bool,
-    pub tokens: Vec<RecoveryToken>,
+    pub tokens: RecoveryTokenVec,
 
     time_declared_lost: Option<Instant>,
     /// After a PTO, this is true when the packet has been released.
@@ -155,7 +155,7 @@ impl SentPacket {
         pn: PacketNumber,
         time_sent: Instant,
         ack_eliciting: bool,
-        tokens: Vec<RecoveryToken>,
+        tokens: RecoveryTokenVec,
         size: usize,
     ) -> Self {
         Self {
@@ -563,7 +563,7 @@ impl RecvdPackets {
         now: Instant,
         rtt: Duration,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         // The worst possible ACK frame, assuming only one range.
@@ -721,7 +721,7 @@ impl AckTracker {
         now: Instant,
         rtt: Duration,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if let Some(space) = self.get_mut(pn_space) {
@@ -756,6 +756,7 @@ mod tests {
     use crate::{
         frame::Frame,
         packet::{PacketBuilder, PacketNumber},
+        recovery::RecoveryTokenVec,
         stats::FrameStats,
     };
 
@@ -887,7 +888,7 @@ mod tests {
     fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let mut stats = FrameStats::default();
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
         assert!(!tokens.is_empty());
         assert_eq!(stats.ack, 1);
@@ -1050,7 +1051,7 @@ mod tests {
             .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
             .is_some());
 
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut stats = FrameStats::default();
         tracker.write_frame(
             PacketNumberSpace::Initial,
@@ -1114,7 +1115,7 @@ mod tests {
             now(),
             RTT,
             &mut builder,
-            &mut Vec::new(),
+            &mut RecoveryTokenVec::new(),
             &mut stats,
         );
         assert_eq!(stats.ack, 0);
@@ -1145,7 +1146,7 @@ mod tests {
             now(),
             RTT,
             &mut builder,
-            &mut Vec::new(),
+            &mut RecoveryTokenVec::new(),
             &mut stats,
         );
         assert_eq!(stats.ack, 1);

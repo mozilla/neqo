@@ -51,6 +51,8 @@ pub(crate) const MIN_OUTSTANDING_UNACK: usize = 16;
 /// The scale we use for the fast PTO feature.
 pub const FAST_PTO_SCALE: u8 = 100;
 
+pub(crate) type RecoveryTokenVec = SmallVec<[RecoveryToken; 4]>;
+
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub enum StreamRecoveryToken {
@@ -1037,6 +1039,7 @@ mod tests {
         cid::{ConnectionId, ConnectionIdEntry},
         packet::PacketType,
         path::{Path, PathRef},
+        recovery::RecoveryTokenVec,
         rtt::RttEstimate,
         stats::{Stats, StatsCell},
     };
@@ -1214,7 +1217,7 @@ mod tests {
                 pn,
                 pn_time(pn),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ));
         }
@@ -1239,7 +1242,7 @@ mod tests {
                 pn,
                 pn_time(pn),
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 ON_SENT_SIZE,
             ));
         }
@@ -1359,7 +1362,7 @@ mod tests {
             0,
             pn_time(0),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         lr.on_packet_sent(SentPacket::new(
@@ -1367,7 +1370,7 @@ mod tests {
             1,
             pn_time(0) + TEST_RTT / 4,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         let (_, lost) = lr.on_ack_received(
@@ -1469,7 +1472,7 @@ mod tests {
             0,
             pn_time(0),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         lr.on_packet_sent(SentPacket::new(
@@ -1477,7 +1480,7 @@ mod tests {
             0,
             pn_time(1),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         lr.on_packet_sent(SentPacket::new(
@@ -1485,7 +1488,7 @@ mod tests {
             0,
             pn_time(2),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
 
@@ -1495,7 +1498,14 @@ mod tests {
             PacketType::Handshake,
             PacketType::Short,
         ] {
-            let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
+            let sent_pkt = SentPacket::new(
+                *sp,
+                1,
+                pn_time(3),
+                true,
+                RecoveryTokenVec::new(),
+                ON_SENT_SIZE,
+            );
             let pn_space = PacketNumberSpace::from(sent_pkt.pt);
             lr.on_packet_sent(sent_pkt);
             lr.on_ack_received(pn_space, 1, vec![1..=1], Duration::from_secs(0), pn_time(3));
@@ -1522,7 +1532,7 @@ mod tests {
             0,
             pn_time(3),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
@@ -1536,7 +1546,7 @@ mod tests {
             0,
             now(),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         // Set the RTT to the initial value so that discarding doesn't
@@ -1555,7 +1565,7 @@ mod tests {
             0,
             now(),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
         lr.on_packet_sent(SentPacket::new(
@@ -1563,7 +1573,7 @@ mod tests {
             0,
             now(),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
 
@@ -1600,7 +1610,7 @@ mod tests {
             1,
             now(),
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             ON_SENT_SIZE,
         ));
 

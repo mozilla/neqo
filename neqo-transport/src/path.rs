@@ -26,7 +26,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, RecoveryTokenVec},
     rtt::RttEstimate,
     sender::PacketSender,
     stats::FrameStats,
@@ -413,7 +413,7 @@ impl Paths {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         while let Some(seqno) = self.to_retire.pop() {
@@ -820,7 +820,7 @@ impl Path {
     pub fn write_cc_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         self.rtt.write_frames(builder, tokens, stats);

@@ -24,7 +24,7 @@ use crate::{
     fc::ReceiverFlowControl,
     frame::FRAME_TYPE_STOP_SENDING,
     packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    recovery::{RecoveryToken, RecoveryTokenVec, StreamRecoveryToken},
     send_stream::SendStreams,
     stats::FrameStats,
     stream_id::StreamId,
@@ -47,7 +47,7 @@ impl RecvStreams {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         for stream in self.streams.values_mut() {
@@ -897,7 +897,7 @@ impl RecvStream {
     pub fn write_frame(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         match &mut self.state {
@@ -1458,8 +1458,8 @@ mod tests {
 
         // consume it
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut token = Vec::new();
-        s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
+        let mut tokens = RecoveryTokenVec::new();
+        s.write_frame(&mut builder, &mut tokens, &mut FrameStats::default());
 
         // it should be gone
         assert!(!s.has_frames_to_write());
@@ -1572,10 +1572,10 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut token = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         session_fc
             .borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut FrameStats::default());
+            .write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
 
         // Switch to SizeKnown state
         s.inbound_stream_frame(true, 2 * u64::try_from(SESSION_WINDOW).unwrap() - 1, &[0])
@@ -1593,10 +1593,10 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut token = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         session_fc
             .borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut FrameStats::default());
+            .write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
 
         // Test DataRecvd state
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
@@ -1841,12 +1841,12 @@ mod tests {
 
         // Write the fc update frame
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut token = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut stats);
+            .write_frames(&mut builder, &mut tokens, &mut stats);
         assert_eq!(stats.max_data, 0);
-        s.write_frame(&mut builder, &mut token, &mut stats);
+        s.write_frame(&mut builder, &mut tokens, &mut stats);
         assert_eq!(stats.max_stream_data, 1);
 
         // Receive 1 byte that will case a session fc update after it is read.
@@ -1857,9 +1857,9 @@ mod tests {
         assert!(fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
         fc.borrow_mut()
-            .write_frames(&mut builder, &mut token, &mut stats);
+            .write_frames(&mut builder, &mut tokens, &mut stats);
         assert_eq!(stats.max_data, 1);
-        s.write_frame(&mut builder, &mut token, &mut stats);
+        s.write_frame(&mut builder, &mut tokens, &mut stats);
         assert_eq!(stats.max_stream_data, 1);
     }
 

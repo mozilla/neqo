@@ -20,7 +20,11 @@ use neqo_crypto::{
 use smallvec::SmallVec;
 
 use crate::{
-    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Res,
+    cid::ConnectionId,
+    packet::PacketBuilder,
+    recovery::{RecoveryToken, RecoveryTokenVec},
+    stats::FrameStats,
+    Res,
 };
 
 /// A prefix we add to Retry tokens to distinguish them from `NEW_TOKEN` tokens.
@@ -348,7 +352,7 @@ impl NewTokenState {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if let Self::Server(ref mut sender) = self {
@@ -422,7 +426,7 @@ impl NewTokenSender {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         for t in &mut self.tokens {

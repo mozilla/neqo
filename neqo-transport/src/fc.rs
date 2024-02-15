@@ -22,7 +22,7 @@ use crate::{
         FRAME_TYPE_STREAMS_BLOCKED_UNIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
     },
     packet::PacketBuilder,
-    recovery::{RecoveryToken, StreamRecoveryToken},
+    recovery::{RecoveryToken, RecoveryTokenVec, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     Error, Res,
@@ -134,7 +134,7 @@ impl SenderFlowControl<()> {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -153,7 +153,7 @@ impl SenderFlowControl<StreamId> {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -179,7 +179,7 @@ impl SenderFlowControl<StreamType> {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if let Some(limit) = self.blocked_needed() {
@@ -299,7 +299,7 @@ impl ReceiverFlowControl<()> {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -348,7 +348,7 @@ impl ReceiverFlowControl<StreamId> {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -402,7 +402,7 @@ impl ReceiverFlowControl<StreamType> {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if !self.frame_needed() {
@@ -581,6 +581,7 @@ mod test {
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
         packet::PacketBuilder,
+        recovery::RecoveryTokenVec,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
         Error,
@@ -811,7 +812,7 @@ mod test {
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        let mut tokens = Vec::new();
+        let mut tokens = RecoveryTokenVec::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
 
