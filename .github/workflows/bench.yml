@@ -3,6 +3,7 @@ on:
   workflow_call:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
+  CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
@@ -16,59 +17,91 @@ jobs:
         shell: bash
 
     steps:
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: $TOOLCHAIN
-          components: rustfmt
-
-      - name: Configure Rust
-        run: echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
-
-      - name: Enable sccache
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: $TOOLCHAIN
+          components: rustfmt
+
+      - name: Configure Rust
+        run: |
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
+          cargo install flamegraph
+
+      - name: Fetch NSS and NSPR
+        uses: ./.github/actions/nss
+
       - name: Build
-        run: cargo +$TOOLCHAIN bench --features ci,bench --no-run
+        run: |
+          cargo +$TOOLCHAIN bench --features bench --no-run
+          cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
+
+      - name: Download criterion results
+        id: criterion-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./target/criterion
+          key: criterion-${{ runner.os }}-${{ hashFiles('./target/criterion/**.json') }}
+          restore-keys: criterion-${{ runner.os }}-
+
+      # - name: Download github-action-benchmark results
+      #   id: benchmark-cache
+      #   uses: actions/cache/restore@v4
+      #   with:
+      #     path: ./cache
+      #     key: action-benchmark-${{ runner.os}}-${{ hashFiles('./cache/**.TODO') }}
+      #     restore-keys: action-benchmark-${{ runner.os }}-
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
-        run: sudo /root/bin/prep.sh
+        run: |
+          sudo /root/bin/prep.sh
+          echo "PERF_CMD=record -o perf.data -F997 --call-graph lbr -g" >> "$GITHUB_ENV"
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
-      - name: Benchmark
+      - name: Run cargo bench
         run: |
-          nice -n -20 taskset -c 0 \
-            cargo +$TOOLCHAIN bench --features ci,bench | tee output.txt
+          taskset -c 0 nice -n -20 \
+            cargo +$TOOLCHAIN bench --features bench | tee output.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
-      - name: Perf transfer benchmark
+      # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
+      - name: Profile cargo bench transfer
         run: |
-          nice -n -20 taskset -c 0 \
-            perf record -F997 --call-graph=lbr -o perf.data \
-            cargo +$TOOLCHAIN bench --features ci,bench --bench transfer
+          taskset -c 0 nice -n -20 \
+            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
+              --bench --exact "Run multiple transfers with varying seeds"
+
+      - name: Profile client/server transfer
+        run: |
+          { mkdir server; \
+            cd server; \
+            taskset -c 0 nice -n -20 \
+            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 || true; } &
+          mkdir client; \
+            cd client; \
+            time taskset -c 1 nice -n -20 \
+            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          killall -INT neqo-server
+          cd ${{ github.workspace }}
+          [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
+        env:
+          HOST: localhost
+          SIZE: 1073741824 # 1 GB
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
-        if: success() || failure()
-
-      - name: Download previous benchmark results
-        uses: actions/cache@v4
-        with:
-          path: ./cache
-          key: ${{ runner.os }}-benchmark
+        if: success() || failure() || cancelled()
 
       # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
-      # benchmark data when the main branch is being updated.
+      # benchmark data when the main branch is being updated (e.g., if: ${{ github.ref == "refs/heads/main" }})
       # - name: Store current benchmark results
       #   uses: benchmark-action/github-action-benchmark@v1
       #   with:
@@ -80,14 +113,38 @@ jobs:
       #     comment-on-alert: true
       #     summary-always: true
 
-      - name: Convert perf data
+      - name: Convert for profiler.firefox.com
         run: |
-          perf script -i perf.data -F +pid | zstd > perf.ff.data.zst
-          zstd perf.data
+          perf script -i perf.data -F +pid > transfer.perf &
+          perf script -i client/perf.data -F +pid > client.perf &
+          perf script -i server/perf.data -F +pid > server.perf &
+          wait
+          mv flamegraph.svg transfer.svg
+          mv client/flamegraph.svg client.svg
+          mv server/flamegraph.svg server.svg
+          rm neqo.svg
+
+      - name: Upload criterion results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ./target/criterion
+          key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
+
+      # - name: Upload github-action-benchmark results
+      #   if: github.ref == 'refs/heads/main'
+      #   uses: actions/cache/save@v4
+      #   with:
+      #     path: ./cache
+      #     key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.head_ref || github.ref_name }}-perf
-          path: "*.zst"
-          compression-level: 0
+          path: |
+            *.svg
+            *.perf
+            output.txt
+            target/criterion
+          compression-level: 9
