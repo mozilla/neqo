@@ -45,7 +45,7 @@ use crate::{
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
-    recovery::{LossRecovery, RecoveryToken, SendProfile},
+    recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
     recv_stream::RecvStreamStats,
     rtt::GRANULARITY,
     send_stream::SendStream,
@@ -56,7 +56,7 @@ use crate::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
     },
-    tracking::{AckTracker, PacketNumberSpace, SentPacket},
+    tracking::{AckTracker, PacketNumberSpace},
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
@@ -2884,12 +2884,12 @@ impl Connection {
     fn handle_ack<R>(
         &mut self,
         space: PacketNumberSpace,
-        largest_acknowledged: u64,
+        largest_acknowledged: PacketNumber,
         ack_ranges: R,
         ack_delay: u64,
         now: Instant,
     ) where
-        R: IntoIterator<Item = RangeInclusive<u64>> + Debug,
+        R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qinfo!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);

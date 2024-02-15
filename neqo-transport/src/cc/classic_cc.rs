@@ -18,9 +18,9 @@ use crate::{
     cc::MAX_DATAGRAM_SIZE,
     packet::PacketNumber,
     qlog::{self, QlogMetric},
+    recovery::SentPacket,
     rtt::RttEstimate,
     sender::PACING_BURST_SIZE,
-    tracking::SentPacket,
 };
 #[rustfmt::skip] // to keep `::` and thus prevent conflict with `crate::qlog`
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
@@ -555,8 +555,8 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
         },
         packet::{PacketNumber, PacketType},
+        recovery::SentPacket,
         rtt::RttEstimate,
-        tracking::SentPacket,
     };
 
     const PTO: Duration = Duration::from_millis(100);

@@ -26,11 +26,11 @@ use crate::{
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
     stats::FrameStats,
-    tracking::{PacketNumberSpace, SentPacket},
+    tracking::PacketNumberSpace,
     Stats,
 };
 

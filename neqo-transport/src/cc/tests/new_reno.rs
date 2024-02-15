@@ -17,8 +17,8 @@ use crate::{
         MAX_DATAGRAM_SIZE,
     },
     packet::PacketType,
+    recovery::SentPacket,
     rtt::RttEstimate,
-    tracking::SentPacket,
 };
 
 const PTO: Duration = Duration::from_millis(100);

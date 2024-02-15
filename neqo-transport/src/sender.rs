@@ -18,8 +18,8 @@ use neqo_common::qlog::NeqoQlog;
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
+    recovery::SentPacket,
     rtt::RttEstimate,
-    tracking::SentPacket,
 };
 
 /// The number of packets we allow to burst from the pacer.

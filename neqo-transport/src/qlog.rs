@@ -29,9 +29,9 @@ use crate::{
     frame::{CloseError, Frame},
     packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket},
     path::PathRef,
+    recovery::SentPacket,
     stream_id::StreamType as NeqoStreamType,
     tparams::{self, TransportParametersHandler},
-    tracking::SentPacket,
     version::{Version, VersionConfig, WireVersion},
 };
 
