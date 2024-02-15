@@ -8,6 +8,7 @@
 
 use std::{
     cmp::min,
+    collections::VecDeque,
     convert::TryFrom,
     ops::RangeInclusive,
     time::{Duration, Instant},
@@ -135,7 +136,7 @@ impl SentPacket {
 #[derive(Debug, Default)]
 pub struct SentPackets {
     /// The collection.
-    packets: Vec<Option<SentPacket>>,
+    packets: VecDeque<Option<SentPacket>>,
     /// The packet number of the first item in the collection.
     offset: PacketNumber,
     /// The number of `Some` values in the packet.  This is cached to keep things squeaky-fast.
@@ -156,7 +157,7 @@ impl SentPackets {
             self.offset = packet.pn;
         }
         self.len += 1;
-        self.packets.push(Some(packet));
+        self.packets.push_back(Some(packet));
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut SentPacket> {
@@ -176,10 +177,11 @@ impl SentPackets {
         );
 
         let before = store.len();
-        if self.packets[..start].iter().all(Option::is_none) {
+        if self.packets.range(..start).all(Option::is_none) {
             // If there are extra empty slots, split those off too.
-            let extra = self.packets[end..]
-                .iter()
+            let extra = self
+                .packets
+                .range(end..)
                 .take_while(|&p| p.is_none())
                 .count();
             self.offset += u64::try_from(end + extra).unwrap();
@@ -195,8 +197,8 @@ impl SentPackets {
             );
         } else {
             store.extend(
-                self.packets[start..end]
-                    .iter_mut()
+                self.packets
+                    .range_mut(start..end)
                     .rev()
                     .filter_map(Option::take),
             );
