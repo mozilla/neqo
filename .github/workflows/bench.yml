@@ -53,16 +53,20 @@ jobs:
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       - name: Download criterion results
+        id: cache-criterion-restore
         uses: actions/cache/restore@v4
         with:
           path: ./target/criterion
-          key: neqo-${{ runner.os }}-main-criterion
+          key: neqo-${{ runner.os }}-${{ github.run_id}}
+          restore-keys: neqo-${{ runner.os }}-main-criterion
 
       - name: Download github-action-benchmark results
+        id: cache-action-benchmark-restore
         uses: actions/cache/restore@v4
         with:
           path: ./cache
-          key: neqo-${{ runner.os }}-main-github-action-benchmark
+          key: neqo-${{ runner.os}}-${{ github.run_id}}
+          restore-keys: neqo-${{ runner.os }}-main-action-benchmark
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -144,7 +148,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ./cache
-          key: neqo-${{ runner.os }}-main-github-action-benchmark
+          key: neqo-${{ runner.os }}-main-action-benchmark
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
