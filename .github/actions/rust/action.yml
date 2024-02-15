@@ -18,7 +18,7 @@ runs:
       uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ inputs.toolchain }}
-        components: ${{ inputs.components }}
+        components: '${{ inputs.components }}'
 
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.4

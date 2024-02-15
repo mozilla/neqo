@@ -24,7 +24,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          components: 'rustfmt'
+          components: rustfmt
 
       - name: Configure Rust
         run: |
