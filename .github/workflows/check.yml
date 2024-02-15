@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Install Rust
-        uses: ./.github/actions/rust
+        uses: ./.github/actions/rust.yml
         with:
           rust-version: ${{ matrix.rust-toolchain }}
           rust-components: rustfmt, clippy, llvm-tools-preview
@@ -103,7 +103,7 @@ jobs:
       # right build flags rather than building NSS.)
       # Clone from the main hg repo, because the GitHub mirror can be out of date.
       - name: Fetch NSS and NSPR
-        uses: ./.github/actions/nss
+        uses: ./.github/actions/nss.yml
 
       - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
