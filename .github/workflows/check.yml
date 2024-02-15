@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Install Rust
-        uses: ./.github/actions/my-composite-action
+        uses: ./.github/actions/rust
         with:
           rust-version: ${{ matrix.rust-toolchain }}
           rust-components: rustfmt, clippy, llvm-tools-preview

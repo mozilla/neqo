@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Install Rust
-        uses: ./.github/actions/my-composite-action
+        uses: ./.github/actions/rust
         with:
           rust-version: $TOOLCHAIN
           rust-components: rustfmt
