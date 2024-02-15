@@ -1,0 +1,21 @@
+name: Checkout NSS and NSPR
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch NSS and NSPR
+      shell: bash
+      run: |
+        for i in {1..$RETRIES}; do
+          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR" && break || sleep $DELAY && false
+        done
+        for i in {1..$RETRIES}; do
+          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR" && break || sleep $DELAY && false
+        done
+        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
+      env:
+        NSS_DIR: ${{ github.workspace }}/nss
+        NSPR_DIR: ${{ github.workspace }}/nspr
+        RETRIES: 10
+        DELAY: 10

@@ -17,34 +17,22 @@ jobs:
         shell: bash
 
     steps:
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: $TOOLCHAIN
-          components: rustfmt
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: $TOOLCHAIN
+          components: rustfmt
 
       - name: Configure Rust
         run: |
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           cargo install flamegraph
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Fetch NSS and NSPR
-        run: |
-          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
-          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
-        env:
-          NSS_DIR: ${{ github.workspace }}/nss
-          NSPR_DIR: ${{ github.workspace }}/nspr
+        uses: ./.github/actions/nss
 
       - name: Build
         run: |
@@ -53,18 +41,20 @@ jobs:
           echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       - name: Download criterion results
+        id: criterion-cache
         uses: actions/cache/restore@v4
         with:
           path: ./target/criterion
-          key: neqo-${{ runner.os }}-${{ github.run_id}}
-          restore-keys: neqo-${{ runner.os }}-main-criterion
+          key: criterion-${{ runner.os }}-${{ hashFiles('./target/criterion/**.json') }}
+          restore-keys: criterion-${{ runner.os }}-
 
-      - name: Download github-action-benchmark results
-        uses: actions/cache/restore@v4
-        with:
-          path: ./cache
-          key: neqo-${{ runner.os}}-${{ github.run_id}}
-          restore-keys: neqo-${{ runner.os }}-main-action-benchmark
+      # - name: Download github-action-benchmark results
+      #   id: benchmark-cache
+      #   uses: actions/cache/restore@v4
+      #   with:
+      #     path: ./cache
+      #     key: action-benchmark-${{ runner.os}}-${{ hashFiles('./cache/**.TODO') }}
+      #     restore-keys: action-benchmark-${{ runner.os }}-
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -139,14 +129,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ./target/criterion
-          key: neqo-${{ runner.os }}-main-criterion
+          key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
 
-      - name: Upload github-action-benchmark results
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ./cache
-          key: neqo-${{ runner.os }}-main-action-benchmark
+      # - name: Upload github-action-benchmark results
+      #   if: github.ref == 'refs/heads/main'
+      #   uses: actions/cache/save@v4
+      #   with:
+      #     path: ./cache
+      #     key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
