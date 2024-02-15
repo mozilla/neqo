@@ -17,6 +17,9 @@ jobs:
         shell: bash
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
@@ -27,9 +30,6 @@ jobs:
         run: |
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
           cargo install flamegraph
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Fetch NSS and NSPR
         uses: ./.github/actions/nss

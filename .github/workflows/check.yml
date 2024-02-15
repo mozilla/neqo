@@ -37,6 +37,9 @@ jobs:
         shell: bash
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
@@ -93,9 +96,6 @@ jobs:
 
       - name: Install Rust tools
         run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
