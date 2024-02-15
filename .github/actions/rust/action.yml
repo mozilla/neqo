@@ -2,11 +2,11 @@ name: Install Rust
 description: Install Rust and sccache
 
 inputs:
-  rust-toolchain:
-    description: 'Rust toolchain to install'
+  version:
+    description: 'Rust toolchain version to install'
     required: true
     default: 'stable'
-  rust-components:
+  components:
     description: 'Rust components to install'
     required: false
     default: ''
@@ -17,8 +17,8 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: rust-toolchain
-        components: rust-components
+        toolchain: toolchain
+        components: components
 
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.4

@@ -23,8 +23,8 @@ jobs:
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
-          rust-version: $TOOLCHAIN
-          rust-components: rustfmt
+          version: $TOOLCHAIN
+          components: rustfmt
 
       - name: Configure Rust
         run: |
