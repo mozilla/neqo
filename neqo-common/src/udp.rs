@@ -132,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn datagram_tos() -> Result<(), io::Error> {
         let sender = Socket::bind("127.0.0.1:0")?;
-        let receiver_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let receiver = Socket::bind(receiver_addr)?;
 
         sleep(Duration::from_millis(100)).await;
