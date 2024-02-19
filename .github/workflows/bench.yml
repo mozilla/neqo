@@ -8,8 +8,8 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
-  RUSTFLAGS:-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment
-  PERF_CMD=record -o perf.data -F997 --call-graph lbr -g
+  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment
+  PERF_CMD: record -o perf.data -F997 --call-graph lbr -g
 
 jobs:
   bench:
@@ -32,8 +32,7 @@ jobs:
           components: rustfmt
 
       - name: Configure Rust
-        run: |
-          cargo install flamegraph
+        run: cargo install flamegraph
 
       - name: Fetch NSS and NSPR
         uses: ./.github/actions/nss
@@ -61,8 +60,7 @@ jobs:
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
-        run: |
-          sudo /root/bin/prep.sh
+        run: sudo /root/bin/prep.sh
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Run cargo bench
