@@ -131,6 +131,7 @@ pub struct RxStreamOrderer {
 }
 
 impl RxStreamOrderer {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -138,6 +139,9 @@ impl RxStreamOrderer {
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
+    /// # Panics
+    /// Only when `u64` values cannot be converted to `usize`, which only
+    /// happens on 32-bit machines that hold far too much data at the same time.
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
         qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
 
@@ -276,6 +280,7 @@ impl RxStreamOrderer {
     }
 
     /// Are any bytes readable?
+    #[must_use]
     pub fn data_ready(&self) -> bool {
         self.data_ranges
             .keys()
@@ -309,10 +314,12 @@ impl RxStreamOrderer {
     }
 
     /// Bytes read by the application.
+    #[must_use]
     pub fn retired(&self) -> u64 {
         self.retired
     }
 
+    #[must_use]
     pub fn received(&self) -> u64 {
         self.received
     }
@@ -591,6 +598,7 @@ impl RecvStream {
         self.state = new_state;
     }
 
+    #[must_use]
     pub fn stats(&self) -> RecvStreamStats {
         match &self.state {
             RecvStreamState::Recv { recv_buf, .. }
@@ -625,6 +633,11 @@ impl RecvStream {
         }
     }
 
+    /// # Errors
+    /// When the incoming data violates flow control limits.
+    /// # Panics
+    /// Only when `u64` values are so big that they can't fit in a `usize`, which
+    /// only happens on a 32-bit machine that has far too much unread data.
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: &[u8]) -> Res<()> {
         // We should post a DataReadable event only once when we change from no-data-ready to
         // data-ready. Therefore remember the state before processing a new frame.
@@ -694,6 +707,8 @@ impl RecvStream {
         Ok(())
     }
 
+    /// # Errors
+    /// When the reset occurs at an invalid point.
     pub fn reset(&mut self, application_error_code: AppError, final_size: u64) -> Res<()> {
         self.state.flow_control_consume_data(final_size, true)?;
         match &mut self.state {
@@ -776,6 +791,7 @@ impl RecvStream {
         }
     }
 
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.state,
@@ -795,8 +811,8 @@ impl RecvStream {
     }
 
     /// # Errors
-    ///
     /// `NoMoreData` if data and fin bit were previously read by the application.
+    #[allow(clippy::missing_panics_doc)] // with a >16 exabyte packet on a 128-bit machine, maybe
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let data_recvd_state = matches!(self.state, RecvStreamState::DataRecvd { .. });
         match &mut self.state {
@@ -970,6 +986,7 @@ impl RecvStream {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub fn has_frames_to_write(&self) -> bool {
         if let RecvStreamState::Recv { fc, .. } = &self.state {
             fc.frame_needed()
@@ -979,6 +996,7 @@ impl RecvStream {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub fn fc(&self) -> Option<&ReceiverFlowControl<StreamId>> {
         match &self.state {
             RecvStreamState::Recv { fc, .. }
