@@ -18,7 +18,7 @@ use std::{
 use enum_map::enum_map;
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{self, fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
+use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
 use super::{Connection, ConnectionError, ConnectionId, Output, State};
 use crate::{

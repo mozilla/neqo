@@ -1766,10 +1766,23 @@ pub struct SendStreamRecoveryToken {
 
 #[cfg(test)]
 mod tests {
-    use neqo_common::{event::Provider, hex_with_len, qtrace};
+    use std::{cell::RefCell, collections::VecDeque, convert::TryFrom, rc::Rc};
 
-    use super::*;
-    use crate::events::ConnectionEvent;
+    use neqo_common::{event::Provider, hex_with_len, qtrace, Encoder};
+
+    use super::SendStreamRecoveryToken;
+    use crate::{
+        connection::{RetransmissionPriority, TransmissionPriority},
+        events::ConnectionEvent,
+        fc::SenderFlowControl,
+        packet::PacketBuilder,
+        recovery::{RecoveryToken, StreamRecoveryToken},
+        send_stream::{
+            RangeState, RangeTracker, SendStream, SendStreamState, SendStreams, TxBuffer,
+        },
+        stats::FrameStats,
+        ConnectionEvents, StreamId, SEND_BUFFER_SIZE,
+    };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
         Rc::new(RefCell::new(SenderFlowControl::new((), limit)))
@@ -2242,7 +2255,7 @@ mod tests {
         let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
         assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len()==SEND_BUFFER_SIZE
+                         Some((0, x)) if x.len() == SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left

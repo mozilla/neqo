@@ -1011,11 +1011,18 @@ impl RecvStream {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
+    use std::{cell::RefCell, convert::TryFrom, ops::Range, rc::Rc};
 
-    use neqo_common::Encoder;
+    use neqo_common::{qtrace, Encoder};
 
-    use super::*;
+    use super::RecvStream;
+    use crate::{
+        fc::ReceiverFlowControl,
+        packet::PacketBuilder,
+        recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
+        stats::FrameStats,
+        ConnectionEvents, Error, StreamId, RECV_BUFFER_SIZE,
+    };
 
     const SESSION_WINDOW: usize = 1024;
 
