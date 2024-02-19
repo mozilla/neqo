@@ -39,6 +39,7 @@ jobs:
 
       - name: Build
         run: |
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
           cargo +$TOOLCHAIN bench --features bench --no-run
           cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
 
