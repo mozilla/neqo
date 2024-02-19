@@ -2329,7 +2329,7 @@ impl Connection {
                         packets.len(),
                         mtu
                     );
-                    initial.size += mtu - packets.len();
+                    initial.add_padding(mtu - packets.len());
                     packets.resize(mtu, 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
@@ -2848,7 +2848,7 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
         for lost in lost_packets {
-            for token in &lost.tokens {
+            for token in lost.tokens() {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
@@ -2903,7 +2903,7 @@ impl Connection {
             now,
         );
         for acked in acked_packets {
-            for token in &acked.tokens {
+            for token in acked.tokens() {
                 match token {
                     RecoveryToken::Stream(stream_token) => self.streams.acked(stream_token),
                     RecoveryToken::Ack(at) => self.acks.acked(at),

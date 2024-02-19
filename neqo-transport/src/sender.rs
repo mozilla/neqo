@@ -109,7 +109,7 @@ impl PacketSender {
 
     pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {
         self.pacer
-            .spend(pkt.time_sent, rtt, self.cc.cwnd(), pkt.size);
+            .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
         self.cc.on_packet_sent(pkt);
     }
 

@@ -21,18 +21,18 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct SentPacket {
-    pub pt: PacketType,
-    pub pn: PacketNumber,
+    pt: PacketType,
+    pn: PacketNumber,
     ack_eliciting: bool,
-    pub time_sent: Instant,
+    time_sent: Instant,
     primary_path: bool,
-    pub tokens: Vec<RecoveryToken>,
+    tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
     /// After a PTO, this is true when the packet has been released.
     pto: bool,
 
-    pub size: usize,
+    len: usize,
 }
 
 impl SentPacket {
@@ -42,7 +42,7 @@ impl SentPacket {
         time_sent: Instant,
         ack_eliciting: bool,
         tokens: Vec<RecoveryToken>,
-        size: usize,
+        len: usize,
     ) -> Self {
         Self {
             pt,
@@ -53,13 +53,23 @@ impl SentPacket {
             tokens,
             time_declared_lost: None,
             pto: false,
-            size,
+            len,
         }
+    }
+
+    /// The type of this packet.
+    pub fn packet_type(&self) -> PacketType {
+        self.pt
     }
 
     /// The number of the packet.
     pub fn pn(&self) -> PacketNumber {
         self.pn
+    }
+
+    /// The time that this packet was sent.
+    pub fn time_sent(&self) -> Instant {
+        self.time_sent
     }
 
     /// Returns `true` if the packet will elicit an ACK.
@@ -72,10 +82,26 @@ impl SentPacket {
         self.primary_path
     }
 
+    /// The length of the packet that was sent.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Access the recovery tokens that this holds.
+    pub fn tokens(&self) -> &[RecoveryToken] {
+        &self.tokens
+    }
+
     /// Clears the flag that had this packet on the primary path.
     /// Used when migrating to clear out state.
     pub fn clear_primary_path(&mut self) {
         self.primary_path = false;
+    }
+
+    /// For Initial packets, it is possible that the packet builder needs to amend the length.
+    pub fn add_padding(&mut self, padding: usize) {
+        debug_assert_eq!(self.pt, PacketType::Initial);
+        self.len += padding;
     }
 
     /// Whether the packet has been declared lost.

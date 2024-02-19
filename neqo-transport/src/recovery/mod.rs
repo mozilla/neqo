@@ -207,14 +207,14 @@ impl LossRecoverySpace {
 
     pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
         if sent_packet.ack_eliciting() {
-            self.last_ack_eliciting = Some(sent_packet.time_sent);
+            self.last_ack_eliciting = Some(sent_packet.time_sent());
             self.in_flight_outstanding += 1;
         } else if self.space != PacketNumberSpace::ApplicationData
             && self.last_ack_eliciting.is_none()
         {
             // For Initial and Handshake spaces, make sure that we have a PTO baseline
             // always. See `LossRecoverySpace::pto_base_time()` for details.
-            self.last_ack_eliciting = Some(sent_packet.time_sent);
+            self.last_ack_eliciting = Some(sent_packet.time_sent());
         }
         self.sent_packets.track(sent_packet);
     }
@@ -330,11 +330,11 @@ impl LossRecoverySpace {
             .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
         {
             // Packets sent before now - loss_delay are deemed lost.
-            if packet.time_sent + loss_delay <= now {
+            if packet.time_sent() + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {:?}",
                     packet.pn(),
-                    packet.time_sent,
+                    packet.time_sent(),
                     loss_delay
                 );
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
@@ -346,7 +346,7 @@ impl LossRecoverySpace {
                 );
             } else {
                 if largest_acked.is_some() {
-                    self.first_ooo_time = Some(packet.time_sent);
+                    self.first_ooo_time = Some(packet.time_sent());
                 }
                 // No more packets can be declared lost after this one.
                 break;
@@ -545,7 +545,7 @@ impl LossRecovery {
     }
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
-        let pn_space = PacketNumberSpace::from(sent_packet.pt);
+        let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
         qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
             path.borrow_mut().packet_sent(&mut sent_packet);
@@ -622,11 +622,11 @@ impl LossRecovery {
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
             let largest_acked_pkt = acked_packets.first().expect("must be there");
-            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
+            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent());
             if any_ack_eliciting && largest_acked_pkt.on_primary_path() {
                 self.rtt_sample(
                     primary_path.borrow_mut().rtt_mut(),
-                    largest_acked_pkt.time_sent,
+                    largest_acked_pkt.time_sent(),
                     now,
                     ack_delay,
                 );
@@ -1413,7 +1413,7 @@ mod tests {
             PacketType::Short,
         ] {
             let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
-            let pn_space = PacketNumberSpace::from(sent_pkt.pt);
+            let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
             lr.on_packet_sent(sent_pkt);
             lr.on_ack_received(pn_space, 1, vec![1..=1], Duration::from_secs(0), pn_time(3));
             let mut lost = Vec::new();

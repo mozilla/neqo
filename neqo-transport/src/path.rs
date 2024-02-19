@@ -945,12 +945,12 @@ impl Path {
             qinfo!(
                 [self],
                 "discarding a packet without an RTT estimate; guessing RTT={:?}",
-                now - sent.time_sent
+                now - sent.time_sent()
             );
             stats.rtt_init_guess = true;
             self.rtt.update(
                 &mut self.qlog,
-                now - sent.time_sent,
+                now - sent.time_sent(),
                 Duration::new(0, 0),
                 false,
                 now,

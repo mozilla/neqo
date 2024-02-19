@@ -261,8 +261,13 @@ pub fn packet_dropped(qlog: &mut NeqoQlog, public_packet: &PublicPacket) {
 pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
-            let header =
-                PacketHeader::with_type(to_qlog_pkt_type(pkt.pt), Some(pkt.pn), None, None, None);
+            let header = PacketHeader::with_type(
+                to_qlog_pkt_type(pkt.packet_type()),
+                Some(pkt.pn()),
+                None,
+                None,
+                None,
+            );
 
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
