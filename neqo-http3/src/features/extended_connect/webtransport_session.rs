@@ -8,7 +8,7 @@ use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc};
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
-use neqo_transport::{streams::SendOrder, Connection, DatagramTracking, StreamId};
+use neqo_transport::{Connection, DatagramTracking, StreamId};
 
 use super::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason};
 use crate::{
@@ -484,16 +484,6 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
 
     fn has_data_to_send(&self) -> bool {
         self.borrow_mut().has_data_to_send()
-    }
-
-    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) -> Res<()> {
-        // Not relevant on session
-        Ok(())
-    }
-
-    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) -> Res<()> {
-        // Not relevant on session
-        Ok(())
     }
 
     fn stream_writable(&self) {}
