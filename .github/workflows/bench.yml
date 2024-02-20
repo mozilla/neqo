@@ -1,12 +1,15 @@
 name: Bench
 on:
   workflow_call:
+  workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
+  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment
+  PERF_CMD: record -o perf.data -F997 --call-graph lbr -g
 
 jobs:
   bench:
@@ -15,6 +18,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Release/lib
 
     steps:
       - name: Checkout
@@ -27,18 +32,16 @@ jobs:
           components: rustfmt
 
       - name: Configure Rust
-        run: |
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment" >> "$GITHUB_ENV"
-          cargo install flamegraph
+        run: cargo install flamegraph
 
       - name: Fetch NSS and NSPR
         uses: ./.github/actions/nss
 
       - name: Build
         run: |
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
           cargo +$TOOLCHAIN bench --features bench --no-run
           cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/Debug/lib" >> "$GITHUB_ENV"
 
       - name: Download criterion results
         id: criterion-cache
@@ -58,9 +61,7 @@ jobs:
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
-        run: |
-          sudo /root/bin/prep.sh
-          echo "PERF_CMD=record -o perf.data -F997 --call-graph lbr -g" >> "$GITHUB_ENV"
+        run: sudo /root/bin/prep.sh
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
       - name: Run cargo bench
