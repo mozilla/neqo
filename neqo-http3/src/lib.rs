@@ -570,10 +570,6 @@ trait SendStream: Stream {
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
-    #[allow(dead_code)] // https://github.com/mozilla/neqo/issues/1651
-    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>) -> Res<()>;
-    #[allow(dead_code)] // https://github.com/mozilla/neqo/issues/1651
-    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) -> Res<()>;
 
     /// # Errors
     ///

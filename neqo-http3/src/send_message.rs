@@ -8,7 +8,7 @@ use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
 
 use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{streams::SendOrder, Connection, StreamId};
+use neqo_transport::{Connection, StreamId};
 
 use crate::{
     frames::HFrame,
@@ -268,16 +268,6 @@ impl SendStream for SendMessage {
     // http client afterwards using `send_request_body` after receiving DataWritable event.
     fn has_data_to_send(&self) -> bool {
         self.stream.has_buffered_data()
-    }
-
-    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) -> Res<()> {
-        // Not relevant for SendMessage
-        Ok(())
-    }
-
-    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) -> Res<()> {
-        // Not relevant for SendMessage
-        Ok(())
     }
 
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
