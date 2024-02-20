@@ -126,11 +126,10 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let receiver = Socket::bind(receiver_addr)?;
 
-        let tos_tx = IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1));
         let datagram = Datagram::new(
             sender.local_addr()?,
             receiver.local_addr()?,
-            tos_tx,
+            IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
             None,
             "Hello, world!".as_bytes().to_vec(),
         );
