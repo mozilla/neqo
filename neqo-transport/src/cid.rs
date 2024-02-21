@@ -603,8 +603,7 @@ mod tests {
             let cid = ConnectionId::generate_initial();
             assert!(
                 matches!(cid.len(), 8..=MAX_CONNECTION_ID_LEN),
-                "connection ID length {:?}",
-                cid,
+                "connection ID length {cid:?}",
             );
         }
     }

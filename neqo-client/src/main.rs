@@ -663,7 +663,7 @@ impl<'a> URLHandler<'a> {
                 false
             }
             Err(e) => {
-                panic!("Can't create stream {}", e);
+                panic!("Can't create stream {e}");
             }
         }
     }
@@ -1189,7 +1189,7 @@ mod old {
                     false
                 }
                 Err(e) => {
-                    panic!("Error creating stream {:?}", e);
+                    panic!("Error creating stream {e:?}");
                 }
             }
         }
