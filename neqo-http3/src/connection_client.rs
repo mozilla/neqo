@@ -894,13 +894,6 @@ impl Http3Client {
         self.process_http3(now);
     }
 
-    /// This should not be used because it gives access to functionalities that may disrupt the
-    /// proper functioning of the HTTP/3 session.
-    /// Only used by `neqo-interop`.
-    pub fn conn(&mut self) -> &mut Connection {
-        &mut self.conn
-    }
-
     /// Process HTTP3 layer.
     /// When `process_output`, `process_input`, or `process` is called we must call this function
     /// as well. The functions calls `Http3Client::check_connection_events` to handle events from

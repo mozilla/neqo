@@ -7,7 +7,6 @@ members = [
   "neqo-server",
   "neqo-qpack",
   "neqo-transport",
-  "neqo-interop",
   "test-fixture",
 ]
 
