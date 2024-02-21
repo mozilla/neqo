@@ -3946,7 +3946,7 @@ mod tests {
                 );
             }
             x => {
-                panic!("event {:?}", x);
+                panic!("event {x:?}");
             }
         }
 
@@ -3992,7 +3992,7 @@ mod tests {
                 assert!(fin);
             }
             x => {
-                panic!("event {:?}", x);
+                panic!("event {x:?}");
             }
         }
         // Stream should now be closed and gone
@@ -4065,7 +4065,7 @@ mod tests {
                     assert_eq!(stream_id, request_stream_id);
                 }
                 x => {
-                    panic!("event {:?}", x);
+                    panic!("event {x:?}");
                 }
             }
         }
@@ -4129,7 +4129,7 @@ mod tests {
                 assert!(!interim);
                 recv_header = true;
             } else {
-                panic!("event {:?}", e);
+                panic!("event {e:?}");
             }
         }
         assert!(recv_header);
