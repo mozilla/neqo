@@ -111,7 +111,7 @@ impl Add<RetransmissionPriority> for TransmissionPriority {
 
 /// If data is lost, this determines the priority that applies to retransmissions
 /// of that data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum RetransmissionPriority {
     /// Prioritize retransmission at a fixed priority.
     /// With this, it is possible to prioritize retransmissions lower than transmissions.
@@ -123,16 +123,11 @@ pub enum RetransmissionPriority {
     Same,
     /// Increase the priority of retransmissions (the default).
     /// Retransmissions of `Critical` or `Important` aren't elevated at all.
+    #[default]
     Higher,
     /// Increase the priority of retransmissions a lot.
     /// This is useful for streams that are particularly exposed to head-of-line blocking.
     MuchHigher,
-}
-
-impl Default for RetransmissionPriority {
-    fn default() -> Self {
-        Self::Higher
-    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

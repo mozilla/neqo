@@ -433,18 +433,13 @@ pub enum Http3StreamType {
 }
 
 #[must_use]
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Default, PartialEq, Eq, Debug)]
 enum ReceiveOutput {
+    #[default]
     NoOutput,
     ControlFrames(Vec<HFrame>),
     UnblockedStreams(Vec<StreamId>),
     NewStream(NewStreamType),
-}
-
-impl Default for ReceiveOutput {
-    fn default() -> Self {
-        Self::NoOutput
-    }
 }
 
 trait Stream: Debug {
