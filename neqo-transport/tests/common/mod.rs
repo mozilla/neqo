@@ -20,7 +20,7 @@ use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     Connection, ConnectionEvent, ConnectionParameters, State,
 };
-use test_fixture::{self, default_client, now, CountingConnectionIdGenerator};
+use test_fixture::{default_client, now, CountingConnectionIdGenerator};
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
 pub fn new_server(params: ConnectionParameters) -> Server {

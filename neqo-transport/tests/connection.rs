@@ -15,7 +15,7 @@ use common::{
 };
 use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_transport::{ConnectionError, ConnectionParameters, Error, State, Version};
-use test_fixture::{self, default_client, default_server, new_client, now, split_datagram};
+use test_fixture::{default_client, default_server, new_client, now, split_datagram};
 
 #[test]
 fn connect() {

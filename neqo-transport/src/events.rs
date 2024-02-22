@@ -254,8 +254,9 @@ impl EventProvider for ConnectionEvents {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{ConnectionError, Error};
+    use neqo_common::event::Provider;
+
+    use crate::{ConnectionError, ConnectionEvent, ConnectionEvents, Error, State, StreamId};
 
     #[test]
     fn event_culling() {
