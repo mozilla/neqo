@@ -219,6 +219,7 @@ impl RangeTracker {
     /// The only tricky parts are making sure that we maintain `self.acked`,
     /// which is the first acknowledged range.  And making sure that we don't create
     /// ranges of the same type that are adjacent; these need to be merged.
+    #[allow(clippy::missing_panics_doc)] // with a >16 exabyte packet on a 128-bit machine, maybe
     pub fn mark_acked(&mut self, new_off: u64, new_len: usize) {
         let end = new_off + u64::try_from(new_len).unwrap();
         let new_off = max(self.acked, new_off);
@@ -316,6 +317,7 @@ impl RangeTracker {
     /// +     SS
     /// = SSSSSS
     /// ```
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
         let new_end = new_off + u64::try_from(new_len).unwrap();
         new_off = max(self.acked, new_off);
@@ -469,6 +471,9 @@ impl RangeTracker {
     }
 
     /// Unmark all sent ranges.
+    /// # Panics
+    /// On 32-bit machines where far too much is sent before calling this.
+    /// Note that this should not be called for handshakes, which should never exceed that limit.
     pub fn unmark_sent(&mut self) {
         self.unmark_range(0, usize::try_from(self.highest_offset()).unwrap());
     }
@@ -482,6 +487,7 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -491,11 +497,12 @@ impl TxBuffer {
         let can_buffer = min(SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            assert!(self.send_buf.len() <= SEND_BUFFER_SIZE);
+            debug_assert!(self.send_buf.len() <= SEND_BUFFER_SIZE);
         }
         can_buffer
     }
 
+    #[allow(clippy::missing_panics_doc)] // These are not possible.
     pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
@@ -532,6 +539,7 @@ impl TxBuffer {
         self.ranges.mark_sent(offset, len);
     }
 
+    #[allow(clippy::missing_panics_doc)] // Not possible here.
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
         let prev_retired = self.retired();
         self.ranges.mark_acked(offset, len);
@@ -555,6 +563,7 @@ impl TxBuffer {
         self.ranges.unmark_sent();
     }
 
+    #[must_use]
     pub fn retired(&self) -> u64 {
         self.ranges.acked_from_zero()
     }
@@ -783,6 +792,7 @@ impl SendStream {
         self.fair = make_fair;
     }
 
+    #[must_use]
     pub fn is_fair(&self) -> bool {
         self.fair
     }
@@ -796,6 +806,7 @@ impl SendStream {
         self.retransmission_priority = retransmission;
     }
 
+    #[must_use]
     pub fn sendorder(&self) -> Option<SendOrder> {
         self.sendorder
     }
@@ -805,6 +816,7 @@ impl SendStream {
     }
 
     /// If all data has been buffered or written, how much was sent.
+    #[must_use]
     pub fn final_size(&self) -> Option<u64> {
         match &self.state {
             SendStreamState::DataSent { send_buf, .. } => Some(send_buf.used()),
@@ -813,10 +825,13 @@ impl SendStream {
         }
     }
 
+    #[must_use]
     pub fn stats(&self) -> SendStreamStats {
         SendStreamStats::new(self.bytes_written(), self.bytes_sent, self.bytes_acked())
     }
 
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn bytes_written(&self) -> u64 {
         match &self.state {
             SendStreamState::Send { send_buf, .. } | SendStreamState::DataSent { send_buf, .. } => {
@@ -839,6 +854,7 @@ impl SendStream {
         }
     }
 
+    #[must_use]
     pub fn bytes_acked(&self) -> u64 {
         match &self.state {
             SendStreamState::Send { send_buf, .. } | SendStreamState::DataSent { send_buf, .. } => {
@@ -928,6 +944,7 @@ impl SendStream {
     }
 
     /// Maybe write a `STREAM` frame.
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn write_stream_frame(
         &mut self,
         priority: TransmissionPriority,
@@ -1090,6 +1107,7 @@ impl SendStream {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         self.bytes_sent = max(self.bytes_sent, offset + u64::try_from(len).unwrap());
 
@@ -1105,6 +1123,7 @@ impl SendStream {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
         match self.state {
             SendStreamState::Send {
@@ -1142,6 +1161,7 @@ impl SendStream {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         self.retransmission_offset = max(
             self.retransmission_offset,
@@ -1170,6 +1190,7 @@ impl SendStream {
 
     /// Bytes sendable on stream. Constrained by stream credit available,
     /// connection credit available, and space in the tx buffer.
+    #[must_use]
     pub fn avail(&self) -> usize {
         if let SendStreamState::Ready { fc, conn_fc } | SendStreamState::Send { fc, conn_fc, .. } =
             &self.state
@@ -1195,6 +1216,7 @@ impl SendStream {
         }
     }
 
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.state,
@@ -1202,10 +1224,14 @@ impl SendStream {
         )
     }
 
+    /// # Errors
+    /// When `buf` is empty or when the stream is already closed.
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
         self.send_internal(buf, false)
     }
 
+    /// # Errors
+    /// When `buf` is empty or when the stream is already closed.
     pub fn send_atomic(&mut self, buf: &[u8]) -> Res<usize> {
         self.send_internal(buf, true)
     }
@@ -1297,6 +1323,7 @@ impl SendStream {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn reset(&mut self, err: AppError) {
         match &self.state {
             SendStreamState::Ready { fc, .. } => {
@@ -1391,6 +1418,7 @@ impl OrderGroup {
         }
     }
 
+    #[must_use]
     pub fn stream_ids(&self) -> &Vec<StreamId> {
         &self.vec
     }
@@ -1414,6 +1442,8 @@ impl OrderGroup {
         next
     }
 
+    /// # Panics
+    /// If the stream ID is already present.
     pub fn insert(&mut self, stream_id: StreamId) {
         let Err(pos) = self.vec.binary_search(&stream_id) else {
             // element already in vector @ `pos`
@@ -1422,6 +1452,8 @@ impl OrderGroup {
         self.vec.insert(pos, stream_id);
     }
 
+    /// # Panics
+    /// If the stream ID is not present.
     pub fn remove(&mut self, stream_id: StreamId) {
         let Ok(pos) = self.vec.binary_search(&stream_id) else {
             // element already in vector @ `pos`
@@ -1729,10 +1761,23 @@ pub struct SendStreamRecoveryToken {
 
 #[cfg(test)]
 mod tests {
-    use neqo_common::{event::Provider, hex_with_len, qtrace};
+    use std::{cell::RefCell, collections::VecDeque, convert::TryFrom, rc::Rc};
 
-    use super::*;
-    use crate::events::ConnectionEvent;
+    use neqo_common::{event::Provider, hex_with_len, qtrace, Encoder};
+
+    use super::SendStreamRecoveryToken;
+    use crate::{
+        connection::{RetransmissionPriority, TransmissionPriority},
+        events::ConnectionEvent,
+        fc::SenderFlowControl,
+        packet::PacketBuilder,
+        recovery::{RecoveryToken, StreamRecoveryToken},
+        send_stream::{
+            RangeState, RangeTracker, SendStream, SendStreamState, SendStreams, TxBuffer,
+        },
+        stats::FrameStats,
+        ConnectionEvents, StreamId, SEND_BUFFER_SIZE,
+    };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
         Rc::new(RefCell::new(SenderFlowControl::new((), limit)))
@@ -2205,7 +2250,7 @@ mod tests {
         let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
         assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
-                         Some((0, x)) if x.len()==SEND_BUFFER_SIZE
+                         Some((0, x)) if x.len() == SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left

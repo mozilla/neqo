@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, mem, rc::Rc, time::Duration};
 
-use test_fixture::{self, assertions, now};
+use test_fixture::{assertions, now};
 
 use super::{
     connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,

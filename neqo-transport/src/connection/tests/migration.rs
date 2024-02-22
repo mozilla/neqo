@@ -13,7 +13,6 @@ use std::{
 
 use neqo_common::{Datagram, Decoder};
 use test_fixture::{
-    self,
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
 };

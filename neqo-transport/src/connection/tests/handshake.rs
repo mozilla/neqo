@@ -18,8 +18,8 @@ use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
 use test_fixture::{
-    self, assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now,
-    split_datagram, DEFAULT_ADDR,
+    assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now, split_datagram,
+    DEFAULT_ADDR,
 };
 
 use super::{
