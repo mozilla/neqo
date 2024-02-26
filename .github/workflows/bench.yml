@@ -51,13 +51,13 @@ jobs:
           key: criterion-${{ runner.os }}-${{ hashFiles('./target/criterion/**.json') }}
           restore-keys: criterion-${{ runner.os }}-
 
-      # - name: Download github-action-benchmark results
-      #   id: benchmark-cache
-      #   uses: actions/cache/restore@v4
-      #   with:
-      #     path: ./cache
-      #     key: action-benchmark-${{ runner.os}}-${{ hashFiles('./cache/**.TODO') }}
-      #     restore-keys: action-benchmark-${{ runner.os }}-
+      - name: Download github-action-benchmark results
+        id: benchmark-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./cache
+          key: action-benchmark-${{ runner.os}}-${{ hashFiles('./cache/**.json') }}
+          restore-keys: action-benchmark-${{ runner.os }}-
 
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
@@ -101,18 +101,30 @@ jobs:
         run: sudo /root/bin/unprep.sh
         if: success() || failure() || cancelled()
 
-      # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
-      # benchmark data when the main branch is being updated (e.g., if: ${{ github.ref == "refs/heads/main" }})
-      # - name: Store current benchmark results
-      #   uses: benchmark-action/github-action-benchmark@v1
-      #   with:
-      #     tool: 'cargo'
-      #     output-file-path: output.txt
-      #     external-data-json-path: ./cache/benchmark-data.json
-      #     fail-on-alert: true
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-      #     comment-on-alert: true
-      #     summary-always: true
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'cargo'
+          output-file-path: output.txt
+          external-data-json-path: ./cache/benchmark-data.json
+          fail-on-alert: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment-on-alert: true
+          summary-always: true
+
+      - name: Store criterion results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ./target/criterion
+          key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
+
+      - name: Store github-action-benchmark results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ./cache
+          key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
 
       - name: Convert for profiler.firefox.com
         run: |
@@ -124,20 +136,6 @@ jobs:
           mv client/flamegraph.svg client.svg
           mv server/flamegraph.svg server.svg
           rm neqo.svg
-
-      - name: Upload criterion results
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ./target/criterion
-          key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
-
-      # - name: Upload github-action-benchmark results
-      #   if: github.ref == 'refs/heads/main'
-      #   uses: actions/cache/save@v4
-      #   with:
-      #     path: ./cache
-      #     key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
 
       - name: Archive perf data
         uses: actions/upload-artifact@v4
