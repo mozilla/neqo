@@ -39,6 +39,7 @@ use crate::{
 mod ackrate;
 mod cc;
 mod close;
+mod ecn;
 mod datagram;
 mod fuzzing;
 mod handshake;
