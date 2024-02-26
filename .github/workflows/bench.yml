@@ -8,8 +8,8 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
-  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment
-  PERF_CMD: record -o perf.data -F997 --call-graph lbr -g
+  RUSTFLAGS: -C force-frame-pointers=yes -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment
+  PERF_CMD: record -o perf.data -F997 --call-graph fp -g
 
 jobs:
   bench:
