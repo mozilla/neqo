@@ -15,13 +15,16 @@ enum-map = "2.7"
 env_logger = { version = "0.10", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = "0.12"
+quinn-udp = { git = "https://github.com/quinn-rs/quinn/", rev = "a947962131aba8a6521253d03cc948b20098a2d6", optional = true }
 time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"], optional = true }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
 [features]
 ci = []
+udp = ["dep:quinn-udp", "dep:tokio"]
 
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"

@@ -27,7 +27,7 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use neqo_common::{hex, qdebug, qinfo, qwarn, Datagram, Header, IpTos};
+use neqo_common::{hex, qinfo, qwarn, udp, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -40,7 +40,7 @@ use neqo_transport::{
     ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
     Version,
 };
-use tokio::{net::UdpSocket, time::Sleep};
+use tokio::time::Sleep;
 
 use crate::old_https::Http09Server;
 
@@ -305,21 +305,6 @@ impl QuicParameters {
     }
 }
 
-async fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
-    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()).await {
-        Err(ref err) => {
-            if err.kind() != io::ErrorKind::WouldBlock || err.kind() == io::ErrorKind::Interrupted {
-                eprintln!("UDP send error: {err:?}");
-            }
-            0
-        }
-        Ok(res) => res,
-    };
-    if sent != out_dgram.len() {
-        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
-    }
-}
-
 fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
     let mut file_path = PathBuf::from("/www");
     file_path.push(filename.trim_matches(|p| p == '/'));
@@ -578,48 +563,11 @@ impl HttpServer for SimpleServer {
     }
 }
 
-fn read_dgram(
-    socket: &mut UdpSocket,
-    local_address: &SocketAddr,
-) -> Result<Option<Datagram>, io::Error> {
-    let buf = &mut [0u8; 2048];
-    let (sz, remote_addr) = match socket.try_recv_from(&mut buf[..]) {
-        Err(ref err)
-            if err.kind() == io::ErrorKind::WouldBlock
-                || err.kind() == io::ErrorKind::Interrupted =>
-        {
-            return Ok(None)
-        }
-        Err(err) => {
-            eprintln!("UDP recv error: {err:?}");
-            return Err(err);
-        }
-        Ok(res) => res,
-    };
-
-    if sz == buf.len() {
-        eprintln!("Might have received more than {} bytes", buf.len());
-    }
-
-    if sz == 0 {
-        eprintln!("zero length datagram received?");
-        Ok(None)
-    } else {
-        Ok(Some(Datagram::new(
-            remote_addr,
-            *local_address,
-            IpTos::default(),
-            None,
-            &buf[..sz],
-        )))
-    }
-}
-
 struct ServersRunner {
     args: Args,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, UdpSocket)>,
+    sockets: Vec<(SocketAddr, udp::Socket)>,
 }
 
 impl ServersRunner {
@@ -632,11 +580,11 @@ impl ServersRunner {
         let sockets = hosts
             .into_iter()
             .map(|host| {
-                let socket = std::net::UdpSocket::bind(host)?;
+                let socket = udp::Socket::bind(host)?;
                 let local_addr = socket.local_addr()?;
                 println!("Server waiting for connection on: {local_addr:?}");
-                socket.set_nonblocking(true)?;
-                Ok((host, UdpSocket::from_std(socket)?))
+
+                Ok((host, socket))
             })
             .collect::<Result<_, io::Error>>()?;
         let server = Self::create_server(&args);
@@ -683,7 +631,7 @@ impl ServersRunner {
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(&mut self, addr: SocketAddr) -> &mut UdpSocket {
+    fn find_socket(&mut self, addr: SocketAddr) -> &mut udp::Socket {
         let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
         rest.iter_mut()
             .map(|(_host, socket)| socket)
@@ -696,12 +644,13 @@ impl ServersRunner {
             .unwrap_or(first_socket)
     }
 
-    async fn process(&mut self, mut dgram: Option<&Datagram>) {
+    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
         loop {
             match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
                     let socket = self.find_socket(dgram.source());
-                    emit_packet(socket, dgram).await;
+                    socket.writable().await?;
+                    socket.send(dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -709,11 +658,11 @@ impl ServersRunner {
                     break;
                 }
                 Output::None => {
-                    qdebug!("Output::None");
                     break;
                 }
             }
         }
+        Ok(())
     }
 
     // Wait for any of the sockets to be readable or the timeout to fire.
@@ -740,20 +689,20 @@ impl ServersRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgram = read_dgram(socket, host)?;
+                    let dgram = socket.recv(host)?;
                     if dgram.is_none() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await;
+                    self.process(dgram.as_ref()).await?;
                 },
                 Ready::Timeout => {
                     self.timeout = None;
-                    self.process(None).await;
+                    self.process(None).await?;
                 }
             }
 
             self.server.process_events(&self.args, self.args.now());
-            self.process(None).await;
+            self.process(None).await?;
         }
     }
 }
