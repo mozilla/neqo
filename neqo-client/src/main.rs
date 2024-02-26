@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, Write},

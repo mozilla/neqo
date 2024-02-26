@@ -11,7 +11,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     mem,
     ops::{Deref, DerefMut},
     os::raw::{c_int, c_uint},

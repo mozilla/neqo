@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     ffi::{CStr, CString},
     mem::{self, MaybeUninit},
     ops::{Deref, DerefMut},

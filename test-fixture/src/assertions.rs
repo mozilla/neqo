@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    net::SocketAddr,
-};
+use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder};
 use neqo_transport::{version::WireVersion, Version};

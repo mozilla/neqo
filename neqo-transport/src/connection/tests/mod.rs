@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     cmp::min,
-    convert::TryFrom,
     mem,
     rc::Rc,
     time::{Duration, Instant},

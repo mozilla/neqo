@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     rc::{Rc, Weak},
     time::Duration,
 };

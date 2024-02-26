@@ -6,8 +6,6 @@
 
 // Functions that handle capturing QLOG traces.
 
-use std::convert::TryFrom;
-
 use neqo_common::qlog::NeqoQlog;
 use neqo_transport::StreamId;
 use qlog::events::{DataRecipient, EventData};

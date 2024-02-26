@@ -8,8 +8,6 @@
 
 mod common;
 
-use std::convert::TryFrom;
-
 use common::{
     apply_header_protection, decode_initial_header, initial_aead_and_hp, remove_header_protection,
 };

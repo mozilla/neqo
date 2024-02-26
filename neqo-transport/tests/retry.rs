@@ -10,7 +10,6 @@
 mod common;
 
 use std::{
-    convert::TryFrom,
     mem,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,

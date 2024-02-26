@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     fmt::{self, Debug},
     os::raw::{c_char, c_int, c_uint},
     ptr::{addr_of_mut, null, null_mut},

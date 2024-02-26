@@ -11,7 +11,6 @@
 use std::{
     cmp::{max, min},
     collections::BTreeMap,
-    convert::TryFrom,
     mem,
     ops::RangeInclusive,
     time::{Duration, Instant},
@@ -1020,7 +1019,6 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use std::{
         cell::RefCell,
-        convert::TryInto,
         ops::{Deref, DerefMut, RangeInclusive},
         rc::Rc,
         time::{Duration, Instant},

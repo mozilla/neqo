@@ -7,7 +7,6 @@
 #![deny(clippy::pedantic)]
 
 use std::{
-    convert::TryFrom,
     fmt::{self, Display},
     time::{Duration, Instant},
 };

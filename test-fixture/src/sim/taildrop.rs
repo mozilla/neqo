@@ -9,7 +9,6 @@
 use std::{
     cmp::max,
     collections::VecDeque,
-    convert::TryFrom,
     fmt::{self, Debug},
     time::{Duration, Instant},
 };
