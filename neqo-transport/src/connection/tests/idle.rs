@@ -10,7 +10,7 @@ use std::{
 };
 
 use neqo_common::{qtrace, Encoder};
-use test_fixture::{self, now, split_datagram};
+use test_fixture::{now, split_datagram};
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},

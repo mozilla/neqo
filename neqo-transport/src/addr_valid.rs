@@ -230,7 +230,7 @@ impl AddressValidation {
                     qinfo!("AddressValidation: valid Retry token for {}", cid);
                     AddressValidationResult::ValidRetry(cid)
                 } else {
-                    panic!("AddressValidation: Retry token with small CID {}", cid);
+                    panic!("AddressValidation: Retry token with small CID {cid}");
                 }
             } else if cid.is_empty() {
                 // An empty connection ID means NEW_TOKEN.
@@ -242,7 +242,7 @@ impl AddressValidation {
                     AddressValidationResult::Pass
                 }
             } else {
-                panic!("AddressValidation: NEW_TOKEN token with CID {}", cid);
+                panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
             }
         } else {
             // From here on, we have a token that we couldn't decrypt.

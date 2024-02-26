@@ -229,7 +229,7 @@ impl Default for IpTos {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{IpTos, IpTosDscp, IpTosEcn};
 
     #[test]
     fn iptosecn_into_u8() {

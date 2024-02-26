@@ -433,18 +433,13 @@ pub enum Http3StreamType {
 }
 
 #[must_use]
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Default, PartialEq, Eq, Debug)]
 enum ReceiveOutput {
+    #[default]
     NoOutput,
     ControlFrames(Vec<HFrame>),
     UnblockedStreams(Vec<StreamId>),
     NewStream(NewStreamType),
-}
-
-impl Default for ReceiveOutput {
-    fn default() -> Self {
-        Self::NoOutput
-    }
 }
 
 trait Stream: Debug {
@@ -565,29 +560,25 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
 trait SendStream: Stream {
     /// # Errors
     ///
-    /// Error my occur during sending data, e.g. protocol error, etc.
+    /// Error may occur during sending data, e.g. protocol error, etc.
     fn send(&mut self, conn: &mut Connection) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
-    #[allow(dead_code)] // https://github.com/mozilla/neqo/issues/1651
-    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>) -> Res<()>;
-    #[allow(dead_code)] // https://github.com/mozilla/neqo/issues/1651
-    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) -> Res<()>;
 
     /// # Errors
     ///
-    /// Error my occur during sending data, e.g. protocol error, etc.
+    /// Error may occur during sending data, e.g. protocol error, etc.
     fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
 
     /// # Errors
     ///
-    /// It may happen that the transport stream is already close. This is unlikely.
+    /// It may happen that the transport stream is already closed. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
 
     /// # Errors
     ///
-    /// It may happen that the transport stream is already close. This is unlikely.
+    /// It may happen that the transport stream is already closed. This is unlikely.
     fn close_with_message(
         &mut self,
         _conn: &mut Connection,
@@ -606,7 +597,7 @@ trait SendStream: Stream {
 
     /// # Errors
     ///
-    /// It may happen that the transport stream is already close. This is unlikely.
+    /// It may happen that the transport stream is already closed. This is unlikely.
     fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
         Err(Error::InvalidStreamId)
     }

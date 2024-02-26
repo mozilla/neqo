@@ -223,18 +223,17 @@ impl IntReader {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum LiteralReaderState {
+    #[default]
     ReadHuffman,
-    ReadLength { reader: IntReader },
-    ReadLiteral { offset: usize },
+    ReadLength {
+        reader: IntReader,
+    },
+    ReadLiteral {
+        offset: usize,
+    },
     Done,
-}
-
-impl Default for LiteralReaderState {
-    fn default() -> Self {
-        Self::ReadHuffman
-    }
 }
 
 /// This is decoder of a literal with a prefix:

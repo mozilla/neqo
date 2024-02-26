@@ -23,7 +23,7 @@ use common::{
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{server::ValidateAddress, ConnectionError, Error, State, StreamType};
-use test_fixture::{self, assertions, datagram, default_client, now, split_datagram};
+use test_fixture::{assertions, datagram, default_client, now, split_datagram};
 
 #[test]
 fn retry_basic() {
