@@ -10,7 +10,7 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
-    convert::{AsRef, TryFrom},
+    convert::TryFrom,
     ops::Deref,
     rc::Rc,
 };
@@ -594,7 +594,7 @@ impl ConnectionIdManager {
 mod tests {
     use test_fixture::fixture_init;
 
-    use super::*;
+    use crate::{cid::MAX_CONNECTION_ID_LEN, ConnectionId};
 
     #[test]
     fn generate_initial_cid() {
@@ -603,8 +603,7 @@ mod tests {
             let cid = ConnectionId::generate_initial();
             assert!(
                 matches!(cid.len(), 8..=MAX_CONNECTION_ID_LEN),
-                "connection ID length {:?}",
-                cid,
+                "connection ID length {cid:?}",
             );
         }
     }

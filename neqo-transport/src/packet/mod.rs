@@ -9,7 +9,6 @@ use std::{
     cmp::min,
     convert::TryFrom,
     fmt,
-    iter::ExactSizeIterator,
     ops::{Deref, DerefMut, Range},
     time::Instant,
 };
@@ -873,10 +872,14 @@ mod tests {
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
 
-    use super::*;
     use crate::{
+        cid::MAX_CONNECTION_ID_LEN,
         crypto::{CryptoDxState, CryptoStates},
-        EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
+        packet::{
+            PacketBuilder, PacketType, PublicPacket, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG,
+            PACKET_BIT_SPIN,
+        },
+        ConnectionId, EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
     };
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];

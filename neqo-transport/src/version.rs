@@ -12,9 +12,10 @@ use crate::{Error, Res};
 
 pub type WireVersion = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Version {
     Version2,
+    #[default]
     Version1,
     Draft29,
     Draft30,
@@ -121,12 +122,6 @@ impl Version {
         all: impl IntoIterator<Item = &'a Self>,
     ) -> impl Iterator<Item = &'a Self> {
         all.into_iter().filter(move |&v| self.is_compatible(*v))
-    }
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Self::Version1
     }
 }
 

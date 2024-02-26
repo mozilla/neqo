@@ -35,8 +35,7 @@ use neqo_crypto::{
     init, AuthenticationStatus, Cipher, ResumptionToken,
 };
 use neqo_http3::{
-    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
-    Priority,
+    Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output, Priority,
 };
 use neqo_transport::{
     CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
@@ -664,7 +663,7 @@ impl<'a> URLHandler<'a> {
                 false
             }
             Err(e) => {
-                panic!("Can't create stream {}", e);
+                panic!("Can't create stream {e}");
             }
         }
     }
@@ -1190,7 +1189,7 @@ mod old {
                     false
                 }
                 Err(e) => {
-                    panic!("Error creating stream {:?}", e);
+                    panic!("Error creating stream {e:?}");
                 }
             }
         }

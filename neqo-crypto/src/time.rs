@@ -7,7 +7,6 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use std::{
-    boxed::Box,
     convert::{TryFrom, TryInto},
     ops::Deref,
     os::raw::c_void,
