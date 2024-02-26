@@ -11,11 +11,9 @@ on:
       - '.github/workflows/qns.yml'
   merge_group:
     branches: ["main"]
-    paths:
-      - 'qns/**'
-      - '.github/workflows/qns.yml'
+
 jobs:
-  docker-image:
+  quic-network-simulator:
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -48,6 +46,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        id: docker_build_and_push
         uses: docker/build-push-action@v5
         with:
           push: ${{ github.event_name != 'pull_request' }}
@@ -58,3 +57,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64, linux/arm64
+
+      - name: Run QUIC Interop tests
+        # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
+        uses: mxinden/quic-interop-runner@action
+        with:
+          name: 'neqo-latest'
+          image: ${{ steps.docker_build_and_push.outputs.imageID }}
+          url: https://github.com/mozilla/neqo
