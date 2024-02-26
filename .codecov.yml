@@ -3,3 +3,11 @@ ignore:
   - "neqo-client"
   - "neqo-interop"
   - "neqo-server"
+
+# Do not notify until at least 3 results have been uploaded from the CI pipeline.
+# (This corresponds to the three main platforms we support: Linux, macOS, and Windows.)
+codecov:
+    notify:
+        after_n_builds: 3
+comment:
+    after_n_builds: 3
