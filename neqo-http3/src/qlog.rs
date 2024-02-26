@@ -8,13 +8,9 @@
 
 use std::convert::TryFrom;
 
-use qlog::{
-    self,
-    events::{DataRecipient, EventData},
-};
-
 use neqo_common::qlog::NeqoQlog;
 use neqo_transport::StreamId;
+use qlog::events::{DataRecipient, EventData};
 
 pub fn h3_data_moved_up(qlog: &mut NeqoQlog, stream_id: StreamId, amount: usize) {
     qlog.add_event_data(|| {

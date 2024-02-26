@@ -6,11 +6,15 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use super::{Node, Rng};
+use std::{
+    fmt::{self, Debug},
+    time::Instant,
+};
+
 use neqo_common::{qtrace, Datagram};
 use neqo_transport::Output;
-use std::fmt::{self, Debug};
-use std::time::Instant;
+
+use super::{Node, Rng};
 
 /// A random dropper.
 pub struct Drop {
@@ -23,6 +27,7 @@ impl Drop {
     /// Make a new random drop generator.  Each `drop` is called, this generates a
     /// random value between 0 and `max` (exclusive).  If this value is less than
     /// `threshold` a value of `true` is returned.
+    #[must_use]
     pub fn new(threshold: u64, max: u64) -> Self {
         Self {
             threshold,
@@ -32,11 +37,16 @@ impl Drop {
     }
 
     /// Generate random drops with the given percentage.
+    #[must_use]
     pub fn percentage(pct: u8) -> Self {
         // Multiply by 10 so that the random number generator works more efficiently.
         Self::new(u64::from(pct) * 10, 1000)
     }
 
+    /// Determine whether or not to drop a packet.
+    /// # Panics
+    /// When this is invoked after test configuration has been torn down,
+    /// such that the RNG is no longer available.
     pub fn drop(&mut self) -> bool {
         let mut rng = self.rng.as_ref().unwrap().borrow_mut();
         let r = rng.random_from(0..self.max);

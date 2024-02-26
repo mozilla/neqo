@@ -4,20 +4,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::Encoder;
-use std::cmp::{min, Ordering};
-use std::mem;
-use std::rc::Rc;
-use std::time::Instant;
-
-use crate::frame::{
-    FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION, FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
-    FRAME_TYPE_HANDSHAKE_DONE,
+use std::{
+    cmp::{min, Ordering},
+    mem,
+    rc::Rc,
+    time::Instant,
 };
-use crate::packet::PacketBuilder;
-use crate::path::PathRef;
-use crate::recovery::RecoveryToken;
-use crate::{ConnectionError, Error, Res};
+
+use neqo_common::Encoder;
+
+use crate::{
+    frame::{
+        FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION, FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+        FRAME_TYPE_HANDSHAKE_DONE,
+    },
+    packet::PacketBuilder,
+    path::PathRef,
+    recovery::RecoveryToken,
+    ConnectionError, Error,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// The state of the Connection.
@@ -61,6 +66,7 @@ impl State {
         )
     }
 
+    #[must_use]
     pub fn error(&self) -> Option<&ConnectionError> {
         if let Self::Closing { error, .. } | Self::Draining { error, .. } | Self::Closed(error) =
             self
@@ -179,13 +185,13 @@ impl ClosingFrame {
     }
 }
 
-/// `StateSignaling` manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
+/// `StateSignaling` manages whether we need to send `HANDSHAKE_DONE` and `CONNECTION_CLOSE`.
 /// Valid state transitions are:
-/// * Idle -> HandshakeDone: at the server when the handshake completes
-/// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
+/// * Idle -> `HandshakeDone`: at the server when the handshake completes
+/// * `HandshakeDone` -> Idle: when a `HANDSHAKE_DONE` frame is sent
 /// * Idle/HandshakeDone -> Closing/Draining: when closing or draining
-/// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
-/// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
+/// * Closing/Draining -> `CloseSent`: after sending `CONNECTION_CLOSE`
+/// * `CloseSent` -> Closing: any time a new `CONNECTION_CLOSE` is needed
 /// * -> Reset: from any state in case of a stateless reset
 #[derive(Debug, Clone)]
 pub enum StateSignaling {
@@ -206,19 +212,16 @@ impl StateSignaling {
             debug_assert!(false, "StateSignaling must be in Idle state.");
             return;
         }
-        *self = Self::HandshakeDone
+        *self = Self::HandshakeDone;
     }
 
-    pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Res<Option<RecoveryToken>> {
+    pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
         if matches!(self, Self::HandshakeDone) && builder.remaining() >= 1 {
             *self = Self::Idle;
             builder.encode_varint(FRAME_TYPE_HANDSHAKE_DONE);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(14));
-            }
-            Ok(Some(RecoveryToken::HandshakeDone))
+            Some(RecoveryToken::HandshakeDone)
         } else {
-            Ok(None)
+            None
         }
     }
 

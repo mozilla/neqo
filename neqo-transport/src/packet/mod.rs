@@ -5,20 +5,23 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
-use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN};
-use crate::crypto::{CryptoDxState, CryptoSpace, CryptoStates};
-use crate::version::{Version, WireVersion};
-use crate::{Error, Res};
+use std::{
+    cmp::min,
+    convert::TryFrom,
+    fmt,
+    ops::{Deref, DerefMut, Range},
+    time::Instant,
+};
 
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
 
-use std::cmp::min;
-use std::convert::TryFrom;
-use std::fmt;
-use std::iter::ExactSizeIterator;
-use std::ops::{Deref, DerefMut, Range};
-use std::time::Instant;
+use crate::{
+    cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
+    crypto::{CryptoDxState, CryptoSpace, CryptoStates},
+    version::{Version, WireVersion},
+    Error, Res,
+};
 
 pub const PACKET_BIT_LONG: u8 = 0x80;
 const PACKET_BIT_SHORT: u8 = 0x00;
@@ -168,11 +171,12 @@ impl PacketBuilder {
     }
 
     /// Start building a long header packet.
-    /// For an Initial packet you will need to call initial_token(),
+    /// For an Initial packet you will need to call `initial_token()`,
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
     #[allow(clippy::reversed_empty_ranges)] // For initializing an empty range.
+    #[allow(clippy::similar_names)] // For dcid and scid, which are fine here.
     pub fn long(
         mut encoder: Encoder,
         pt: PacketType,
@@ -241,7 +245,7 @@ impl PacketBuilder {
 
     /// Adjust the limit to ensure that no more data is added.
     pub fn mark_full(&mut self) {
-        self.limit = self.encoder.len()
+        self.limit = self.encoder.len();
     }
 
     /// Mark the packet as needing padding (or not).
@@ -267,7 +271,7 @@ impl PacketBuilder {
         let mask = if quic_bit { PACKET_BIT_FIXED_QUIC } else { 0 }
             | if self.is_long() { 0 } else { PACKET_BIT_SPIN };
         let first = self.header.start;
-        self.encoder.as_mut()[first] ^= random(1)[0] & mask;
+        self.encoder.as_mut()[first] ^= random::<1>()[0] & mask;
     }
 
     /// For an Initial packet, encode the token.
@@ -311,6 +315,7 @@ impl PacketBuilder {
         self.pn = pn;
     }
 
+    #[allow(clippy::cast_possible_truncation)] // Nope.
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
@@ -352,7 +357,7 @@ impl PacketBuilder {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
             debug_assert!(false);
-            return Err(Error::InternalError(5));
+            return Err(Error::InternalError);
         }
 
         self.pad_for_crypto(crypto);
@@ -405,7 +410,8 @@ impl PacketBuilder {
     /// Make a retry packet.
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
-    /// this returns a Vec<u8> rather than building on an encoder.
+    /// this returns a [`Vec<u8>`] rather than building on an encoder.
+    #[allow(clippy::similar_names)] // scid and dcid are fine here.
     pub fn retry(
         version: Version,
         dcid: &[u8],
@@ -420,7 +426,7 @@ impl PacketBuilder {
             PACKET_BIT_LONG
                 | PACKET_BIT_FIXED_QUIC
                 | (PacketType::Retry.to_byte(version) << 4)
-                | (random(1)[0] & 0xf),
+                | (random::<1>()[0] & 0xf),
         );
         encoder.encode_uint(4, version.wire_version());
         encoder.encode_vec(1, dcid);
@@ -437,6 +443,7 @@ impl PacketBuilder {
     }
 
     /// Make a Version Negotiation packet.
+    #[allow(clippy::similar_names)] // scid and dcid are fine here.
     pub fn version_negotiation(
         dcid: &[u8],
         scid: &[u8],
@@ -444,7 +451,7 @@ impl PacketBuilder {
         versions: &[Version],
     ) -> Vec<u8> {
         let mut encoder = Encoder::default();
-        let mut grease = random(4);
+        let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
         encoder.encode(&[0; 4]); // Zero version == VN.
@@ -488,7 +495,7 @@ impl From<PacketBuilder> for Encoder {
     }
 }
 
-/// PublicPacket holds information from packets that is public only.  This allows for
+/// `PublicPacket` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
 pub struct PublicPacket<'a> {
     /// The packet type.
@@ -497,8 +504,8 @@ pub struct PublicPacket<'a> {
     dcid: ConnectionIdRef<'a>,
     /// The source connection ID, if this is a long header packet.
     scid: Option<ConnectionIdRef<'a>>,
-    /// Any token that is included in the packet (Retry always has a token; Initial sometimes does).
-    /// This is empty when there is no token.
+    /// Any token that is included in the packet (Retry always has a token; Initial sometimes
+    /// does). This is empty when there is no token.
     token: &'a [u8],
     /// The size of the header, not including the packet number.
     header_len: usize,
@@ -548,6 +555,7 @@ impl<'a> PublicPacket<'a> {
 
     /// Decode the common parts of a packet.  This provides minimal parsing and validation.
     /// Returns a tuple of a `PublicPacket` and a slice with any remainder from the datagram.
+    #[allow(clippy::similar_names)] // For dcid and scid, which are fine.
     pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_byte())?;
@@ -599,9 +607,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from a supported version.
-        let version = if let Ok(v) = Version::try_from(version) {
-            v
-        } else {
+        let Ok(version) = Version::try_from(version) else {
             return Ok((
                 Self {
                     packet_type: PacketType::OtherVersion,
@@ -671,13 +677,12 @@ impl<'a> PublicPacket<'a> {
         self.packet_type
     }
 
-    pub fn dcid(&self) -> &ConnectionIdRef<'a> {
-        &self.dcid
+    pub fn dcid(&self) -> ConnectionIdRef<'a> {
+        self.dcid
     }
 
-    pub fn scid(&self) -> &ConnectionIdRef<'a> {
+    pub fn scid(&self) -> ConnectionIdRef<'a> {
         self.scid
-            .as_ref()
             .expect("should only be called for long header packets")
     }
 
@@ -864,11 +869,18 @@ impl Deref for DecryptedPacket {
 
 #[cfg(all(test, not(feature = "fuzzing")))]
 mod tests {
-    use super::*;
-    use crate::crypto::{CryptoDxState, CryptoStates};
-    use crate::{EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version};
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
+
+    use crate::{
+        cid::MAX_CONNECTION_ID_LEN,
+        crypto::{CryptoDxState, CryptoStates},
+        packet::{
+            PacketBuilder, PacketType, PublicPacket, PACKET_BIT_FIXED_QUIC, PACKET_BIT_LONG,
+            PACKET_BIT_SPIN,
+        },
+        ConnectionId, EmptyConnectionIdGenerator, RandomConnectionIdGenerator, Version,
+    };
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
@@ -1020,7 +1032,8 @@ mod tests {
         assert_eq!(&decrypted[..], SAMPLE_SHORT_PAYLOAD);
     }
 
-    /// By telling the decoder that the connection ID is shorter than it really is, we get a decryption error.
+    /// By telling the decoder that the connection ID is shorter than it really is, we get a
+    /// decryption error.
     #[test]
     fn decode_short_bad_cid() {
         fixture_init();
@@ -1170,9 +1183,9 @@ mod tests {
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[
-        0xcf, 0x70, 0x9a, 0x50, 0xc4, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
-        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x1d, 0xc7, 0x11, 0x30, 0xcd, 0x1e, 0xd3, 0x9d, 0x6e, 0xfc,
-        0xee, 0x5c, 0x85, 0x80, 0x65, 0x01,
+        0xcf, 0x6b, 0x33, 0x43, 0xcf, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0xc8, 0x64, 0x6c, 0xe8, 0xbf, 0xe3, 0x39, 0x52, 0xd9, 0x55,
+        0x54, 0x36, 0x65, 0xdc, 0xc7, 0xb6,
     ];
 
     const SAMPLE_RETRY_V1: &[u8] = &[
@@ -1353,7 +1366,7 @@ mod tests {
 
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
-        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0x70, 0x9a, 0x50, 0xc4, 0x00, 0x00, 0x00,
+        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0x6b, 0x33, 0x43, 0xcf, 0x00, 0x00, 0x00,
         0x01, 0xff, 0x00, 0x00, 0x20, 0xff, 0x00, 0x00, 0x1f, 0xff, 0x00, 0x00, 0x1e, 0xff, 0x00,
         0x00, 0x1d, 0x0a, 0x0a, 0x0a, 0x0a,
     ];
@@ -1361,8 +1374,12 @@ mod tests {
     #[test]
     fn build_vn() {
         fixture_init();
-        let mut vn =
-            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a0a0a, &Version::all());
+        let mut vn = PacketBuilder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+        );
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
@@ -1375,8 +1392,12 @@ mod tests {
     #[test]
     fn vn_do_not_repeat_client_grease() {
         fixture_init();
-        let vn =
-            PacketBuilder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a0a0a, &Version::all());
+        let vn = PacketBuilder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+        );
         assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
 

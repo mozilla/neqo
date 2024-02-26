@@ -1,0 +1,9 @@
+# Ignore everything:
+*
+# Except for the following:
+!**/*.toml
+!**/*.rs
+!**/*.h
+!**/*.hpp
+!qns
+!Cargo.lock

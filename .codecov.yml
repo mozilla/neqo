@@ -1,0 +1,5 @@
+# neqo has no test coverage for its example client, server and interop test
+ignore:
+  - "neqo-client"
+  - "neqo-interop"
+  - "neqo-server"

@@ -4,21 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{
-    agentio::as_c_void,
-    constants::{Extension, HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
-    err::Res,
-    ssl::{
-        PRBool, PRFileDesc, SECFailure, SECStatus, SECSuccess, SSLAlertDescription,
-        SSLExtensionHandler, SSLExtensionWriter, SSLHandshakeType,
-    },
-};
 use std::{
     cell::RefCell,
     convert::TryFrom,
     os::raw::{c_uint, c_void},
     pin::Pin,
     rc::Rc,
+};
+
+use crate::{
+    agentio::as_c_void,
+    constants::{Extension, HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
+    err::Res,
+    null_safe_slice,
+    ssl::{
+        PRBool, PRFileDesc, SECFailure, SECStatus, SECSuccess, SSLAlertDescription,
+        SSLExtensionHandler, SSLExtensionWriter, SSLHandshakeType,
+    },
 };
 
 experimental_api!(SSL_InstallExtensionHooks(
@@ -74,7 +76,7 @@ impl ExtensionTracker {
         f(&mut *rc.borrow_mut())
     }
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     unsafe extern "C" fn extension_writer(
         _fd: *mut PRFileDesc,
         message: SSLHandshakeType::Type,
@@ -104,8 +106,8 @@ impl ExtensionTracker {
         alert: *mut SSLAlertDescription,
         arg: *mut c_void,
     ) -> SECStatus {
-        let d = std::slice::from_raw_parts(data, len as usize);
-        #[allow(clippy::cast_possible_truncation)]
+        let d = null_safe_slice(data, len);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         Self::wrap_handler_call(arg, |handler| {
             // Cast is safe here because the message type is always part of the enum
             match handler.handle(message as HandshakeMessage, d) {
@@ -121,11 +123,13 @@ impl ExtensionTracker {
     /// Use the provided handler to manage an extension.  This is quite unsafe.
     ///
     /// # Safety
+    ///
     /// The holder of this `ExtensionTracker` needs to ensure that it lives at
     /// least as long as the file descriptor, as NSS provides no way to remove
     /// an extension handler once it is configured.
     ///
     /// # Errors
+    ///
     /// If the underlying NSS API fails to register a handler.
     pub unsafe fn new(
         fd: *mut PRFileDesc,

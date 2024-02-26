@@ -1,105 +1,176 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   check:
-    name: Neqo Build and Test
-    runs-on: ubuntu-22.04
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=lld
+    name: Build & test
     strategy:
+      fail-fast: false
       matrix:
-        rust-toolchain: [stable, 1.65.0]
+        os: [ubuntu-latest, macos-14, windows-latest]
+        # Don't increase beyond what Firefox is currently using:
+        # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
+        rust-toolchain: [1.74.0, stable, nightly]
+        type: [debug]
+        include:
+          - os: ubuntu-latest
+            rust-toolchain: stable
+            type: release
+    env:
+      BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
-      - name: Install Packages
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: ${{ matrix.rust-toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         env:
           DEBIAN_FRONTEND: noninteractive
-          llvm_version: 14
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            clang \
-            coreutils \
-            curl \
-            git \
-            gyp \
-            libclang-dev \
-            libssl-dev \
-            lld \
-            llvm-"$llvm_version" \
-            llvm-"$llvm_version"-runtime \
-            make \
-            mercurial \
-            ninja-build \
-            pkg-config \
-            ssh \
-            zlib1g-dev \
-            --no-install-recommends
-          [ -d "/usr/lib/llvm-$llvm_version/lib" ]
-          echo "LIBCLANG_DIR=/usr/lib/llvm-$llvm_version/lib" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
-      # Rust installation cribbed from Dockerfiles at https://github.com/rust-lang/docker-rust
-      - name: Install Rust
+      # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
+      # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
+      # from the build directory and avoid various other test failures. This seems to always be
+      # the case on any macos-13 runner, but not consistently on macos-latest (which is currently
+      # macos-12, FWIW).
+      - name: Install dependencies (MacOS)
+        if: runner.os == 'MacOS'
         run: |
-          export RUSTUP_HOME=~/.rustup
-          export CARGO_HOME=~/.cargo
-          rustup_dir=`mktemp -d /tmp/rustup-XXXXX`
-          mkdir -p "$rustup_dir"
-          rustup_init="$rustup_dir/rustup-init"
-          rustup_url="https://static.rust-lang.org/rustup/archive/$rustup_version/$rustup_host/rustup-init"
-          curl -SsLf "$rustup_url" -o "$rustup_init"
-          echo "${rustup_hash} $rustup_init" | sha256sum -c -
-          chmod +x "$rustup_init"
-          "$rustup_init" -y -q --no-modify-path --profile minimal \
-            --default-toolchain ${{ matrix.rust-toolchain }} \
-            --default-host "$rustup_host" \
-            --component clippy --component rustfmt
-          rm -rf "$rustup_dir"
-          chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
-          "$CARGO_HOME/bin/rustup" default ${{ matrix.rust-toolchain }}
-          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
-          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
-        env:
-          rustup_version: 1.26.0
-          rustup_host: x86_64-unknown-linux-gnu
-          rustup_hash: 0b2f6c8f85a3d02fde2efc0ced4657869d73fccfce59defb4e8d29233116e6db
+          csrutil status | grep disabled
+          brew install ninja mercurial cargo-binstall llvm
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+          ln -s /opt/homebrew/bin/python3 /opt/homebrew/bin/python
+          # python3 -m pip install gyp-next
+          # Above does not work, since pypi only has gyp 0.15.0, which is too old
+          # for the homebrew python3. Install from source instead.
+          python3 -m pip install git+https://github.com/nodejs/gyp-next
+          python3 -m pip install packaging
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
+
+      - name: Use MSYS2 environment and install more dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
+          echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
+          python3 -m pip install git+https://github.com/nodejs/gyp-next
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
+
+      - name: Set up MSVC build environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Rust tools
+        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
 
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
       # (neqo-crypto/build.rs would also need to query pkg-config to get the
       # right build flags rather than building NSS.)
+      # Clone from the main hg repo, because the GitHub mirror can be out of date.
       - name: Fetch NSS and NSPR
+        uses: ./.github/actions/nss
+
+      - name: Set up NSS/NSPR build environment (Windows)
+        if: runner.os == 'Windows'
         run: |
-          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-          git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
-          echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-          echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
-        env:
-          NSS_DIR: ${{ github.workspace }}/nss
-          NSPR_DIR: ${{ github.workspace }}/nspr
+          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
+          echo "GYP_MSVS_VERSION=2022" >> "$GITHUB_ENV"
+          echo "BASH=$SHELL" >> "$GITHUB_ENV"
+          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+          rm /usr/bin/link.exe
 
       - name: Build
-        run: cargo +${{ matrix.rust-toolchain }} build -v --tests
-
-      - name: Run Tests
-        run: cargo +${{ matrix.rust-toolchain }} test -v
+        run: |
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci,bench
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
+          echo "${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_PATH"
         env:
-           LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Debug/lib
-           RUST_BACKTRACE: 1
-           RUST_LOG: neqo=debug
+          LIB_DIR: ${{ matrix.type == 'release' && 'Release' || 'Debug' }}
+
+      - name: Run tests and determine coverage
+        run: |
+          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
+          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+
+      - name: Run client/server transfer
+        run: |
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
+          PID=$!
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          kill $PID
+          [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+        env:
+          HOST: localhost
+          SIZE: 54321
+          RUST_LOG: warn
 
       - name: Check formatting
-        run: cargo +${{ matrix.rust-toolchain }} fmt --all -- --check
-        if: ${{ success() || failure() }}
+        run: |
+          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
+            export CONFIG_PATH="--config-path=$(mktemp)"
+          fi
+          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
+        if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy -v --tests -- -D warnings
-        if: ${{ success() || failure() }}
+        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
+        if: success() || failure()
+
+      - name: Check rustdoc links
+        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
+        if: success() || failure()
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+
+  bench:
+    name: "Benchmark"
+    needs: [check]
+    uses: ./.github/workflows/bench.yml

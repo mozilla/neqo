@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom;
-use std::mem;
-use std::time::{Duration, Instant};
+use std::{
+    convert::TryFrom,
+    mem,
+    time::{Duration, Instant},
+};
 
 /// Internal structure for a timer item.
 struct TimerItem<T> {
@@ -21,10 +23,10 @@ impl<T> TimerItem<T> {
 }
 
 /// A timer queue.
-/// This uses a classic timer wheel arrangement, with some characteristics that might be considered peculiar.
-/// Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut points).
-/// Time is relative, the wheel has an origin time and it is unable to represent times that are more than
-/// `granularity * capacity` past that time.
+/// This uses a classic timer wheel arrangement, with some characteristics that might be considered
+/// peculiar. Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut
+/// points). Time is relative, the wheel has an origin time and it is unable to represent times that
+/// are more than `granularity * capacity` past that time.
 pub struct Timer<T> {
     items: Vec<Vec<TimerItem<T>>>,
     now: Instant,
@@ -34,7 +36,9 @@ pub struct Timer<T> {
 
 impl<T> Timer<T> {
     /// Construct a new wheel at the given granularity, starting at the given time.
+    ///
     /// # Panics
+    ///
     /// When `capacity` is too large to fit in `u32` or `granularity` is zero.
     pub fn new(now: Instant, granularity: Duration, capacity: usize) -> Self {
         assert!(u32::try_from(capacity).is_ok());
@@ -109,7 +113,9 @@ impl<T> Timer<T> {
     }
 
     /// Asserts if the time given is in the past or too far in the future.
+    ///
     /// # Panics
+    ///
     /// When `time` is in the past relative to previous calls.
     pub fn add(&mut self, time: Instant, item: T) {
         assert!(time >= self.now);
@@ -241,48 +247,50 @@ impl<T> Timer<T> {
 
 #[cfg(test)]
 mod test {
-    use super::{Duration, Instant, Timer};
-    use lazy_static::lazy_static;
+    use std::sync::OnceLock;
 
-    lazy_static! {
-        static ref NOW: Instant = Instant::now();
+    use super::{Duration, Instant, Timer};
+
+    fn now() -> Instant {
+        static NOW: OnceLock<Instant> = OnceLock::new();
+        *NOW.get_or_init(Instant::now)
     }
 
     const GRANULARITY: Duration = Duration::from_millis(10);
     const CAPACITY: usize = 10;
     #[test]
     fn create() {
-        let t: Timer<()> = Timer::new(*NOW, GRANULARITY, CAPACITY);
+        let t: Timer<()> = Timer::new(now(), GRANULARITY, CAPACITY);
         assert_eq!(t.span(), Duration::from_millis(100));
         assert_eq!(None, t.next_time());
     }
 
     #[test]
     fn immediate_entry() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        t.add(*NOW, 12);
-        assert_eq!(*NOW, t.next_time().expect("should have an entry"));
-        let values: Vec<_> = t.take_until(*NOW).collect();
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        t.add(now(), 12);
+        assert_eq!(now(), t.next_time().expect("should have an entry"));
+        let values: Vec<_> = t.take_until(now()).collect();
         assert_eq!(vec![12], values);
     }
 
     #[test]
     fn same_time() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
         let v1 = 12;
         let v2 = 13;
-        t.add(*NOW, v1);
-        t.add(*NOW, v2);
-        assert_eq!(*NOW, t.next_time().expect("should have an entry"));
-        let values: Vec<_> = t.take_until(*NOW).collect();
+        t.add(now(), v1);
+        t.add(now(), v2);
+        assert_eq!(now(), t.next_time().expect("should have an entry"));
+        let values: Vec<_> = t.take_until(now()).collect();
         assert!(values.contains(&v1));
         assert!(values.contains(&v2));
     }
 
     #[test]
     fn add() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let near_future = *NOW + Duration::from_millis(17);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let near_future = now() + Duration::from_millis(17);
         let v = 9;
         t.add(near_future, v);
         assert_eq!(near_future, t.next_time().expect("should return a value"));
@@ -298,8 +306,8 @@ mod test {
 
     #[test]
     fn add_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let future = *NOW + Duration::from_millis(117);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let future = now() + Duration::from_millis(117);
         let v = 9;
         t.add(future, v);
         assert_eq!(future, t.next_time().expect("should return a value"));
@@ -308,8 +316,8 @@ mod test {
 
     #[test]
     fn add_far_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let far_future = *NOW + Duration::from_millis(892);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let far_future = now() + Duration::from_millis(892);
         let v = 9;
         t.add(far_future, v);
         assert_eq!(far_future, t.next_time().expect("should return a value"));
@@ -326,12 +334,12 @@ mod test {
     ];
 
     fn with_times() -> Timer<usize> {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
         for (i, time) in TIMES.iter().enumerate() {
-            t.add(*NOW + *time, i);
+            t.add(now() + *time, i);
         }
         assert_eq!(
-            *NOW + *TIMES.iter().min().unwrap(),
+            now() + *TIMES.iter().min().unwrap(),
             t.next_time().expect("should have a time")
         );
         t
@@ -341,7 +349,7 @@ mod test {
     #[allow(clippy::needless_collect)] // false positive
     fn multiple_values() {
         let mut t = with_times();
-        let values: Vec<_> = t.take_until(*NOW + *TIMES.iter().max().unwrap()).collect();
+        let values: Vec<_> = t.take_until(now() + *TIMES.iter().max().unwrap()).collect();
         for i in 0..TIMES.len() {
             assert!(values.contains(&i));
         }
@@ -351,7 +359,7 @@ mod test {
     #[allow(clippy::needless_collect)] // false positive
     fn take_far_future() {
         let mut t = with_times();
-        let values: Vec<_> = t.take_until(*NOW + Duration::from_secs(100)).collect();
+        let values: Vec<_> = t.take_until(now() + Duration::from_secs(100)).collect();
         for i in 0..TIMES.len() {
             assert!(values.contains(&i));
         }
@@ -361,15 +369,15 @@ mod test {
     fn remove_each() {
         let mut t = with_times();
         for (i, time) in TIMES.iter().enumerate() {
-            assert_eq!(Some(i), t.remove(*NOW + *time, |&x| x == i));
+            assert_eq!(Some(i), t.remove(now() + *time, |&x| x == i));
         }
         assert_eq!(None, t.next_time());
     }
 
     #[test]
     fn remove_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let future = *NOW + Duration::from_millis(117);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let future = now() + Duration::from_millis(117);
         let v = 9;
         t.add(future, v);
 
@@ -378,9 +386,9 @@ mod test {
 
     #[test]
     fn remove_too_far_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let future = *NOW + Duration::from_millis(117);
-        let too_far_future = *NOW + t.span() + Duration::from_millis(117);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let future = now() + Duration::from_millis(117);
+        let too_far_future = now() + t.span() + Duration::from_millis(117);
         let v = 9;
         t.add(future, v);
 

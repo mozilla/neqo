@@ -6,15 +6,16 @@
 
 // Directly relating to QUIC frames.
 
+use std::{convert::TryFrom, ops::RangeInclusive};
+
 use neqo_common::{qtrace, Decoder};
 
-use crate::cid::MAX_CONNECTION_ID_LEN;
-use crate::packet::PacketType;
-use crate::stream_id::{StreamId, StreamType};
-use crate::{AppError, ConnectionError, Error, Res, TransportError};
-
-use std::convert::TryFrom;
-use std::ops::RangeInclusive;
+use crate::{
+    cid::MAX_CONNECTION_ID_LEN,
+    packet::PacketType,
+    stream_id::{StreamId, StreamType},
+    AppError, ConnectionError, Error, Res, TransportError,
+};
 
 #[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
@@ -77,6 +78,7 @@ impl CloseError {
         }
     }
 
+    #[must_use]
     pub fn code(&self) -> u64 {
         match self {
             Self::Transport(c) | Self::Application(c) => *c,
@@ -302,7 +304,7 @@ impl<'a> Frame<'a> {
         )
     }
 
-    /// Converts AckRanges as encoded in a ACK frame (see -transport
+    /// Converts `AckRanges` as encoded in a ACK frame (see -transport
     /// 19.3.1) into ranges of acked packets (end, start), inclusive of
     /// start and end values.
     pub fn decode_ack_frame(
@@ -368,7 +370,7 @@ impl<'a> Frame<'a> {
             )),
             Self::Padding => None,
             Self::Datagram { data, .. } => Some(format!("Datagram {{ len: {} }}", data.len())),
-            _ => Some(format!("{:?}", self)),
+            _ => Some(format!("{self:?}")),
         }
     }
 
@@ -386,7 +388,19 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
+        /// Maximum ACK Range Count in ACK Frame
+        ///
+        /// Given a max UDP datagram size of 64k bytes and a minimum ACK Range size of 2
+        /// bytes (2 QUIC varints), a single datagram can at most contain 32k ACK
+        /// Ranges.
+        ///
+        /// Note that the maximum (jumbogram) Ethernet MTU of 9216 or on the
+        /// Internet the regular Ethernet MTU of 1518 are more realistically to
+        /// be the limiting factor. Though for simplicity the higher limit is chosen.
+        const MAX_ACK_RANGE_COUNT: u64 = 32 * 1024;
+
         fn d<T>(v: Option<T>) -> Res<T> {
             v.ok_or(Error::NoMoreData)
         }
@@ -410,9 +424,15 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
                 let la = dv(dec)?;
                 let ad = dv(dec)?;
-                let nr = dv(dec)?;
+                let nr = dv(dec).and_then(|nr| {
+                    if nr < MAX_ACK_RANGE_COUNT {
+                        Ok(nr)
+                    } else {
+                        Err(Error::TooMuchData)
+                    }
+                })?;
                 let fa = dv(dec)?;
-                let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
+                let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
                 for _ in 0..nr {
                     let ar = AckRange {
                         gap: dv(dec)?,
@@ -595,8 +615,13 @@ impl<'a> Frame<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neqo_common::{Decoder, Encoder};
+
+    use crate::{
+        cid::MAX_CONNECTION_ID_LEN,
+        frame::{AckRange, Frame, FRAME_TYPE_ACK},
+        CloseError, Error, StreamId, StreamType,
+    };
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);
@@ -658,7 +683,7 @@ mod tests {
             application_error_code: 0x77,
         };
 
-        just_dec(&f, "053F4077")
+        just_dec(&f, "053F4077");
     }
 
     #[test]
@@ -942,5 +967,17 @@ mod tests {
             fill: false,
         };
         just_dec(&f, "403103010203");
+    }
+
+    #[test]
+    fn frame_decode_enforces_bound_on_ack_range() {
+        let mut e = Encoder::new();
+
+        e.encode_varint(FRAME_TYPE_ACK);
+        e.encode_varint(0u64); // largest acknowledged
+        e.encode_varint(0u64); // ACK delay
+        e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
+
+        assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
     }
 }

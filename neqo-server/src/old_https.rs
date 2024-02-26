@@ -4,17 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::Instant;
-
-use regex::Regex;
+use std::{
+    cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
+};
 
 use neqo_common::{event::Provider, hex, qdebug, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
@@ -23,6 +17,7 @@ use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State, StreamId,
 };
+use regex::Regex;
 
 use super::{qns_read_response, Args, HttpServer};
 
@@ -138,9 +133,7 @@ impl Http09Server {
             data
         };
 
-        let msg = if let Ok(s) = std::str::from_utf8(&buf[..]) {
-            s
-        } else {
+        let Ok(msg) = std::str::from_utf8(&buf[..]) else {
             self.save_partial(stream_id, buf, conn);
             return;
         };
@@ -158,7 +151,7 @@ impl Http09Server {
             }
             Some(path) => {
                 let path = path.as_str();
-                eprintln!("Path = '{}'", path);
+                eprintln!("Path = '{path}'");
                 if args.qns_test.is_some() {
                     qns_read_response(path)
                 } else {
@@ -173,7 +166,7 @@ impl Http09Server {
     fn stream_writable(&mut self, stream_id: StreamId, conn: &mut ActiveConnectionRef) {
         match self.write_state.get_mut(&stream_id) {
             None => {
-                eprintln!("Unknown stream {}, ignoring event", stream_id);
+                eprintln!("Unknown stream {stream_id}, ignoring event");
             }
             Some(stream_state) => {
                 stream_state.writable = true;
@@ -184,9 +177,9 @@ impl Http09Server {
                         .unwrap();
                     qdebug!("Wrote {}", sent);
                     *offset += sent;
-                    self.server.add_to_waiting(conn.clone());
+                    self.server.add_to_waiting(conn);
                     if *offset == data.len() {
-                        eprintln!("Sent {} on {}, closing", sent, stream_id);
+                        eprintln!("Sent {sent} on {stream_id}, closing");
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();
                         self.write_state.remove(&stream_id);
                     } else {
@@ -199,7 +192,7 @@ impl Http09Server {
 }
 
 impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
 
@@ -211,7 +204,7 @@ impl HttpServer for Http09Server {
                     None => break,
                     Some(e) => e,
                 };
-                eprintln!("Event {:?}", event);
+                eprintln!("Event {event:?}");
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
                         self.write_state
@@ -231,14 +224,14 @@ impl HttpServer for Http09Server {
                     }
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamComplete { .. } => (),
-                    e => eprintln!("unhandled event {:?}", e),
+                    e => eprintln!("unhandled event {e:?}"),
                 }
             }
         }
     }
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir)
+        self.server.set_qlog_dir(dir);
     }
 
     fn validate_address(&mut self, v: ValidateAddress) {
@@ -252,7 +245,7 @@ impl HttpServer for Http09Server {
     fn enable_ech(&mut self) -> &[u8] {
         let (sk, pk) = generate_ech_keys().expect("generate ECH keys");
         self.server
-            .enable_ech(random(1)[0], "public.example", &sk, &pk)
+            .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
             .expect("enable ECH");
         self.server.ech_config()
     }

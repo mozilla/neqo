@@ -4,18 +4,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::err::secstatus_to_res;
-use crate::p11::{CERTCertListNode, CERT_GetCertificateDer, CertList, Item, SECItem, SECItemArray};
-use crate::ssl::{
-    PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
-    SSL_PeerStapledOCSPResponses,
+use std::{
+    convert::TryFrom,
+    ptr::{addr_of, NonNull},
 };
+
 use neqo_common::qerror;
 
-use std::convert::TryFrom;
-use std::ptr::{addr_of, NonNull};
-
-use std::slice;
+use crate::{
+    err::secstatus_to_res,
+    null_safe_slice,
+    p11::{CERTCertListNode, CERT_GetCertificateDer, CertList, Item, SECItem, SECItemArray},
+    ssl::{
+        PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
+        SSL_PeerStapledOCSPResponses,
+    },
+};
 
 pub struct CertificateInfo {
     certs: CertList,
@@ -48,7 +52,7 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
             };
             for idx in 0..len {
                 let itemp: *const SECItem = unsafe { ocsp_ptr.as_ref().items.offset(idx).cast() };
-                let item = unsafe { slice::from_raw_parts((*itemp).data, (*itemp).len as usize) };
+                let item = unsafe { null_safe_slice((*itemp).data, (*itemp).len) };
                 ocsp_helper.push(item.to_owned());
             }
             Some(ocsp_helper)
@@ -64,9 +68,8 @@ fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
             if unsafe { sct_ptr.as_ref().len == 0 || sct_ptr.as_ref().data.is_null() } {
                 Some(Vec::new())
             } else {
-                let sct_slice = unsafe {
-                    slice::from_raw_parts(sct_ptr.as_ref().data, sct_ptr.as_ref().len as usize)
-                };
+                let sct_slice =
+                    unsafe { null_safe_slice(sct_ptr.as_ref().data, sct_ptr.as_ref().len) };
                 Some(sct_slice.to_owned())
             }
         }
@@ -101,7 +104,7 @@ impl<'a> Iterator for &'a mut CertificateInfo {
         let cert = unsafe { *self.cursor }.cert;
         secstatus_to_res(unsafe { CERT_GetCertificateDer(cert, &mut item) })
             .expect("getting DER from certificate should work");
-        Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
+        Some(unsafe { null_safe_slice(item.data, item.len) })
     }
 }
 

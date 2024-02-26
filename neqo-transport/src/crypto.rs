@@ -16,12 +16,12 @@ use std::{
 };
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
-
 use neqo_crypto::{
     hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
     PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
     TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
+    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
     TLS_VERSION_1_3,
 };
 
@@ -78,6 +78,13 @@ impl Crypto {
             TLS_AES_256_GCM_SHA384,
             TLS_CHACHA20_POLY1305_SHA256,
         ])?;
+        agent.set_groups(&[
+            TLS_GRP_EC_X25519,
+            TLS_GRP_EC_SECP256R1,
+            TLS_GRP_EC_SECP384R1,
+            TLS_GRP_EC_SECP521R1,
+        ])?;
+        agent.send_additional_key_shares(1)?;
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
         // Always enable 0-RTT on the client, but the server needs
@@ -94,10 +101,10 @@ impl Crypto {
             version,
             protocols,
             tls: agent,
-            streams: Default::default(),
+            streams: CryptoStreams::default(),
             states: CryptoStates {
                 fuzzing,
-                ..Default::default()
+                ..CryptoStates::default()
             },
         })
     }
@@ -218,7 +225,7 @@ impl Crypto {
                 self.tls.read_secret(TLS_EPOCH_ZERO_RTT),
             ),
         };
-        let secret = secret.ok_or(Error::InternalError(1))?;
+        let secret = secret.ok_or(Error::InternalError)?;
         self.states
             .set_0rtt_keys(version, dir, &secret, cipher.unwrap());
         Ok(true)
@@ -232,34 +239,32 @@ impl Crypto {
 
     /// Returns true if new handshake keys were installed.
     pub fn install_keys(&mut self, role: Role) -> Res<bool> {
-        if !self.tls.state().is_final() {
+        if self.tls.state().is_final() {
+            Ok(false)
+        } else {
             let installed_hs = self.install_handshake_keys()?;
             if role == Role::Server {
                 self.maybe_install_application_write_key(self.version)?;
             }
             Ok(installed_hs)
-        } else {
-            Ok(false)
         }
     }
 
     fn install_handshake_keys(&mut self) -> Res<bool> {
         qtrace!([self], "Attempt to install handshake keys");
-        let write_secret = if let Some(secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) {
-            secret
-        } else {
+        let Some(write_secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) else {
             // No keys is fine.
             return Ok(false);
         };
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_HANDSHAKE)
-            .ok_or(Error::InternalError(2))?;
+            .ok_or(Error::InternalError)?;
         let cipher = match self.tls.info() {
             None => self.tls.preinfo()?.cipher_suite(),
             Some(info) => Some(info.cipher_suite()),
         }
-        .ok_or(Error::InternalError(3))?;
+        .ok_or(Error::InternalError)?;
         self.states
             .set_handshake_keys(self.version, &write_secret, &read_secret, cipher);
         qdebug!([self], "Handshake keys installed");
@@ -269,7 +274,7 @@ impl Crypto {
     fn maybe_install_application_write_key(&mut self, version: Version) -> Res<()> {
         qtrace!([self], "Attempt to install application write key");
         if let Some(secret) = self.tls.write_secret(TLS_EPOCH_APPLICATION_DATA) {
-            self.states.set_application_write_key(version, secret)?;
+            self.states.set_application_write_key(version, &secret)?;
             qdebug!([self], "Application write key installed");
         }
         Ok(())
@@ -283,9 +288,9 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_APPLICATION_DATA)
-            .ok_or(Error::InternalError(4))?;
+            .ok_or(Error::InternalError)?;
         self.states
-            .set_application_read_key(version, read_secret, expire_0rtt)?;
+            .set_application_read_key(version, &read_secret, expire_0rtt)?;
         qdebug!([self], "application read keys installed");
         Ok(())
     }
@@ -308,8 +313,8 @@ impl Crypto {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
-        self.streams.write_frame(space, builder, tokens, stats)
+    ) {
+        self.streams.write_frame(space, builder, tokens, stats);
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -657,7 +662,7 @@ impl CryptoDxState {
         // The numbers in `Self::limit` assume a maximum packet size of 2^11.
         if body.len() > 2048 {
             debug_assert!(false);
-            return Err(Error::InternalError(12));
+            return Err(Error::InternalError);
         }
         self.invoked()?;
 
@@ -762,7 +767,7 @@ impl CryptoDxAppData {
     pub fn new(
         version: Version,
         dir: CryptoDxDirection,
-        secret: SymKey,
+        secret: &SymKey,
         cipher: Cipher,
         fuzzing: bool,
     ) -> Res<Self> {
@@ -771,12 +776,12 @@ impl CryptoDxAppData {
                 version,
                 dir,
                 TLS_EPOCH_APPLICATION_DATA,
-                &secret,
+                secret,
                 cipher,
                 fuzzing,
             ),
             cipher,
-            next_secret: Self::update_secret(cipher, &secret)?,
+            next_secret: Self::update_secret(cipher, secret)?,
             fuzzing,
         })
     }
@@ -1106,7 +1111,7 @@ impl CryptoStates {
         });
     }
 
-    pub fn set_application_write_key(&mut self, version: Version, secret: SymKey) -> Res<()> {
+    pub fn set_application_write_key(&mut self, version: Version, secret: &SymKey) -> Res<()> {
         debug_assert!(self.app_write.is_none());
         debug_assert_ne!(self.cipher, 0);
         let mut app = CryptoDxAppData::new(
@@ -1129,7 +1134,7 @@ impl CryptoStates {
     pub fn set_application_read_key(
         &mut self,
         version: Version,
-        secret: SymKey,
+        secret: &SymKey,
         expire_0rtt: Instant,
     ) -> Res<()> {
         debug_assert!(self.app_write.is_some(), "should have write keys installed");
@@ -1400,6 +1405,9 @@ pub enum CryptoStreams {
 }
 
 impl CryptoStreams {
+    /// Keep around 64k if a server wants to push excess data at us.
+    const BUFFER_LIMIT: u64 = 65536;
+
     pub fn discard(&mut self, space: PacketNumberSpace) {
         match space {
             PacketNumberSpace::Initial => {
@@ -1434,8 +1442,14 @@ impl CryptoStreams {
         self.get_mut(space).unwrap().tx.send(data);
     }
 
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) {
-        self.get_mut(space).unwrap().rx.inbound_frame(offset, data);
+    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+        let rx = &mut self.get_mut(space).unwrap().rx;
+        rx.inbound_frame(offset, data);
+        if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
+            Ok(())
+        } else {
+            Err(Error::CryptoBufferExceeded)
+        }
     }
 
     pub fn data_ready(&self, space: PacketNumberSpace) -> bool {
@@ -1516,19 +1530,19 @@ impl CryptoStreams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> Res<()> {
+    ) {
         let cs = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
             // Don't bother if there isn't room for the header and some data.
             if builder.remaining() < header_len + 1 {
-                return Ok(());
+                return;
             }
             // Calculate length of data based on the minimum of:
             // - available data
-            // - remaining space, less the header, which counts only one byte
-            //   for the length at first to avoid underestimating length
+            // - remaining space, less the header, which counts only one byte for the length at
+            //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
             header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
@@ -1536,9 +1550,6 @@ impl CryptoStreams {
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
             builder.encode_varint(offset);
             builder.encode_vvec(&data[..length]);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(15));
-            }
 
             cs.tx.mark_as_sent(offset, length);
 
@@ -1550,7 +1561,6 @@ impl CryptoStreams {
             }));
             stats.crypto += 1;
         }
-        Ok(())
     }
 }
 

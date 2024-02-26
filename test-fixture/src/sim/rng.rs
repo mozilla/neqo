@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::Decoder;
-use std::convert::TryFrom;
 use std::ops::Range;
+
+use neqo_common::Decoder;
 
 /// An implementation of a xoshiro256** pseudorandom generator.
 pub struct Random {
@@ -14,7 +14,9 @@ pub struct Random {
 }
 
 impl Random {
-    pub fn new(seed: [u8; 32]) -> Self {
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)] // These are impossible.
+    pub fn new(seed: &[u8; 32]) -> Self {
         assert!(seed.iter().any(|&x| x != 0));
         let mut dec = Decoder::from(&seed);
         Self {
@@ -48,6 +50,7 @@ impl Random {
     /// Generate a random value from the range.
     /// If the range is empty or inverted (`range.start > range.end`), then
     /// this returns the value of `range.start` without generating any random values.
+    #[must_use]
     pub fn random_from(&mut self, range: Range<u64>) -> u64 {
         let max = range.end.saturating_sub(range.start);
         if max == 0 {
@@ -55,7 +58,6 @@ impl Random {
         }
 
         let shift = (max - 1).leading_zeros();
-        assert_ne!(max, 0);
         loop {
             let r = self.random() >> shift;
             if r < max {
@@ -64,7 +66,8 @@ impl Random {
         }
     }
 
-    /// Get the seed necessary to continue from this point.
+    /// Get the seed necessary to continue from the current state of the RNG.
+    #[must_use]
     pub fn seed_str(&self) -> String {
         format!(
             "{:8x}{:8x}{:8x}{:8x}",
@@ -75,7 +78,6 @@ impl Random {
 
 impl Default for Random {
     fn default() -> Self {
-        let buf = neqo_crypto::random(32);
-        Random::new(<[u8; 32]>::try_from(&buf[..]).unwrap())
+        Random::new(&neqo_crypto::random::<32>())
     }
 }
