@@ -142,7 +142,7 @@ jobs:
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.head_ref || github.ref_name }}-perf
+          name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
             *.svg
             *.perf
