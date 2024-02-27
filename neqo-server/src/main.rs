@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::min,
     collections::HashMap,
-    convert::TryFrom,
     fmt::{self, Display},
     fs::OpenOptions,
     io::{self, Read},

@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     mem,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,

@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     fmt::{Debug, Display},
     mem,
     net::SocketAddr,
@@ -1289,7 +1288,7 @@ impl EventProvider for Http3Client {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryFrom, mem, time::Duration};
+    use std::{mem, time::Duration};
 
     use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};

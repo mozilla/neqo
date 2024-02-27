@@ -536,10 +536,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        convert::TryFrom,
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
 
     use neqo_common::qinfo;
     use test_fixture::now;

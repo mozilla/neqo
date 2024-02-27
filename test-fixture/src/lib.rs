@@ -10,7 +10,6 @@
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
-    convert::TryFrom,
     fmt::Display,
     io::{Cursor, Result, Write},
     mem,
