@@ -41,7 +41,6 @@ jobs:
           echo 'Download artifacts [here](' >> comment
           cat logs-url >> comment
           echo ').' >> comment
-        if: always()
         shell: bash
 
       - name: Read PR Number
