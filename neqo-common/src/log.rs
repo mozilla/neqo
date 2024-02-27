@@ -6,21 +6,17 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-#[cfg(not(feature = "bench"))]
 use std::{
     io::Write,
     sync::{Once, OnceLock},
     time::{Duration, Instant},
 };
 
-#[cfg(not(feature = "bench"))]
 use env_logger::Builder;
 
 #[macro_export]
 macro_rules! do_log {
-    (target: $target:expr, $lvl:expr, $($arg:tt)+) => (
-        #[cfg(not(feature = "bench"))]
-        {
+    (target: $target:expr, $lvl:expr, $($arg:tt)+) => ({
         let lvl = $lvl;
         if lvl <= ::log::max_level() {
             ::log::logger().log(
@@ -34,8 +30,7 @@ macro_rules! do_log {
                     .build()
             );
         }
-        }
-    );
+    });
     ($lvl:expr, $($arg:tt)+) => ($crate::do_log!(target: module_path!(), $lvl, $($arg)+))
 }
 
@@ -50,36 +45,32 @@ macro_rules! log_subject {
     }};
 }
 
-#[cfg(not(feature = "bench"))]
 fn since_start() -> Duration {
     static START_TIME: OnceLock<Instant> = OnceLock::new();
     START_TIME.get_or_init(Instant::now).elapsed()
 }
 
 pub fn init() {
-    #[cfg(not(feature = "bench"))]
-    {
-        static INIT_ONCE: Once = Once::new();
-        INIT_ONCE.call_once(|| {
-            let mut builder = Builder::from_env("RUST_LOG");
-            builder.format(|buf, record| {
-                let elapsed = since_start();
-                writeln!(
-                    buf,
-                    "{}s{:3}ms {} {}",
-                    elapsed.as_secs(),
-                    elapsed.as_millis() % 1000,
-                    record.level(),
-                    record.args()
-                )
-            });
-            if let Err(e) = builder.try_init() {
-                do_log!(::log::Level::Info, "Logging initialization error {:?}", e);
-            } else {
-                do_log!(::log::Level::Info, "Logging initialized");
-            }
+    static INIT_ONCE: Once = Once::new();
+    INIT_ONCE.call_once(|| {
+        let mut builder = Builder::from_env("RUST_LOG");
+        builder.format(|buf, record| {
+            let elapsed = since_start();
+            writeln!(
+                buf,
+                "{}s{:3}ms {} {}",
+                elapsed.as_secs(),
+                elapsed.as_millis() % 1000,
+                record.level(),
+                record.args()
+            )
         });
-    }
+        if let Err(e) = builder.try_init() {
+            do_log!(::log::Level::Info, "Logging initialization error {:?}", e);
+        } else {
+            do_log!(::log::Level::Info, "Logging initialized");
+        }
+    });
 }
 
 #[macro_export]
@@ -89,28 +80,73 @@ macro_rules! log_invoke {
         ::neqo_common::do_log!($lvl, "[{}] {}", $ctx, format!($($arg)*));
     } )
 }
+
+#[cfg(not(feature = "bench"))]
 #[macro_export]
 macro_rules! qerror {
     ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Error, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::neqo_common::do_log!(::log::Level::Error, $($arg)*); } );
 }
+
+#[cfg(feature = "bench")]
+#[macro_export]
+macro_rules! qerror {
+    ([$ctx:expr], $($arg:tt)*) => (());
+    ($($arg:tt)*) => (());
+}
+
+#[cfg(not(feature = "bench"))]
 #[macro_export]
 macro_rules! qwarn {
     ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Warn, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::neqo_common::do_log!(::log::Level::Warn, $($arg)*); } );
 }
+
+#[cfg(feature = "bench")]
+#[macro_export]
+macro_rules! qwarn {
+    ([$ctx:expr], $($arg:tt)*) => (());
+    ($($arg:tt)*) => (());
+}
+
+#[cfg(not(feature = "bench"))]
 #[macro_export]
 macro_rules! qinfo {
     ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Info, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::neqo_common::do_log!(::log::Level::Info, $($arg)*); } );
 }
+
+#[cfg(feature = "bench")]
+#[macro_export]
+macro_rules! qinfo {
+    ([$ctx:expr], $($arg:tt)*) => (());
+    ($($arg:tt)*) => (());
+}
+
+#[cfg(not(feature = "bench"))]
 #[macro_export]
 macro_rules! qdebug {
     ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Debug, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::neqo_common::do_log!(::log::Level::Debug, $($arg)*); } );
 }
+
+#[cfg(feature = "bench")]
+#[macro_export]
+macro_rules! qdebug {
+    ([$ctx:expr], $($arg:tt)*) => (());
+    ($($arg:tt)*) => (());
+}
+
+#[cfg(not(feature = "bench"))]
 #[macro_export]
 macro_rules! qtrace {
     ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Trace, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::neqo_common::do_log!(::log::Level::Trace, $($arg)*); } );
+}
+
+#[cfg(feature = "bench")]
+#[macro_export]
+macro_rules! qtrace {
+    ([$ctx:expr], $($arg:tt)*) => (());
+    ($($arg:tt)*) => (());
 }
