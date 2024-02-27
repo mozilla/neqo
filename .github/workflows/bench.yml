@@ -7,6 +7,7 @@ env:
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUST_LOG: off
   TOOLCHAIN: nightly
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment
   PERF_CMD: record -o perf.data -F997 --call-graph lbr -g
