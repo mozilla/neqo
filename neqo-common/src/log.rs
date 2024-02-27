@@ -18,7 +18,9 @@ use env_logger::Builder;
 
 #[macro_export]
 macro_rules! do_log {
-    (target: $target:expr, $lvl:expr, $($arg:tt)+) => ({
+    (target: $target:expr, $lvl:expr, $($arg:tt)+) => (
+        #[cfg(not(feature = "bench"))]
+        {
         let lvl = $lvl;
         if lvl <= ::log::max_level() {
             ::log::logger().log(
@@ -32,7 +34,8 @@ macro_rules! do_log {
                     .build()
             );
         }
-    });
+        }
+    );
     ($lvl:expr, $($arg:tt)+) => ($crate::do_log!(target: module_path!(), $lvl, $($arg)+))
 }
 
