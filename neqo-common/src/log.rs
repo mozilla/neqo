@@ -6,12 +6,14 @@
 
 #![allow(clippy::module_name_repetitions)]
 
+#[cfg(not(feature = "bench"))]
 use std::{
     io::Write,
     sync::{Once, OnceLock},
     time::{Duration, Instant},
 };
 
+#[cfg(not(feature = "bench"))]
 use env_logger::Builder;
 
 #[macro_export]
@@ -45,32 +47,36 @@ macro_rules! log_subject {
     }};
 }
 
+#[cfg(not(feature = "bench"))]
 fn since_start() -> Duration {
     static START_TIME: OnceLock<Instant> = OnceLock::new();
     START_TIME.get_or_init(Instant::now).elapsed()
 }
 
 pub fn init() {
-    static INIT_ONCE: Once = Once::new();
-    INIT_ONCE.call_once(|| {
-        let mut builder = Builder::from_env("RUST_LOG");
-        builder.format(|buf, record| {
-            let elapsed = since_start();
-            writeln!(
-                buf,
-                "{}s{:3}ms {} {}",
-                elapsed.as_secs(),
-                elapsed.as_millis() % 1000,
-                record.level(),
-                record.args()
-            )
+    #[cfg(not(feature = "bench"))]
+    {
+        static INIT_ONCE: Once = Once::new();
+        INIT_ONCE.call_once(|| {
+            let mut builder = Builder::from_env("RUST_LOG");
+            builder.format(|buf, record| {
+                let elapsed = since_start();
+                writeln!(
+                    buf,
+                    "{}s{:3}ms {} {}",
+                    elapsed.as_secs(),
+                    elapsed.as_millis() % 1000,
+                    record.level(),
+                    record.args()
+                )
+            });
+            if let Err(e) = builder.try_init() {
+                do_log!(::log::Level::Info, "Logging initialization error {:?}", e);
+            } else {
+                do_log!(::log::Level::Info, "Logging initialized");
+            }
         });
-        if let Err(e) = builder.try_init() {
-            do_log!(::log::Level::Info, "Logging initialization error {:?}", e);
-        } else {
-            do_log!(::log::Level::Info, "Logging initialized");
-        }
-    });
+    }
 }
 
 #[macro_export]
