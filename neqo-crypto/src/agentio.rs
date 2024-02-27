@@ -6,7 +6,6 @@
 
 use std::{
     cmp::min,
-    convert::{TryFrom, TryInto},
     fmt, mem,
     ops::Deref,
     os::raw::{c_uint, c_void},

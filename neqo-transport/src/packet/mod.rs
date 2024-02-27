@@ -7,7 +7,6 @@
 // Encoding and decoding packets off the wire.
 use std::{
     cmp::min,
-    convert::TryFrom,
     fmt,
     ops::{Deref, DerefMut, Range},
     time::Instant,

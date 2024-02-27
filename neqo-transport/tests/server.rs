@@ -8,7 +8,7 @@
 
 mod common;
 
-use std::{cell::RefCell, convert::TryFrom, mem, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, mem, net::SocketAddr, rc::Rc, time::Duration};
 
 use common::{
     apply_header_protection, connect, connected_server, decode_initial_header, default_server,

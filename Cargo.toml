@@ -9,6 +9,7 @@ members = [
   "neqo-transport",
   "test-fixture",
 ]
+resolver = "2"
 
 [workspace.package]
 homepage = "https://github.com/mozilla/neqo/"

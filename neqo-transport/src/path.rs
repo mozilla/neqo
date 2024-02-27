@@ -9,7 +9,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     fmt::{self, Display},
     mem,
     net::{IpAddr, SocketAddr},

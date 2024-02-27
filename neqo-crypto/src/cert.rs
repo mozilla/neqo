@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    convert::TryFrom,
-    ptr::{addr_of, NonNull},
-};
+use std::ptr::{addr_of, NonNull};
 
 use neqo_common::qerror;
 
