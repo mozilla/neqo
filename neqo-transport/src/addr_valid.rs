@@ -7,7 +7,6 @@
 // This file implements functions necessary for address validation.
 
 use std::{
-    convert::TryFrom,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };

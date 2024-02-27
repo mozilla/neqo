@@ -7,7 +7,6 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use std::{
-    convert::{TryFrom, TryInto},
     ops::Deref,
     os::raw::c_void,
     pin::Pin,
@@ -214,10 +213,7 @@ impl Default for TimeHolder {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        convert::{TryFrom, TryInto},
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
 
     use super::{get_base, init, Interval, PRTime, Time};
     use crate::err::Res;

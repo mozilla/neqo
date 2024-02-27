@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, collections::VecDeque, convert::TryFrom, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
 use neqo_common::{qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;

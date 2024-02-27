@@ -14,7 +14,6 @@ mod taildrop;
 use std::{
     cell::RefCell,
     cmp::min,
-    convert::TryFrom,
     fmt::Debug,
     ops::{Deref, DerefMut},
     rc::Rc,
