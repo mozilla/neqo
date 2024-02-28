@@ -6,9 +6,10 @@ on:
   workflow_dispatch:
   pull_request:
     branches: ["main"]
-    paths:
-      - 'qns/**'
-      - '.github/workflows/qns.yml'
+    # TODO: Re-introduce
+    # paths:
+    #   - 'qns/**'
+    #   - '.github/workflows/qns.yml'
   merge_group:
     branches: ["main"]
 
