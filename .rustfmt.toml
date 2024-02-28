@@ -5,3 +5,5 @@ imports_granularity="Crate"
 group_imports="StdExternalCrate"
 
 format_code_in_doc_comments=true
+
+format_macro_matchers=true
