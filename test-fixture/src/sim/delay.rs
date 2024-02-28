@@ -8,7 +8,6 @@
 
 use std::{
     collections::BTreeMap,
-    convert::TryFrom,
     fmt::{self, Debug},
     ops::Range,
     time::{Duration, Instant},
