@@ -23,7 +23,7 @@ use neqo_crypto::random;
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
-    cc::{CongestionControlAlgorithm, MAX_DATAGRAM_SIZE},
+    cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
@@ -44,7 +44,7 @@ pub const PATH_MTU_V6: usize = 1337;
 /// The path MTU for IPv4 can be 20 bytes larger than for v6.
 pub const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 /// The number of times that a path will be probed before it is considered failed.
-const MAX_PATH_PROBES: usize = 3;
+pub const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
@@ -546,8 +546,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
-    /// The number of ECN-marked bytes sent on this path that were declared lost.
-    lost_ecn_bytes: usize,
+    /// The number of ECN-marked packets sent on this path that were declared lost.
+    lost_ecn_packets: usize,
     /// The ECN counts received in the last ACK on this path, for each packet number space.
     ecn_count: EnumMap<PacketNumberSpace, EcnCount>,
 
@@ -583,7 +583,7 @@ impl Path {
             ttl: 64, // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
-            lost_ecn_bytes: 0,
+            lost_ecn_packets: 0,
             ecn_count: EnumMap::default(),
             qlog,
         }
@@ -1011,17 +1011,24 @@ impl Path {
 
         if self.is_ecn_enabled() {
             // If the path is currently marking outgoing packets as ECT(0),
-            // update the count of lost ECN-marked bytes.
-            self.lost_ecn_bytes += lost_packets.iter().map(|p| p.size).sum::<usize>();
+            // update the count of lost ECN-marked packets.
+            self.lost_ecn_packets += lost_packets.len();
 
-            // If we lost more than 3 MTUs worth of ECN-marked bytes, then
+            // If we lost more than `MAX_PATH_PROBES` ECN-marked packets, then
             // disable ECN on this path. See RFC 9000, Section 13.4.2.
             // This doesn't quite implement the algorithm given in RFC 9000,
             // Appendix A.4, but it should be OK. (It might be worthwhile caching
             // destination IP addresses for paths on which we had to disable ECN,
             // in order to not persitently delay connection establishment to
             // those destinations.)
-            if self.lost_ecn_bytes > MAX_DATAGRAM_SIZE * 3 {
+            //
+            // (Reusing `MAX_PATH_PROBES` here as a threshold is a bit of a hack,
+            // but avoids defining another constant just for this.)
+            println!(
+                "XXX Lost {} ECN-marked packets on this path",
+                self.lost_ecn_packets
+            );
+            if self.lost_ecn_packets > MAX_PATH_PROBES {
                 qinfo!([self], "Disabling ECN on path due to excessive loss");
                 self.disable_ecn();
             }

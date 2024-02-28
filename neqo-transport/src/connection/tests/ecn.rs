@@ -10,13 +10,17 @@ use neqo_common::IpTos;
 use test_fixture::now;
 
 use crate::{
+    cc::MAX_DATAGRAM_SIZE,
     connection::tests::{connect_force_idle, default_client, default_server},
+    path::MAX_PATH_PROBES,
     StreamType,
 };
 
+// This is more data than will fit into `MAX_PATH_PROBES` packets.
+const DATA_CLIENT: &[u8] = &[0; MAX_PATH_PROBES * MAX_DATAGRAM_SIZE];
+
 #[test]
 fn disables_when_bleached() {
-    const DATA_CLIENT: &[u8] = &[2; 8000];
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -36,5 +40,38 @@ fn disables_when_bleached() {
         client.process_input(&server_pkt, now());
     }
 
+    // ECN should now be disabled.
+    assert!(!client.paths.primary().borrow().is_ecn_enabled());
+}
+
+#[test]
+fn disables_on_loss() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    connect_force_idle(&mut client, &mut server);
+    assert!(client.paths.primary().borrow().is_ecn_enabled());
+
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, DATA_CLIENT).unwrap();
+
+    while let Some(client_pkt) = client.process_output(now).dgram() {
+        drop(client_pkt);
+    }
+
+    // First PTO
+    now += client.process_output(now).callback();
+    while let Some(client_pkt) = client.process_output(now).dgram() {
+        drop(client_pkt);
+    }
+
+    // Second PTO
+    now += client.process_output(now).callback();
+    while let Some(client_pkt) = client.process_output(now).dgram() {
+        drop(client_pkt);
+    }
+
+    // ECN should now be disabled.
     assert!(!client.paths.primary().borrow().is_ecn_enabled());
 }
