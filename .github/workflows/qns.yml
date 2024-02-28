@@ -57,7 +57,8 @@ jobs:
             RUST_VERSION=stable
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64, linux/arm64
+          # On pull requests only build amd64 for the sake of CI time.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
 
       - name: Run QUIC Interop tests
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
