@@ -2925,7 +2925,7 @@ impl Connection {
         self.paths
             .primary()
             .borrow_mut()
-            .validate_ecn_use(space, &acked_packets, ecn_count);
+            .validate_ack_ecn(space, &acked_packets, ecn_count);
 
         for acked in acked_packets {
             for token in &acked.tokens {

@@ -740,6 +740,7 @@ impl LossRecovery {
         primary_path
             .borrow_mut()
             .on_packets_lost(prev_largest_acked, pn_space, &lost);
+        primary_path.borrow_mut().validate_ecn_use(&lost);
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
@@ -969,6 +970,7 @@ impl LossRecovery {
         self.stats.borrow_mut().lost += lost_packets.len();
 
         self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
+        primary_path.borrow_mut().validate_ecn_use(&lost_packets);
         lost_packets
     }
 

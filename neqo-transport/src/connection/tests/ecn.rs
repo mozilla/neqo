@@ -63,33 +63,35 @@ fn stay_enabled_under_ce() {
     assert_ecn_enabled(&pkt);
 }
 
-// #[test]
-// fn disables_on_loss() {
-//     let mut now = now();
-//     let mut client = default_client();
-//     let mut server = default_server();
-//     connect_force_idle(&mut client, &mut server);
+#[test]
+fn disables_on_loss() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
 
-//     connect_force_idle(&mut client, &mut server);
+    for _ in 0..MAX_PATH_PROBES {
+        let client_pkt = send_something(&mut client, now);
+        // First batch sent with ECN enabled.
+        assert_ecn_enabled(&client_pkt);
+    }
 
-//     send_something(&mut client, now);
+    // First PTO.
+    //
+    // We're only marking two packets lost on a PTO, so we need another one
+    // to trigger ECN disablement.
+    now += client.process_output(now).callback();
+    for _ in 0..MAX_PATH_PROBES {
+        send_something(&mut client, now);
+    }
 
-//     while let Some(client_pkt) = client.process_output(now).dgram() {
-//         drop(client_pkt);
-//     }
+    // Second PTO. Somewhere in this second batch, ECN will be disabled.
+    now += client.process_output(now).callback();
+    for _ in 0..MAX_PATH_PROBES {
+        send_something(&mut client, now);
+    }
 
-//     // First PTO
-//     now += client.process_output(now).callback();
-//     while let Some(client_pkt) = client.process_output(now).dgram() {
-//         drop(client_pkt);
-//     }
-
-//     // Second PTO
-//     now += client.process_output(now).callback();
-//     while let Some(client_pkt) = client.process_output(now).dgram() {
-//         drop(client_pkt);
-//     }
-
-//     // ECN should now be disabled.
-//     assert!(!client.paths.primary().borrow().is_ecn_enabled());
-// }
+    // ECN should now be disabled.
+    let client_pkt = send_something(&mut client, now);
+    assert_ecn_disabled(&client_pkt);
+}
