@@ -595,17 +595,6 @@ impl Path {
         self.tos
     }
 
-    /// Return latest ECN count received on this path.
-    pub fn ecn_count(&self, space: PacketNumberSpace) -> EcnCount {
-        self.ecn_count[space]
-    }
-
-    /// Set the ECN count received on this path.
-    pub fn set_ecn_count(&mut self, space: PacketNumberSpace, ecn_count: EcnCount) {
-        qinfo!("Setting ECN count for {:} to {:?}", space, ecn_count);
-        self.ecn_count[space] = ecn_count;
-    }
-
     /// Whether this path is currently marking packets with ECN.
     fn is_ecn_enabled(&self) -> bool {
         self.tos.ecn() != IpTosEcn::NotEct
@@ -644,7 +633,7 @@ impl Path {
             // > less than the number of newly acknowledged packets that were originally sent with an
             // > ECT(0) marking.
             let newly_acked = acked_packets.len().try_into().unwrap();
-            let ecn_diff = ecn_count - self.ecn_count(space);
+            let ecn_diff = ecn_count - self.ecn_count[space];
             let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
             if sum_inc < newly_acked {
                 qwarn!(
@@ -654,7 +643,7 @@ impl Path {
                 );
                 self.disable_ecn();
             }
-            self.set_ecn_count(space, ecn_count);
+            self.ecn_count[space] = ecn_count;
         }
     }
 
