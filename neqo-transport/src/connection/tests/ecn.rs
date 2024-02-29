@@ -23,14 +23,12 @@ fn assert_ecn_disabled(d: &Datagram) {
 }
 
 fn connect_and_send_something_marked(ecn: IpTosEcn) -> Datagram {
-    let mut now = now();
+    let now = now();
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
-    println!("XXX connected");
 
     for _ in 0..MAX_PATH_PROBES {
-        println!("XXX pkt tx -> {ecn:?}");
         let mut client_pkt = send_something(&mut client, now);
         assert_ecn_enabled(&client_pkt);
         // Change the ECN bits on the packet to `ecn`.
@@ -40,13 +38,11 @@ fn connect_and_send_something_marked(ecn: IpTosEcn) -> Datagram {
 
     // Client should now process ACKs with incorrect ECN counts and disable ECN.
     while let Some(server_pkt) = server.process_output(now).dgram() {
-        println!("XXX pkt tx -> {ecn:?}");
         client.process_input(&server_pkt, now);
     }
-    now += client.process_output(now).callback();
 
-    // ECN should now be disabled.
-    client.process_output(now).dgram().unwrap()
+    // Return another client packet for the caller to check.
+    send_something(&mut client, now)
 }
 
 #[test]
