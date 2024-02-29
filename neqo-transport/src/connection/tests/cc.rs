@@ -71,6 +71,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
         client.stats().frame_rx.largest_acknowledged,
         flight1_largest
     );
+    let cwnd_before_cong = cwnd(&client);
 
     // Client: send more
     let (mut c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream_id, now);
@@ -93,6 +94,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
         client.stats().frame_rx.largest_acknowledged,
         flight2_largest
     );
+    assert!(cwnd(&client) < cwnd_before_cong);
 }
 
 #[test]
