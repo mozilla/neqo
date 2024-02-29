@@ -98,7 +98,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Rust tools
-        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
+        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest cargo-hack
 
       # This step might be removed if the distro included a recent enough
       # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
@@ -158,7 +158,6 @@ jobs:
           # respective default features only. Can reveal warnings otherwise
           # hidden given that a plain cargo clippy combines all features of the
           # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
-          cargo +${{ matrix.rust-toolchain }} install cargo-hack
           cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
         if: success() || failure()
 
