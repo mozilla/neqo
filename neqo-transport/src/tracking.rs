@@ -11,7 +11,7 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    ops::{Index, IndexMut},
+    ops::{Add, Deref, DerefMut, Index, IndexMut, Sub},
     time::{Duration, Instant},
 };
 
@@ -354,20 +354,55 @@ pub struct AckToken {
 }
 
 /// The counts for different ECN marks.
-pub type EcnCount = EnumMap<IpTosEcn, u64>;
+#[derive(PartialEq, Eq, Debug, Clone, Default, Copy)]
+pub struct EcnCount(EnumMap<IpTosEcn, u64>);
 
-/// Whether any of the ECN counts are non-zero.
-pub fn have_ecn_count(ecn: &EcnCount) -> bool {
-    ecn[IpTosEcn::Ect0] > 0 || ecn[IpTosEcn::Ect1] > 0 || ecn[IpTosEcn::Ce] > 0
+impl Deref for EcnCount {
+    type Target = EnumMap<IpTosEcn, u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-/// Subtract the ECN counts in `b` from `a`.
-pub fn diff_ecn_count(a: &EcnCount, b: &EcnCount) -> EcnCount {
-    let mut diff = EcnCount::default();
-    for (ecn, count) in &mut diff {
-        *count = a[ecn].saturating_sub(b[ecn]);
+impl DerefMut for EcnCount {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
-    diff
+}
+
+impl EcnCount {
+    pub fn new(not_ect: u64, ect0: u64, ect1: u64, ce: u64) -> Self {
+        // Yes, the enum array order is different from the argument order.
+        Self(EnumMap::from_array([not_ect, ect1, ect0, ce]))
+    }
+
+    /// Whether any of the ECN counts are non-zero.
+    pub fn is_some(self) -> bool {
+        self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
+    }
+}
+
+impl Sub for EcnCount {
+    type Output = Self;
+
+    /// Subtract the ECN counts in `other` from `self`.
+    fn sub(self, other: Self) -> Self {
+        let mut diff = EcnCount::default();
+        for (ecn, count) in &mut *diff {
+            *count = self[ecn].saturating_sub(other[ecn]);
+        }
+        diff
+    }
+}
+
+impl Add<IpTosEcn> for EcnCount {
+    type Output = Self;
+
+    fn add(mut self, ecn: IpTosEcn) -> Self::Output {
+        self[ecn] += 1;
+        self
+    }
 }
 
 /// A structure that tracks what packets have been received,
@@ -421,7 +456,6 @@ impl RecvdPackets {
         }
     }
 
-    /// Increase the ECN count for the mark given by `ecn` by `1`.
     pub fn inc_ecn_count(&mut self, ecn: IpTosEcn) {
         self.ecn_count[ecn] += 1;
     }
@@ -622,8 +656,7 @@ impl RecvdPackets {
             .cloned()
             .collect::<Vec<_>>();
 
-        let have_ecn_count = have_ecn_count(&self.ecn_count);
-        builder.encode_varint(if have_ecn_count {
+        builder.encode_varint(if self.ecn_count.is_some() {
             FRAME_TYPE_ACK_ECN
         } else {
             FRAME_TYPE_ACK
@@ -651,7 +684,7 @@ impl RecvdPackets {
             last = r.smallest;
         }
 
-        if have_ecn_count {
+        if self.ecn_count.is_some() {
             builder.encode_varint(self.ecn_count[IpTosEcn::Ect0]);
             builder.encode_varint(self.ecn_count[IpTosEcn::Ect1]);
             builder.encode_varint(self.ecn_count[IpTosEcn::Ce]);

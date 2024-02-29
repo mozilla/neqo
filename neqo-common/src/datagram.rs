@@ -93,7 +93,7 @@ use test_fixture::datagram;
 fn fmt_datagram() {
     let d = datagram([0; 1].to_vec());
     assert_eq!(
-        format!("{d:?}"),
-        "Datagram IpTos(Cs0, Ect0) TTL Some(128) [fe80::1]:443->[fe80::1]:443: [1]: 00".to_string()
+        &format!("{d:?}"),
+        "Datagram IpTos(Cs0, Ect0) TTL Some(128) [fe80::1]:443->[fe80::1]:443: [1]: 00"
     );
 }

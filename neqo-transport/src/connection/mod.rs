@@ -19,7 +19,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTosEcn, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -55,7 +55,7 @@ use crate::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
     },
-    tracking::{diff_ecn_count, AckTracker, EcnCount, PacketNumberSpace, SentPacket},
+    tracking::{AckTracker, EcnCount, PacketNumberSpace, SentPacket},
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
@@ -1421,6 +1421,15 @@ impl Connection {
         migrate: bool,
         now: Instant,
     ) {
+        // Since we processed frames from this IP packet now,
+        // update the ECN counts (RFC9000, Section 13.4.1).
+        let space = PacketNumberSpace::from(packet.packet_type());
+        if let Some(space) = self.acks.get_mut(space) {
+            space.inc_ecn_count(d.tos().ecn());
+        } else {
+            qdebug!("Not tracking ECN for dropped packet number space");
+        }
+
         if self.state == State::WaitInitial {
             self.start_handshake(path, packet, now);
         }
@@ -1492,6 +1501,7 @@ impl Connection {
                         payload.packet_type(),
                         payload.pn(),
                         &payload[..],
+                        d.tos(),
                     );
 
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
@@ -1501,16 +1511,7 @@ impl Connection {
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
                         match self.process_packet(path, &payload, now) {
-                            Ok(migrate) => {
-                                // Since we processed frames from this IP packet now,
-                                // update the ECN counts (RFC9000, Section 13.4.1).
-                                if let Some(space) = self.acks.get_mut(space) {
-                                    space.inc_ecn_count(d.tos().into());
-                                } else {
-                                    qdebug!("Not tracking ECN for dropped packet number space");
-                                }
-                                self.postprocess_packet(path, d, &packet, migrate, now);
-                            }
+                            Ok(migrate) => self.postprocess_packet(path, d, &packet, migrate, now),
                             Err(e) => {
                                 self.ensure_error_path(path, &packet, now);
                                 return Err(e);
@@ -2272,6 +2273,7 @@ impl Connection {
                 pt,
                 pn,
                 &builder.as_ref()[payload_start..],
+                path.borrow().tos(),
             );
             qlog::packet_sent(
                 &mut self.qlog,
@@ -2920,41 +2922,10 @@ impl Connection {
             now,
         );
 
-        let path = self.paths.primary();
-        if path.borrow().is_ecn_enabled() {
-            // RFC 9000, Section 13.4.2.1:
-            //
-            // > An endpoint that receives an ACK frame with ECN counts therefore validates
-            // > the counts before using them. It performs this validation by comparing newly
-            // > received counts against those from the last successfully processed ACK frame.
-            //
-            // RFC 9000 fails to state that this is done *per packet number space*.
-            //
-            // > If an ACK frame newly acknowledges a packet that the endpoint sent with
-            // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
-            // > corresponding ECN counts are not present in the ACK frame.
-            //
-            // We always mark with ECT(0) - if at all - so we only need to check for that.
-            // Also, if we sent a packet with ECT(0) and get only an ACK frame (and not an
-            // ACK-ECN frame), `ecn_counts` will be all zero and the check below will fail,
-            // so no need to explicitly check for the above.
-            //
-            // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
-            // > less than the number of newly acknowledged packets that were originally sent with an
-            // > ECT(0) marking.
-            let newly_acked = acked_packets.len() as u64;
-            let ecn_diff = diff_ecn_count(&ecn_count, &path.borrow().ecn_count(space));
-            let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
-            if sum_inc < newly_acked {
-                qwarn!(
-                    "ACK had {} new marks, but acked {} packets, disabling ECN",
-                    sum_inc,
-                    newly_acked
-                );
-                path.borrow_mut().disable_ecn();
-            }
-            path.borrow_mut().set_ecn_count(space, ecn_count);
-        }
+        self.paths
+            .primary()
+            .borrow_mut()
+            .validate_ecn_use(space, &acked_packets, ecn_count);
 
         for acked in acked_packets {
             for token in &acked.tokens {

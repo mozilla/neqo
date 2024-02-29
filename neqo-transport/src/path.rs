@@ -17,7 +17,9 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos, IpTosEcn};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos, IpTosEcn,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -588,6 +590,11 @@ impl Path {
         }
     }
 
+    /// Return the current DSCP/ECN marking of outgoing packets on this path.
+    pub fn tos(&self) -> IpTos {
+        self.tos
+    }
+
     /// Return latest ECN count received on this path.
     pub fn ecn_count(&self, space: PacketNumberSpace) -> EcnCount {
         self.ecn_count[space]
@@ -600,13 +607,55 @@ impl Path {
     }
 
     /// Whether this path is currently marking packets with ECN.
-    pub fn is_ecn_enabled(&self) -> bool {
-        self.tos != IpTosEcn::NotEct.into()
+    fn is_ecn_enabled(&self) -> bool {
+        self.tos.ecn() != IpTosEcn::NotEct
     }
 
     /// Disable ECN marking on this path.
-    pub fn disable_ecn(&mut self) {
-        self.tos = IpTosEcn::NotEct.into();
+    fn disable_ecn(&mut self) {
+        self.tos.set_ecn(IpTosEcn::NotEct);
+    }
+
+    pub fn validate_ecn_use(
+        &mut self,
+        space: PacketNumberSpace,
+        acked_packets: &[SentPacket],
+        ecn_count: EcnCount,
+    ) {
+        if self.is_ecn_enabled() {
+            // RFC 9000, Section 13.4.2.1:
+            //
+            // > An endpoint that receives an ACK frame with ECN counts therefore validates
+            // > the counts before using them. It performs this validation by comparing newly
+            // > received counts against those from the last successfully processed ACK frame.
+            //
+            // RFC 9000 fails to state that this is done *per packet number space*.
+            //
+            // > If an ACK frame newly acknowledges a packet that the endpoint sent with
+            // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
+            // > corresponding ECN counts are not present in the ACK frame.
+            //
+            // We always mark with ECT(0) - if at all - so we only need to check for that.
+            // Also, if we sent a packet with ECT(0) and get only an ACK frame (and not an
+            // ACK-ECN frame), `ecn_counts` will be all zero and the check below will fail,
+            // so no need to explicitly check for the above.
+            //
+            // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
+            // > less than the number of newly acknowledged packets that were originally sent with an
+            // > ECT(0) marking.
+            let newly_acked = acked_packets.len().try_into().unwrap();
+            let ecn_diff = ecn_count - self.ecn_count(space);
+            let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
+            if sum_inc < newly_acked {
+                qwarn!(
+                    "ACK had {} new marks, but acked {} packets, disabling ECN",
+                    sum_inc,
+                    newly_acked
+                );
+                self.disable_ecn();
+            }
+            self.set_ecn_count(space, ecn_count);
+        }
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -1023,8 +1072,8 @@ impl Path {
             //
             // (Reusing `MAX_PATH_PROBES` here as a threshold is a bit of a hack,
             // but avoids defining another constant just for this.)
-            println!(
-                "XXX Lost {} ECN-marked packets on this path",
+            qdebug!(
+                "Lost {} ECN-marked packets on this path",
                 self.lost_ecn_packets
             );
             if self.lost_ecn_packets > MAX_PATH_PROBES {

@@ -8,8 +8,7 @@
 
 use std::ops::RangeInclusive;
 
-use enum_map::{enum_map, EnumMap};
-use neqo_common::{qtrace, Decoder, IpTosEcn};
+use neqo_common::{qtrace, Decoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
@@ -411,6 +410,41 @@ impl<'a> Frame<'a> {
             d(dec.decode_varint())
         }
 
+        fn decode_ack<'a>(dec: &mut Decoder<'a>, t: u64) -> Res<Frame<'a>> {
+            let la = dv(dec)?;
+            let ad = dv(dec)?;
+            let nr = dv(dec).and_then(|nr| {
+                if nr < MAX_ACK_RANGE_COUNT {
+                    Ok(nr)
+                } else {
+                    Err(Error::TooMuchData)
+                }
+            })?;
+            let fa = dv(dec)?;
+            let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
+            for _ in 0..nr {
+                let ar = AckRange {
+                    gap: dv(dec)?,
+                    range: dv(dec)?,
+                };
+                arr.push(ar);
+            }
+
+            // Now check for the values for ACK_ECN.
+            let ecn_count: EcnCount = match t {
+                FRAME_TYPE_ACK_ECN => EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?),
+                _ => EcnCount::default(),
+            };
+
+            Ok(Frame::Ack {
+                largest_acknowledged: la,
+                ack_delay: ad,
+                first_ack_range: fa,
+                ack_ranges: arr,
+                ecn_count,
+            })
+        }
+
         // TODO(ekr@rtfm.com): check for minimal encoding
         let t = d(dec.decode_varint())?;
         match t {
@@ -424,48 +458,7 @@ impl<'a> Frame<'a> {
                     _ => return Err(Error::NoMoreData),
                 },
             }),
-            FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
-                let la = dv(dec)?;
-                let ad = dv(dec)?;
-                let nr = dv(dec).and_then(|nr| {
-                    if nr < MAX_ACK_RANGE_COUNT {
-                        Ok(nr)
-                    } else {
-                        Err(Error::TooMuchData)
-                    }
-                })?;
-                let fa = dv(dec)?;
-                let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
-                for _ in 0..nr {
-                    let ar = AckRange {
-                        gap: dv(dec)?,
-                        range: dv(dec)?,
-                    };
-                    arr.push(ar);
-                }
-
-                // Now check for the values for ACK_ECN.
-                let ecn_count: EcnCount = match t {
-                    FRAME_TYPE_ACK_ECN => {
-                        let (ect0, ect1, ce) = (dv(dec)?, dv(dec)?, dv(dec)?);
-                        enum_map! {
-                                IpTosEcn::NotEct => 0,
-                                IpTosEcn::Ect0 => ect0,
-                                IpTosEcn::Ect1 => ect1,
-                                IpTosEcn::Ce => ce,
-                        }
-                    }
-                    _ => EnumMap::default(),
-                };
-
-                Ok(Self::Ack {
-                    largest_acknowledged: la,
-                    ack_delay: ad,
-                    first_ack_range: fa,
-                    ack_ranges: arr,
-                    ecn_count,
-                })
-            }
+            FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => decode_ack(dec, t),
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
                 stream_id: StreamId::from(dv(dec)?),
                 application_error_code: d(dec.decode_varint())?,
@@ -626,12 +619,12 @@ impl<'a> Frame<'a> {
 
 #[cfg(test)]
 mod tests {
-    use enum_map::{enum_map, EnumMap};
-    use neqo_common::{Decoder, Encoder, IpTosEcn};
+    use neqo_common::{Decoder, Encoder};
 
     use crate::{
         cid::MAX_CONNECTION_ID_LEN,
         frame::{AckRange, Frame, FRAME_TYPE_ACK},
+        tracking::EcnCount,
         CloseError, Error, StreamId, StreamType,
     };
 
@@ -662,7 +655,7 @@ mod tests {
             ack_delay: 0x1235,
             first_ack_range: 0x1236,
             ack_ranges: ar.clone(),
-            ecn_count: EnumMap::default(),
+            ecn_count: EcnCount::default(),
         };
 
         just_dec(&f, "025234523502523601020304");
@@ -673,12 +666,7 @@ mod tests {
         assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
 
         // Try to parse ACK_ECN with ECN values
-        let ecn_count = enum_map! {
-            IpTosEcn::NotEct => 0,
-            IpTosEcn::Ect0 => 1,
-            IpTosEcn::Ect1 => 2,
-            IpTosEcn::Ce => 3,
-        };
+        let ecn_count = EcnCount::new(0, 1, 2, 3);
         let fe = Frame::Ack {
             largest_acknowledged: 0x1234,
             ack_delay: 0x1235,
