@@ -1937,6 +1937,10 @@ impl Connection {
             };
 
             let path = close.path().borrow();
+            if path.is_temporary() {
+                debug_assert!(false, "Path is not permanent");
+                return Err(Error::InternalError);
+            }
             let (_, mut builder) = Self::build_packet_header(
                 &path,
                 cspace,
