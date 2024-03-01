@@ -118,7 +118,7 @@ impl Socket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{IpTos, IpTosDscp, IpTosEcn};
+    use crate::{IpTosDscp, IpTosEcn};
 
     #[tokio::test]
     async fn datagram_tos() -> Result<(), io::Error> {

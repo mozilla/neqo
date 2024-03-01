@@ -21,7 +21,7 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
-    self, assertions, datagram, default_client, new_client, now, split_datagram,
+    assertions, datagram, default_client, new_client, now, split_datagram,
     CountingConnectionIdGenerator,
 };
 
