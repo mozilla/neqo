@@ -21,4 +21,4 @@ neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { version = "0.12", default-features = false }
 regex = { version = "1.9", default-features = false }
-tokio = { version = "1", default-features = false }
+tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
