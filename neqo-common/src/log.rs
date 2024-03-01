@@ -81,6 +81,12 @@ macro_rules! log_invoke {
     } )
 }
 
+#[cfg(feature = "bench")]
+#[macro_export]
+macro_rules! qnoop {
+    ($($arg:expr),* $(,)?) => {{ $( { let _ = $arg; } )* }};
+}
+
 #[cfg(not(feature = "bench"))]
 #[macro_export]
 macro_rules! qerror {
@@ -91,8 +97,8 @@ macro_rules! qerror {
 #[cfg(feature = "bench")]
 #[macro_export]
 macro_rules! qerror {
-    ([$ctx:expr], $($arg:tt)*) => ( &($ctx, $($arg)*); );
-    ($($arg:tt)*) => ( &($($arg)*); );
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
+    ($($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
 }
 
 #[cfg(not(feature = "bench"))]
@@ -105,8 +111,8 @@ macro_rules! qwarn {
 #[cfg(feature = "bench")]
 #[macro_export]
 macro_rules! qwarn {
-    ([$ctx:expr], $($arg:tt)*) => ( &($ctx, $($arg)*); );
-    ($($arg:tt)*) => ( &($($arg)*); );
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
+    ($($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
 }
 
 #[cfg(not(feature = "bench"))]
@@ -119,8 +125,8 @@ macro_rules! qinfo {
 #[cfg(feature = "bench")]
 #[macro_export]
 macro_rules! qinfo {
-    ([$ctx:expr], $($arg:tt)*) => ( &($ctx, $($arg)*); );
-    ($($arg:tt)*) => ( &($($arg)*); );
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
+    ($($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
 }
 
 #[cfg(not(feature = "bench"))]
@@ -133,8 +139,8 @@ macro_rules! qdebug {
 #[cfg(feature = "bench")]
 #[macro_export]
 macro_rules! qdebug {
-    ([$ctx:expr], $($arg:tt)*) => ( &($ctx, $($arg)*); );
-    ($($arg:tt)*) => ( &($($arg)*); );
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
+    ($($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
 }
 
 #[cfg(not(feature = "bench"))]
@@ -147,6 +153,6 @@ macro_rules! qtrace {
 #[cfg(feature = "bench")]
 #[macro_export]
 macro_rules! qtrace {
-    ([$ctx:expr], $($arg:tt)*) => ( &($ctx, $($arg)*); );
-    ($($arg:tt)*) => ( &($($arg)*); );
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
+    ($($arg:tt)*) => (::neqo_common::qnoop!($($arg)*));
 }

@@ -59,8 +59,8 @@ impl IdleTimeout {
             max(self.timeout, pto * 3)
         };
         qtrace!(
-            "IdleTimeout::expiry@{now:?} pto={pto:?}, ka={keep_alive} => {t:?}",
-            t = start + delay
+            "IdleTimeout::expiry@{now:?} pto={pto:?}, ka={keep_alive} => {:?}",
+            start + delay
         );
         start + delay
     }

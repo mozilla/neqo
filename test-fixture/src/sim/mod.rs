@@ -240,11 +240,11 @@ impl Simulator {
 
         let setup_start = Instant::now();
         let now = self.process_loop(start, start);
-        let setup_time = now - start;
         qinfo!(
-            "{t}: Setup took {wall:?} (wall) {setup_time:?} (simulated)",
-            t = self.name,
-            wall = setup_start.elapsed(),
+            "{}: Setup took {:?} (wall) {:?} (simulated)",
+            self.name,
+            setup_start.elapsed(),
+            now - start
         );
 
         for n in &mut self.nodes {
@@ -282,11 +282,11 @@ impl ReadySimulator {
     pub fn run(mut self) {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
-        let sim_time = end - self.now;
         qinfo!(
-            "{t}: Simulation took {wall:?} (wall) {sim_time:?} (simulated)",
-            t = self.sim.name,
-            wall = real_start.elapsed(),
+            "{}: Simulation took {:?} (wall) {sim_time:?} (simulated)",
+            self.sim.name,
+            real_start.elapsed(),
+            end - self.now
         );
         self.sim.print_summary();
     }
