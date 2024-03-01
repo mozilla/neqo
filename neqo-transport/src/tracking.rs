@@ -354,7 +354,7 @@ pub struct AckToken {
 }
 
 /// The counts for different ECN marks.
-#[derive(PartialEq, Eq, Debug, Clone, Default, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Default)]
 pub struct EcnCount(EnumMap<IpTosEcn, u64>);
 
 impl Deref for EcnCount {
@@ -378,16 +378,16 @@ impl EcnCount {
     }
 
     /// Whether any of the ECN counts are non-zero.
-    pub fn is_some(self) -> bool {
+    pub fn is_some(&self) -> bool {
         self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
     }
 }
 
-impl Sub for EcnCount {
-    type Output = Self;
+impl<'a, 'b> Sub<&'a EcnCount> for &'b EcnCount {
+    type Output = EcnCount;
 
     /// Subtract the ECN counts in `other` from `self`.
-    fn sub(self, other: Self) -> Self {
+    fn sub(self, other: &'a EcnCount) -> EcnCount {
         let mut diff = EcnCount::default();
         for (ecn, count) in &mut *diff {
             *count = self[ecn].saturating_sub(other[ecn]);

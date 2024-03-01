@@ -660,7 +660,7 @@ impl Path {
         // > less than the number of newly acknowledged packets that were originally sent with an
         // > ECT(0) marking.
         let newly_acked = acked_packets.len().try_into().unwrap();
-        let ecn_diff = ecn_count - self.ecn_count[space];
+        let ecn_diff = &ecn_count - &self.ecn_count[space];
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
         if sum_inc < newly_acked {
             qwarn!(
