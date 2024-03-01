@@ -52,6 +52,11 @@ fn since_start() -> Duration {
 
 pub fn init() {
     static INIT_ONCE: Once = Once::new();
+
+    if ::log::STATIC_MAX_LEVEL == ::log::LevelFilter::Off {
+        return;
+    }
+
     INIT_ONCE.call_once(|| {
         let mut builder = Builder::from_env("RUST_LOG");
         builder.format(|buf, record| {
