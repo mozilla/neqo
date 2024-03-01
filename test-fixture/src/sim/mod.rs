@@ -283,7 +283,7 @@ impl ReadySimulator {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         qinfo!(
-            "{}: Simulation took {:?} (wall) {sim_time:?} (simulated)",
+            "{}: Simulation took {:?} (wall) {:?} (simulated)",
             self.sim.name,
             real_start.elapsed(),
             end - self.now
