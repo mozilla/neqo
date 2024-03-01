@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn iptos_to_iptosdscp() {
-        let tos: IpTos = (IpTosDscp::Af41, IpTosEcn::NotEct).into();
+        let tos = IpTos::from((IpTosDscp::Af41, IpTosEcn::NotEct));
         let dscp = IpTosDscp::from(tos);
         assert_eq!(dscp, IpTosDscp::Af41);
     }
