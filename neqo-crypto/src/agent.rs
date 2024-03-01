@@ -117,7 +117,7 @@ pub struct SecretAgentPreInfo {
 }
 
 macro_rules! preinfo_arg {
-    ($v:ident, $m:ident, $f:ident: $t:ident $(,)?) => {
+    ($v:ident, $m:ident, $f:ident : $t:ident $(,)?) => {
         #[must_use]
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
