@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 // This uses external interfaces to neqo_crypto rather than being a module
 // inside of lib.rs. Because all other code uses the test_fixture module,
 // they will be calling into the public version of init_db().  Calling into

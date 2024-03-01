@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 use std::boxed::Box;
 
 use neqo_crypto::{

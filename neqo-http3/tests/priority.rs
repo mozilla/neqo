@@ -98,7 +98,7 @@ fn priority_update() {
             assert_eq!(&headers, expected_headers);
             assert!(!fin);
         }
-        other => panic!("unexpected server event: {:?}", other),
+        other => panic!("unexpected server event: {other:?}"),
     }
 
     let update_priority = Priority::new(3, false);

@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 use std::mem;
 
 use neqo_crypto::{

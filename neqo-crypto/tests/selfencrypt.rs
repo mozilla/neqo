@@ -1,4 +1,3 @@
-#![warn(clippy::pedantic)]
 #![cfg(not(feature = "fuzzing"))]
 
 use neqo_crypto::{

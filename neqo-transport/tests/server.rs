@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 mod common;
 
 use std::{cell::RefCell, mem, net::SocketAddr, rc::Rc, time::Duration};
