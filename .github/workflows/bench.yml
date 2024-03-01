@@ -25,6 +25,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set PATH
+        run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
