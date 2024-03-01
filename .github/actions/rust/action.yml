@@ -27,9 +27,11 @@ runs:
 
     - name: Install cargo-binstall (Windows)
       if: runner.os != 'Windows'
+      shell: bash
       run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
     - name: Install Rust tools
+      shell: bash
       run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph
 
     - name: Use Rust cache
