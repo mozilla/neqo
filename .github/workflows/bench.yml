@@ -31,9 +31,6 @@ jobs:
           version: $TOOLCHAIN
           components: rustfmt
 
-      - name: Configure Rust
-        run: cargo install flamegraph
-
       - name: Fetch NSS and NSPR
         uses: ./.github/actions/nss
 

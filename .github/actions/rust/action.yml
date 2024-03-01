@@ -20,6 +20,18 @@ runs:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
+    - name: Install cargo-binstall (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
+
+    - name: Install cargo-binstall (Windows)
+      if: runner.os != 'Windows'
+      run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+    - name: Install Rust tools
+      run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph
+
     - name: Use Rust cache
       uses: Swatinem/rust-cache@v2
       with:
