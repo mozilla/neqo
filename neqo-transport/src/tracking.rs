@@ -11,7 +11,7 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    ops::{Add, Deref, DerefMut, Index, IndexMut, Sub},
+    ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub},
     time::{Duration, Instant},
 };
 
@@ -400,8 +400,14 @@ impl Add<IpTosEcn> for EcnCount {
     type Output = Self;
 
     fn add(mut self, ecn: IpTosEcn) -> Self::Output {
-        self[ecn] += 1;
+        self += ecn;
         self
+    }
+}
+
+impl AddAssign<IpTosEcn> for EcnCount {
+    fn add_assign(&mut self, ecn: IpTosEcn) {
+        self[ecn] += 1;
     }
 }
 
@@ -456,8 +462,9 @@ impl RecvdPackets {
         }
     }
 
-    pub fn inc_ecn_count(&mut self, ecn: IpTosEcn) {
-        self.ecn_count[ecn] += 1;
+    /// Get the ECN counts.
+    pub fn ecn_count(&mut self) -> &mut EcnCount {
+        &mut self.ecn_count
     }
 
     /// Get the time at which the next ACK should be sent.

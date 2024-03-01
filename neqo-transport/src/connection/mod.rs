@@ -1425,7 +1425,7 @@ impl Connection {
         // update the ECN counts (RFC9000, Section 13.4.1).
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
-            space.inc_ecn_count(d.tos().ecn());
+            *space.ecn_count() += d.tos().into();
         } else {
             qdebug!("Not tracking ECN for dropped packet number space");
         }

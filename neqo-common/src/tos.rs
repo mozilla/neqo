@@ -48,7 +48,7 @@ impl From<u8> for IpTosEcn {
 
 impl From<IpTos> for IpTosEcn {
     fn from(v: IpTos) -> Self {
-        v.ecn()
+        IpTosEcn::from(u8::from(v))
     }
 }
 
@@ -167,7 +167,7 @@ impl From<u8> for IpTosDscp {
 
 impl From<IpTos> for IpTosDscp {
     fn from(v: IpTos) -> Self {
-        v.dscp()
+        IpTosDscp::from(u8::from(v))
     }
 }
 
@@ -214,29 +214,19 @@ impl From<u8> for IpTos {
 impl Debug for IpTos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("IpTos")
-            .field(&self.dscp())
-            .field(&self.ecn())
+            .field(&IpTosDscp::from(*self))
+            .field(&IpTosEcn::from(*self))
             .finish()
     }
 }
 
 impl IpTos {
-    #[must_use]
-    pub fn ecn(self) -> IpTosEcn {
-        IpTosEcn::from(self.0 & 0b0000_0011)
-    }
-
-    #[must_use]
-    pub fn dscp(self) -> IpTosDscp {
-        IpTosDscp::from(self.0 & 0b1111_1100)
-    }
-
     pub fn set_ecn(&mut self, ecn: IpTosEcn) {
-        self.0 = u8::from(self.dscp()) | u8::from(ecn);
+        self.0 = u8::from(IpTosDscp::from(*self)) | u8::from(ecn);
     }
 
     pub fn set_dscp(&mut self, dscp: IpTosDscp) {
-        self.0 = u8::from(self.ecn()) | u8::from(dscp);
+        self.0 = u8::from(IpTosEcn::from(*self)) | u8::from(dscp);
     }
 }
 

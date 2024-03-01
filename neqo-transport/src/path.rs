@@ -597,7 +597,7 @@ impl Path {
 
     /// Whether this path is currently marking packets with ECN.
     fn is_ecn_enabled(&self) -> bool {
-        self.tos.ecn() != IpTosEcn::NotEct
+        IpTosEcn::from(self.tos) != IpTosEcn::NotEct
     }
 
     /// Disable ECN marking on this path.
