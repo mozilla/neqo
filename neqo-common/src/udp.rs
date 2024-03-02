@@ -72,7 +72,7 @@ impl Socket {
     }
 
     /// Receive a UDP datagram on the specified socket.
-    pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Option<Datagram>, io::Error> {
+    pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         let mut meta = RecvMeta::default();
 
         match self.socket.try_io(Interest::READABLE, || {
@@ -89,7 +89,7 @@ impl Socket {
                 if err.kind() == io::ErrorKind::WouldBlock
                     || err.kind() == io::ErrorKind::Interrupted =>
             {
-                return Ok(None)
+                return Ok(vec![])
             }
             Err(err) => {
                 return Err(err);
@@ -98,9 +98,8 @@ impl Socket {
 
         if meta.len == 0 {
             eprintln!("zero length datagram received?");
-            return Ok(None);
+            return Ok(vec![]);
         }
-
         if meta.len == self.recv_buf.len() {
             eprintln!(
                 "Might have received more than {} bytes",
@@ -108,22 +107,23 @@ impl Socket {
             );
         }
 
-        Ok(Some(Datagram::new(
-            meta.addr,
-            *local_address,
-            meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-            None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
-            &self.recv_buf[..meta.len],
-        )))
+        Ok(self.recv_buf[0..meta.len]
+            .chunks(meta.stride.min(self.recv_buf.len()))
+            .map(|d| {
+                Datagram::new(
+                    meta.addr,
+                    *local_address,
+                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+                    None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
+                    d,
+                )
+            })
+            .collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use tokio::time::timeout;
-
     use super::*;
     use crate::{IpTos, IpTosDscp, IpTosEcn};
 
@@ -148,6 +148,8 @@ mod tests {
         let received_datagram = receiver
             .recv(&receiver_addr)
             .expect("receive to succeed")
+            .into_iter()
+            .next()
             .expect("receive to yield datagram");
 
         // Assert that the ECN is correct.
@@ -163,6 +165,8 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), ignore)]
     async fn many_datagrams_through_gro() -> Result<(), io::Error> {
+        const SEGMENT_SIZE: usize = 128;
+
         let sender = Socket::bind("127.0.0.1:0")?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let mut receiver = Socket::bind(receiver_addr)?;
@@ -171,7 +175,6 @@ mod tests {
         // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
         // `quinn_udp` directly.
         let max_segments = sender.state.max_gso_segments();
-        const SEGMENT_SIZE: usize = 128;
         let msg = vec![0xAB; SEGMENT_SIZE * max_segments];
         let transmit = Transmit {
             destination: receiver.local_addr()?,
@@ -191,25 +194,15 @@ mod tests {
         })?;
         assert_eq!(n, 1, "only passed one slice");
 
-        for i in 0..max_segments {
-            // Wait for socket to become readable.
-            timeout(Duration::from_secs(1), receiver.readable())
-                .await
-                .map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("timeout waiting for {i}. datagram"),
-                    )
-                })??;
-            // Read from socket.
-            let received_datagram = receiver
-                .recv(&receiver_addr)
-                .expect("receive to succeed")
-                .expect("receive to yield datagram");
+        receiver.readable().await?;
+        let received_datagrams = receiver.recv(&receiver_addr).expect("receive to succeed");
+
+        assert_eq!(received_datagrams.len(), max_segments);
+        for datagram in received_datagrams {
             assert_eq!(
                 SEGMENT_SIZE,
-                received_datagram.len(),
-                "Expect received datagrams to have same length as sent datagrams."
+                datagram.len(),
+                "Expect received datagram to have same length as sent datagram."
             );
         }
 
