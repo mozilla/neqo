@@ -25,7 +25,9 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_common::{self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, udp, Role};
+use neqo_common::{
+    self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, udp, Datagram, Role,
+};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher, ResumptionToken,
@@ -820,20 +822,7 @@ impl<'a> ClientRunner<'a> {
                 break;
             }
 
-            match self.client.process_output(Instant::now()) {
-                Output::Datagram(dgram) => {
-                    self.socket.writable().await?;
-                    self.socket.send(dgram)?;
-                    continue;
-                }
-                Output::Callback(new_timeout) => {
-                    qinfo!("Setting timeout of {:?}", new_timeout);
-                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                }
-                Output::None => {
-                    qdebug!("Output::None");
-                }
-            }
+            self.process(None).await?;
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
@@ -841,8 +830,9 @@ impl<'a> ClientRunner<'a> {
                     if dgrams.is_empty() {
                         break;
                     }
-                    self.client
-                        .process_multiple_input(dgrams.iter(), Instant::now());
+                    for dgram in &dgrams {
+                        self.process(Some(dgram)).await?;
+                    }
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
                 Ready::Timeout => {
@@ -867,6 +857,28 @@ impl<'a> ClientRunner<'a> {
             None
         };
         Ok(token)
+    }
+
+    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+        loop {
+            match self.client.process(dgram.take(), Instant::now()) {
+                Output::Datagram(dgram) => {
+                    self.socket.writable().await?;
+                    self.socket.send(dgram)?;
+                }
+                Output::Callback(new_timeout) => {
+                    qinfo!("Setting timeout of {:?}", new_timeout);
+                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    break;
+                }
+                Output::None => {
+                    qdebug!("Output::None");
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1045,7 +1057,7 @@ mod old {
         cell::RefCell,
         collections::{HashMap, VecDeque},
         fs::File,
-        io::Write,
+        io::{self, Write},
         net::SocketAddr,
         path::PathBuf,
         pin::Pin,
@@ -1053,7 +1065,7 @@ mod old {
         time::Instant,
     };
 
-    use neqo_common::{event::Provider, qdebug, qinfo, udp};
+    use neqo_common::{event::Provider, qdebug, qinfo, udp, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
@@ -1321,20 +1333,7 @@ mod old {
                     }
                 }
 
-                match self.client.process_output(Instant::now()) {
-                    Output::Datagram(dgram) => {
-                        self.socket.writable().await?;
-                        self.socket.send(dgram)?;
-                        continue;
-                    }
-                    Output::Callback(new_timeout) => {
-                        qinfo!("Setting timeout of {:?}", new_timeout);
-                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    }
-                    Output::None => {
-                        qdebug!("Output::None");
-                    }
-                }
+                self.process(None).await?;
 
                 if let State::Closed(..) = self.client.state() {
                     return Ok(self.handler.token.take());
@@ -1342,12 +1341,13 @@ mod old {
 
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = self.socket.recv(&self.local_addr)?;
-                        if dgram.is_empty() {
+                        let dgrams = self.socket.recv(&self.local_addr)?;
+                        if dgrams.is_empty() {
                             break;
                         }
-                        self.client
-                            .process_multiple_input(dgram.iter(), Instant::now());
+                        for dgram in &dgrams {
+                            self.process(Some(dgram)).await?;
+                        }
                         self.handler.maybe_key_update(&mut self.client)?;
                     },
                     Ready::Timeout => {
@@ -1355,6 +1355,28 @@ mod old {
                     }
                 }
             }
+        }
+
+        async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+            loop {
+                match self.client.process(dgram.take(), Instant::now()) {
+                    Output::Datagram(dgram) => {
+                        self.socket.writable().await?;
+                        self.socket.send(dgram)?;
+                    }
+                    Output::Callback(new_timeout) => {
+                        qinfo!("Setting timeout of {:?}", new_timeout);
+                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                        break;
+                    }
+                    Output::None => {
+                        qdebug!("Output::None");
+                        break;
+                    }
+                }
+            }
+
+            Ok(())
         }
     }
 }
