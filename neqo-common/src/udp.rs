@@ -120,6 +120,10 @@ impl Socket {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tokio::time::timeout;
+
     use super::*;
     use crate::{IpTos, IpTosDscp, IpTosEcn};
 
@@ -151,6 +155,63 @@ mod tests {
             IpTosEcn::from(datagram.tos()),
             IpTosEcn::from(received_datagram.tos())
         );
+
+        Ok(())
+    }
+
+    /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
+    #[tokio::test]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), ignore)]
+    async fn many_datagrams_through_gro() -> Result<(), io::Error> {
+        let sender = Socket::bind("127.0.0.1:0")?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut receiver = Socket::bind(receiver_addr)?;
+
+        // `neqo_common::udp::Socket::send` does not yet
+        // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
+        // `quinn_udp` directly.
+        let max_segments = sender.state.max_gso_segments();
+        const SEGMENT_SIZE: usize = 128;
+        let msg = vec![0xAB; SEGMENT_SIZE * max_segments];
+        let transmit = Transmit {
+            destination: receiver.local_addr()?,
+            ecn: EcnCodepoint::from_bits(Into::<u8>::into(IpTos::from((
+                IpTosDscp::Le,
+                IpTosEcn::Ect1,
+            )))),
+            contents: msg.clone().into(),
+            segment_size: Some(SEGMENT_SIZE),
+            src_ip: None,
+        };
+        sender.writable().await?;
+        let n = sender.socket.try_io(Interest::WRITABLE, || {
+            sender
+                .state
+                .send((&sender.socket).into(), slice::from_ref(&transmit))
+        })?;
+        assert_eq!(n, 1, "only passed one slice");
+
+        for i in 0..max_segments {
+            // Wait for socket to become readable.
+            timeout(Duration::from_secs(1), receiver.readable())
+                .await
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("timeout waiting for {i}. datagram"),
+                    )
+                })??;
+            // Read from socket.
+            let received_datagram = receiver
+                .recv(&receiver_addr)
+                .expect("receive to succeed")
+                .expect("receive to yield datagram");
+            assert_eq!(
+                SEGMENT_SIZE,
+                received_datagram.len(),
+                "Expect received datagrams to have same length as sent datagrams."
+            );
+        }
 
         Ok(())
     }
