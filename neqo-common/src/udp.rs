@@ -174,8 +174,8 @@ mod tests {
         // `neqo_common::udp::Socket::send` does not yet
         // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
         // `quinn_udp` directly.
-        let max_segments = sender.state.max_gso_segments();
-        let msg = vec![0xAB; SEGMENT_SIZE * max_segments];
+        let max_gso_segments = sender.state.max_gso_segments();
+        let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
         let transmit = Transmit {
             destination: receiver.local_addr()?,
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(IpTos::from((
@@ -194,16 +194,22 @@ mod tests {
         })?;
         assert_eq!(n, 1, "only passed one slice");
 
-        receiver.readable().await?;
-        let received_datagrams = receiver.recv(&receiver_addr).expect("receive to succeed");
-
-        assert_eq!(received_datagrams.len(), max_segments);
-        for datagram in received_datagrams {
-            assert_eq!(
-                SEGMENT_SIZE,
-                datagram.len(),
-                "Expect received datagram to have same length as sent datagram."
-            );
+        // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
+        let mut num_received = 0;
+        while num_received < max_gso_segments {
+            receiver.readable().await?;
+            receiver
+                .recv(&receiver_addr)
+                .expect("receive to succeed")
+                .into_iter()
+                .for_each(|d| {
+                    assert_eq!(
+                        SEGMENT_SIZE,
+                        d.len(),
+                        "Expect received datagrams to have same length as sent datagrams."
+                    );
+                    num_received += 1;
+                });
         }
 
         Ok(())
