@@ -14,15 +14,14 @@ workspace = true
 
 [dependencies]
 # neqo-server is not used in Firefox, so we can be liberal with dependency versions
-clap = { version = "4.4", features = ["derive"] }
-futures = "0.3"
+clap = { version = "4.4", default-features = false, features = ["std", "derive"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 log = { version = "0.4", default-features = false }
 neqo-common = { path = "./../neqo-common", features = ["udp"] }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = "0.12"
-regex = "1.9"
-tokio = { version = "1", features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
-
+qlog = { version = "0.12", default-features = false }
+regex = { version = "1.9", default-features = false }
+tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
