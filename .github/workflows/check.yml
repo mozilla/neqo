@@ -7,8 +7,6 @@ on:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
