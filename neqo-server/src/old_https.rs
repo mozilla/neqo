@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 use std::{
     cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
 };

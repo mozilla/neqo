@@ -5,7 +5,6 @@
 // except according to those terms.
 
 // Management of the peer's ack rate.
-#![deny(clippy::pedantic)]
 
 use std::{cmp::max, time::Duration};
 

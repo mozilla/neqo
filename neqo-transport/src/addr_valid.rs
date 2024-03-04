@@ -43,9 +43,9 @@ const MAX_SAVED_TOKENS: usize = 8;
 pub enum ValidateAddress {
     /// Require address validation never.
     Never,
-    /// Require address validation unless a NEW_TOKEN token is provided.
+    /// Require address validation unless a `NEW_TOKEN` token is provided.
     NoToken,
-    /// Require address validation even if a NEW_TOKEN token is provided.
+    /// Require address validation even if a `NEW_TOKEN` token is provided.
     Always,
 }
 
@@ -400,7 +400,7 @@ impl NewTokenFrameStatus {
 
 #[derive(Default)]
 pub struct NewTokenSender {
-    /// The unacknowledged NEW_TOKEN frames we are yet to send.
+    /// The unacknowledged `NEW_TOKEN` frames we are yet to send.
     tokens: Vec<NewTokenFrameStatus>,
     /// A sequence number that is used to track individual tokens
     /// by reference (so that recovery tokens can be simple).

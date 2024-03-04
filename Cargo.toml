@@ -22,6 +22,9 @@ license = "MIT OR Apache-2.0"
 # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
 rust-version = "1.74.0"
 
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
 [profile.bench]
 # Inherits from the "release" profile, so just provide overrides here:
 # https://doc.rust-lang.org/cargo/reference/profiles.html#release

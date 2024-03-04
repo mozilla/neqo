@@ -1015,7 +1015,7 @@ pub enum ZeroRttCheckResult {
     Accept,
     /// Reject 0-RTT, but continue the handshake normally.
     Reject,
-    /// Send HelloRetryRequest (probably not needed for QUIC).
+    /// Send `HelloRetryRequest` (probably not needed for QUIC).
     HelloRetryRequest(Vec<u8>),
     /// Fail the handshake.
     Fail,

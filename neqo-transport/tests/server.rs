@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 mod common;
 
 use std::{cell::RefCell, mem, net::SocketAddr, rc::Rc, time::Duration};
@@ -23,7 +21,7 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
-    self, assertions, datagram, default_client, new_client, now, split_datagram,
+    assertions, datagram, default_client, new_client, now, split_datagram,
     CountingConnectionIdGenerator,
 };
 

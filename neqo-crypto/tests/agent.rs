@@ -4,10 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
-use std::boxed::Box;
-
 use neqo_crypto::{
     generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, SecretAgentPreInfo,
     Server, ZeroRttCheckResult, ZeroRttChecker, TLS_AES_128_GCM_SHA256,

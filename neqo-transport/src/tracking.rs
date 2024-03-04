@@ -6,8 +6,6 @@
 
 // Tracking of received packets and generating acks thereof.
 
-#![deny(clippy::pedantic)]
-
 use std::{
     cmp::min,
     collections::VecDeque,
