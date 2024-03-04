@@ -763,7 +763,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 
 struct ClientRunner<'a> {
     local_addr: SocketAddr,
-    socket: &'a udp::Socket,
+    socket: &'a mut udp::Socket,
     client: Http3Client,
     handler: Handler<'a>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -773,7 +773,7 @@ struct ClientRunner<'a> {
 impl<'a> ClientRunner<'a> {
     fn new(
         args: &'a mut Args,
-        socket: &'a udp::Socket,
+        socket: &'a mut udp::Socket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         hostname: &str,
@@ -998,7 +998,7 @@ async fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = udp::Socket::bind(local_addr)?;
+        let mut socket = udp::Socket::bind(local_addr)?;
         let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
@@ -1022,7 +1022,7 @@ async fn main() -> Res<()> {
             token = if args.use_old_http {
                 old::ClientRunner::new(
                     &args,
-                    &socket,
+                    &mut socket,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1034,7 +1034,7 @@ async fn main() -> Res<()> {
             } else {
                 ClientRunner::new(
                     &mut args,
-                    &socket,
+                    &mut socket,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1249,7 +1249,7 @@ mod old {
 
     pub struct ClientRunner<'a> {
         local_addr: SocketAddr,
-        socket: &'a udp::Socket,
+        socket: &'a mut udp::Socket,
         client: Connection,
         handler: HandlerOld<'a>,
         timeout: Option<Pin<Box<Sleep>>>,
@@ -1259,7 +1259,7 @@ mod old {
     impl<'a> ClientRunner<'a> {
         pub fn new(
             args: &'a Args,
-            socket: &'a udp::Socket,
+            socket: &'a mut udp::Socket,
             local_addr: SocketAddr,
             remote_addr: SocketAddr,
             origin: &str,
