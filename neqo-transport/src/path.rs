@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
 use std::{
@@ -71,7 +70,7 @@ pub struct Paths {
     /// Connection IDs that need to be retired.
     to_retire: Vec<u64>,
 
-    /// QLog handler.
+    /// `QLog` handler.
     qlog: NeqoQlog,
 }
 
@@ -526,7 +525,7 @@ pub struct Path {
     /// For a path that is not validated, this is `None`.  For a validated
     /// path, the time that the path was last valid.
     validated: Option<Instant>,
-    /// A path challenge was received and PATH_RESPONSE has not been sent.
+    /// A path challenge was received and `PATH_RESPONSE` has not been sent.
     challenge: Option<[u8; 8]>,
 
     /// The round trip time estimate for this path.

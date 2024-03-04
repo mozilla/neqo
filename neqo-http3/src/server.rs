@@ -1271,11 +1271,11 @@ mod tests {
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { stream, .. } => {
-                    assert!(requests.get(&stream).is_none());
+                    assert!(!requests.contains_key(&stream));
                     requests.insert(stream, 0);
                 }
                 Http3ServerEvent::Data { stream, .. } => {
-                    assert!(requests.get(&stream).is_some());
+                    assert!(requests.contains_key(&stream));
                 }
                 Http3ServerEvent::DataWritable { .. }
                 | Http3ServerEvent::StreamReset { .. }

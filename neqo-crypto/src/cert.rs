@@ -21,7 +21,7 @@ use crate::{
 pub struct CertificateInfo {
     certs: CertList,
     cursor: *const CERTCertListNode,
-    /// stapled_ocsp_responses and signed_cert_timestamp are properties
+    /// `stapled_ocsp_responses` and `signed_cert_timestamp` are properties
     /// associated with each of the certificates. Right now, NSS only
     /// reports the value for the end-entity certificate (the first).
     stapled_ocsp_responses: Option<Vec<Vec<u8>>>,

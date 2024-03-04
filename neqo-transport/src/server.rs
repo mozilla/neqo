@@ -168,7 +168,7 @@ pub struct Server {
     /// the same key are routed to the connection that was first accepted.
     /// This is cleared out when the connection is closed or established.
     active_attempts: HashMap<AttemptKey, StateRef>,
-    /// All connections, keyed by ConnectionId.
+    /// All connections, keyed by `ConnectionId`.
     connections: ConnectionTableRef,
     /// The connections that have new events.
     active: HashSet<ActiveConnectionRef>,
