@@ -106,7 +106,7 @@ jobs:
         uses: ./.github/actions/nss
 
       - name: Build
-        run: cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci,bench
+        run: cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
