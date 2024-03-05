@@ -583,7 +583,7 @@ impl Path {
 
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
     pub fn tos(&self) -> IpTos {
-        self.ecn_info.tos()
+        self.ecn_info.ecn_mark().into()
     }
 
     /// Whether this path is the primary or current path for the connection.

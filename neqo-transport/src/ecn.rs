@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use enum_map::EnumMap;
-use neqo_common::{qdebug, qinfo, qwarn, IpTos, IpTosEcn};
+use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 
 use crate::{
     rtt::RttEstimate,
@@ -157,8 +157,7 @@ impl EcnInfo {
         self.count[space] = ecn_count.clone();
     }
 
-    pub fn tos(&self) -> IpTos {
-        // XXX simplify
+    pub fn ecn_mark(&self) -> IpTosEcn {
         match self.state {
             EcnValidationState::Testing {
                 start: _,
@@ -166,8 +165,8 @@ impl EcnInfo {
                 lost: _,
             }
             | EcnValidationState::Capable
-            | EcnValidationState::Unknown => IpTosEcn::Ect0.into(),
-            EcnValidationState::Failed => IpTosEcn::NotEct.into(),
+            | EcnValidationState::Unknown => IpTosEcn::Ect0,
+            EcnValidationState::Failed => IpTosEcn::NotEct,
         }
     }
 }
