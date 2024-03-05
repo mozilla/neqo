@@ -5,7 +5,7 @@
 // except according to those terms.
 
 // Tests with the test vectors from the spec.
-#![deny(clippy::pedantic)]
+
 #![cfg(not(feature = "fuzzing"))]
 
 use std::{cell::RefCell, rc::Rc};

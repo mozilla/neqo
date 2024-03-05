@@ -45,7 +45,7 @@ pub enum HpKey {
     /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
     /// as that is not supported for these contexts.
     Aes(Rc<RefCell<Context>>),
-    /// The ChaCha20 mask has to invoke a new PK11_Encrypt every time as it needs to
+    /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
     /// change the counter and nonce on each invocation.
     Chacha(SymKey),
 }
