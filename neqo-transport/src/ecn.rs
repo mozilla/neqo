@@ -4,32 +4,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Instant;
-
 use enum_map::EnumMap;
 use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 
-use crate::{
-    rtt::RttEstimate,
-    tracking::{EcnCount, PacketNumberSpace, SentPacket},
-};
+use crate::tracking::{EcnCount, PacketNumberSpace, SentPacket};
 
 /// The number of packets to use for testing a path for ECN capability.
 pub const ECN_TEST_COUNT: usize = 10;
 
 /// The state information related to testing a path for ECN capability.
 /// See RFC9000, Appendix A.4.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 enum EcnValidationState {
     /// The path is currently being tested for ECN capability.
-    Testing {
-        /// The time when the ECN validation of the path started.
-        start: Instant,
-        /// The number of packets sent so far on the path during the ECN validation.
-        count: usize,
-        /// The number of packets declared lost so far during the ECN validation.
-        lost: usize,
-    },
+    #[default]
+    Testing,
     /// The validation test has concluded but the path's ECN capability is not yet known.
     Unknown,
     /// The path is known to **not** be ECN capable.
@@ -38,73 +27,34 @@ enum EcnValidationState {
     Capable,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EcnInfo {
     /// The current state of ECN validation on this path.
     state: EcnValidationState,
-
+    /// The number of packets sent so far on the path during the ECN validation.
+    sent: usize,
     /// The ECN counts received in the last ACK on this path, for each packet number space.
-    /// Won't be updated after ECN has been disabled on a path.
+    /// Won't be updated after ECN has been tested on the path.
     count: EnumMap<PacketNumberSpace, EcnCount>,
 }
 
 impl EcnInfo {
-    pub fn new(now: Instant) -> Self {
-        Self {
-            state: EcnValidationState::Testing {
-                start: now,
-                count: 0,
-                lost: 0,
-            },
-            count: EnumMap::default(),
+    /// Count the number of packets sent out on this path during ECN validation.
+    /// Exit ECN validation if the number of packets sent exceeds `ECN_TEST_COUNT`.
+    /// We do not implement the part of the RFC that says to exit ECN validation if the time since
+    /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
+    pub fn count_packets_out(&mut self) {
+        if self.state == EcnValidationState::Testing {
+            if self.sent < ECN_TEST_COUNT {
+                self.sent += 1;
+            } else {
+                qdebug!("ECN probing concluded with {} packet sent", self.sent);
+                self.state = EcnValidationState::Unknown;
+            }
         }
     }
 
-    pub fn count_packets_out(&mut self) {
-        self.state = match self.state {
-            EcnValidationState::Testing { start, count, lost } => {
-                // if count < ECN_TEST_COUNT {
-                EcnValidationState::Testing {
-                    start,
-                    count: count + 1,
-                    lost,
-                }
-                // } else {
-                //     EcnValidationState::Unknown
-                // }
-            }
-            EcnValidationState::Unknown => EcnValidationState::Unknown,
-            EcnValidationState::Failed => EcnValidationState::Failed,
-            EcnValidationState::Capable => EcnValidationState::Capable,
-        };
-        qdebug!("ECN {:?}", self.state);
-    }
-
-    pub fn count_packets_lost(&mut self, lost_packets: &[SentPacket]) {
-        self.state = match self.state {
-            EcnValidationState::Failed => EcnValidationState::Failed,
-            EcnValidationState::Capable => EcnValidationState::Capable,
-            EcnValidationState::Unknown => EcnValidationState::Unknown,
-            EcnValidationState::Testing { start, count, lost } => {
-                qdebug!("ECN {:?}", self);
-                if start.elapsed()
-                    > 3 * RttEstimate::default().pto(PacketNumberSpace::ApplicationData)
-                    || count > ECN_TEST_COUNT
-                {
-                    qinfo!("ECN test concluded {}", lost_packets.len());
-                    EcnValidationState::Unknown
-                } else {
-                    EcnValidationState::Testing {
-                        start,
-                        count,
-                        lost: lost + lost_packets.len(),
-                    }
-                }
-            }
-        };
-        qdebug!("ECN {:?}", self);
-    }
-
+    /// After the ECN validation test has ended, check if the path is ECN capable.
     pub fn validate_ack_ecn(
         &mut self,
         space: PacketNumberSpace,
@@ -144,29 +94,23 @@ impl EcnInfo {
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
         if sum_inc < newly_acked {
             qwarn!(
-                "ACK had {} new marks, but acked {} packets, disabling ECN",
+                "ACK had {} new marks, but acked {} packets, ECN validation failed",
                 sum_inc,
                 newly_acked
             );
             self.state = EcnValidationState::Failed;
         } else {
-            qinfo!("ECN validation succeeded");
+            qinfo!("ECN validation succeeded, path is capable");
             self.state = EcnValidationState::Capable;
         }
-        qdebug!("ECN {:?}", self);
         self.count[space] = ecn_count.clone();
     }
 
+    /// The ECN mark to use for packets sent on this path.
     pub fn ecn_mark(&self) -> IpTosEcn {
         match self.state {
-            EcnValidationState::Testing {
-                start: _,
-                count: _,
-                lost: _,
-            }
-            | EcnValidationState::Capable
-            | EcnValidationState::Unknown => IpTosEcn::Ect0,
-            EcnValidationState::Failed => IpTosEcn::NotEct,
+            EcnValidationState::Testing | EcnValidationState::Capable => IpTosEcn::Ect0,
+            EcnValidationState::Failed | EcnValidationState::Unknown => IpTosEcn::NotEct,
         }
     }
 }

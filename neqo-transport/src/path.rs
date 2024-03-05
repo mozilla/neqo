@@ -576,7 +576,7 @@ impl Path {
             ttl: 64, // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
-            ecn_info: EcnInfo::new(now),
+            ecn_info: EcnInfo::default(),
             qlog,
         }
     }
@@ -995,7 +995,6 @@ impl Path {
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
         }
-        self.ecn_info.count_packets_lost(lost_packets);
     }
 
     /// Get the number of bytes that can be written to this path.
