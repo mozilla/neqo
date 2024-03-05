@@ -54,19 +54,25 @@ impl EcnInfo {
         }
     }
 
-    /// After the ECN validation test has ended, check if the path is ECN capable.
+    /// Validate [`EcnCount`] received from ACK.
+    ///
+    /// After the ECN validation test has ended, check if the path is ECN
+    /// capable.
+    ///
+    /// Returns `true` if path is ECN capable AND provided [`EcnCount`]
+    /// increases [`IpTosEcn::Ce`], i.e. congestion was experienced.
     pub fn validate_ack_ecn(
         &mut self,
         space: PacketNumberSpace,
         acked_packets: &[SentPacket],
         ecn_count: &EcnCount,
-    ) {
+    ) -> bool {
         // RFC 9000, Appendix A.4:
         // From the "unknown" state, successful validation of the ECN counts in an ACK frame
         // (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
         // no marked packet has been acknowledged.
         if self.state != EcnValidationState::Unknown {
-            return;
+            return false;
         }
 
         // RFC 9000, Section 13.4.2.1:
@@ -92,6 +98,7 @@ impl EcnInfo {
         let newly_acked = acked_packets.len().try_into().unwrap();
         let ecn_diff = ecn_count - &self.count[space];
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
+        self.count[space] = ecn_count.clone();
         if sum_inc < newly_acked {
             qwarn!(
                 "ACK had {} new marks, but acked {} packets, ECN validation failed",
@@ -99,11 +106,15 @@ impl EcnInfo {
                 newly_acked
             );
             self.state = EcnValidationState::Failed;
-        } else {
-            qinfo!("ECN validation succeeded, path is capable");
-            self.state = EcnValidationState::Capable;
-        }
-        self.count[space] = ecn_count.clone();
+            qdebug!("ECN {:?}", self);
+            return false;
+        };
+
+        qinfo!("ECN validation succeeded, path is capable");
+        self.state = EcnValidationState::Capable;
+        qdebug!("ECN {:?}", self);
+
+        ecn_diff[IpTosEcn::Ce] > 0
     }
 
     /// The ECN mark to use for packets sent on this path.

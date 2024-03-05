@@ -975,7 +975,14 @@ impl Path {
     ) {
         debug_assert!(self.is_primary());
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
-        self.ecn_info.validate_ack_ecn(space, acked_pkts, ecn_count);
+        let ce_mark_received = self.ecn_info.validate_ack_ecn(space, acked_pkts, ecn_count);
+        if ce_mark_received {
+            if let Some(largest_acked) = acked_pkts.first() {
+                // TODO: Should congestion window reduction through CE marks result in
+                // an update to ACK delay? See on_packets_lost below.
+                self.sender.on_ecn_ce_received(largest_acked);
+            }
+        }
     }
 
     /// Record packets as lost with the sender.
