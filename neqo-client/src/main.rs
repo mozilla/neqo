@@ -824,11 +824,13 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = self.socket.recv(&self.local_addr)?;
-                    if dgram.is_none() {
+                    let dgrams = self.socket.recv(&self.local_addr)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in &dgrams {
+                        self.process(Some(dgram)).await?;
+                    }
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
                 Ready::Timeout => {
@@ -1337,11 +1339,13 @@ mod old {
 
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = self.socket.recv(&self.local_addr)?;
-                        if dgram.is_none() {
+                        let dgrams = self.socket.recv(&self.local_addr)?;
+                        if dgrams.is_empty() {
                             break;
                         }
-                        self.process(dgram.as_ref()).await?;
+                        for dgram in &dgrams {
+                            self.process(Some(dgram)).await?;
+                        }
                         self.handler.maybe_key_update(&mut self.client)?;
                     },
                     Ready::Timeout => {

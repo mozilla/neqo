@@ -686,11 +686,13 @@ impl ServersRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgram = socket.recv(host)?;
-                    if dgram.is_none() {
+                    let dgrams = socket.recv(host)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in dgrams {
+                        self.process(Some(&dgram)).await?;
+                    }
                 },
                 Ready::Timeout => {
                     self.timeout = None;
