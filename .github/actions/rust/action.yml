@@ -32,7 +32,7 @@ runs:
 
     - name: Install Rust tools
       shell: bash
-      run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph
+      run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph cargo-hack
 
     - name: Use Rust cache
       uses: Swatinem/rust-cache@v2
