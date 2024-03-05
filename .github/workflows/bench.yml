@@ -25,14 +25,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set PATH
+        run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
+
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
           components: rustfmt
-
-      - name: Configure Rust
-        run: cargo install flamegraph
 
       - name: Fetch NSS and NSPR
         uses: ./.github/actions/nss
