@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{convert::TryInto, mem, str};
+use std::{mem, str};
 
 use neqo_common::{qdebug, qerror};
 use neqo_transport::{Connection, StreamId};

@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    convert::TryFrom,
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };

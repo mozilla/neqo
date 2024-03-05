@@ -4,10 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
 #![allow(unused)]
 
-use std::{cell::RefCell, convert::TryFrom, mem, ops::Range, rc::Rc};
+use std::{cell::RefCell, mem, ops::Range, rc::Rc};
 
 use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{

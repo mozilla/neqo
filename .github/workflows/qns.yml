@@ -10,13 +10,11 @@ on:
       - 'qns/**'
       - '.github/workflows/qns.yml'
   merge_group:
-    branches: ["main"]
-    paths:
-      - 'qns/**'
-      - '.github/workflows/qns.yml'
 jobs:
   docker-image:
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

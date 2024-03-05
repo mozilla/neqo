@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 mod codec;
@@ -17,6 +16,8 @@ pub mod log;
 pub mod qlog;
 pub mod timer;
 pub mod tos;
+#[cfg(feature = "udp")]
+pub mod udp;
 
 use std::fmt::Write;
 

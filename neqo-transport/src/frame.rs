@@ -6,7 +6,7 @@
 
 // Directly relating to QUIC frames.
 
-use std::{convert::TryFrom, ops::RangeInclusive};
+use std::ops::RangeInclusive;
 
 use neqo_common::{qtrace, Decoder};
 

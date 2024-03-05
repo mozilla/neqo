@@ -4,12 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![deny(clippy::pedantic)]
-
 use std::{
     cell::RefCell,
     cmp::min,
-    convert::TryFrom,
     mem,
     rc::Rc,
     time::{Duration, Instant},

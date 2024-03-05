@@ -10,7 +10,6 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
-    convert::TryFrom,
     ops::Deref,
     rc::Rc,
 };
@@ -451,7 +450,7 @@ pub struct ConnectionIdManager {
     limit: usize,
     /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
     next_seqno: u64,
-    /// Outstanding, but lost NEW_CONNECTION_ID frames will be stored here.
+    /// Outstanding, but lost `NEW_CONNECTION_ID` frames will be stored here.
     lost_new_connection_id: Vec<ConnectionIdEntry<[u8; 16]>>,
 }
 

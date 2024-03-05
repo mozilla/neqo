@@ -4,12 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, Write},
@@ -22,13 +19,12 @@ use std::{
 };
 
 use clap::Parser;
-use common::IpTos;
 use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
 use neqo_common::{
-    self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role,
+    self as common, event::Provider, hex, qdebug, qinfo, qlog::NeqoQlog, udp, Datagram, Role,
 };
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -42,7 +38,7 @@ use neqo_transport::{
     EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
-use tokio::{net::UdpSocket, time::Sleep};
+use tokio::time::Sleep;
 use url::{Origin, Url};
 
 #[derive(Debug)]
@@ -192,7 +188,7 @@ pub struct Args {
 
     #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
-    /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+    /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
     ciphers: Vec<String>,
 
     #[arg(name = "ech", long, value_parser = |s: &str| hex::decode(s))]
@@ -301,11 +297,11 @@ struct QuicParameters {
     quic_version: Vec<Version>,
 
     #[arg(long, default_value = "16")]
-    /// Set the MAX_STREAMS_BIDI limit.
+    /// Set the `MAX_STREAMS_BIDI` limit.
     max_streams_bidi: u64,
 
     #[arg(long, default_value = "16")]
-    /// Set the MAX_STREAMS_UNI limit.
+    /// Set the `MAX_STREAMS_UNI` limit.
     max_streams_uni: u64,
 
     #[arg(long = "idle", default_value = "30")]
@@ -349,21 +345,6 @@ impl QuicParameters {
             params.versions(version, Version::all())
         }
     }
-}
-
-async fn emit_datagram(socket: &UdpSocket, out_dgram: Datagram) -> Result<(), io::Error> {
-    let sent = match socket.send_to(&out_dgram, &out_dgram.destination()).await {
-        Ok(res) => res,
-        Err(ref err) if err.kind() != io::ErrorKind::WouldBlock => {
-            eprintln!("UDP send error: {err:?}");
-            0
-        }
-        Err(e) => return Err(e),
-    };
-    if sent != out_dgram.len() {
-        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
-    }
-    Ok(())
 }
 
 fn get_output_file(
@@ -415,7 +396,7 @@ enum Ready {
 
 // Wait for the socket to be readable or the timeout to fire.
 async fn ready(
-    socket: &UdpSocket,
+    socket: &udp::Socket,
     mut timeout: Option<&mut Pin<Box<Sleep>>>,
 ) -> Result<Ready, io::Error> {
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
@@ -424,43 +405,6 @@ async fn ready(
         .map_or(Either::Right(futures::future::pending()), Either::Left)
         .map(|()| Ok(Ready::Timeout));
     select(socket_ready, timeout_ready).await.factor_first().0
-}
-
-fn read_dgram(
-    socket: &UdpSocket,
-    local_address: &SocketAddr,
-) -> Result<Option<Datagram>, io::Error> {
-    let buf = &mut [0u8; 2048];
-    let (sz, remote_addr) = match socket.try_recv_from(&mut buf[..]) {
-        Err(ref err)
-            if err.kind() == io::ErrorKind::WouldBlock
-                || err.kind() == io::ErrorKind::Interrupted =>
-        {
-            return Ok(None)
-        }
-        Err(err) => {
-            eprintln!("UDP recv error: {err:?}");
-            return Err(err);
-        }
-        Ok(res) => res,
-    };
-
-    if sz == buf.len() {
-        eprintln!("Might have received more than {} bytes", buf.len());
-    }
-
-    if sz == 0 {
-        eprintln!("zero length datagram received?");
-        Ok(None)
-    } else {
-        Ok(Some(Datagram::new(
-            remote_addr,
-            *local_address,
-            IpTos::default(),
-            None,
-            &buf[..sz],
-        )))
-    }
 }
 
 trait StreamHandler {
@@ -817,7 +761,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 
 struct ClientRunner<'a> {
     local_addr: SocketAddr,
-    socket: &'a UdpSocket,
+    socket: &'a mut udp::Socket,
     client: Http3Client,
     handler: Handler<'a>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -827,7 +771,7 @@ struct ClientRunner<'a> {
 impl<'a> ClientRunner<'a> {
     fn new(
         args: &'a mut Args,
-        socket: &'a UdpSocket,
+        socket: &'a mut udp::Socket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         hostname: &str,
@@ -880,11 +824,13 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = read_dgram(self.socket, &self.local_addr)?;
-                    if dgram.is_none() {
+                    let dgrams = self.socket.recv(&self.local_addr)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in &dgrams {
+                        self.process(Some(dgram)).await?;
+                    }
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
                 Ready::Timeout => {
@@ -915,7 +861,8 @@ impl<'a> ClientRunner<'a> {
         loop {
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
-                    emit_datagram(self.socket, dgram).await?;
+                    self.socket.writable().await?;
+                    self.socket.send(dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qinfo!("Setting timeout of {:?}", new_timeout);
@@ -1051,16 +998,7 @@ async fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = match std::net::UdpSocket::bind(local_addr) {
-            Err(e) => {
-                eprintln!("Unable to bind UDP socket: {e}");
-                exit(1)
-            }
-            Ok(s) => s,
-        };
-        socket.set_nonblocking(true)?;
-        let socket = UdpSocket::from_std(socket)?;
-
+        let mut socket = udp::Socket::bind(local_addr)?;
         let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
@@ -1084,7 +1022,7 @@ async fn main() -> Res<()> {
             token = if args.use_old_http {
                 old::ClientRunner::new(
                     &args,
-                    &socket,
+                    &mut socket,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1096,7 +1034,7 @@ async fn main() -> Res<()> {
             } else {
                 ClientRunner::new(
                     &mut args,
-                    &socket,
+                    &mut socket,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1125,17 +1063,16 @@ mod old {
         time::Instant,
     };
 
-    use neqo_common::{event::Provider, qdebug, qinfo, Datagram};
+    use neqo_common::{event::Provider, qdebug, qinfo, udp, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
         StreamType,
     };
-    use tokio::{net::UdpSocket, time::Sleep};
+    use tokio::time::Sleep;
     use url::Url;
 
-    use super::{get_output_file, qlog_new, read_dgram, ready, Args, KeyUpdateState, Ready, Res};
-    use crate::emit_datagram;
+    use super::{get_output_file, qlog_new, ready, Args, KeyUpdateState, Ready, Res};
 
     struct HandlerOld<'b> {
         streams: HashMap<StreamId, Option<File>>,
@@ -1232,12 +1169,12 @@ mod old {
             Ok(())
         }
 
-        fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<bool> {
+        fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<()> {
             let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
             match &mut maybe_maybe_out_file {
                 None => {
                     println!("Data on unexpected stream: {stream_id}");
-                    return Ok(false);
+                    return Ok(());
                 }
                 Some(maybe_out_file) => {
                     let fin_recvd = Self::read_from_stream(
@@ -1253,25 +1190,15 @@ mod old {
                         }
                         self.streams.remove(&stream_id);
                         self.download_urls(client);
-                        if self.streams.is_empty() && self.url_queue.is_empty() {
-                            return Ok(false);
-                        }
                     }
                 }
             }
-            Ok(true)
+            Ok(())
         }
 
-        /// Just in case we didn't get a resumption token event, this
-        /// iterates through events until one is found.
-        fn get_token(&mut self, client: &mut Connection) {
-            for event in client.events() {
-                if let ConnectionEvent::ResumptionToken(token) = event {
-                    self.token = Some(token);
-                }
-            }
-        }
-
+        /// Handle events on the connection.
+        ///
+        /// Returns `Ok(true)` when done, i.e. url queue is empty and streams are closed.
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             while let Some(event) = client.next_event() {
                 match event {
@@ -1279,11 +1206,7 @@ mod old {
                         client.authenticated(AuthenticationStatus::Ok, Instant::now());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        if !self.read(client, stream_id)? {
-                            self.get_token(client);
-                            client.close(Instant::now(), 0, "kthxbye!");
-                            return Ok(false);
-                        };
+                        self.read(client, stream_id)?;
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         println!("stream {stream_id} writable");
@@ -1315,13 +1238,18 @@ mod old {
                 }
             }
 
-            Ok(true)
+            if self.streams.is_empty() && self.url_queue.is_empty() {
+                // Handler is done.
+                return Ok(true);
+            }
+
+            Ok(false)
         }
     }
 
     pub struct ClientRunner<'a> {
         local_addr: SocketAddr,
-        socket: &'a UdpSocket,
+        socket: &'a mut udp::Socket,
         client: Connection,
         handler: HandlerOld<'a>,
         timeout: Option<Pin<Box<Sleep>>>,
@@ -1331,7 +1259,7 @@ mod old {
     impl<'a> ClientRunner<'a> {
         pub fn new(
             args: &'a Args,
-            socket: &'a UdpSocket,
+            socket: &'a mut udp::Socket,
             local_addr: SocketAddr,
             remote_addr: SocketAddr,
             origin: &str,
@@ -1386,51 +1314,53 @@ mod old {
 
         pub async fn run(mut self) -> Res<Option<ResumptionToken>> {
             loop {
-                if !self.handler.handle(&mut self.client)? {
-                    break;
+                let handler_done = self.handler.handle(&mut self.client)?;
+
+                match (handler_done, self.args.resume, self.handler.token.is_some()) {
+                    // Handler isn't done. Continue.
+                    (false, _, _) => {},
+                    // Handler done. Resumption token needed but not present. Continue.
+                    (true, true, false) => {
+                        qdebug!("Handler done. Waiting for resumption token.");
+                    }
+                    // Handler is done, no resumption token needed. Close.
+                    (true, false, _) |
+                    // Handler is done, resumption token needed and present. Close.
+                    (true, true, true) => {
+                        self.client.close(Instant::now(), 0, "kthxbye!");
+                    }
                 }
 
                 self.process(None).await?;
 
+                if let State::Closed(..) = self.client.state() {
+                    return Ok(self.handler.token.take());
+                }
+
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = read_dgram(self.socket, &self.local_addr)?;
-                        if dgram.is_none() {
+                        let dgrams = self.socket.recv(&self.local_addr)?;
+                        if dgrams.is_empty() {
                             break;
                         }
-                        self.process(dgram.as_ref()).await?;
+                        for dgram in &dgrams {
+                            self.process(Some(dgram)).await?;
+                        }
                         self.handler.maybe_key_update(&mut self.client)?;
                     },
                     Ready::Timeout => {
                         self.timeout = None;
                     }
                 }
-
-                if let State::Closed(..) = self.client.state() {
-                    break;
-                }
             }
-
-            let token = if self.args.resume {
-                // If we haven't received an event, take a token if there is one.
-                // Lots of servers don't provide NEW_TOKEN, but a session ticket
-                // without NEW_TOKEN is better than nothing.
-                self.handler
-                    .token
-                    .take()
-                    .or_else(|| self.client.take_resumption_token(Instant::now()))
-            } else {
-                None
-            };
-
-            Ok(token)
         }
 
         async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
             loop {
                 match self.client.process(dgram.take(), Instant::now()) {
                     Output::Datagram(dgram) => {
-                        emit_datagram(self.socket, dgram).await?;
+                        self.socket.writable().await?;
+                        self.socket.send(dgram)?;
                     }
                     Output::Callback(new_timeout) => {
                         qinfo!("Setting timeout of {:?}", new_timeout);

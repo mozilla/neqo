@@ -52,7 +52,7 @@ pub enum ConnectionEvent {
         stream_id: StreamId,
         app_error: AppError,
     },
-    /// Peer has sent STOP_SENDING
+    /// Peer has sent `STOP_SENDING`
     SendStreamStopSending {
         stream_id: StreamId,
         app_error: AppError,
@@ -61,7 +61,7 @@ pub enum ConnectionEvent {
     SendStreamComplete {
         stream_id: StreamId,
     },
-    /// Peer increased MAX_STREAMS
+    /// Peer increased `MAX_STREAMS`
     SendStreamCreatable {
         stream_type: StreamType,
     },
