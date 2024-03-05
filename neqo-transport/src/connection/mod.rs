@@ -1982,7 +1982,7 @@ impl Connection {
             encoder = builder.build(tx)?;
         }
 
-        Ok(SendOption::Yes(close.path().borrow().datagram(encoder)))
+        Ok(SendOption::Yes(close.path().borrow_mut().datagram(encoder)))
     }
 
     /// Write the frames that are exchanged in the application data space.
@@ -2345,7 +2345,7 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial);
             }
             path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(path.borrow().datagram(packets)))
+            Ok(SendOption::Yes(path.borrow_mut().datagram(packets)))
         }
     }
 
@@ -2724,7 +2724,7 @@ impl Connection {
                     space,
                     largest_acknowledged,
                     ranges,
-                    ecn_count,
+                    &ecn_count,
                     ack_delay,
                     now,
                 );
@@ -2904,7 +2904,7 @@ impl Connection {
         space: PacketNumberSpace,
         largest_acknowledged: u64,
         ack_ranges: R,
-        ecn_count: EcnCount,
+        ecn_count: &EcnCount,
         ack_delay: u64,
         now: Instant,
     ) where
@@ -2918,14 +2918,10 @@ impl Connection {
             space,
             largest_acknowledged,
             ack_ranges,
+            ecn_count,
             self.decode_ack_delay(ack_delay),
             now,
         );
-
-        self.paths
-            .primary()
-            .borrow_mut()
-            .validate_ack_ecn(space, &acked_packets, ecn_count);
 
         for acked in acked_packets {
             for token in &acked.tokens {

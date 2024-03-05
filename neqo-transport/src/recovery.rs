@@ -29,7 +29,7 @@ use crate::{
     send_stream::SendStreamRecoveryToken,
     stats::{Stats, StatsCell},
     stream_id::{StreamId, StreamType},
-    tracking::{AckToken, PacketNumberSpace, PacketNumberSpaceSet, SentPacket},
+    tracking::{AckToken, EcnCount, PacketNumberSpace, PacketNumberSpaceSet, SentPacket},
 };
 
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
@@ -665,12 +665,14 @@ impl LossRecovery {
     }
 
     /// Returns (acked packets, lost packets)
+    #[allow(clippy::too_many_arguments)]
     pub fn on_ack_received<R>(
         &mut self,
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         largest_acked: u64,
         acked_ranges: R,
+        ecn_count: &EcnCount,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -738,14 +740,13 @@ impl LossRecovery {
         primary_path
             .borrow_mut()
             .on_packets_lost(prev_largest_acked, pn_space, &lost);
-        primary_path.borrow_mut().validate_ecn_use(&lost);
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
         primary_path
             .borrow_mut()
-            .on_packets_acked(&acked_packets, now);
+            .on_packets_acked(pn_space, &acked_packets, ecn_count, now);
 
         self.pto_state = None;
 
@@ -968,7 +969,6 @@ impl LossRecovery {
         self.stats.borrow_mut().lost += lost_packets.len();
 
         self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
-        primary_path.borrow_mut().validate_ecn_use(&lost_packets);
         lost_packets
     }
 
@@ -1037,6 +1037,7 @@ mod tests {
         path::{Path, PathRef},
         rtt::RttEstimate,
         stats::{Stats, StatsCell},
+        tracking::EcnCount,
     };
 
     // Shorthand for a time in milliseconds.
@@ -1062,6 +1063,7 @@ mod tests {
             pn_space: PacketNumberSpace,
             largest_acked: u64,
             acked_ranges: Vec<RangeInclusive<u64>>,
+            ecn_count: &EcnCount,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
@@ -1070,6 +1072,7 @@ mod tests {
                 pn_space,
                 largest_acked,
                 acked_ranges,
+                ecn_count,
                 ack_delay,
                 now,
             )
@@ -1225,6 +1228,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             pn,
             vec![pn..=pn],
+            &EcnCount::default(),
             ACK_DELAY,
             pn_time(pn) + delay,
         );
@@ -1372,6 +1376,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             1,
             vec![1..=1],
+            &EcnCount::default(),
             ACK_DELAY,
             pn_time(0) + (TEST_RTT * 5 / 4),
         );
@@ -1395,6 +1400,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             2,
             vec![2..=2],
+            &EcnCount::default(),
             ACK_DELAY,
             pn2_ack_time,
         );
@@ -1424,6 +1430,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             4,
             vec![2..=4],
+            &EcnCount::default(),
             ACK_DELAY,
             pn_time(4),
         );
@@ -1452,6 +1459,7 @@ mod tests {
             PacketNumberSpace::Initial,
             0,
             vec![],
+            &EcnCount::default(),
             Duration::from_millis(0),
             pn_time(0),
         );
@@ -1496,7 +1504,14 @@ mod tests {
             let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
             let pn_space = PacketNumberSpace::from(sent_pkt.pt);
             lr.on_packet_sent(sent_pkt);
-            lr.on_ack_received(pn_space, 1, vec![1..=1], Duration::from_secs(0), pn_time(3));
+            lr.on_ack_received(
+                pn_space,
+                1,
+                vec![1..=1],
+                &EcnCount::default(),
+                Duration::from_secs(0),
+                pn_time(3),
+            );
             let mut lost = Vec::new();
             lr.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
                 pn_time(3),
@@ -1544,6 +1559,7 @@ mod tests {
             PacketNumberSpace::Initial,
             0,
             vec![0..=0],
+            &EcnCount::default(),
             Duration::new(0, 0),
             now() + rtt,
         );

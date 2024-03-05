@@ -15,16 +15,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::EnumMap;
-use neqo_common::{
-    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos, IpTosEcn,
-};
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos};
 use neqo_crypto::random;
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
+    ecn::EcnInfo,
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
     recovery::RecoveryToken,
@@ -535,8 +533,6 @@ pub struct Path {
     rtt: RttEstimate,
     /// A packet sender for the path, which includes congestion control and a pacer.
     sender: PacketSender,
-    /// The DSCP/ECN marking to use for outgoing packets on this path.
-    tos: IpTos,
     /// The IP TTL to use for outgoing packets on this path.
     ttl: u8,
 
@@ -546,10 +542,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
-    /// The number of ECN-marked packets sent on this path that were declared lost.
-    lost_ecn_packets: usize,
-    /// The ECN counts received in the last ACK on this path, for each packet number space.
-    ecn_count: EnumMap<PacketNumberSpace, EcnCount>,
+    /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
+    ecn_info: EcnInfo,
 
     /// For logging of events.
     qlog: NeqoQlog,
@@ -579,97 +573,17 @@ impl Path {
             challenge: None,
             rtt: RttEstimate::default(),
             sender,
-            tos: IpTosEcn::Ect0.into(),
             ttl: 64, // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
-            lost_ecn_packets: 0,
-            ecn_count: EnumMap::default(),
+            ecn_info: EcnInfo::new(now),
             qlog,
         }
     }
 
-    /// Return the current DSCP/ECN marking of outgoing packets on this path.
+    /// Return the DSCP/ECN marking to use for outgoing packets on this path.
     pub fn tos(&self) -> IpTos {
-        self.tos
-    }
-
-    /// Whether this path is currently marking packets with ECN.
-    fn is_ecn_enabled(&self) -> bool {
-        IpTosEcn::from(self.tos) != IpTosEcn::NotEct
-    }
-
-    /// Disable ECN marking on this path.
-    fn disable_ecn(&mut self) {
-        self.tos.set_ecn(IpTosEcn::NotEct);
-    }
-
-    pub fn validate_ecn_use(&mut self, lost_packets: &[SentPacket]) {
-        if !self.is_ecn_enabled() {
-            return;
-        }
-        // If the path is currently marking outgoing packets as ECT(0),
-        // update the count of lost ECN-marked packets.
-        self.lost_ecn_packets += lost_packets.len();
-
-        // If we lost more than `MAX_PATH_PROBES` ECN-marked packets, then
-        // disable ECN on this path. See RFC 9000, Section 13.4.2.
-        // This doesn't quite implement the algorithm given in RFC 9000,
-        // Appendix A.4, but it should be OK. (It might be worthwhile caching
-        // destination IP addresses for paths on which we had to disable ECN,
-        // in order to not persitently delay connection establishment to
-        // those destinations.)
-        //
-        // (Reusing `MAX_PATH_PROBES` here as a threshold is a bit of a hack,
-        // but avoids defining another constant just for this.)
-        if self.lost_ecn_packets > MAX_PATH_PROBES {
-            qinfo!([self], "Disabling ECN on path due to excessive loss");
-            self.disable_ecn();
-        }
-    }
-
-    pub fn validate_ack_ecn(
-        &mut self,
-        space: PacketNumberSpace,
-        acked_packets: &[SentPacket],
-        ecn_count: EcnCount,
-    ) {
-        if !self.is_ecn_enabled() {
-            return;
-        }
-
-        // RFC 9000, Section 13.4.2.1:
-        //
-        // > An endpoint that receives an ACK frame with ECN counts therefore validates
-        // > the counts before using them. It performs this validation by comparing newly
-        // > received counts against those from the last successfully processed ACK frame.
-        //
-        // RFC 9000 fails to state that this is done *per packet number space*.
-        //
-        // > If an ACK frame newly acknowledges a packet that the endpoint sent with
-        // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
-        // > corresponding ECN counts are not present in the ACK frame.
-        //
-        // We always mark with ECT(0) - if at all - so we only need to check for that.
-        // Also, if we sent a packet with ECT(0) and get only an ACK frame (and not an
-        // ACK-ECN frame), `ecn_counts` will be all zero and the check below will fail,
-        // so no need to explicitly check for the above.
-        //
-        // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
-        // > less than the number of newly acknowledged packets that were originally sent with an
-        // > ECT(0) marking.
-        let newly_acked = acked_packets.len().try_into().unwrap();
-        let ecn_diff = &ecn_count - &self.ecn_count[space];
-        let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
-        if sum_inc < newly_acked {
-            qwarn!(
-                "ACK had {} new marks, but acked {} packets, disabling ECN",
-                sum_inc,
-                newly_acked
-            );
-            self.disable_ecn();
-        }
-        self.ecn_count[space] = ecn_count;
+        self.ecn_info.tos()
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -787,8 +701,9 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(self.local, self.remote, self.tos, Some(self.ttl), payload)
+    pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V) -> Datagram {
+        self.ecn_info.count_packets_out();
+        Datagram::new(self.local, self.remote, self.tos(), Some(self.ttl), payload)
     }
 
     /// Get local address as `SocketAddr`
@@ -1051,9 +966,16 @@ impl Path {
     }
 
     /// Record packets as acknowledged with the sender.
-    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant) {
+    pub fn on_packets_acked(
+        &mut self,
+        space: PacketNumberSpace,
+        acked_pkts: &[SentPacket],
+        ecn_count: &EcnCount,
+        now: Instant,
+    ) {
         debug_assert!(self.is_primary());
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
+        self.ecn_info.validate_ack_ecn(space, acked_pkts, ecn_count);
     }
 
     /// Record packets as lost with the sender.
@@ -1073,6 +995,7 @@ impl Path {
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
         }
+        self.ecn_info.count_packets_lost(lost_packets);
     }
 
     /// Get the number of bytes that can be written to this path.
