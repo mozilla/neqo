@@ -18,6 +18,11 @@ use tokio::io::Interest;
 
 use crate::{Datagram, IpTos};
 
+/// Socket receive buffer size.
+///
+/// Allows reading multiple datagrams in a single [`Socket::recv`] call.
+const RECV_BUF_SIZE: usize = u16::MAX as usize;
+
 pub struct Socket {
     socket: tokio::net::UdpSocket,
     state: UdpSocketState,
@@ -32,7 +37,7 @@ impl Socket {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
             socket: tokio::net::UdpSocket::from_std(socket)?,
-            recv_buf: vec![0; u16::MAX as usize],
+            recv_buf: vec![0; RECV_BUF_SIZE],
         })
     }
 
