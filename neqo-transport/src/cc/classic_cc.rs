@@ -296,6 +296,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         congestion || persistent_congestion
     }
 
+    /// Report received ECN CE mark(s) to the congestion controller as a
+    /// congestion event.
+    ///
+    /// See <https://datatracker.ietf.org/doc/html/rfc9002#section-b.7>.
+    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket) -> bool {
+        self.on_congestion_event(largest_acked_pkt)
+    }
+
     fn discard(&mut self, pkt: &SentPacket) {
         if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.size);
@@ -486,8 +494,8 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
     fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
-        // Start a new congestion event if lost packet was sent after the start
-        // of the previous congestion recovery period.
+        // Start a new congestion event if lost or ECN CE marked packet was sent
+        // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
             return false;
         }
@@ -1187,5 +1195,27 @@ mod tests {
             assert_ne!(cc.acked_bytes, last_acked_bytes);
             last_acked_bytes = cc.acked_bytes;
         }
+    }
+
+    #[test]
+    fn ecn_ce() {
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
+        let p_ce = SentPacket::new(
+            PacketType::Short,
+            1,
+            IpTosEcn::default(),
+            now(),
+            true,
+            Vec::new(),
+            MAX_DATAGRAM_SIZE,
+        );
+        cc.on_packet_sent(&p_ce);
+        cwnd_is_default(&cc);
+        assert_eq!(cc.state, State::SlowStart);
+
+        // Signal congestion (ECN CE) and thus change state to recovery start.
+        cc.on_ecn_ce_received(&p_ce);
+        cwnd_is_halved(&cc);
+        assert_eq!(cc.state, State::RecoveryStart);
     }
 }

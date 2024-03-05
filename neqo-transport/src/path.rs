@@ -978,8 +978,16 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
+
+        let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn);
+        if ecn_ce_received {
+            // TODO: Should congestion window reduction through CE marks result in
+            // an update to ACK delay? See on_packets_lost below.
+            self.sender
+                .on_ecn_ce_received(acked_pkts.first().expect("must be there"));
+        }
+
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
-        self.ecn_info.validate_ack_ecn(acked_pkts, ack_ecn);
     }
 
     /// Record packets as lost with the sender.

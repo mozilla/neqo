@@ -695,10 +695,10 @@ impl LossRecovery {
 
         let (acked_packets, any_ack_eliciting) =
             space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
-        if acked_packets.is_empty() {
+        let Some(largest_acked_pkt) = acked_packets.first() else {
             // No new information.
             return (Vec::new(), Vec::new());
-        }
+        };
 
         // Track largest PN acked per space
         let prev_largest_acked = space.largest_acked_sent_time;
@@ -707,7 +707,6 @@ impl LossRecovery {
 
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
-            let largest_acked_pkt = acked_packets.first().expect("must be there");
             space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting && largest_acked_pkt.on_primary_path() {
                 self.rtt_sample(
