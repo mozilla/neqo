@@ -50,9 +50,10 @@ struct Bindings {
 }
 
 fn is_debug() -> bool {
-    env::var("DEBUG")
-        .map(|d| d.parse::<bool>().unwrap_or(false))
-        .unwrap_or(false)
+    // Check the build profile and not whether debug symbols are enabled (i.e.,
+    // `env::var("DEBUG")`), because we enable those for benchmarking/profiling and still want
+    // to build NSS in release mode.
+    env::var("PROFILE").unwrap_or_default() == "debug"
 }
 
 // bindgen needs access to libclang.
