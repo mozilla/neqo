@@ -10,11 +10,21 @@ name: Fetch and build NSS
 runs:
   using: composite
   steps:
-    - name: Fetch and build NSS
+    - name: Checkout NSPR
+      uses: actions/checkout@v4
+      with:
+        repository: 'nss-dev/nspr'
+        path: ${{ github.workspace }}/nspr
+
+    - name: Checkout NSS
+      uses: actions/checkout@v4
+      with:
+        repository: 'nss-dev/nss'
+        path: ${{ github.workspace }}/nss
+
+    - name: Build
       shell: bash
       run: |
-        git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"
-        git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
         # We want to do an optimized build for accurate CPU profiling, but
         # we also want debug symbols for that, which the normal optimized NSS
         # build process doesn't provide.
