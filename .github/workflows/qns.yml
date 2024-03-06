@@ -64,6 +64,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run QUIC Interop tests
+        if: ${{ github.event_name == 'pull_request' }}
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
         uses: ./.github/actions/quic-interop-runner
         with:
