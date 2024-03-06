@@ -1,5 +1,12 @@
 name: Fetch and build NSS
 
+# This step might be removed if the distro included a recent enough
+# version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
+# (neqo-crypto/build.rs would also need to query pkg-config to get the
+# right build flags rather than building NSS.)
+#
+# Also see https://github.com/mozilla/neqo/issues/1711
+
 runs:
   using: composite
   steps:
@@ -9,11 +16,11 @@ runs:
         git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"
         git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
         $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
+        export NSS_OUT="$NSS_DIR/../dist/$(cat "$NSS_DIR/../dist/latest")"
+        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
-        echo "LD_LIBRARY_PATH=$NSS_DIR/../dist/Release/lib" >> "$GITHUB_ENV"
-        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_DIR/../dist/Release/lib" >> "$GITHUB_ENV"
-        echo "$NSS_DIR/../dist/Release/lib" >> "$GITHUB_PATH"
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
