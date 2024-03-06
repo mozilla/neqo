@@ -32,6 +32,16 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Checkout quic-interop/quic-interop-runner repository
+      uses: actions/checkout@v4
+      with:
+        repository: 'quic-interop/quic-interop-runner'
+        path: 'quic-interop-runner'
+
+    - name: Enable IPv6 support
+      run: sudo modprobe ip6table_filter
+      shell: bash
+
     - name: Install dependencies
       run: |
         sudo add-apt-repository ppa:wireshark-dev/stable
@@ -39,28 +49,17 @@ runs:
         sudo apt-get install -y wireshark tshark jq
       shell: bash
 
-    - uses: actions/setup-python@v4
+    - uses: actions/setup-python@v5
       with:
         python-version: 3.8
-
-    - name: Enable IPv6 support
-      run: sudo modprobe ip6table_filter
-      shell: bash
-
-    - name: Checkout quic-interop/quic-interop-runner repository
-      uses: actions/checkout@v2
-      with:
-        repository: 'quic-interop/quic-interop-runner'
-        path: 'quic-interop-runner'
+        cache: 'pip'
+        cache-dependency-path: 'quic-interop-runner/requirements.txt'
 
     - name: Install Python packages
       run: |
         cd quic-interop-runner
         pip install -U pip
         pip install -r requirements.txt
-      shell: bash
-
-    - run: docker image ls
       shell: bash
 
     - name: Run tests
