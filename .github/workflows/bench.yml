@@ -81,6 +81,8 @@ jobs:
             taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
               --bin neqo-server -- --db ../test-fixture/db $HOST:4433 || true; } &
+          # Give the server time to start.
+          sleep 3
           mkdir client; \
             cd client; \
             time taskset -c 1 nice -n -20 \

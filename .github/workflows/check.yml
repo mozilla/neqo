@@ -117,9 +117,10 @@ jobs:
         run: |
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
-          PID=$!
+          # Give the server time to start.
+          sleep 3
           cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
-          kill $PID
+          killall -INT neqo-server
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
