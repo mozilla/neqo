@@ -64,7 +64,7 @@ jobs:
 
       - name: Run QUIC Interop tests
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
-        uses: ./.github/actions/quic-interop-runner.yml
+        uses: ./.github/actions/quic-interop-runner
         with:
           name: 'neqo-latest'
           image: ${{ steps.docker_build_and_push.outputs.imageID }}
