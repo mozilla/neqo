@@ -4,7 +4,7 @@
 # tests itself might run off of a fork, i.e. an untrusted environment and should
 # thus not be granted write permissions.
 
-name: Comment on the pull request
+name: QUIC Network Simulator Comment
 
 on:
   workflow_run:
