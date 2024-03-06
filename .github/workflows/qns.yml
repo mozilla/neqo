@@ -6,10 +6,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: ["main"]
-    # TODO: Re-introduce
-    # paths:
-    #   - 'qns/**'
-    #   - '.github/workflows/qns.yml'
   merge_group:
 
 jobs:
@@ -58,7 +54,7 @@ jobs:
           cache-to: type=gha,mode=max
           # On pull requests only build amd64 for the sake of CI time.
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
-          load: true
+          load: ${{ github.event_name == 'pull_request' }}
 
       - name: Checkout
         uses: actions/checkout@v4
