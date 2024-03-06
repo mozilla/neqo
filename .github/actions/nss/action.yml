@@ -19,7 +19,7 @@ runs:
         # we also want debug symbols for that, which the normal optimized NSS
         # build process doesn't provide.
         [ "${{ runner.os }}" != "Windows" ] && export CFLAGS=-ggdb3
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o -v
         export NSS_OUT="$NSS_DIR/../dist/$(cat "$NSS_DIR/../dist/latest")"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
