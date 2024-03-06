@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    convert::TryFrom,
     hash::{Hash, Hasher},
     mem,
     ops::Add,
@@ -1761,7 +1760,7 @@ pub struct SendStreamRecoveryToken {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, collections::VecDeque, convert::TryFrom, rc::Rc};
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
     use neqo_common::{event::Provider, hex_with_len, qtrace, Encoder};
 

@@ -18,12 +18,13 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Release/lib
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set PATH
+        run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
         uses: ./.github/actions/rust
@@ -31,15 +32,11 @@ jobs:
           version: $TOOLCHAIN
           components: rustfmt
 
-      - name: Configure Rust
-        run: cargo install flamegraph
-
-      - name: Fetch NSS and NSPR
+      - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
 
       - name: Build
         run: |
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
           cargo +$TOOLCHAIN bench --features bench --no-run
           cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
 
@@ -142,7 +139,7 @@ jobs:
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.head_ref || github.ref_name }}-perf
+          name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
             *.svg
             *.perf

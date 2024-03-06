@@ -11,7 +11,6 @@ use std::{
     cell::RefCell,
     cmp::max,
     collections::BTreeMap,
-    convert::TryFrom,
     mem,
     rc::{Rc, Weak},
 };
@@ -1011,7 +1010,7 @@ impl RecvStream {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, convert::TryFrom, ops::Range, rc::Rc};
+    use std::{cell::RefCell, ops::Range, rc::Rc};
 
     use neqo_common::{qtrace, Encoder};
 

@@ -8,7 +8,6 @@
 // into flow control frames needing to be sent to the remote.
 
 use std::{
-    convert::TryFrom,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
 };

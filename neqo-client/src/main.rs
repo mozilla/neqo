@@ -4,12 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, Write},
@@ -191,7 +188,7 @@ pub struct Args {
 
     #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
-    /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+    /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
     ciphers: Vec<String>,
 
     #[arg(name = "ech", long, value_parser = |s: &str| hex::decode(s))]
@@ -300,11 +297,11 @@ struct QuicParameters {
     quic_version: Vec<Version>,
 
     #[arg(long, default_value = "16")]
-    /// Set the MAX_STREAMS_BIDI limit.
+    /// Set the `MAX_STREAMS_BIDI` limit.
     max_streams_bidi: u64,
 
     #[arg(long, default_value = "16")]
-    /// Set the MAX_STREAMS_UNI limit.
+    /// Set the `MAX_STREAMS_UNI` limit.
     max_streams_uni: u64,
 
     #[arg(long = "idle", default_value = "30")]
@@ -764,7 +761,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 
 struct ClientRunner<'a> {
     local_addr: SocketAddr,
-    socket: &'a udp::Socket,
+    socket: &'a mut udp::Socket,
     client: Http3Client,
     handler: Handler<'a>,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -774,7 +771,7 @@ struct ClientRunner<'a> {
 impl<'a> ClientRunner<'a> {
     fn new(
         args: &'a mut Args,
-        socket: &'a udp::Socket,
+        socket: &'a mut udp::Socket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         hostname: &str,
@@ -827,11 +824,13 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = self.socket.recv(&self.local_addr)?;
-                    if dgram.is_none() {
+                    let dgrams = self.socket.recv(&self.local_addr)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in &dgrams {
+                        self.process(Some(dgram)).await?;
+                    }
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
                 Ready::Timeout => {
@@ -999,7 +998,7 @@ async fn main() -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let socket = udp::Socket::bind(local_addr)?;
+        let mut socket = udp::Socket::bind(local_addr)?;
         let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
@@ -1023,7 +1022,7 @@ async fn main() -> Res<()> {
             token = if args.use_old_http {
                 old::ClientRunner::new(
                     &args,
-                    &socket,
+                    &mut socket,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1035,7 +1034,7 @@ async fn main() -> Res<()> {
             } else {
                 ClientRunner::new(
                     &mut args,
-                    &socket,
+                    &mut socket,
                     real_local,
                     remote_addr,
                     &hostname,
@@ -1170,12 +1169,12 @@ mod old {
             Ok(())
         }
 
-        fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<bool> {
+        fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<()> {
             let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
             match &mut maybe_maybe_out_file {
                 None => {
                     println!("Data on unexpected stream: {stream_id}");
-                    return Ok(false);
+                    return Ok(());
                 }
                 Some(maybe_out_file) => {
                     let fin_recvd = Self::read_from_stream(
@@ -1191,25 +1190,15 @@ mod old {
                         }
                         self.streams.remove(&stream_id);
                         self.download_urls(client);
-                        if self.streams.is_empty() && self.url_queue.is_empty() {
-                            return Ok(false);
-                        }
                     }
                 }
             }
-            Ok(true)
+            Ok(())
         }
 
-        /// Just in case we didn't get a resumption token event, this
-        /// iterates through events until one is found.
-        fn get_token(&mut self, client: &mut Connection) {
-            for event in client.events() {
-                if let ConnectionEvent::ResumptionToken(token) = event {
-                    self.token = Some(token);
-                }
-            }
-        }
-
+        /// Handle events on the connection.
+        ///
+        /// Returns `Ok(true)` when done, i.e. url queue is empty and streams are closed.
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             while let Some(event) = client.next_event() {
                 match event {
@@ -1217,11 +1206,7 @@ mod old {
                         client.authenticated(AuthenticationStatus::Ok, Instant::now());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        if !self.read(client, stream_id)? {
-                            self.get_token(client);
-                            client.close(Instant::now(), 0, "kthxbye!");
-                            return Ok(false);
-                        };
+                        self.read(client, stream_id)?;
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         println!("stream {stream_id} writable");
@@ -1253,13 +1238,18 @@ mod old {
                 }
             }
 
-            Ok(true)
+            if self.streams.is_empty() && self.url_queue.is_empty() {
+                // Handler is done.
+                return Ok(true);
+            }
+
+            Ok(false)
         }
     }
 
     pub struct ClientRunner<'a> {
         local_addr: SocketAddr,
-        socket: &'a udp::Socket,
+        socket: &'a mut udp::Socket,
         client: Connection,
         handler: HandlerOld<'a>,
         timeout: Option<Pin<Box<Sleep>>>,
@@ -1269,7 +1259,7 @@ mod old {
     impl<'a> ClientRunner<'a> {
         pub fn new(
             args: &'a Args,
-            socket: &'a udp::Socket,
+            socket: &'a mut udp::Socket,
             local_addr: SocketAddr,
             remote_addr: SocketAddr,
             origin: &str,
@@ -1324,44 +1314,45 @@ mod old {
 
         pub async fn run(mut self) -> Res<Option<ResumptionToken>> {
             loop {
-                if !self.handler.handle(&mut self.client)? {
-                    break;
+                let handler_done = self.handler.handle(&mut self.client)?;
+
+                match (handler_done, self.args.resume, self.handler.token.is_some()) {
+                    // Handler isn't done. Continue.
+                    (false, _, _) => {},
+                    // Handler done. Resumption token needed but not present. Continue.
+                    (true, true, false) => {
+                        qdebug!("Handler done. Waiting for resumption token.");
+                    }
+                    // Handler is done, no resumption token needed. Close.
+                    (true, false, _) |
+                    // Handler is done, resumption token needed and present. Close.
+                    (true, true, true) => {
+                        self.client.close(Instant::now(), 0, "kthxbye!");
+                    }
                 }
 
                 self.process(None).await?;
 
+                if let State::Closed(..) = self.client.state() {
+                    return Ok(self.handler.token.take());
+                }
+
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = self.socket.recv(&self.local_addr)?;
-                        if dgram.is_none() {
+                        let dgrams = self.socket.recv(&self.local_addr)?;
+                        if dgrams.is_empty() {
                             break;
                         }
-                        self.process(dgram.as_ref()).await?;
+                        for dgram in &dgrams {
+                            self.process(Some(dgram)).await?;
+                        }
                         self.handler.maybe_key_update(&mut self.client)?;
                     },
                     Ready::Timeout => {
                         self.timeout = None;
                     }
                 }
-
-                if let State::Closed(..) = self.client.state() {
-                    break;
-                }
             }
-
-            let token = if self.args.resume {
-                // If we haven't received an event, take a token if there is one.
-                // Lots of servers don't provide NEW_TOKEN, but a session ticket
-                // without NEW_TOKEN is better than nothing.
-                self.handler
-                    .token
-                    .take()
-                    .or_else(|| self.client.take_resumption_token(Instant::now()))
-            } else {
-                None
-            };
-
-            Ok(token)
         }
 
         async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {

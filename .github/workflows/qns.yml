@@ -11,7 +11,6 @@ on:
     #   - 'qns/**'
     #   - '.github/workflows/qns.yml'
   merge_group:
-    branches: ["main"]
 
 jobs:
   quic-network-simulator:

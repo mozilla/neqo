@@ -4,13 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 use std::{
     cell::RefCell,
     cmp::min,
     collections::HashMap,
-    convert::TryFrom,
     fmt::{self, Display},
     fs::OpenOptions,
     io::{self, Read},
@@ -141,7 +138,7 @@ struct Args {
 
     #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
-    /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+    /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
     ciphers: Vec<String>,
 
     #[arg(name = "ech", long)]
@@ -214,11 +211,11 @@ struct QuicParameters {
     quic_version: Vec<Version>,
 
     #[arg(long, default_value = "16")]
-    /// Set the MAX_STREAMS_BIDI limit.
+    /// Set the `MAX_STREAMS_BIDI` limit.
     max_streams_bidi: u64,
 
     #[arg(long, default_value = "16")]
-    /// Set the MAX_STREAMS_UNI limit.
+    /// Set the `MAX_STREAMS_UNI` limit.
     max_streams_uni: u64,
 
     #[arg(long = "idle", default_value = "30")]
@@ -689,11 +686,13 @@ impl ServersRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgram = socket.recv(host)?;
-                    if dgram.is_none() {
+                    let dgrams = socket.recv(host)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in dgrams {
+                        self.process(Some(&dgram)).await?;
+                    }
                 },
                 Ready::Timeout => {
                     self.timeout = None;

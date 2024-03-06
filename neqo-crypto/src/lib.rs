@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 #![allow(clippy::unseparated_literal_suffix, clippy::used_underscore_binding)] // For bindgen code.
 
@@ -32,7 +31,7 @@ pub mod selfencrypt;
 mod ssl;
 mod time;
 
-use std::{convert::TryFrom, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
+use std::{ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
 #[cfg(not(feature = "fuzzing"))]
 pub use self::aead::RealAead as Aead;

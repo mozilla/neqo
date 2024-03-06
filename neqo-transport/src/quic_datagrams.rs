@@ -6,7 +6,7 @@
 
 // https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
 
-use std::{cmp::min, collections::VecDeque, convert::TryFrom};
+use std::{cmp::min, collections::VecDeque};
 
 use neqo_common::Encoder;
 
