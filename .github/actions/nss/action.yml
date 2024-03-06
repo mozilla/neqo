@@ -29,7 +29,7 @@ runs:
         # we also want debug symbols for that, which the normal optimized NSS
         # build process doesn't provide.
         [ "${{ runner.os }}" != "Windows" ] && export CFLAGS=-ggdb3
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o --static
         export NSS_TARGET=$(cat "$NSS_DIR/../dist/latest")
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         export NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
