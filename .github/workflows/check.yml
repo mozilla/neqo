@@ -111,6 +111,7 @@ jobs:
 
       - name: Run client/server transfer
         run: |
+          export PORT=$((RANDOM + 2000))
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:$PORT &
           PID=$!
@@ -119,7 +120,6 @@ jobs:
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
-          PORT: $((RANDOM + 2000))
           SIZE: 54321
           RUST_LOG: warn
 

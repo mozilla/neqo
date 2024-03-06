@@ -76,6 +76,7 @@ jobs:
 
       - name: Profile client/server transfer
         run: |
+          export PORT=$((RANDOM + 2000))
           { mkdir server; \
             cd server; \
             taskset -c 0 nice -n -20 \
@@ -91,7 +92,6 @@ jobs:
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
-          PORT: $((RANDOM + 2000))
           SIZE: 1073741824 # 1 GB
 
       # Re-enable turboboost, hyperthreading and use powersave governor.

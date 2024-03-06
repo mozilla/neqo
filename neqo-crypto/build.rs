@@ -148,7 +148,6 @@ fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
-        String::from("-v"),
     ];
     if is_debug() {
         build_nss.push(String::from("--static"));
@@ -163,7 +162,6 @@ fn build_nss(dir: PathBuf) {
     if target.strip_prefix("aarch64-").is_some() {
         build_nss.push(String::from("--target=arm64"));
     }
-    eprintln!("Building NSS with {build_nss:?}");
     let status = Command::new(get_bash())
         .args(build_nss)
         .current_dir(dir)
