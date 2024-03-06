@@ -148,10 +148,9 @@ fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
+        String::from("--static"),
     ];
-    if is_debug() {
-        build_nss.push(String::from("--static"));
-    } else {
+    if !is_debug() {
         build_nss.push(String::from("-o"));
     }
     if let Ok(d) = env::var("NSS_JOBS") {
