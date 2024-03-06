@@ -15,7 +15,12 @@ runs:
       run: |
         git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"
         git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
+        # We want to do an optimized build for accurate CPU profiling, but
+        # we also want debug symbols for that, which the normal optimized NSS
+        # build process doesn't provide. So we muck with the build flags.
+        sed -i.bak 's/--disable-debug/--enable-debug-symbols/' $NSS_DIR/Makefile
+        sed -i.bak 's/-gdwarf-2/-ggdb3/' $NSS_DIR/coreconf/Linux.mk
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o -v
         export NSS_OUT="$NSS_DIR/../dist/$(cat "$NSS_DIR/../dist/latest")"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
