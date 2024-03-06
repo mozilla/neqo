@@ -59,6 +59,9 @@ jobs:
           # On pull requests only build amd64 for the sake of CI time.
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
 
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Run QUIC Interop tests
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
         uses: ./.github/actions/quic-interop-runner
