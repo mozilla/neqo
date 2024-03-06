@@ -107,7 +107,7 @@ jobs:
       - name: Run tests and determine coverage
         run: |
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
-          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run -vv
 
       - name: Run client/server transfer
         run: |
