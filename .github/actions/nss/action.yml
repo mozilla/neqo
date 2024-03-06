@@ -20,7 +20,9 @@ runs:
         # build process doesn't provide.
         [ "${{ runner.os }}" != "Windows" ] && export CFLAGS=-ggdb3
         $NSS_DIR/build.sh -g -Ddisable_tests=1 -o
-        export NSS_OUT="$NSS_DIR/../dist/$(cat "$NSS_DIR/../dist/latest")"
+        export NSS_TARGET=$(cat "$NSS_DIR/../dist/latest")
+        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
+        export NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
