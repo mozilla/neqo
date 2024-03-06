@@ -1,5 +1,4 @@
 name: Install Rust
-description: Install Rust and sccache
 
 inputs:
   version:

@@ -34,6 +34,8 @@ jobs:
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
+        with:
+          type: Release
 
       - name: Build
         run: |
@@ -76,17 +78,16 @@ jobs:
 
       - name: Profile client/server transfer
         run: |
-          export PORT=$((RANDOM + 2000))
           { mkdir server; \
             cd server; \
             taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- --db ../test-fixture/db $HOST:$PORT || true; } &
+              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 || true; } &
           mkdir client; \
             cd client; \
             time taskset -c 1 nice -n -20 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-client -- --output-dir . https://$HOST:$PORT/$SIZE
+              --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
           killall -INT neqo-server
           cd ${{ github.workspace }}
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1

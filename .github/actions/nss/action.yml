@@ -1,5 +1,11 @@
 name: Fetch and build NSS
 
+inputs:
+  type:
+    description: 'Whether to do a debug or release build of NSS'
+    required: true
+    default: 'Debug'
+
 # This step might be removed if the distro included a recent enough
 # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
 # (neqo-crypto/build.rs would also need to query pkg-config to get the
@@ -29,8 +35,13 @@ runs:
         # we also want debug symbols for that, which the normal optimized NSS
         # build process doesn't provide.
         [ "${{ runner.os }}" != "Windows" ] && export CFLAGS=-ggdb3
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 -o --static
-        export NSS_TARGET=$(cat "$NSS_DIR/../dist/latest")
+        if [ "${{ inputs.type }}" != "Debug" ]; then
+          export OPT="-o"
+          export NSS_TARGET=Release
+        else
+          export NSS_TARGET=Debug
+        fi
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         export NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"

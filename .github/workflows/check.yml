@@ -32,6 +32,7 @@ jobs:
             type: release
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
+      BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -113,11 +114,10 @@ jobs:
 
       - name: Run client/server transfer
         run: |
-          export PORT=$((RANDOM + 2000))
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:$PORT &
+          target/$BUILD_DIR/neqo-server $HOST:4433 &
           PID=$!
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:$PORT/$SIZE
+          target/$BUILD_DIR/neqo-client --output-dir . https://$HOST:4433/$SIZE
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
