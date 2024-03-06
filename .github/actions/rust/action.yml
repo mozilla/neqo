@@ -38,4 +38,3 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         cache-all-crates: "true"
-        cache-directories: "${{ github.workspace }}/dist"
