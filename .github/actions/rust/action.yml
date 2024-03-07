@@ -1,5 +1,5 @@
 name: Install Rust
-description: Install Rust and sccache
+description: Install Rust and tools
 
 inputs:
   version:
@@ -31,4 +31,3 @@ runs:
     - name: Install Rust tools
       shell: bash
       run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph cargo-hack
-
