@@ -18,7 +18,8 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     if: >
-      github.event.workflow_run.event == 'pull_request'
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'failure'
     steps:
       - name: Download comment-data
         uses: actions/download-artifact@v4
@@ -52,3 +53,4 @@ jobs:
         with:
           filePath: comment
           pr_number: ${{ steps.pr-number.outputs.number }}
+          comment_tag: quic-network-simulator-comment
