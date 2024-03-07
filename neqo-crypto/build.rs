@@ -148,6 +148,7 @@ fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
+        // Generate static libraries in addition to shared libraries.
         String::from("--static"),
     ];
     if !is_debug() {

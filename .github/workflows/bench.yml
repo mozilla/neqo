@@ -34,8 +34,6 @@ jobs:
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
-        with:
-          type: Release
 
       - name: Build
         run: |

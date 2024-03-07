@@ -1,13 +1,12 @@
 name: Install Rust
+description: Install Rust and related tools
 
 inputs:
   version:
     description: 'Rust toolchain version to install'
-    required: true
     default: 'stable'
   components:
     description: 'Rust components to install'
-    required: false
     default: ''
 
 runs:

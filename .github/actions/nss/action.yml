@@ -1,10 +1,10 @@
 name: Fetch and build NSS
+description: Fetch and build NSS
 
 inputs:
   type:
-    description: 'Whether to do a debug or release build of NSS'
-    required: true
-    default: 'Debug'
+    description: "Whether to do a debug or release build of NSS"
+    default: "Release"
 
 # This step might be removed if the distro included a recent enough
 # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
@@ -19,31 +19,31 @@ runs:
     - name: Checkout NSPR
       uses: actions/checkout@v4
       with:
-        repository: 'nss-dev/nspr'
+        repository: "nss-dev/nspr"
         path: ${{ github.workspace }}/nspr
 
     - name: Checkout NSS
       uses: actions/checkout@v4
       with:
-        repository: 'nss-dev/nss'
+        repository: "nss-dev/nss"
         path: ${{ github.workspace }}/nss
 
     - name: Build
       shell: bash
       run: |
-        # We want to do an optimized build for accurate CPU profiling, but
-        # we also want debug symbols for that, which the normal optimized NSS
-        # build process doesn't provide.
-        [ "${{ runner.os }}" != "Windows" ] && export CFLAGS=-ggdb3
         if [ "${{ inputs.type }}" != "Debug" ]; then
-          export OPT="-o"
-          export NSS_TARGET=Release
+          # We want to do an optimized build for accurate CPU profiling, but
+          # we also want debug symbols and frame pointers for that, which the normal optimized NSS
+          # build process doesn't provide.
+          OPT="-o"
+          NSS_TARGET=Release
+          [ "${{ runner.os }}" != "Windows" ] && CFLAGS="-ggdb3 -fnoomit-frame-pointer"
         else
-          export NSS_TARGET=Debug
+          NSS_TARGET=Debug
         fi
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
-        export NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
+        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
