@@ -1,12 +1,14 @@
 name: Install Rust
-description: Install Rust and related tools, and set up caching
+description: Install Rust and sccache
 
 inputs:
   version:
     description: 'Rust toolchain version to install'
+    required: true
     default: 'stable'
   components:
     description: 'Rust components to install'
+    required: false
     default: ''
 
 runs:
@@ -36,3 +38,4 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         cache-all-crates: "true"
+        cache-directories: "${{ github.workspace }}/dist"

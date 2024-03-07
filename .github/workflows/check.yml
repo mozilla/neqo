@@ -32,7 +32,6 @@ jobs:
             type: release
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
-      BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -81,10 +80,10 @@ jobs:
         run: |
           echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
           echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall # lld
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-          # echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -99,6 +98,10 @@ jobs:
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
 
+      # This step might be removed if the distro included a recent enough
+      # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
+      # (neqo-crypto/build.rs would also need to query pkg-config to get the
+      # right build flags rather than building NSS.)
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
 
@@ -113,9 +116,11 @@ jobs:
       - name: Run client/server transfer
         run: |
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          target/$BUILD_DIR/neqo-server $HOST:4433 &
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
           PID=$!
-          target/$BUILD_DIR/neqo-client --output-dir . https://$HOST:4433/$SIZE
+          # Give the server time to start.
+          sleep 3
+          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
@@ -126,7 +131,7 @@ jobs:
       - name: Check formatting
         run: |
           if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
-            CONFIG_PATH="--config-path=$(mktemp)"
+            export CONFIG_PATH="--config-path=$(mktemp)"
           fi
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
