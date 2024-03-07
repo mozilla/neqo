@@ -101,8 +101,6 @@ jobs:
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
-        with:
-          type: Debug
 
       - name: Build
         run: cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci

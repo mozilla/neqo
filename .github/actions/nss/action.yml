@@ -37,7 +37,7 @@ runs:
           # build process doesn't provide.
           OPT="-o"
           NSS_TARGET=Release
-          [ "${{ runner.os }}" != "Windows" ] && CFLAGS="-ggdb3 -fnoomit-frame-pointer"
+          [ "${{ runner.os }}" != "Windows" ] && CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         else
           NSS_TARGET=Debug
         fi
