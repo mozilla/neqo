@@ -31,13 +31,13 @@ runs:
     - name: Build
       shell: bash
       run: |
-        if [ "${{ inputs.type }}" != "Debug" && "${{ runner.os }}" != "Windows" ]; then
+        if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
           NSS_TARGET=Release
-          export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+          [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         else
           NSS_TARGET=Debug
         fi
