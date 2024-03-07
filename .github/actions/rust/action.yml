@@ -1,5 +1,5 @@
 name: Install Rust
-description: Install Rust and related tools
+description: Install Rust and related tools, and set up caching
 
 inputs:
   version:
