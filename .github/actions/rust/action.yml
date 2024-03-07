@@ -4,11 +4,9 @@ description: Install Rust and sccache
 inputs:
   version:
     description: 'Rust toolchain version to install'
-    required: true
     default: 'stable'
   components:
     description: 'Rust components to install'
-    required: false
     default: ''
 
 runs:
@@ -34,8 +32,3 @@ runs:
       shell: bash
       run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph cargo-hack
 
-    - name: Use Rust cache
-      uses: Swatinem/rust-cache@v2
-      with:
-        cache-all-crates: "true"
-        cache-directories: "${{ github.workspace }}/dist"
