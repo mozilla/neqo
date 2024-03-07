@@ -6,12 +6,10 @@ on:
   workflow_dispatch:
   pull_request:
     branches: ["main"]
-    paths:
-      - 'qns/**'
-      - '.github/workflows/qns.yml'
   merge_group:
+
 jobs:
-  docker-image:
+  quic-network-simulator:
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -44,6 +42,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        id: docker_build_and_push
         uses: docker/build-push-action@v5
         with:
           push: ${{ github.event_name != 'pull_request' }}
@@ -53,4 +52,21 @@ jobs:
             RUST_VERSION=stable
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64, linux/arm64
+          # On pull requests only build amd64 for the sake of CI time.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
+          load: ${{ github.event_name == 'pull_request' }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run QUIC Interop tests
+        if: ${{ github.event_name == 'pull_request' }}
+        # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
+        uses: ./.github/actions/quic-interop-runner
+        with:
+          name: 'neqo-latest'
+          image: ${{ steps.docker_build_and_push.outputs.imageID }}
+          url: https://github.com/mozilla/neqo
+          test: handshake
+          client: neqo-latest,quic-go,ngtcp2,neqo,msquic
+          server: neqo-latest,quic-go,ngtcp2,neqo,msquic
