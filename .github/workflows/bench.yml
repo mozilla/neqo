@@ -13,6 +13,8 @@ env:
 
 jobs:
   bench:
+    permissions:
+      pull-requests: write
     name: Benchmark
     runs-on: self-hosted
     defaults:
