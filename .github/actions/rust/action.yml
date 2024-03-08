@@ -31,3 +31,15 @@ runs:
     - name: Install Rust tools
       shell: bash
       run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph cargo-hack
+
+    - name: Use sccache
+      uses: mozilla-actions/sccache-action@v0.0.4
+
+    - name: Enable sscache
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CC=sccache cc" >> "$GITHUB_ENV"
+        echo "CXX=sccache c++" >> "$GITHUB_ENV"
+
