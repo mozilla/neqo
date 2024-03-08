@@ -104,6 +104,13 @@ jobs:
         run: |
           grep -Ev 'ignored|running \d+ tests|%\)' results.txt > results.md
 
+      - name: Post results to PR
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          filePath: results.md
+          pr_number: ${{ github.event.pull_request.number }}
+          comment_tag: bench-results
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         if: github.event_name == 'pull_request'
