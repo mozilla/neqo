@@ -66,7 +66,7 @@ jobs:
           # This re-runs part of the previous step, and would hence overwrite part of the criterion results.
           # Avoid that by shuffling the directories around so this run uses its own results directory.
           mv target/criterion target/criterion-bench
-          mv target/criterion-transfer-profile target/criterion
+          mv target/criterion-transfer-profile target/criterion || true
           taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds"
