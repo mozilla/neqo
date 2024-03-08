@@ -74,10 +74,9 @@ jobs:
         run: |
           echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
           echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -98,10 +97,6 @@ jobs:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
 
-      # This step might be removed if the distro included a recent enough
-      # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
-      # (neqo-crypto/build.rs would also need to query pkg-config to get the
-      # right build flags rather than building NSS.)
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
 
@@ -116,22 +111,21 @@ jobs:
       - name: Run client/server transfer
         run: |
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
+          target/$BUILD_DIR/neqo-server $HOST:4433 &
           PID=$!
-          # Give the server time to start.
-          sleep 3
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          target/$BUILD_DIR/neqo-client --output-dir . https://$HOST:4433/$SIZE
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
           SIZE: 54321
           RUST_LOG: warn
+          BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
       - name: Check formatting
         run: |
           if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
-            export CONFIG_PATH="--config-path=$(mktemp)"
+            CONFIG_PATH="--config-path=$(mktemp)"
           fi
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
