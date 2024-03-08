@@ -157,3 +157,24 @@ jobs:
     name: "Benchmark"
     needs: [check]
     uses: ./.github/workflows/bench.yml
+
+  comment:
+    name: "Comment on PR"
+    needs: [bench]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Download results
+        uses: actions/download-artifact@v4
+        with:
+          name: results
+
+      - name: Comment PR
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          filePath: results.md
+          pr_number: ${{ github.event.pull_request.number }}
+          comment_tag: bench-results

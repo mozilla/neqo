@@ -58,7 +58,7 @@ jobs:
       - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN bench --features bench | tee bench.txt
+            cargo +$TOOLCHAIN bench --features bench | tee results.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
@@ -102,15 +102,14 @@ jobs:
 
       - name: Format results as Markdown
         run: |
-          grep -Ev 'ignored|running \d+ tests|%\)' bench.txt > extract.txt
+          grep -Ev 'ignored|running \d+ tests|%\)' results.txt > results.md
 
-      - name: Post results to PR
+      - name: Upload results
+        uses: actions/upload-artifact@v4
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@v2
         with:
-          filePath: extract.txt
-          comment_tag: execution
-          pr_number: ${{ github.event.pull_request.number }}
+          name: results
+          path: results.*
 
       - name: Convert for profiler.firefox.com
         run: |
@@ -137,6 +136,6 @@ jobs:
           path: |
             *.svg
             *.perf
-            bench.txt
+            results.*
             target/criterion*
           compression-level: 9
