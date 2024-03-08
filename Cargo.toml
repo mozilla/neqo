@@ -1,10 +1,9 @@
 [workspace]
 members = [
-  "neqo-client",
+  "neqo-bin",
   "neqo-common",
   "neqo-crypto",
   "neqo-http3",
-  "neqo-server",
   "neqo-qpack",
   "neqo-transport",
   "test-fixture",
