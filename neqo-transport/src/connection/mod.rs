@@ -55,7 +55,7 @@ use crate::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
     },
-    tracking::{AckTracker, PacketNumberSpace, SentPacket},
+    tracking::{AckTracker, EcnCount, PacketNumberSpace, SentPacket},
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
@@ -461,7 +461,7 @@ impl Connection {
     }
 
     /// # Errors
-    /// When the operation fails.    
+    /// When the operation fails.
     pub fn client_enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
         self.crypto.client_enable_ech(ech_config_list)
     }
@@ -1421,6 +1421,15 @@ impl Connection {
         migrate: bool,
         now: Instant,
     ) {
+        // Since we processed frames from this IP packet now,
+        // update the ECN counts (RFC9000, Section 13.4.1).
+        let space = PacketNumberSpace::from(packet.packet_type());
+        if let Some(space) = self.acks.get_mut(space) {
+            *space.ecn_count() += d.tos().into();
+        } else {
+            qdebug!("Not tracking ECN for dropped packet number space");
+        }
+
         if self.state == State::WaitInitial {
             self.start_handshake(path, packet, now);
         }
@@ -1492,6 +1501,7 @@ impl Connection {
                         payload.packet_type(),
                         payload.pn(),
                         &payload[..],
+                        d.tos(),
                     );
 
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
@@ -1972,7 +1982,7 @@ impl Connection {
             encoder = builder.build(tx)?;
         }
 
-        Ok(SendOption::Yes(close.path().borrow().datagram(encoder)))
+        Ok(SendOption::Yes(close.path().borrow_mut().datagram(encoder)))
     }
 
     /// Write the frames that are exchanged in the application data space.
@@ -2263,6 +2273,7 @@ impl Connection {
                 pt,
                 pn,
                 &builder.as_ref()[payload_start..],
+                path.borrow().tos(),
             );
             qlog::packet_sent(
                 &mut self.qlog,
@@ -2334,7 +2345,7 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial);
             }
             path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(path.borrow().datagram(packets)))
+            Ok(SendOption::Yes(path.borrow_mut().datagram(packets)))
         }
     }
 
@@ -2705,10 +2716,18 @@ impl Connection {
                 ack_delay,
                 first_ack_range,
                 ack_ranges,
+                ecn_count,
             } => {
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, largest_acknowledged, ranges, ack_delay, now);
+                self.handle_ack(
+                    space,
+                    largest_acknowledged,
+                    ranges,
+                    &ecn_count,
+                    ack_delay,
+                    now,
+                );
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -2885,6 +2904,7 @@ impl Connection {
         space: PacketNumberSpace,
         largest_acknowledged: u64,
         ack_ranges: R,
+        ecn_count: &EcnCount,
         ack_delay: u64,
         now: Instant,
     ) where
@@ -2898,9 +2918,11 @@ impl Connection {
             space,
             largest_acknowledged,
             ack_ranges,
+            ecn_count,
             self.decode_ack_delay(ack_delay),
             now,
         );
+
         for acked in acked_packets {
             for token in &acked.tokens {
                 match token {

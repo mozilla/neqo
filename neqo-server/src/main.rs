@@ -733,7 +733,7 @@ async fn main() -> Result<(), io::Error> {
         }
 
         match testcase.as_str() {
-            "http3" => (),
+            "http3" | "ecn" => (),
             "zerortt" => {
                 args.use_old_http = true;
                 args.alpn = String::from(HQ_INTEROP);

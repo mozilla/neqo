@@ -237,8 +237,7 @@ impl Args {
         // Only use v1 for most QNS tests.
         self.quic_parameters.quic_version = vec![Version::Version1];
         match testcase.as_str() {
-            // TODO: Add "ecn" when that is ready.
-            "http3" => {}
+            "http3" | "ecn" => {}
             "handshake" | "transfer" | "retry" => {
                 self.use_old_http = true;
             }

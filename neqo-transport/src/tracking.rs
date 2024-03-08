@@ -9,22 +9,24 @@
 use std::{
     cmp::min,
     collections::VecDeque,
-    ops::{Index, IndexMut},
+    ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub},
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use enum_map::{Enum, EnumMap};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
+    frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
     stats::FrameStats,
 };
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum)]
 pub enum PacketNumberSpace {
     Initial,
     Handshake,
@@ -349,6 +351,64 @@ pub struct AckToken {
     ranges: Vec<PacketRange>,
 }
 
+/// The counts for different ECN marks.
+#[derive(PartialEq, Eq, Debug, Clone, Default)]
+pub struct EcnCount(EnumMap<IpTosEcn, u64>);
+
+impl Deref for EcnCount {
+    type Target = EnumMap<IpTosEcn, u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for EcnCount {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl EcnCount {
+    pub fn new(not_ect: u64, ect0: u64, ect1: u64, ce: u64) -> Self {
+        // Yes, the enum array order is different from the argument order.
+        Self(EnumMap::from_array([not_ect, ect1, ect0, ce]))
+    }
+
+    /// Whether any of the ECN counts are non-zero.
+    pub fn is_some(&self) -> bool {
+        self[IpTosEcn::Ect0] > 0 || self[IpTosEcn::Ect1] > 0 || self[IpTosEcn::Ce] > 0
+    }
+}
+
+impl<'a, 'b> Sub<&'a EcnCount> for &'b EcnCount {
+    type Output = EcnCount;
+
+    /// Subtract the ECN counts in `other` from `self`.
+    fn sub(self, other: &'a EcnCount) -> EcnCount {
+        let mut diff = EcnCount::default();
+        for (ecn, count) in &mut *diff {
+            *count = self[ecn].saturating_sub(other[ecn]);
+        }
+        diff
+    }
+}
+
+impl Add<IpTosEcn> for EcnCount {
+    type Output = Self;
+
+    fn add(mut self, ecn: IpTosEcn) -> Self::Output {
+        self += ecn;
+        self
+    }
+}
+
+impl AddAssign<IpTosEcn> for EcnCount {
+    fn add_assign(&mut self, ecn: IpTosEcn) {
+        self[ecn] += 1;
+    }
+}
+
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
 #[derive(Debug)]
@@ -377,6 +437,8 @@ pub struct RecvdPackets {
     /// Whether we are ignoring packets that arrive out of order
     /// for the purposes of generating immediate acknowledgment.
     ignore_order: bool,
+    /// The counts of different ECN marks that have been received.
+    ecn_count: EcnCount,
 }
 
 impl RecvdPackets {
@@ -394,7 +456,13 @@ impl RecvdPackets {
             unacknowledged_count: 0,
             unacknowledged_tolerance: DEFAULT_ACK_PACKET_TOLERANCE,
             ignore_order: false,
+            ecn_count: EcnCount::default(),
         }
+    }
+
+    /// Get the ECN counts.
+    pub fn ecn_count(&mut self) -> &mut EcnCount {
+        &mut self.ecn_count
     }
 
     /// Get the time at which the next ACK should be sent.
@@ -593,7 +661,11 @@ impl RecvdPackets {
             .cloned()
             .collect::<Vec<_>>();
 
-        builder.encode_varint(crate::frame::FRAME_TYPE_ACK);
+        builder.encode_varint(if self.ecn_count.is_some() {
+            FRAME_TYPE_ACK_ECN
+        } else {
+            FRAME_TYPE_ACK
+        });
         let mut iter = ranges.iter();
         let Some(first) = iter.next() else { return };
         builder.encode_varint(first.largest);
@@ -615,6 +687,12 @@ impl RecvdPackets {
             builder.encode_varint(last - r.largest - 2); // Gap
             builder.encode_varint(r.len() - 1); // Range
             last = r.smallest;
+        }
+
+        if self.ecn_count.is_some() {
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ect0]);
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ect1]);
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ce]);
         }
 
         // We've sent an ACK, reset the timer.
