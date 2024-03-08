@@ -41,6 +41,7 @@ runs:
         else
           NSS_TARGET=Debug
         fi
+        ls -l $NSS_DIR
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
