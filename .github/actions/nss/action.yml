@@ -16,17 +16,23 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout NSPR
-      uses: actions/checkout@v4
-      with:
-        repository: "nss-dev/nspr"
-        path: ${{ github.workspace }}/nspr
+    # - name: Checkout NSPR
+    #   uses: actions/checkout@v4
+    #   with:
+    #     repository: "nss-dev/nspr"
+    #     path: ${{ github.workspace }}/nspr
 
-    - name: Checkout NSS
-      uses: actions/checkout@v4
-      with:
-        repository: "nss-dev/nss"
-        path: ${{ github.workspace }}/nss
+    # - name: Checkout NSS
+    #   uses: actions/checkout@v4
+    #   with:
+    #     repository: "nss-dev/nss"
+    #     path: ${{ github.workspace }}/nss
+
+    - run: hg clone https://hg.mozilla.org/projects/nspr ${{ github.workspace }}/nspr
+      shell: bash
+
+    - run: hg clone https://hg.mozilla.org/projects/nss ${{ github.workspace }}/nss
+      shell: bash
 
     - name: Build
       shell: bash
