@@ -38,8 +38,13 @@ runs:
     - name: Enable sscache
       shell: bash
       run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          echo "CC=sccache cl" >> "$GITHUB_ENV"
+          echo "CXX=sccache cl" >> "$GITHUB_ENV"
+        else
+          echo "CC=sccache cc" >> "$GITHUB_ENV"
+          echo "CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
         echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        echo "CC=sccache cc" >> "$GITHUB_ENV"
-        echo "CXX=sccache c++" >> "$GITHUB_ENV"
-
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
