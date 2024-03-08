@@ -41,12 +41,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: ./.github/actions/rust
-        with:
-          version: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
-
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         env:
@@ -96,6 +90,12 @@ jobs:
           echo "BASH=$SHELL" >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
+
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: ${{ matrix.rust-toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
