@@ -16,6 +16,21 @@ inputs:
 runs:
   using: composite
   steps:
+    # Ideally, we'd use this. But things are sufficiently flaky that we're better off
+    # trying both hg and git. Leaving this here in case we want to re-try in the future.
+    #
+    # - name: Checkout NSPR
+    #   uses: actions/checkout@v4
+    #   with:
+    #     repository: "nss-dev/nspr"
+    #     path: ${{ github.workspace }}/nspr
+
+    # - name: Checkout NSS
+    #   uses: actions/checkout@v4
+    #   with:
+    #     repository: "nss-dev/nss"
+    #     path: ${{ github.workspace }}/nss
+
     - name: Checkout NSPR
       shell: bash
       run: |
@@ -41,8 +56,6 @@ runs:
         else
           NSS_TARGET=Debug
         fi
-        ls -l "${{ github.workspace }}"
-        ls -l $NSS_DIR
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
