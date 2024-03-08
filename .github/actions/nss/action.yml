@@ -19,14 +19,14 @@ runs:
     - name: Checkout NSPR
       shell: bash
       run: |
-        hg clone https://hg.mozilla.org/projects/nspr ${{ github.workspace }}/nspr || \
-          git clone --depth=1 https://github.com/nss-dev/nspr ${{ github.workspace }}/nspr
+        hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
+          git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
 
     - name: Checkout NSS
       shell: bash
       run: |
-        hg clone https://hg.mozilla.org/projects/nss ${{ github.workspace }}/nss || \
-          git clone --depth=1 https://github.com/nss-dev/nss ${{ github.workspace }}/nss
+        hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
+          git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
 
     - name: Build
       shell: bash
@@ -41,7 +41,7 @@ runs:
         else
           NSS_TARGET=Debug
         fi
-        ls -l ${{ github.workspace }}
+        ls -l "${{ github.workspace }}"
         ls -l $NSS_DIR
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
