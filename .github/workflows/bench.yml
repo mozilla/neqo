@@ -42,7 +42,7 @@ jobs:
           cargo +$TOOLCHAIN bench --features bench --no-run
           cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
 
-      - name: Download cached `main`-branch results
+      - name: Download cached main-branch results
         id: criterion-cache
         uses: actions/cache/restore@v4
         with:
@@ -55,15 +55,14 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
-      - name: Run `cargo bench`
+      - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN bench --features bench | tee results.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
-      #
-      - name: Profile `cargo bench` transfer
+      - name: Profile cargo bench transfer
         run: |
           # This re-runs part of the previous step, and would hence overwrite part of the criterion results.
           # Avoid that by shuffling the directories around so this run uses its own results directory.
@@ -102,7 +101,13 @@ jobs:
 
       - name: Format results as Markdown
         run: |
-          grep -Ev 'ignored|running \d+ tests|%\)' results.txt > results.md
+          grep -Ev 'ignored|running \d+ tests|%\)' output.txt |\
+            sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
+                    -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
+                    -e 's/^ +/  * /gi' \
+                    -e 's/^([a-z0-9].*)$/**\1**/gi' \
+                    -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
+              > results.md
 
       - name: Post results to PR
         uses: thollander/actions-comment-pull-request@v2
@@ -111,7 +116,7 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           comment_tag: bench-results
 
-      - name: Convert for `profiler.firefox.com`
+      - name: Convert for profiler.firefox.com
         run: |
           perf script -i perf.data -F +pid > transfer.perf &
           perf script -i client/perf.data -F +pid > client.perf &
@@ -122,7 +127,7 @@ jobs:
           mv server/flamegraph.svg server.svg
           rm neqo.svg
 
-      - name: Cache `main`-branch results
+      - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
