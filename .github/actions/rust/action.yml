@@ -23,7 +23,7 @@ runs:
       shell: pwsh
       run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
 
-    - name: Install cargo-binstall (Windows)
+    - name: Install cargo-binstall (Linux & MacOS)
       if: runner.os != 'Windows'
       shell: bash
       run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
