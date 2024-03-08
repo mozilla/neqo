@@ -48,14 +48,6 @@ jobs:
           key: criterion-${{ runner.os }}-${{ hashFiles('./target/criterion/**.json') }}
           restore-keys: criterion-${{ runner.os }}-
 
-      # - name: Download github-action-benchmark results
-      #   id: benchmark-cache
-      #   uses: actions/cache/restore@v4
-      #   with:
-      #     path: ./cache
-      #     key: action-benchmark-${{ runner.os}}-${{ hashFiles('./cache/**.TODO') }}
-      #     restore-keys: action-benchmark-${{ runner.os }}-
-
       # Disable turboboost, hyperthreading and use performance governor.
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
@@ -64,15 +56,23 @@ jobs:
       - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN bench --features bench | tee output.txt
+            cargo +$TOOLCHAIN bench --features bench | tee bench.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
+      #
       - name: Profile cargo bench transfer
         run: |
+          # This re-runs part of the previous step, and would hence overwrite part of the criterion results.
+          # Avoid that by shuffling the directories around so this run uses its own results directory.
+          mv target/criterion target/criterion-bench
+          mv target/criterion-transfer-profile target/criterion
           taskset -c 0 nice -n -20 \
             cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds"
+          # And now restore the directories.
+          mv target/criterion target/criterion-transfer-profile
+          mv target/criterion-bench target/criterion
 
       - name: Profile client/server transfer
         run: |
@@ -98,18 +98,17 @@ jobs:
         run: sudo /root/bin/unprep.sh
         if: success() || failure() || cancelled()
 
-      # TODO: Wait for this action to be allowlisted. And then figure out how to only upload
-      # benchmark data when the main branch is being updated (e.g., if: ${{ github.ref == "refs/heads/main" }})
-      # - name: Store current benchmark results
-      #   uses: benchmark-action/github-action-benchmark@v1
-      #   with:
-      #     tool: 'cargo'
-      #     output-file-path: output.txt
-      #     external-data-json-path: ./cache/benchmark-data.json
-      #     fail-on-alert: true
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-      #     comment-on-alert: true
-      #     summary-always: true
+      - name: Format results as Markdown
+        run: |
+          grep -Ev 'ignored|running \d+ tests|%\)' bench.txt > extract.txt
+
+      - name: Post results to PR
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          filePath: extract.txt
+          comment_tag: execution
+          pr_number: ${{ github.event.pull_request.number }}
 
       - name: Convert for profiler.firefox.com
         run: |
@@ -129,13 +128,6 @@ jobs:
           path: ./target/criterion
           key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
 
-      # - name: Upload github-action-benchmark results
-      #   if: github.ref == 'refs/heads/main'
-      #   uses: actions/cache/save@v4
-      #   with:
-      #     path: ./cache
-      #     key: ${{ steps.benchmark-cache.outputs.cache-primary-key }}
-
       - name: Archive perf data
         uses: actions/upload-artifact@v4
         with:
@@ -143,6 +135,6 @@ jobs:
           path: |
             *.svg
             *.perf
-            output.txt
-            target/criterion
+            bench.txt
+            target/criterion*
           compression-level: 9
