@@ -99,23 +99,6 @@ jobs:
         run: sudo /root/bin/unprep.sh
         if: success() || failure() || cancelled()
 
-      - name: Format results as Markdown
-        run: |
-          grep -Ev 'ignored|running \d+ tests|%\)' output.txt |\
-            sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
-                    -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
-                    -e 's/^ +/  * /gi' \
-                    -e 's/^([a-z0-9].*)$/**\1**/gi' \
-                    -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
-              > results.md
-
-      - name: Post results to PR
-        uses: thollander/actions-comment-pull-request@v2
-        with:
-          filePath: results.md
-          pr_number: ${{ github.event.pull_request.number }}
-          comment_tag: bench-results
-
       - name: Convert for profiler.firefox.com
         run: |
           perf script -i perf.data -F +pid > transfer.perf &
@@ -135,6 +118,7 @@ jobs:
           key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
 
       - name: Export perf data
+        id: export
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
@@ -144,3 +128,22 @@ jobs:
             results.*
             target/criterion*
           compression-level: 9
+
+      - name: Format results as Markdown
+        run: |
+          grep -Ev 'ignored|running \d+ tests|%\)' output.txt |\
+            sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
+                    -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
+                    -e 's/^ +/  * /gi' \
+                    -e 's/^([a-z0-9].*)$/**\1**/gi' \
+                    -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
+              > results.md
+          echo '' >> results.md
+          echo '[:arrow_down: Download full results](${{ steps.export.outputs.artifact-url }})' >> results.md
+
+      - name: Post results to PR
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          filePath: results.md
+          pr_number: ${{ github.event.pull_request.number }}
+          comment_tag: bench-results
