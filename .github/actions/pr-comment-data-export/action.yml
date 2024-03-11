@@ -25,8 +25,8 @@ runs:
       run: |
         mkdir comment-data
         cp "${{ inputs.contents }}" comment-data/contents
-        echo "${{ inputs.name }}"" > comment-data/name
-        echo "${{ inputs.log-url }}"" > comment-data/log-url
+        echo "${{ inputs.name }}" > comment-data/name
+        echo "${{ inputs.log-url }}" > comment-data/log-url
         echo "${{ github.event.number }}" > comment-data/pr-number
 
     - if: github.event_name == 'pull_request'
