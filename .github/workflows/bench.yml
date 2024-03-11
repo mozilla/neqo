@@ -42,8 +42,8 @@ jobs:
 
       - name: Build
         run: |
-          cargo +$TOOLCHAIN bench --features bench --no-run
-          cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
+          cargo "+$TOOLCHAIN" bench --features bench --no-run
+          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
 
       - name: Download cached main-branch results
         id: criterion-cache
@@ -61,7 +61,7 @@ jobs:
       - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN bench --features bench | tee results.txt
+            cargo "+$TOOLCHAIN" bench --features bench | tee results.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
@@ -72,7 +72,7 @@ jobs:
           mv target/criterion target/criterion-bench
           mv target/criterion-transfer-profile target/criterion || true
           taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
+            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds"
           # And now restore the directories.
           mv target/criterion target/criterion-transfer-profile
@@ -83,13 +83,13 @@ jobs:
           { mkdir server; \
             cd server; \
             taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 || true; } &
+            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-server -- --db ../test-fixture/db "$HOST:4433" || true; } &
           mkdir client; \
             cd client; \
             time taskset -c 1 nice -n -20 \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-client -- --output-dir . "https://$HOST:4433/$SIZE"
           killall -INT neqo-server
           cd ${{ github.workspace }}
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
