@@ -21,7 +21,7 @@ qlog = { version = "0.12", default-features = false }
 smallvec = { version = "1.11", default-features = false }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+criterion = { version = "0.5", default-features = false }
 enum-map = { version = "2.7", default-features = false }
 test-fixture = { path = "../test-fixture" }
 
