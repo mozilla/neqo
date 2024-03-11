@@ -68,7 +68,7 @@ fn priority_update() {
             Instant::now(),
             "GET",
             &("https", "something.com", "/"),
-            &[],
+            &[Header::new("priority", "u=4,i")],
             Priority::new(4, true),
         )
         .unwrap();
@@ -129,7 +129,7 @@ fn priority_update_dont_send_for_cancelled_stream() {
             Instant::now(),
             "GET",
             &("https", "something.com", "/"),
-            &[],
+            &[Header::new("priority", "u=5")],
             Priority::new(5, false),
         )
         .unwrap();
