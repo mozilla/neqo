@@ -50,9 +50,10 @@ struct Bindings {
 }
 
 fn is_debug() -> bool {
-    env::var("DEBUG")
-        .map(|d| d.parse::<bool>().unwrap_or(false))
-        .unwrap_or(false)
+    // Check the build profile and not whether debug symbols are enabled (i.e.,
+    // `env::var("DEBUG")`), because we enable those for benchmarking/profiling and still want
+    // to build NSS in release mode.
+    env::var("PROFILE").unwrap_or_default() == "debug"
 }
 
 // bindgen needs access to libclang.
@@ -147,10 +148,10 @@ fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
+        // Generate static libraries in addition to shared libraries.
+        String::from("--static"),
     ];
-    if is_debug() {
-        build_nss.push(String::from("--static"));
-    } else {
+    if !is_debug() {
         build_nss.push(String::from("-o"));
     }
     if let Ok(d) = env::var("NSS_JOBS") {
@@ -315,7 +316,7 @@ fn setup_standalone() -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    if is_debug() {
+    if is_debug() || env::consts::OS == "windows" {
         static_link();
     } else {
         dynamic_link();

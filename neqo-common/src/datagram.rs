@@ -54,6 +54,7 @@ impl Datagram {
         self.ttl
     }
 
+    #[cfg(feature = "udp")]
     #[must_use]
     pub(crate) fn into_data(self) -> Vec<u8> {
         self.d

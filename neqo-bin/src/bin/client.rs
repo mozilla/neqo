@@ -15,7 +15,7 @@ use std::{
     pin::Pin,
     process::exit,
     rc::Rc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use clap::Parser;
@@ -34,8 +34,8 @@ use neqo_http3::{
     Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output, Priority,
 };
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, StreamId, StreamType, Version,
+    Connection, ConnectionId, EmptyConnectionIdGenerator, Error as TransportError, StreamId,
+    Version,
 };
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
@@ -122,11 +122,8 @@ impl KeyUpdateState {
 #[command(author, version, about, long_about = None)]
 #[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
-    #[arg(short = 'a', long, default_value = "h3")]
-    /// ALPN labels to negotiate.
-    ///
-    /// This client still only does HTTP/3 no matter what the ALPN says.
-    alpn: String,
+    #[command(flatten)]
+    shared: neqo_bin::SharedArgs,
 
     urls: Vec<Url>,
 
@@ -136,21 +133,8 @@ pub struct Args {
     #[arg(short = 'H', long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[arg(name = "encoder-table-size", long, default_value = "16384")]
-    max_table_size_encoder: u64,
-
-    #[arg(name = "decoder-table-size", long, default_value = "16384")]
-    max_table_size_decoder: u64,
-
-    #[arg(name = "max-blocked-streams", short = 'b', long, default_value = "10")]
-    max_blocked_streams: u16,
-
     #[arg(name = "max-push", short = 'p', long, default_value = "10")]
     max_concurrent_push_streams: u64,
-
-    #[arg(name = "use-old-http", short = 'o', long)]
-    /// Use http 0.9 instead of HTTP/3
-    use_old_http: bool,
 
     #[arg(name = "download-in-series", long)]
     /// Download resources in series using separate connections.
@@ -164,17 +148,9 @@ pub struct Args {
     /// Output received data to stdout
     output_read_data: bool,
 
-    #[arg(name = "qlog-dir", long)]
-    /// Enable QLOG logging and QLOG traces to this directory
-    qlog_dir: Option<PathBuf>,
-
     #[arg(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
-
-    #[arg(name = "qns-test", long)]
-    /// Enable special behavior for use with QUIC Network Simulator
-    qns_test: Option<String>,
 
     #[arg(short = 'r', long)]
     /// Client attempts to resume by making multiple connections to servers.
@@ -186,18 +162,10 @@ pub struct Args {
     /// Attempt to initiate a key update immediately after confirming the connection.
     key_update: bool,
 
-    #[arg(short = 'c', long, number_of_values = 1)]
-    /// The set of TLS cipher suites to enable.
-    /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
-    ciphers: Vec<String>,
-
     #[arg(name = "ech", long, value_parser = |s: &str| hex::decode(s))]
     /// Enable encrypted client hello (ECH).
     /// This takes an encoded ECH configuration in hexadecimal format.
     ech: Option<Vec<u8>>,
-
-    #[command(flatten)]
-    quic_parameters: QuicParameters,
 
     #[arg(name = "ipv4-only", short = '4', long)]
     /// Connect only over IPv4
@@ -218,7 +186,8 @@ pub struct Args {
 
 impl Args {
     fn get_ciphers(&self) -> Vec<Cipher> {
-        self.ciphers
+        self.shared
+            .ciphers
             .iter()
             .filter_map(|c| match c.as_str() {
                 "TLS_AES_128_GCM_SHA256" => Some(TLS_AES_128_GCM_SHA256),
@@ -230,119 +199,47 @@ impl Args {
     }
 
     fn update_for_tests(&mut self) {
-        let Some(testcase) = self.qns_test.as_ref() else {
+        let Some(testcase) = self.shared.qns_test.as_ref() else {
             return;
         };
 
         // Only use v1 for most QNS tests.
-        self.quic_parameters.quic_version = vec![Version::Version1];
+        self.shared.quic_parameters.quic_version = vec![Version::Version1];
         match testcase.as_str() {
             // TODO: Add "ecn" when that is ready.
             "http3" => {}
             "handshake" | "transfer" | "retry" => {
-                self.use_old_http = true;
+                self.shared.use_old_http = true;
             }
             "zerortt" | "resumption" => {
                 if self.urls.len() < 2 {
                     eprintln!("Warning: resumption tests won't work without >1 URL");
                     exit(127);
                 }
-                self.use_old_http = true;
+                self.shared.use_old_http = true;
                 self.resume = true;
             }
             "multiconnect" => {
-                self.use_old_http = true;
+                self.shared.use_old_http = true;
                 self.download_in_series = true;
             }
             "chacha20" => {
-                self.use_old_http = true;
-                self.ciphers.clear();
-                self.ciphers
+                self.shared.use_old_http = true;
+                self.shared.ciphers.clear();
+                self.shared
+                    .ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             "keyupdate" => {
-                self.use_old_http = true;
+                self.shared.use_old_http = true;
                 self.key_update = true;
             }
             "v2" => {
-                self.use_old_http = true;
+                self.shared.use_old_http = true;
                 // Use default version set for this test (which allows compatible vneg.)
-                self.quic_parameters.quic_version.clear();
+                self.shared.quic_parameters.quic_version.clear();
             }
             _ => exit(127),
-        }
-    }
-}
-
-fn from_str(s: &str) -> Res<Version> {
-    let v = u32::from_str_radix(s, 16)
-        .map_err(|_| ClientError::ArgumentError("versions need to be specified in hex"))?;
-    Version::try_from(v).map_err(|_| ClientError::ArgumentError("unknown version"))
-}
-
-#[derive(Debug, Parser)]
-struct QuicParameters {
-    #[arg(
-        short = 'Q',
-        long,
-        num_args = 1..,
-        value_delimiter = ' ',
-        number_of_values = 1,
-        value_parser = from_str)]
-    /// A list of versions to support, in hex.
-    /// The first is the version to attempt.
-    /// Adding multiple values adds versions in order of preference.
-    /// If the first listed version appears in the list twice, the position
-    /// of the second entry determines the preference order of that version.
-    quic_version: Vec<Version>,
-
-    #[arg(long, default_value = "16")]
-    /// Set the `MAX_STREAMS_BIDI` limit.
-    max_streams_bidi: u64,
-
-    #[arg(long, default_value = "16")]
-    /// Set the `MAX_STREAMS_UNI` limit.
-    max_streams_uni: u64,
-
-    #[arg(long = "idle", default_value = "30")]
-    /// The idle timeout for connections, in seconds.
-    idle_timeout: u64,
-
-    #[arg(long = "cc", default_value = "newreno")]
-    /// The congestion controller to use.
-    congestion_control: CongestionControlAlgorithm,
-
-    #[arg(long = "pacing")]
-    /// Whether pacing is enabled.
-    pacing: bool,
-}
-
-impl QuicParameters {
-    fn get(&self, alpn: &str) -> ConnectionParameters {
-        let params = ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, self.max_streams_bidi)
-            .max_streams(StreamType::UniDi, self.max_streams_uni)
-            .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .cc_algorithm(self.congestion_control)
-            .pacing(self.pacing);
-
-        if let Some(&first) = self.quic_version.first() {
-            let all = if self.quic_version[1..].contains(&first) {
-                &self.quic_version[1..]
-            } else {
-                &self.quic_version
-            };
-            params.versions(first, all.to_vec())
-        } else {
-            let version = match alpn {
-                "h3" | "hq-interop" => Version::Version1,
-                "h3-29" | "hq-29" => Version::Draft29,
-                "h3-30" | "hq-30" => Version::Draft30,
-                "h3-31" | "hq-31" => Version::Draft31,
-                "h3-32" | "hq-32" => Version::Draft32,
-                _ => Version::default(),
-            };
-            params.versions(version, Version::all())
         }
     }
 }
@@ -824,11 +721,13 @@ impl<'a> ClientRunner<'a> {
 
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
-                    let dgram = self.socket.recv(&self.local_addr)?;
-                    if dgram.is_none() {
+                    let dgrams = self.socket.recv(&self.local_addr)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in &dgrams {
+                        self.process(Some(dgram)).await?;
+                    }
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
                 Ready::Timeout => {
@@ -887,11 +786,11 @@ fn create_http3_client(
 ) -> Res<Http3Client> {
     let mut transport = Connection::new_client(
         hostname,
-        &[&args.alpn],
+        &[&args.shared.alpn],
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         local_addr,
         remote_addr,
-        args.quic_parameters.get(args.alpn.as_str()),
+        args.shared.quic_parameters.get(args.shared.alpn.as_str()),
         Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
@@ -901,9 +800,9 @@ fn create_http3_client(
     let mut client = Http3Client::new_with_conn(
         transport,
         Http3Parameters::default()
-            .max_table_size_encoder(args.max_table_size_encoder)
-            .max_table_size_decoder(args.max_table_size_decoder)
-            .max_blocked_streams(args.max_blocked_streams)
+            .max_table_size_encoder(args.shared.max_table_size_encoder)
+            .max_table_size_decoder(args.shared.max_table_size_decoder)
+            .max_blocked_streams(args.shared.max_blocked_streams)
             .max_concurrent_push_streams(args.max_concurrent_push_streams),
     );
 
@@ -922,7 +821,7 @@ fn create_http3_client(
 }
 
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
-    if let Some(qlog_dir) = &args.qlog_dir {
+    if let Some(qlog_dir) = &args.shared.qlog_dir {
         let mut qlog_path = qlog_dir.clone();
         let filename = format!("{hostname}-{cid}.sqlog");
         qlog_path.push(filename);
@@ -1000,7 +899,7 @@ async fn main() -> Res<()> {
         let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
-            if args.use_old_http { "H9" } else { "H3" },
+            if args.shared.use_old_http { "H9" } else { "H3" },
             real_local,
             remote_addr,
         );
@@ -1017,7 +916,7 @@ async fn main() -> Res<()> {
 
             first = false;
 
-            token = if args.use_old_http {
+            token = if args.shared.use_old_http {
                 old::ClientRunner::new(
                     &args,
                     &mut socket,
@@ -1264,8 +1163,8 @@ mod old {
             url_queue: VecDeque<Url>,
             token: Option<ResumptionToken>,
         ) -> Res<ClientRunner<'a>> {
-            let alpn = match args.alpn.as_str() {
-                "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.alpn.as_str(),
+            let alpn = match args.shared.alpn.as_str() {
+                "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.shared.alpn.as_str(),
                 _ => "hq-interop",
             };
 
@@ -1275,7 +1174,7 @@ mod old {
                 Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
                 local_addr,
                 remote_addr,
-                args.quic_parameters.get(alpn),
+                args.shared.quic_parameters.get(alpn),
                 Instant::now(),
             )?;
 
@@ -1337,11 +1236,13 @@ mod old {
 
                 match ready(self.socket, self.timeout.as_mut()).await? {
                     Ready::Socket => loop {
-                        let dgram = self.socket.recv(&self.local_addr)?;
-                        if dgram.is_none() {
+                        let dgrams = self.socket.recv(&self.local_addr)?;
+                        if dgrams.is_empty() {
                             break;
                         }
-                        self.process(dgram.as_ref()).await?;
+                        for dgram in &dgrams {
+                            self.process(Some(dgram)).await?;
+                        }
                         self.handler.maybe_key_update(&mut self.client)?;
                     },
                     Ready::Timeout => {

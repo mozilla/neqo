@@ -41,19 +41,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: ./.github/actions/rust
-        with:
-          version: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
-
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
@@ -65,7 +58,7 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           csrutil status | grep disabled
-          brew install ninja mercurial cargo-binstall llvm
+          brew install ninja mercurial llvm
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           ln -s /opt/homebrew/bin/python3 /opt/homebrew/bin/python
           # python3 -m pip install gyp-next
@@ -76,82 +69,84 @@ jobs:
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
-
       - name: Use MSYS2 environment and install more dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
-          echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
+          # shellcheck disable=SC2028
+          {
+            echo "C:\\msys64\\usr\\bin"
+            echo "C:\\msys64\\mingw64\\bin"
+          } >> "$GITHUB_PATH"
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Rust tools
-        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
-
-      # This step might be removed if the distro included a recent enough
-      # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
-      # (neqo-crypto/build.rs would also need to query pkg-config to get the
-      # right build flags rather than building NSS.)
-      # Clone from the main hg repo, because the GitHub mirror can be out of date.
-      - name: Fetch NSS and NSPR
-        uses: ./.github/actions/nss
-
       - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
         run: |
-          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
-          echo "GYP_MSVS_VERSION=2022" >> "$GITHUB_ENV"
-          echo "BASH=$SHELL" >> "$GITHUB_ENV"
+          {
+            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+            echo "GYP_MSVS_VERSION=2022"
+            echo "BASH=$SHELL"
+          } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
 
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: ${{ matrix.rust-toolchain }}
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Fetch and build NSS and NSPR
+        uses: ./.github/actions/nss
+
       - name: Build
         run: |
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci,bench
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
-          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
-          echo "${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_PATH"
-        env:
-          LIB_DIR: ${{ matrix.type == 'release' && 'Release' || 'Debug' }}
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
           cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
         run: |
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
+          "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
           SIZE: 54321
           RUST_LOG: warn
+          BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
       - name: Check formatting
         run: |
           if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
-            export CONFIG_PATH="--config-path=$(mktemp)"
+            CONFIG_PATH="--config-path=$(mktemp)"
           fi
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
       - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
+        run: |
+          # Use cargo-hack to run clippy on each crate individually with its
+          # respective default features only. Can reveal warnings otherwise
+          # hidden given that a plain cargo clippy combines all features of the
+          # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
+          cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
         if: success() || failure()
 
       - name: Check rustdoc links
@@ -167,8 +162,3 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
-
-  bench:
-    name: "Benchmark"
-    needs: [check]
-    uses: ./.github/workflows/bench.yml

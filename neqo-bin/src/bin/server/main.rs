@@ -33,9 +33,7 @@ use neqo_http3::{
     Error, Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{
-    server::ValidateAddress, tparams::PreferredAddress, CongestionControlAlgorithm,
-    ConnectionIdGenerator, ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
-    Version,
+    server::ValidateAddress, ConnectionIdGenerator, Output, RandomConnectionIdGenerator, Version,
 };
 use tokio::time::Sleep;
 
@@ -90,18 +88,12 @@ impl std::error::Error for ServerError {}
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    #[command(flatten)]
+    shared: neqo_bin::SharedArgs,
+
     /// List of IP:port to listen on
     #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
-
-    #[arg(name = "encoder-table-size", long, default_value = "16384")]
-    max_table_size_encoder: u64,
-
-    #[arg(name = "decoder-table-size", long, default_value = "16384")]
-    max_table_size_decoder: u64,
-
-    #[arg(short = 'b', long, default_value = "10")]
-    max_blocked_streams: u16,
 
     #[arg(short = 'd', long, default_value = "./test-fixture/db")]
     /// NSS database directory.
@@ -111,35 +103,9 @@ struct Args {
     /// Name of key from NSS database.
     key: String,
 
-    #[arg(short = 'a', long, default_value = "h3")]
-    /// ALPN labels to negotiate.
-    ///
-    /// This server still only does HTTP3 no matter what the ALPN says.
-    alpn: String,
-
-    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
-    /// Enable QLOG logging and QLOG traces to this directory
-    qlog_dir: Option<PathBuf>,
-
-    #[arg(name = "qns-test", long)]
-    /// Enable special behavior for use with QUIC Network Simulator
-    qns_test: Option<String>,
-
-    #[arg(name = "use-old-http", short = 'o', long)]
-    /// Use http 0.9 instead of HTTP/3
-    use_old_http: bool,
-
-    #[command(flatten)]
-    quic_parameters: QuicParameters,
-
     #[arg(name = "retry", long)]
     /// Force a retry
     retry: bool,
-
-    #[arg(short = 'c', long, number_of_values = 1)]
-    /// The set of TLS cipher suites to enable.
-    /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
-    ciphers: Vec<String>,
 
     #[arg(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
@@ -150,7 +116,8 @@ struct Args {
 
 impl Args {
     fn get_ciphers(&self) -> Vec<Cipher> {
-        self.ciphers
+        self.shared
+            .ciphers
             .iter()
             .filter_map(|c| match c.as_str() {
                 "TLS_AES_128_GCM_SHA256" => Some(TLS_AES_128_GCM_SHA256),
@@ -166,13 +133,13 @@ impl Args {
             .iter()
             .filter_map(|host| host.to_socket_addrs().ok())
             .flatten()
-            .chain(self.quic_parameters.preferred_address_v4())
-            .chain(self.quic_parameters.preferred_address_v6())
+            .chain(self.shared.quic_parameters.preferred_address_v4())
+            .chain(self.shared.quic_parameters.preferred_address_v6())
             .collect()
     }
 
     fn now(&self) -> Instant {
-        if self.qns_test.is_some() {
+        if self.shared.qns_test.is_some() {
             // When NSS starts its anti-replay it blocks any acceptance of 0-RTT for a
             // single period.  This ensures that an attacker that is able to force a
             // server to reboot is unable to use that to flush the anti-replay buffers
@@ -188,117 +155,6 @@ impl Args {
         } else {
             Instant::now()
         }
-    }
-}
-
-fn from_str(s: &str) -> Result<Version, ServerError> {
-    let v = u32::from_str_radix(s, 16)
-        .map_err(|_| ServerError::ArgumentError("versions need to be specified in hex"))?;
-    Version::try_from(v).map_err(|_| ServerError::ArgumentError("unknown version"))
-}
-
-#[derive(Debug, Parser)]
-struct QuicParameters {
-    #[arg(
-        short = 'Q',
-        long,
-        num_args = 1..,
-        value_delimiter = ' ',
-        number_of_values = 1,
-        value_parser = from_str
-    )]
-    /// A list of versions to support in order of preference, in hex.
-    quic_version: Vec<Version>,
-
-    #[arg(long, default_value = "16")]
-    /// Set the `MAX_STREAMS_BIDI` limit.
-    max_streams_bidi: u64,
-
-    #[arg(long, default_value = "16")]
-    /// Set the `MAX_STREAMS_UNI` limit.
-    max_streams_uni: u64,
-
-    #[arg(long = "idle", default_value = "30")]
-    /// The idle timeout for connections, in seconds.
-    idle_timeout: u64,
-
-    #[arg(long = "cc", default_value = "newreno")]
-    /// The congestion controller to use.
-    congestion_control: CongestionControlAlgorithm,
-
-    #[arg(name = "preferred-address-v4", long)]
-    /// An IPv4 address for the server preferred address.
-    preferred_address_v4: Option<String>,
-
-    #[arg(name = "preferred-address-v6", long)]
-    /// An IPv6 address for the server preferred address.
-    preferred_address_v6: Option<String>,
-}
-
-impl QuicParameters {
-    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
-    where
-        F: FnMut(&SocketAddr) -> bool,
-    {
-        let addr = opt
-            .iter()
-            .filter_map(|spa| spa.to_socket_addrs().ok())
-            .flatten()
-            .find(f);
-        assert_eq!(
-            opt.is_some(),
-            addr.is_some(),
-            "unable to resolve '{}' to an {} address",
-            opt.as_ref().unwrap(),
-            v,
-        );
-        addr
-    }
-
-    fn preferred_address_v4(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", SocketAddr::is_ipv4)
-    }
-
-    fn preferred_address_v6(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", SocketAddr::is_ipv6)
-    }
-
-    fn preferred_address(&self) -> Option<PreferredAddress> {
-        let v4 = self.preferred_address_v4();
-        let v6 = self.preferred_address_v6();
-        if v4.is_none() && v6.is_none() {
-            None
-        } else {
-            let v4 = v4.map(|v4| {
-                let SocketAddr::V4(v4) = v4 else {
-                    unreachable!();
-                };
-                v4
-            });
-            let v6 = v6.map(|v6| {
-                let SocketAddr::V6(v6) = v6 else {
-                    unreachable!();
-                };
-                v6
-            });
-            Some(PreferredAddress::new(v4, v6))
-        }
-    }
-
-    fn get(&self) -> ConnectionParameters {
-        let mut params = ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, self.max_streams_bidi)
-            .max_streams(StreamType::UniDi, self.max_streams_uni)
-            .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .cc_algorithm(self.congestion_control);
-        if let Some(pa) = self.preferred_address() {
-            params = params.preferred_address(pa);
-        }
-
-        if let Some(first) = self.quic_version.first() {
-            params = params.versions(*first, self.quic_version.clone());
-        }
-        params
     }
 }
 
@@ -417,14 +273,14 @@ impl SimpleServer {
         let server = Http3Server::new(
             args.now(),
             &[args.key.clone()],
-            &[args.alpn.clone()],
+            &[args.shared.alpn.clone()],
             anti_replay,
             cid_mgr,
             Http3Parameters::default()
-                .connection_parameters(args.quic_parameters.get())
-                .max_table_size_encoder(args.max_table_size_encoder)
-                .max_table_size_decoder(args.max_table_size_decoder)
-                .max_blocked_streams(args.max_blocked_streams),
+                .connection_parameters(args.shared.quic_parameters.get(&args.shared.alpn))
+                .max_table_size_encoder(args.shared.max_table_size_encoder)
+                .max_table_size_decoder(args.shared.max_table_size_decoder)
+                .max_blocked_streams(args.shared.max_blocked_streams),
             None,
         )
         .expect("We cannot make a server!");
@@ -470,7 +326,7 @@ impl HttpServer for SimpleServer {
 
                     let mut response =
                         if let Some(path) = headers.iter().find(|&h| h.name() == ":path") {
-                            if args.qns_test.is_some() {
+                            if args.shared.qns_test.is_some() {
                                 if let Some(data) = qns_read_response(path.value()) {
                                     ResponseData::from(data)
                                 } else {
@@ -600,15 +456,15 @@ impl ServersRunner {
             .expect("unable to setup anti-replay");
         let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-        let mut svr: Box<dyn HttpServer> = if args.use_old_http {
+        let mut svr: Box<dyn HttpServer> = if args.shared.use_old_http {
             Box::new(
                 Http09Server::new(
                     args.now(),
                     &[args.key.clone()],
-                    &[args.alpn.clone()],
+                    &[args.shared.alpn.clone()],
                     anti_replay,
                     cid_mgr,
-                    args.quic_parameters.get(),
+                    args.shared.quic_parameters.get(&args.shared.alpn),
                 )
                 .expect("We cannot make a server!"),
             )
@@ -616,7 +472,7 @@ impl ServersRunner {
             Box::new(SimpleServer::new(args, anti_replay, cid_mgr))
         };
         svr.set_ciphers(&args.get_ciphers());
-        svr.set_qlog_dir(args.qlog_dir.clone());
+        svr.set_qlog_dir(args.shared.qlog_dir.clone());
         if args.retry {
             svr.validate_address(ValidateAddress::Always);
         }
@@ -686,11 +542,13 @@ impl ServersRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgram = socket.recv(host)?;
-                    if dgram.is_none() {
+                    let dgrams = socket.recv(host)?;
+                    if dgrams.is_empty() {
                         break;
                     }
-                    self.process(dgram.as_ref()).await?;
+                    for dgram in dgrams {
+                        self.process(Some(&dgram)).await?;
+                    }
                 },
                 Ready::Timeout => {
                     self.timeout = None;
@@ -718,39 +576,41 @@ async fn main() -> Result<(), io::Error> {
 
     init_db(args.db.clone());
 
-    if let Some(testcase) = args.qns_test.as_ref() {
-        if args.quic_parameters.quic_version.is_empty() {
+    if let Some(testcase) = args.shared.qns_test.as_ref() {
+        if args.shared.quic_parameters.quic_version.is_empty() {
             // Quic Interop Runner expects the server to support `Version1`
             // only. Exceptions are testcases `versionnegotiation` (not yet
             // implemented) and `v2`.
             if testcase != "v2" {
-                args.quic_parameters.quic_version = vec![Version::Version1];
+                args.shared.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
             qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
         }
 
+        // TODO: More options to deduplicate with client?
         match testcase.as_str() {
             "http3" => (),
             "zerortt" => {
-                args.use_old_http = true;
-                args.alpn = String::from(HQ_INTEROP);
-                args.quic_parameters.max_streams_bidi = 100;
+                args.shared.use_old_http = true;
+                args.shared.alpn = String::from(HQ_INTEROP);
+                args.shared.quic_parameters.max_streams_bidi = 100;
             }
             "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" => {
-                args.use_old_http = true;
-                args.alpn = String::from(HQ_INTEROP);
+                args.shared.use_old_http = true;
+                args.shared.alpn = String::from(HQ_INTEROP);
             }
             "chacha20" => {
-                args.use_old_http = true;
-                args.alpn = String::from(HQ_INTEROP);
-                args.ciphers.clear();
-                args.ciphers
+                args.shared.use_old_http = true;
+                args.shared.alpn = String::from(HQ_INTEROP);
+                args.shared.ciphers.clear();
+                args.shared
+                    .ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             "retry" => {
-                args.use_old_http = true;
-                args.alpn = String::from(HQ_INTEROP);
+                args.shared.use_old_http = true;
+                args.shared.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
             }
             _ => exit(127),
