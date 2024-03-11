@@ -78,12 +78,12 @@ jobs:
       - name: Profile client/server transfer
         run: |
           for CC in newreno cubic; do
-            { mkdir server; \
+            { mkdir -p server; \
               cd server; \
               taskset -c 0 nice -n -20 \
               cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
                 --bin neqo-server -- --db ../test-fixture/db --cc "$CC" $HOST:4433 || true; } &
-            mkdir client; \
+            mkdir -p client; \
               cd client; \
               time taskset -c 1 nice -n -20 \
               cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
