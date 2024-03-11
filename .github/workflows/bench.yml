@@ -151,3 +151,10 @@ jobs:
                     -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
               > results.md
           echo '' >> results.md
+
+      - name: Export PR comment data
+        uses: ./.github/actions/pr-comment-data-export
+        with:
+          name: bench
+          contents: results.md
+          log-url: ${{ steps.export.outputs.artifact-url }}
