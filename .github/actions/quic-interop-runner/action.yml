@@ -99,7 +99,6 @@ runs:
       shell: bash
 
     - name: Export PR comment data
-      if: ${{ github.event_name == 'pull_request' }}
       uses: ./.github/actions/pr-comment-data-export
       with:
         name: qns
