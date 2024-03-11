@@ -156,4 +156,6 @@ jobs:
   bench:
     name: "Benchmark"
     needs: [check]
+    permissions:
+      pull-requests: write
     uses: ./.github/workflows/bench.yml
