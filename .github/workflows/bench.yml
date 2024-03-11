@@ -77,6 +77,8 @@ jobs:
 
       - name: Profile client/server transfer
         run: |
+          cd ${{ github.workspace }}
+          rm -rf client server
           for CC in newreno cubic; do
             { mkdir server; \
               cd server; \
@@ -91,7 +93,8 @@ jobs:
             killall -INT neqo-server
             cd ${{ github.workspace }}
             [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
-            for PEER in server client; do
+            while [ ! -f server/flamegraph.svg ]; do sleep 1; done
+            for PEER in client server; do
               mv "$PEER/flamegraph.svg" "$PEER-$CC.svg"
               mv "$PEER/perf.data" "$PEER-$CC.perf"
             done
@@ -111,7 +114,7 @@ jobs:
           perf script -i perf.data -F +pid > transfer.perf &
           mv flamegraph.svg transfer.svg
           for CC in newreno cubic; do
-            for PEER in server client; do
+            for PEER in client server; do
               perf script -i "$PEER-$CC.perf" -F +pid > "$PEER-$CC.fx.perf" &
             done
           done
