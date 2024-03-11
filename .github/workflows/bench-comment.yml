@@ -1,7 +1,7 @@
 # Post test results as pull request comment.
 #
 # This is done as a separate workflow as it requires write permissions. The
-# tests itself might run off of a fork, i.e. an untrusted environment and should
+# tests itself might run off of a fork, i.e., an untrusted environment and should
 # thus not be granted write permissions.
 
 name: Benchmark Comment
