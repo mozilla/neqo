@@ -4,11 +4,11 @@
 # tests itself might run off of a fork, i.e., an untrusted environment and should
 # thus not be granted write permissions.
 
-name: QUIC Network Simulator Comment
+name: Benchmark Comment
 
 on:
   workflow_run:
-    workflows: ["QUIC Network Simulator"]
+    workflows: ["Bench"]
     types:
       - completed
 
@@ -17,10 +17,8 @@ jobs:
     permissions:
       pull-requests: write
     runs-on: ubuntu-latest
-    if: >
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'failure'
+    if: github.event.workflow_run.event == 'pull_request'
     steps:
       - uses: ./.github/actions/pr-comment
         with:
-          name: qns
+          name: bench

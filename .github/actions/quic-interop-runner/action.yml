@@ -88,24 +88,19 @@ runs:
         name: logs
         path: quic-interop-runner/logs
 
-    # This action might be running off of a fork and would thus not have write
-    # permissions on the origin repository. In order to allow a separate
-    # priviledged action to post a comment on a pull request, upload the
-    # necessary metadata.
-    - name: store comment-data
-      shell: bash
-      if: github.event_name == 'pull_request'
-      env:
-        PULL_REQUEST_NUMBER: ${{ github.event.number }}
+    - name: Format GitHub comment
       run: |
-        mkdir comment-data
-        mv quic-interop-runner/summary comment-data/summary
-        echo $PULL_REQUEST_NUMBER > comment-data/pr-number
-        echo '${{ steps.artifact-upload-step.outputs.artifact-url }}' > comment-data/logs-url
+        echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
+        echo '' >> comment
+        echo '```' >> comment
+        cat quic-interop-runner/summary >> comment
+        echo '```' >> comment
+        echo '' >> comment
+      shell: bash
 
-    - name: Upload comment data
-      uses: actions/upload-artifact@v4
-      if: github.event_name == 'pull_request'
+    - name: Export PR comment data
+      uses: ./.github/actions/pr-comment-data-export
       with:
-        name: comment-data
-        path: ./comment-data
+        name: qns
+        contents: comment
+        log-url: ${{ steps.artifact-upload-step.outputs.artifact-url }}

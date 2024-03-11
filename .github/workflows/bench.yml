@@ -1,6 +1,9 @@
 name: Bench
 on:
-  workflow_call:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
@@ -8,7 +11,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
-  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -Cforce-frame-pointers=yes
+  RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_CMD: record -o perf.data -F997 --call-graph fp -g
 
 jobs:
@@ -39,8 +42,8 @@ jobs:
 
       - name: Build
         run: |
-          cargo +$TOOLCHAIN bench --features bench --no-run
-          cargo +$TOOLCHAIN build --release --bin neqo-client --bin neqo-server
+          cargo "+$TOOLCHAIN" bench --features bench --no-run
+          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
 
       - name: Download cached main-branch results
         id: criterion-cache
@@ -58,7 +61,7 @@ jobs:
       - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN bench --features bench -- --noplot | tee results.txt
+            cargo "+$TOOLCHAIN" bench --features bench -- --noplot | tee results.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
@@ -69,7 +72,7 @@ jobs:
           mv target/criterion target/criterion-bench
           mv target/criterion-transfer-profile target/criterion || true
           taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
+            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
               --bench --exact "Run multiple transfers with varying seeds" --noplot
           # And now restore the directories.
           mv target/criterion target/criterion-transfer-profile
@@ -80,13 +83,13 @@ jobs:
           { mkdir server; \
             cd server; \
             taskset -c 0 nice -n -20 \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- --db ../test-fixture/db $HOST:4433 || true; } &
+            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-server -- --db ../test-fixture/db "$HOST:4433" || true; } &
           mkdir client; \
             cd client; \
             time taskset -c 1 nice -n -20 \
-            cargo +$TOOLCHAIN flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
+              --bin neqo-client -- --output-dir . "https://$HOST:4433/$SIZE"
           killall -INT neqo-server
           cd ${{ github.workspace }}
           [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
@@ -110,6 +113,13 @@ jobs:
           mv server/flamegraph.svg server.svg
           rm neqo.svg
 
+      - name: Generate perf reports
+        run: |
+          perf report -i perf.data --no-children --stdio > transfer.perf.txt &
+          perf report -i client/perf.data --no-children --stdio > client.perf.txt &
+          perf report -i server/perf.data --no-children --stdio > server.perf.txt &
+          wait
+
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
@@ -125,6 +135,7 @@ jobs:
           path: |
             *.svg
             *.perf
+            *.txt
             results.*
             target/criterion*
           compression-level: 9
@@ -140,4 +151,3 @@ jobs:
                     -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
               > results.md
           echo '' >> results.md
-          echo '[:arrow_down: Download full results](${{ steps.export.outputs.artifact-url }})' >> results.md
