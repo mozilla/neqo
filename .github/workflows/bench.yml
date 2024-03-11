@@ -77,8 +77,6 @@ jobs:
 
       - name: Profile client/server transfer
         run: |
-          cd ${{ github.workspace }}
-          rm -rf client server
           for CC in newreno cubic; do
             { mkdir server; \
               cd server; \
@@ -110,7 +108,6 @@ jobs:
 
       - name: Convert for profiler.firefox.com
         run: |
-          rm neqo.svg
           perf script -i perf.data -F +pid > transfer.perf &
           mv flamegraph.svg transfer.svg
           for CC in newreno cubic; do
@@ -119,6 +116,7 @@ jobs:
             done
           done
           wait
+          rm neqo.svg
 
       - name: Generate perf reports
         run: |
