@@ -136,7 +136,7 @@ jobs:
       - name: Format results as Markdown
         id: results
         run: |
-          grep -Ev 'ignored|running \d+ tests|%\)' output.txt |\
+          grep -Ev 'ignored|running \d+ tests|%\)' results.txt |\
             sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
                     -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
                     -e 's/^ +/  * /gi' \
