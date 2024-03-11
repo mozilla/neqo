@@ -1,6 +1,6 @@
 [package]
-name = "neqo-server"
-description = "A basic HTTP3 server."
+name = "neqo-bin"
+description = "A basic QUIC HTTP/0.9 and HTTP/3 client and server."
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -9,13 +9,22 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "neqo-client"
+path = "src/bin/client.rs"
+
+[[bin]]
+name = "neqo-server"
+path = "src/bin/server/main.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
-# neqo-server is not used in Firefox, so we can be liberal with dependency versions
+# neqo-bin is not used in Firefox, so we can be liberal with dependency versions
 clap = { version = "4.4", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hex = { version = "0.4", default-features = false, features = ["std"] }
 log = { version = "0.4", default-features = false }
 neqo-common = { path = "./../neqo-common", features = ["udp"] }
 neqo-crypto = { path = "./../neqo-crypto" }
@@ -25,3 +34,4 @@ neqo-transport = { path = "./../neqo-transport" }
 qlog = { version = "0.12", default-features = false }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
+url = { version = "2.5", default-features = false }
