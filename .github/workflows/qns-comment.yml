@@ -17,10 +17,7 @@ jobs:
     permissions:
       pull-requests: write
     runs-on: ubuntu-latest
-    if: >
-      github.event.workflow_run.event == 'pull_request'
-  # &&
-  # github.event.workflow_run.conclusion == 'failure'
+    if: github.event.workflow_run.event == 'pull_request'
     steps:
       - uses: ./.github/actions/pr-comment
         with:
