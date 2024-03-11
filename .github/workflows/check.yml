@@ -72,8 +72,11 @@ jobs:
       - name: Use MSYS2 environment and install more dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          printf 'C:\\msys64\\usr\\bin' >> "$GITHUB_PATH"
-          printf 'C:\\msys64\\mingw64\\bin' >> "$GITHUB_PATH"
+          # shellcheck disable=SC2028
+          {
+            echo "C:\\msys64\\usr\\bin"
+            echo "C:\\msys64\\mingw64\\bin"
+          } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
