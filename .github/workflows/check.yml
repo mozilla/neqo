@@ -155,18 +155,5 @@ jobs:
 
   bench:
     name: "Benchmark"
-    # needs: [check]
+    needs: [check]
     uses: ./.github/workflows/bench.yml
-
-  pr-comment:
-    name: "Post results to PR"
-    needs: [bench]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-    - uses: thollander/actions-comment-pull-request@v2
-      with:
-        message: ${{ needs.bench.outputs.results }}
-        pr_number: ${{ github.event.pull_request.number }}
-        comment_tag: bench-results

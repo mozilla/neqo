@@ -1,10 +1,6 @@
 name: Bench
 on:
   workflow_call:
-    outputs:
-      results:
-        description: 'Benchmark results formatted as Markdown'
-        value: ${{ jobs.bench.outputs.results }}
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
@@ -19,8 +15,8 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    outputs:
-      results: ${{ steps.results.outputs.results }}
+    permissions:
+      pull-requests: write
     defaults:
       run:
         shell: bash
@@ -145,9 +141,11 @@ jobs:
               > results.md
           echo '' >> results.md
           echo '[:arrow_down: Download full results](${{ steps.export.outputs.artifact-url }})' >> results.md
-          DELIMITER="$(openssl rand -hex 8)"
-          {
-            echo "results<<${DELIMITER}"
-            cat results.md
-            echo "${DELIMITER}"
-          } >> "$GITHUB_OUTPUT"
+
+      - name: "Post results to PR"
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          filePath: results.md
+          pr_number: ${{ github.event.pull_request.number }}
+          comment_tag: bench-results
+
