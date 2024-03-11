@@ -13,6 +13,7 @@ runs:
       with:
         run-id: ${{ github.event.workflow_run.id }}
         name: ${{ inputs.name }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
 
     - id: pr-number
       shell: bash
