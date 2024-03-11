@@ -103,16 +103,20 @@ jobs:
         uses: ./.github/actions/nss
 
       - name: Build
-        run: cargo +${{ matrix.rust-toolchain }} build "$BUILD_TYPE" --all-targets --features ci
+        run: |
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest "$BUILD_TYPE" --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
           cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
         run: |
-          cargo +${{ matrix.rust-toolchain }} build "$BUILD_TYPE" --bin neqo-client --bin neqo-server
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
