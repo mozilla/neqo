@@ -141,11 +141,3 @@ jobs:
               > results.md
           echo '' >> results.md
           echo '[:arrow_down: Download full results](${{ steps.export.outputs.artifact-url }})' >> results.md
-
-      - name: "Post results to PR"
-        uses: thollander/actions-comment-pull-request@v2
-        with:
-          filePath: results.md
-          pr_number: ${{ github.event.pull_request.number }}
-          comment_tag: bench-results
-
