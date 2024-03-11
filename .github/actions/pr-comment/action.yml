@@ -18,6 +18,10 @@ runs:
       shell: bash
       run: echo "number=$(cat pr-number)" >> "$GITHUB_OUTPUT"
 
+    - shell: bash
+      run: |
+        [ -s log-url ] && echo "" >> contents && echo "[:arrow_down: Download logs]($(cat log-url))" >> contents
+
     - uses: thollander/actions-comment-pull-request@v2
       with:
         filePath: contents

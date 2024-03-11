@@ -140,7 +140,6 @@ jobs:
                     -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
               > results.md
           echo '' >> results.md
-          echo '[:arrow_down: Download full results](${{ steps.export.outputs.artifact-url }})' >> results.md
 
       - name: Export PR comment data
         if: ${{ github.event_name == 'pull_request' }}
