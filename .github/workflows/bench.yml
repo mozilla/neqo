@@ -145,4 +145,9 @@ jobs:
               > results.md
           echo '' >> results.md
           echo '[:arrow_down: Download full results](${{ steps.export.outputs.artifact-url }})' >> results.md
-          echo "results='$(cat results.md)'" >> "$GITHUB_OUTPUT"
+          DELIMITER="$(openssl rand -hex 8)"
+          {
+            echo "results<<${DELIMITER}"
+            cat results.md
+            echo "${DELIMITER}"
+          } >> "$GITHUB_OUTPUT"
