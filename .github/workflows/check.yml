@@ -133,7 +133,8 @@ jobs:
           if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
             CONFIG_PATH="--config-path=$(mktemp)"
           fi
-          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check "$CONFIG_PATH"
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
       - name: Clippy
