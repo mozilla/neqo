@@ -120,6 +120,13 @@ jobs:
           done
           wait
 
+      - name: Generate perf reports
+        run: |
+          perf report -i perf.data --no-children --stdio > transfer.perf.txt &
+          perf report -i client/perf.data --no-children --stdio > client.perf.txt &
+          perf report -i server/perf.data --no-children --stdio > server.perf.txt &
+          wait
+
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
@@ -135,6 +142,7 @@ jobs:
           path: |
             *.svg
             *.perf
+            *.txt
             results.*
             target/criterion*
           compression-level: 9
