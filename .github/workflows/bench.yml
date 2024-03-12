@@ -77,15 +77,17 @@ jobs:
       - name: Profile client/server transfer
         run: |
           for CC in newreno cubic; do
+            TMP=$(mktemp -d)
             taskset -c 0 nice -n -20 \
             cargo "+$TOOLCHAIN" flamegraph -o "server-$CC.svg" -v -c "$PERF_OPT -o server-$CC.perf" \
-              --bin neqo-server -- --db ../test-fixture/db --cc "$CC" "$HOST:4433" &
+              --bin neqo-server -- --cc "$CC" "$HOST:4433" &
             PID=$!
             time taskset -c 1 nice -n -20 \
             cargo "+$TOOLCHAIN" flamegraph -o "client-$CC.svg" -v -c "$PERF_OPT -o client-$CC.perf" \
-              --bin neqo-client -- --output-dir . --cc "$CC" "https://$HOST:4433/$SIZE"
+              --bin neqo-client -- --output-dir "$TMP" --cc "$CC" "https://$HOST:4433/$SIZE"
             killall -INT $PID
-            [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
+            [ "$(wc -c < "$TMP/$SIZE")" -eq "$SIZE" ] || exit 1
+            rm -rf "$TMP"
           done
         env:
           HOST: localhost
