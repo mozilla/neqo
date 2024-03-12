@@ -15,8 +15,6 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    permissions:
-      pull-requests: write
     defaults:
       run:
         shell: bash

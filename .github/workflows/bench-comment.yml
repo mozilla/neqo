@@ -17,9 +17,7 @@ jobs:
     permissions:
       pull-requests: write
     runs-on: ubuntu-latest
-    if: >
-      github.event.workflow_run.event == 'pull_request' ||
-      github.event.workflow_run.event == 'workflow_run'
+    if: github.event.workflow_run.event == 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - run: echo ${{ github.event.workflow_run.event }}
