@@ -85,7 +85,7 @@ jobs:
             time taskset -c 1 nice -n -20 \
             cargo "+$TOOLCHAIN" flamegraph -o "client-$CC.svg" -v -c "$PERF_OPT -o client-$CC.perf" \
               --bin neqo-client -- --output-dir "$TMP" --cc "$CC" "https://$HOST:4433/$SIZE"
-            kill $PID
+            killall -v -u bench neqo-server
             [ "$(wc -c < "$TMP/$SIZE")" -eq "$SIZE" ] || exit 1
             rm -rf "$TMP"
           done
