@@ -21,6 +21,7 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'failure'
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/pr-comment
         with:
           name: qns
