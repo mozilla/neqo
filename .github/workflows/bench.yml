@@ -125,19 +125,6 @@ jobs:
           path: ./target/criterion
           key: ${{ steps.criterion-cache.outputs.cache-primary-key }}
 
-      - name: Export perf data
-        id: export
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}
-          path: |
-            *.svg
-            *.perf
-            *.txt
-            results.*
-            target/criterion*
-          compression-level: 9
-
       - name: Format results as Markdown
         id: results
         run: |
@@ -149,6 +136,19 @@ jobs:
                     -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
               > results.md
           echo '' >> results.md
+
+      - name: Export bench data
+        id: export
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-${{ github.sha }}
+          path: |
+            *.svg
+            *.perf
+            *.txt
+            results.*
+            target/criterion*
+          compression-level: 9
 
       - name: Export PR comment data
         uses: ./.github/actions/pr-comment-data-export
