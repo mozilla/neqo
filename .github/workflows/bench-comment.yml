@@ -8,7 +8,7 @@ name: Benchmark Comment
 
 on:
   workflow_run:
-    workflows: ["Bench"]
+    workflows: ["CI"]
     types:
       - completed
 
@@ -19,8 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.workflow_run.event == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
-      - run: echo ${{ github.event.workflow_run.event }}
       - uses: ./.github/actions/pr-comment
         with:
           name: bench
