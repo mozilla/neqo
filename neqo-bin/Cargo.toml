@@ -12,10 +12,12 @@ license.workspace = true
 [[bin]]
 name = "neqo-client"
 path = "src/bin/client/main.rs"
+bench = false
 
 [[bin]]
 name = "neqo-server"
 path = "src/bin/server/main.rs"
+bench = false
 
 [lints]
 workspace = true
@@ -35,3 +37,7 @@ qlog = { version = "0.12", default-features = false }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false

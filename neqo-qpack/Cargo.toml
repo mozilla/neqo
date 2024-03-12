@@ -22,3 +22,7 @@ static_assertions = { version = "1.1", default-features = false }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false

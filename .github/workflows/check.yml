@@ -72,8 +72,11 @@ jobs:
       - name: Use MSYS2 environment and install more dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
-          echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
+          # shellcheck disable=SC2028
+          {
+            echo "C:\\msys64\\usr\\bin"
+            echo "C:\\msys64\\mingw64\\bin"
+          } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
           python3 -m pip install git+https://github.com/nodejs/gyp-next
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
@@ -85,9 +88,11 @@ jobs:
       - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
         run: |
-          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
-          echo "GYP_MSVS_VERSION=2022" >> "$GITHUB_ENV"
-          echo "BASH=$SHELL" >> "$GITHUB_ENV"
+          {
+            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+            echo "GYP_MSVS_VERSION=2022"
+            echo "BASH=$SHELL"
+          } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
 
@@ -101,19 +106,23 @@ jobs:
         uses: ./.github/actions/nss
 
       - name: Build
-        run: cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
+        run: |
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
           cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
         run: |
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          target/$BUILD_DIR/neqo-server $HOST:4433 &
+          "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
-          target/$BUILD_DIR/neqo-client --output-dir . https://$HOST:4433/$SIZE
+          "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
@@ -127,6 +136,7 @@ jobs:
           if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
             CONFIG_PATH="--config-path=$(mktemp)"
           fi
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
