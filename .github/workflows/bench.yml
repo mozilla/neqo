@@ -1,9 +1,6 @@
 name: Bench
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
+  workflow_call:
   workflow_dispatch:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
@@ -18,8 +15,6 @@ jobs:
   bench:
     name: Benchmark
     runs-on: self-hosted
-    permissions:
-      pull-requests: write
     defaults:
       run:
         shell: bash
