@@ -85,13 +85,13 @@ jobs:
             time taskset -c 1 nice -n -20 \
             cargo "+$TOOLCHAIN" flamegraph -o "client-$CC.svg" -v -c "$PERF_OPT -o client-$CC.perf" \
               --bin neqo-client -- --output-dir "$TMP" --cc "$CC" "https://$HOST:4433/$SIZE"
-            killall -INT $PID
+            kill -INT $PID
             [ "$(wc -c < "$TMP/$SIZE")" -eq "$SIZE" ] || exit 1
             rm -rf "$TMP"
           done
         env:
           HOST: localhost
-          SIZE: 1073741824 # 1 GB
+          SIZE: 536870912 # 512 MB
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
