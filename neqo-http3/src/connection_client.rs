@@ -935,12 +935,12 @@ impl Http3Client {
     /// returned. After that, the application should call the function again if a new UDP packet is
     /// received and processed or the timer value expires.
     ///
-    /// The HTTP/3 neqo implementation drives the HTTP/3 and QUC layers, therefore this function
+    /// The HTTP/3 neqo implementation drives the HTTP/3 and QUIC layers, therefore this function
     /// will call both layers:
     ///  - First it calls HTTP/3 layer processing (`process_http3`) to make sure the layer writes
     ///    data to QUIC layer or cancels streams if needed.
     ///  - Then QUIC layer processing is called - [`Connection::process_output`][3]. This produces a
-    ///    packet or a timer value. It may also produce ned [`ConnectionEvent`][2]s, e.g. connection
+    ///    packet or a timer value. It may also produce new [`ConnectionEvent`][2]s, e.g. connection
     ///    state-change event.
     ///  - Therefore the HTTP/3 layer processing (`process_http3`) is called again.
     ///
