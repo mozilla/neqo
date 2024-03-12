@@ -20,7 +20,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - if: github.event.workflow_run.event == 'pull_request'
+    - if: github.event_name == 'pull_request'
       shell: bash
       run: |
         mkdir comment-data
@@ -29,7 +29,7 @@ runs:
         echo "${{ inputs.log-url }}" > comment-data/log-url
         echo "${{ github.event.number }}" > comment-data/pr-number
 
-    - if: github.event.workflow_run.event == 'pull_request'
+    - if: github.event_name == 'pull_request'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.name }}
