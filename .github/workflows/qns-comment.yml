@@ -26,3 +26,4 @@ jobs:
       - uses: ./.github/actions/pr-comment
         with:
           name: qns
+          token: ${{ secrets.GITHUB_TOKEN }}
