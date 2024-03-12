@@ -61,7 +61,7 @@ jobs:
       - name: Run cargo bench
         run: |
           taskset -c 0 nice -n -20 \
-            cargo "+$TOOLCHAIN" bench --features bench | tee results.txt
+            cargo "+$TOOLCHAIN" bench --features bench -- --noplot | tee results.txt
 
       # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
       # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
@@ -74,7 +74,7 @@ jobs:
           taskset -c 0 nice -n -20 \
             cargo "+$TOOLCHAIN" flamegraph -o transfer.svg -v -c "$PERF_OPT -o transfer.perf" \
               --features bench --bench transfer -- \
-              --bench --exact "Run multiple transfers with varying seeds"
+              --bench --exact "Run multiple transfers with varying seeds" --noplot
           # And now restore the directories.
           mv target/criterion target/criterion-transfer-profile
           mv target/criterion-bench target/criterion
