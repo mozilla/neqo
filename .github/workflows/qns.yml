@@ -8,6 +8,10 @@ on:
     branches: ["main"]
   merge_group:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   quic-network-simulator:
     runs-on: ubuntu-latest
