@@ -8,7 +8,7 @@ name: Benchmark Comment
 
 on:
   workflow_run:
-    workflows: ["Bench"]
+    workflows: ["CI"]
     types:
       - completed
 
