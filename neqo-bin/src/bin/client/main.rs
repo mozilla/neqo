@@ -21,7 +21,8 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_common::{self as common, qdebug, qinfo, qlog::NeqoQlog, udp, Datagram, Role};
+use neqo_bin::udp;
+use neqo_common::{self as common, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,

@@ -24,7 +24,8 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use neqo_common::{hex, qinfo, qwarn, udp, Datagram, Header};
+use neqo_bin::udp;
+use neqo_common::{hex, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
