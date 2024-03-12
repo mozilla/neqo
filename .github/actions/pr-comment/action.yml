@@ -5,6 +5,9 @@ inputs:
   name:
     description: 'Artifact name to import comment data from.'
     required: true
+  token:
+    description: 'A Github PAT'
+    required: true
 
 runs:
   using: composite
@@ -13,7 +16,7 @@ runs:
       with:
         run-id: ${{ github.event.workflow_run.id }}
         name: ${{ inputs.name }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ inputs.token }}
 
     - id: pr-number
       shell: bash
