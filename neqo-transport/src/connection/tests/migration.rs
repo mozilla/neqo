@@ -964,7 +964,7 @@ impl crate::connection::test_internal::FrameWriter for GarbageWriter {
 /// Test the case that we run out of connection ID and receive an invalid frame
 /// from a new path.
 #[test]
-#[should_panic(expected = "path is temporary")]
+#[should_panic(expected = "attempting to close with a temporary path")]
 fn error_on_new_path_with_no_connection_id() {
     let mut client = default_client();
     let mut server = default_server();
