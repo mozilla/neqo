@@ -8,14 +8,23 @@
 #![allow(clippy::missing_panics_doc)] // Functions simply delegate to tokio and quinn-udp.
 
 use std::{
+    array,
     io::{self, IoSliceMut},
+    mem::MaybeUninit,
     net::{SocketAddr, ToSocketAddrs},
     slice,
 };
 
-use neqo_common::{Datagram, IpTos};
+use neqo_common::{qwarn, Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 use tokio::io::Interest;
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+// Chosen somewhat arbitrarily; might benefit from additional tuning.
+pub(crate) const BATCH_SIZE: usize = 32;
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub(crate) const BATCH_SIZE: usize = 1;
 
 /// Socket receive buffer size.
 ///
@@ -25,7 +34,7 @@ const RECV_BUF_SIZE: usize = u16::MAX as usize;
 pub struct Socket {
     socket: tokio::net::UdpSocket,
     state: UdpSocketState,
-    recv_buf: Vec<u8>,
+    recv_bufs: [Vec<u8>; BATCH_SIZE],
 }
 
 impl Socket {
@@ -36,7 +45,7 @@ impl Socket {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
             socket: tokio::net::UdpSocket::from_std(socket)?,
-            recv_buf: vec![0; RECV_BUF_SIZE],
+            recv_bufs: array::from_fn(|_| vec![0; RECV_BUF_SIZE]),
         })
     }
 
@@ -75,54 +84,58 @@ impl Socket {
         Ok(())
     }
 
-    /// Receive a UDP datagram on the specified socket.
-    pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        let mut meta = RecvMeta::default();
+    /// Receive UDP datagrams on the specified socket.
+    pub fn recv<'a>(
+        &'a mut self,
+        local_address: &'a SocketAddr,
+    ) -> Result<impl Iterator<Item = Datagram> + 'a, io::Error> {
+        let mut metas = [RecvMeta::default(); BATCH_SIZE];
 
-        match self.socket.try_io(Interest::READABLE, || {
-            self.state.recv(
-                (&self.socket).into(),
-                &mut [IoSliceMut::new(&mut self.recv_buf)],
-                slice::from_mut(&mut meta),
-            )
+        // TODO: Safe? Double check.
+        let mut iovs = MaybeUninit::<[IoSliceMut<'_>; BATCH_SIZE]>::uninit();
+        for (i, iov) in self
+            .recv_bufs
+            .iter_mut()
+            .map(|b| IoSliceMut::new(b))
+            .enumerate()
+        {
+            unsafe {
+                iovs.as_mut_ptr().cast::<IoSliceMut>().add(i).write(iov);
+            };
+        }
+        let mut iovs = unsafe { iovs.assume_init() };
+
+        let msgs = match self.socket.try_io(Interest::READABLE, || {
+            self.state
+                .recv((&self.socket).into(), &mut iovs, &mut metas)
         }) {
-            Ok(n) => {
-                assert_eq!(n, 1, "only passed one slice");
-            }
-            Err(ref err)
-                if err.kind() == io::ErrorKind::WouldBlock
-                    || err.kind() == io::ErrorKind::Interrupted =>
-            {
-                return Ok(vec![])
-            }
-            Err(err) => {
-                return Err(err);
-            }
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => 0,
+            Err(e) => return Err(e),
         };
 
-        if meta.len == 0 {
-            eprintln!("zero length datagram received?");
-            return Ok(vec![]);
-        }
-        if meta.len == self.recv_buf.len() {
-            eprintln!(
-                "Might have received more than {} bytes",
-                self.recv_buf.len()
-            );
-        }
+        Ok(metas
+            .into_iter()
+            .zip(self.recv_bufs.iter())
+            .take(msgs)
+            .flat_map(move |(meta, buf)| {
+                // TODO: Needed?
+                if meta.len == buf.len() {
+                    qwarn!("Might have received more than {} bytes", buf.len());
+                }
 
-        Ok(self.recv_buf[0..meta.len]
-            .chunks(meta.stride.min(self.recv_buf.len()))
-            .map(|d| {
-                Datagram::new(
-                    meta.addr,
-                    *local_address,
-                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                    None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
-                    d,
-                )
-            })
-            .collect())
+                buf[0..meta.len]
+                    .chunks(meta.stride.min(buf.len()))
+                    .map(move |d| {
+                        Datagram::new(
+                            meta.addr,
+                            *local_address,
+                            meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+                            None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
+                            d,
+                        )
+                    })
+            }))
     }
 }
 

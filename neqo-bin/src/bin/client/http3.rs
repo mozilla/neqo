@@ -119,6 +119,10 @@ impl super::Client for Http3Client {
         self.process(dgram, now)
     }
 
+    fn process_input(&mut self, dgram: &Datagram, now: Instant) {
+        self.process_input(dgram, now);
+    }
+
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display,

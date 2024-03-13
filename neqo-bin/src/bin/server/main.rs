@@ -543,7 +543,8 @@ impl ServersRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgrams = socket.recv(host)?;
+                    // TODO: Remove collect.
+                    let dgrams: Vec<_> = socket.recv(host)?.collect();
                     if dgrams.is_empty() {
                         break;
                     }

@@ -143,6 +143,10 @@ impl super::Client for Connection {
         self.process(dgram, now)
     }
 
+    fn process_input(&mut self, dgram: &Datagram, now: Instant) {
+        self.process_input(dgram, now);
+    }
+
     fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)
     where
         S: AsRef<str> + std::fmt::Display,

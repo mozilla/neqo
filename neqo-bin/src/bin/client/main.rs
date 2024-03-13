@@ -322,7 +322,9 @@ trait Handler {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
+    // TODO: datagram option needed?
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    fn process_input(&mut self, dgram: &Datagram, now: Instant);
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
@@ -367,11 +369,13 @@ impl<'a, H: Handler> Runner<'a, H> {
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => loop {
                     let dgrams = self.socket.recv(&self.local_addr)?;
-                    if dgrams.is_empty() {
-                        break;
+                    let mut is_empty = true;
+                    for dgram in dgrams {
+                        is_empty = false;
+                        self.client.process_input(&dgram, Instant::now());
                     }
-                    for dgram in &dgrams {
-                        self.process(Some(dgram)).await?;
+                    if is_empty {
+                        break;
                     }
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
