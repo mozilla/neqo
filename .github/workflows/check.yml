@@ -58,7 +58,7 @@ jobs:
 
       - name: Use MSYS2 environment and install more dependencies (Windows)
         if: runner.os == 'Windows'
-        run: /c/msys64/usr/bin/pacman -S --noconfirm nss
+        run: /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
