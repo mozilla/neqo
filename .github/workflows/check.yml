@@ -46,12 +46,14 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends lld libnss3-dev
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
+          brew update
           brew install llvm nss
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
@@ -59,8 +61,9 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
+          /c/msys64/usr/bin/pacman -Suy
           /c/msys64/usr/bin/pacman -Ss nss
-          /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-nss
+          /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
