@@ -61,7 +61,7 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          /c/msys64/usr/bin/pacman -Suy
+          /c/msys64/usr/bin/pacman -Suy --noconfirm
           /c/msys64/usr/bin/pacman -Ss nss
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss
 

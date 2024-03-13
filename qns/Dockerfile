@@ -1,7 +1,7 @@
 FROM martenseemann/quic-network-simulator-endpoint:latest AS buildimage
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential lld \
+    curl build-essential lld libnss3-dev \
     && apt-get autoremove -y && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 
