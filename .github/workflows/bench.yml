@@ -138,13 +138,14 @@ jobs:
       - name: Format results as Markdown
         id: results
         run: |
+          echo '### Benchmark results' > results.md
           grep -Ev 'ignored|running \d+ tests|%\)' results.txt |\
             sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
                     -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
-                    -e 's/^ +/  * /gi' \
-                    -e 's/^([a-z0-9].*)$/**\1**/gi' \
-                    -e 's/(change:[^%]*%)([^%]*%)(.*)/\1**\2**\3/gi' \
-              > results.md
+                    -e 's/^ +/   /gi' \
+                    -e 's/^([a-z0-9].*)$/* **\1**/gi' \
+                    -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
+              >> results.md
           echo '' >> results.md
 
       - name: Export PR comment data
