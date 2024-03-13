@@ -2,8 +2,10 @@
 
 ## Table of Contents
 
-1. [System Details](#system-details)
-2. [Installation Steps](#installation-steps)
+- [Build Process for Linux](#build-process-for-linux)
+  - [Table of Contents](#table-of-contents)
+  - [System Details](#system-details)
+  - [Installation Steps](#installation-steps)
 
 ## System Details
 
@@ -91,7 +93,7 @@ sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
 ca-certificates coreutils curl git make mercurial ssh \
 build-essential clang llvm libclang-dev gyp ninja-build \
-pkg-config zlib1g-dev sudo
+pkg-config zlib1g-dev sudo libnss3-dev
 ```
 
 2. Remove orphaned packages and clear local repository (optional)
@@ -102,29 +104,7 @@ sudo apt-get autoremove -y && sudo apt-get clean -y
 
 3. Install rust. Follow the steps from [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
 
-4. Export following path variables. `$HOME` is your home directory which is usually `/home/{username}`. `LD_LIBRARY_PATH` will be `$NSS_DIR/../dist/Debug/lib`
-
-```shell
-export NSS_DIR=$HOME/nss
-export NSPR_DIR=$HOME/nspr
-export LD_LIBRARY_PATH=$NSS_DIR/../dist/Debug/lib
-```
-
-5. Clone **NSS** and **NSPR**
-
-```shell
-hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
-hg clone -u NSPR_4_25_RTM https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
-```
-
-6. Build **NSS**
-
-```shell
-cd $NSS_DIR
-./build.sh --static -Ddisable_tests=1
-```
-
-7. Navigate to your workspace and checkout **Neqo**
+4. Navigate to your workspace and checkout **Neqo**
 
 ```shell
 git clone https://github.com/mozilla/neqo.git
