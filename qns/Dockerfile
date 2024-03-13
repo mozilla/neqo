@@ -1,7 +1,7 @@
 FROM martenseemann/quic-network-simulator-endpoint:latest AS buildimage
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl lld \
+    curl build-essential lld \
     && apt-get autoremove -y && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 
