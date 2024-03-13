@@ -956,6 +956,7 @@ struct GarbageWriter {}
 
 impl crate::connection::test_internal::FrameWriter for GarbageWriter {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        // Not a valid frame type.
         builder.encode_varint(u32::MAX);
     }
 }
@@ -963,26 +964,21 @@ impl crate::connection::test_internal::FrameWriter for GarbageWriter {
 /// Test the case that we run out of connection ID and receive an invalid frame
 /// from a new path.
 #[test]
+#[should_panic(expected = "path is temporary")]
 fn error_on_new_path_with_no_connection_id() {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    let dgram = send_something(&mut server, now());
-    let dgram = change_path(&dgram, DEFAULT_ADDR_V4);
-    client.process_input(&dgram, now());
-
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
     server.test_frame_writer = Some(Box::new(RetireAll { cid_gen }));
     let retire_all = send_something(&mut server, now());
-    server.test_frame_writer = None;
 
     client.process_input(&retire_all, now());
 
     server.test_frame_writer = Some(Box::new(GarbageWriter {}));
     let garbage = send_something(&mut server, now());
-    server.test_frame_writer = None;
 
     let dgram = change_path(&garbage, DEFAULT_ADDR_V4);
     client.process_input(&dgram, now());
