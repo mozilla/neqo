@@ -56,9 +56,11 @@ jobs:
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
-      - name: Use MSYS2 environment and install more dependencies (Windows)
+      - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        run: /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-nss
+        run: |
+          /c/msys64/usr/bin/pacman -Ss nss
+          /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
