@@ -61,9 +61,9 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          /c/msys64/usr/bin/pacman -Suy --noconfirm
-          /c/msys64/usr/bin/pacman -Ss nss
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss
+          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+          rm /usr/bin/link.exe
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
