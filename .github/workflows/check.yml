@@ -47,8 +47,10 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends lld libnss3-dev
+          sudo apt-get install -y --no-install-recommends lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          brew update
+          brew install nss
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
@@ -66,8 +68,8 @@ jobs:
             echo "C:\\msys64\\usr\\bin"
             echo "C:\\msys64\\mingw64\\bin"
           } >> "$GITHUB_PATH"
-          find "C:\\msys64"
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss mingw-w64-x86_64-pkg-config
+          find "C:\\msys64"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
           rm C:\\msys64\\usr\\bin\\link.exe
