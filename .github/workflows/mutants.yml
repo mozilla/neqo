@@ -42,9 +42,9 @@ jobs:
           {
             echo "### Mutants"
             echo "See https://mutants.rs/using-results.html for more information."
-            echo "```"
+            echo '```'
             cat results.txt
-            echo "```"
+            echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
       - name: Archive mutants.out
