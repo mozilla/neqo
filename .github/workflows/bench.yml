@@ -115,30 +115,6 @@ jobs:
           perf report -i server/perf.data --no-children --stdio > server.perf.txt &
           wait
 
-      - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ hashFiles('./target/criterion/**.json') }}
-
-      - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
-        run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
-
-      - name: Export perf data
-        id: export
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-${{ github.sha }}
-          path: |
-            *.svg
-            *.perf
-            *.txt
-            results.*
-            target/criterion*
-          compression-level: 9
-
       - name: Format results as Markdown
         id: results
         run: |
@@ -155,6 +131,30 @@ jobs:
                     -e 's/^([a-z0-9].*)$/* **\1**/gi' \
                     -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
               >> results.md
+
+      - name: Remember main-branch push URL
+        if: github.ref == 'refs/heads/main'
+        run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
+
+      - name: Cache main-branch results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ./target/criterion
+          key: criterion-${{ runner.name }}-${{ hashFiles('./target/criterion/**.json') }}
+
+      - name: Export perf data
+        id: export
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-${{ github.sha }}
+          path: |
+            *.svg
+            *.perf
+            *.txt
+            results.*
+            target/criterion*
+          compression-level: 9
 
       - name: Export PR comment data
         uses: ./.github/actions/pr-comment-data-export
