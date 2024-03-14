@@ -20,18 +20,19 @@ runs:
       shell: bash
       run: |
         if ! command -v pkg-config &> /dev/null; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_VERSION=$(pkg-config --modversion nss)
         NSS_MAJOR=$(echo $NSS_VERSION | cut -d. -f1)
         NSS_MINOR=$(echo $NSS_VERSION | cut -d. -f2)
+        # Keep this in sync with what the code requires
         if [ $NSS_MAJOR -ne 3 ] || [ $NSS_MINOR -lt 98 ]; then
           echo "System NSS is too old: $NSS_VERSION"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
         else
           echo "System NSS is suitable: $NSS_VERSION"
-          echo "BUILD_NSS=0" >> "$GITHUB_ENV
+          echo "BUILD_NSS=0" >> "$GITHUB_ENV"
         fi
 
     # Ideally, we'd use this. But things are sufficiently flaky that we're better off
