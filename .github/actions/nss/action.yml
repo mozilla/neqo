@@ -24,7 +24,12 @@ runs:
           exit 0
         fi
         echo "pkg-config found"
-        NSS_VERSION=$(pkg-config --modversion nss &> /dev/null)
+        if ! pkg-config --exists nss; then
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        echo "NSS found"
+        NSS_VERSION=$(pkg-config --modversion nss)
         echo "NSS_VERSION=$NSS_VERSION"
         if [ "$?" -ne 0 ]; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
