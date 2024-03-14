@@ -30,6 +30,7 @@ ADD . /neqo
 
 RUN set -eux; \
     cd /neqo; \
+    export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH; \
     cargo build --release --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
