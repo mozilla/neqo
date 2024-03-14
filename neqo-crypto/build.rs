@@ -12,7 +12,10 @@ use std::{
 };
 
 use bindgen::Builder;
+use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
+
+include!("min_version.rs");
 
 const BINDINGS_DIR: &str = "bindings";
 const BINDINGS_CONFIG: &str = "bindings.toml";
@@ -301,23 +304,22 @@ fn pkg_config() -> Vec<String> {
         .output()
         .expect("pkg-config reports NSS as absent")
         .stdout;
-    let modversion_str = String::from_utf8(modversion).expect("non-UTF8 from pkg-config");
-    let mut v = modversion_str.split('.');
-    assert_eq!(
-        v.next(),
-        Some("3"),
-        "NSS version 3.62 or higher is needed, found {modversion_str} (or set $NSS_DIR)"
+    let modversion = String::from_utf8(modversion).expect("non-UTF8 from pkg-config");
+    let modversion = modversion.trim().to_string();
+    // The NSS version number does not follow semver numbering, because it omits the patch version
+    // when that's 0. Deal with that.
+    let modversion_for_cmp = if modversion.split('.').count() == 2 {
+        modversion.clone() + ".0"
+    } else {
+        modversion.clone()
+    };
+    let modversion_for_cmp =
+        Version::parse(&modversion_for_cmp).expect("NSS version not in semver format");
+    let version_req = VersionReq::parse(&(">=".to_owned() + MINIMUM_NSS_VERSION.trim())).unwrap();
+    assert!(
+        version_req.matches(&modversion_for_cmp),
+        "neqo has NSS version requirement {version_req}, found {modversion}"
     );
-    if let Some(minor) = v.next() {
-        let minor = minor
-            .trim_end()
-            .parse::<u32>()
-            .expect("NSS minor version is not a number");
-        assert!(
-            minor >= 62,
-            "NSS version 3.62 or higher is needed, found {modversion_str} (or set $NSS_DIR)",
-        );
-    }
 
     let cfg = Command::new("pkg-config")
         .args(["--cflags", "--libs", "nss"])
