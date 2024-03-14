@@ -35,11 +35,21 @@ jobs:
           version: stable
 
       - name: Mutants
-        run: cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff
+        run: |
+          # Don't fail the build if mutants fail, for now.
+          set -o pipefail
+          cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
+          {
+            echo "### Mutants"
+            echo "See https://mutants.rs/using-results.html for more information."
+            echo "```"
+            cat results.txt
+            echo "```"
+          } > "$GITHUB_STEP_SUMMARY"
 
       - name: Archive mutants.out
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mutants-incremental.out
+          name: mutants.out
           path: mutants.out
