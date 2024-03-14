@@ -54,6 +54,8 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew update
           brew install nss pkg-config
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          pkg-config --debug --modversion nss
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
@@ -78,6 +80,7 @@ jobs:
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
           rm C:\\msys64\\usr\\bin\\link.exe
+          C:\\msys64\\mingw64\\bin\\pkg-config --debug --modversion nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
