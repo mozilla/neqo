@@ -11,7 +11,7 @@ license.workspace = true
 
 [[bin]]
 name = "neqo-client"
-path = "src/bin/client.rs"
+path = "src/bin/client/main.rs"
 bench = false
 
 [[bin]]
