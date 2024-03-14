@@ -91,7 +91,7 @@ jobs:
       - name: Build
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build -v $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} build -vv $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |

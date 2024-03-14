@@ -23,7 +23,7 @@ RUN useradd --create-home --shell /bin/bash --user-group linuxbrew \
     && echo 'linuxbrew ALL=(ALL) NOPASSWD:ALL' >>/etc/sudoers
 USER linuxbrew
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-RUN brew install nss pkg-config
+RUN /home/linuxbrew/.linuxbrew/bin/brew install nss pkg-config
 
 ADD . /neqo
 
