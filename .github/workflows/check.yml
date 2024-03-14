@@ -66,6 +66,7 @@ jobs:
             echo "C:\\msys64\\usr\\bin"
             echo "C:\\msys64\\mingw64\\bin"
           } >> "$GITHUB_PATH"
+          find "C:\\msys64"
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss mingw-w64-x86_64-pkg-config
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
