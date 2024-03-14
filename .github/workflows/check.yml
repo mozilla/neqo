@@ -53,6 +53,11 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew update
           brew install nss
+          find /home/linuxbrew/.linuxbrew/
+          {
+            echo "CFLAGS=-I /home/linuxbrew/.linuxbrew/include"
+            echo "LDFLAGS=-L /home/linuxbrew/.linuxbrew/lib"
+          } >> "$GITHUB_ENV"
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
@@ -72,8 +77,7 @@ jobs:
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss mingw-w64-x86_64-pkg-config
           {
-            echo "CFLAGS=-I C:/msys64/mingw64/include"
-            echo "LDFLAGS=-L C:/msys64/mingw64/lib"
+            echo "LIBPATH=$LIBPATH;C:/msys64/mingw64/lib"
           } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
