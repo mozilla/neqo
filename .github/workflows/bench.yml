@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ hashFiles('./target/criterion/**.json') }}
+          key: criterion-${{ runner.name }}-${{ github.sha }}
           restore-keys: criterion-${{ runner.name }}-
 
       # Disable turboboost, hyperthreading and use performance governor.
@@ -115,16 +115,44 @@ jobs:
           perf report -i server/perf.data --no-children --stdio > server.perf.txt &
           wait
 
+      - name: Format results as Markdown
+        id: results
+        run: |
+          {
+            echo "### Benchmark results"
+            echo
+          } > results.md
+          SHA=$(cat target/criterion/baseline-sha.txt)
+          if [ -n "$SHA" ]; then
+            {
+              echo "Performance differences relative to $SHA."
+              echo
+            } >> results.md
+          fi
+          grep -Ev 'ignored|running \d+ tests|%\)' results.txt |\
+            sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
+                    -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
+                    -e 's/^ +/   /gi' \
+                    -e 's/^([a-z0-9].*)$/* **\1**/gi' \
+                    -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
+              >> results.md
+
+      - name: Remember main-branch push URL
+        if: github.ref == 'refs/heads/main'
+        run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
+
+      - name: Store history
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p target/criterion-history
+          cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
+
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ hashFiles('./target/criterion/**.json') }}
-
-      - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
-        run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
+          key: criterion-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
@@ -138,23 +166,6 @@ jobs:
             results.*
             target/criterion*
           compression-level: 9
-
-      - name: Format results as Markdown
-        id: results
-        run: |
-          {
-            echo "### Benchmark results"
-            echo
-            echo "Performance differences relative to $(cat target/criterion/baseline-sha.txt)."
-            echo
-          } > results.md
-          grep -Ev 'ignored|running \d+ tests|%\)' results.txt |\
-            sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
-                    -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
-                    -e 's/^ +/   /gi' \
-                    -e 's/^([a-z0-9].*)$/* **\1**/gi' \
-                    -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
-              >> results.md
 
       - name: Export PR comment data
         uses: ./.github/actions/pr-comment-data-export
