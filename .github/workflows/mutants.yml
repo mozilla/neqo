@@ -2,7 +2,7 @@ name: Find mutants
 on:
   pull_request:
     branches: ["main"]
-    paths: [".github/**"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
 
 concurrency:
