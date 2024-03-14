@@ -14,7 +14,7 @@ resolver = "2"
 homepage = "https://github.com/mozilla/neqo/"
 repository = "https://github.com/mozilla/neqo/"
 authors = ["The Neqo Authors <necko@mozilla.com>"]
-version = "0.7.1"
+version = "0.7.2"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
