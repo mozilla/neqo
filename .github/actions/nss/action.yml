@@ -34,14 +34,15 @@ runs:
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        # Keep this in sync with what the code requires
-        if [ "$NSS_MAJOR" -ne 3 ] || [ "$NSS_MINOR" -lt 98 ]; then
+        REQ_NSS_MAJOR=$(cat neqo-crypto/nss_version.txt | cut -d. -f1)
+        REQ_NSS_MINOR=$(cat neqo-crypto/nss_version.txt | cut -d. -f2)
+        if [ "$NSS_MAJOR" -lt "REQ_NSS_MAJOR" ] || [ "$NSS_MAJOR" -eq "REQ_NSS_MAJOR" -a "$NSS_MINOR" -lt "REQ_NSS_MINOR"]; then
           echo "System NSS is too old: $NSS_VERSION"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
-        else
-          echo "System NSS is suitable: $NSS_VERSION"
-          echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+          exit 0
         fi
+        echo "System NSS is suitable: $NSS_VERSION"
+        echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
     # Ideally, we'd use this. But things are sufficiently flaky that we're better off
     # trying both hg and git. Leaving this here in case we want to re-try in the future.
