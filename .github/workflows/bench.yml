@@ -32,6 +32,9 @@ jobs:
           version: $TOOLCHAIN
           components: rustfmt
 
+      - name: Fetch and build NSS and NSPR
+        uses: ./.github/actions/nss
+
       - name: Build
         run: |
           cargo "+$TOOLCHAIN" bench --features bench --no-run
