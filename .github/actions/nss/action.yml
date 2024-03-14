@@ -23,22 +23,17 @@ runs:
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
-        echo "pkg-config found"
         if ! pkg-config --exists nss; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
-        echo "NSS found"
         NSS_VERSION=$(pkg-config --modversion nss)
-        echo "NSS_VERSION=$NSS_VERSION"
         if [ "$?" -ne 0 ]; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        echo "NSS_MAJOR=$NSS_MAJOR"
-        echo "NSS_MINOR=$NSS_MINOR"
         # Keep this in sync with what the code requires
         if [ "$NSS_MAJOR" -ne 3 ] || [ "$NSS_MINOR" -lt 98 ]; then
           echo "System NSS is too old: $NSS_VERSION"
@@ -52,14 +47,14 @@ runs:
     # trying both hg and git. Leaving this here in case we want to re-try in the future.
     #
     # - name: Checkout NSPR
-    #   if: env.BUILD_NSS
+    #   if: env.BUILD_NSS == '1'
     #   uses: actions/checkout@v4
     #   with:
     #     repository: "nss-dev/nspr"
     #     path: ${{ github.workspace }}/nspr
 
     # - name: Checkout NSS
-    #   if: env.BUILD_NSS
+    #   if: env.BUILD_NSS == '1'
     #   uses: actions/checkout@v4
     #   with:
     #     repository: "nss-dev/nss"
@@ -67,21 +62,21 @@ runs:
 
     - name: Checkout NSPR
       shell: bash
-      if: env.BUILD_NSS
+      if: env.BUILD_NSS == '1'
       run: |
         hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
           git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
 
     - name: Checkout NSS
       shell: bash
-      if: env.BUILD_NSS
+      if: env.BUILD_NSS == '1'
       run: |
         hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
           git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
 
     - name: Build
       shell: bash
-      if: env.BUILD_NSS
+      if: env.BUILD_NSS == '1'
       run: |
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
