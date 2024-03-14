@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crossbeam_utils::CachePadded;
 use env_logger::Builder;
 
 #[macro_export]
@@ -50,14 +51,10 @@ fn since_start() -> Duration {
     START_TIME.get_or_init(Instant::now).elapsed()
 }
 
+static INIT_ONCE: CachePadded<Once> = CachePadded::new(Once::new());
+
 pub fn init() {
-    static INIT_ONCE: Once = Once::new();
-
-    if ::log::STATIC_MAX_LEVEL == ::log::LevelFilter::Off {
-        return;
-    }
-
-    INIT_ONCE.call_once(|| {
+    fn do_init() {
         let mut builder = Builder::from_env("RUST_LOG");
         builder.format(|buf, record| {
             let elapsed = since_start();
@@ -75,7 +72,17 @@ pub fn init() {
         } else {
             do_log!(::log::Level::Info, "Logging initialized");
         }
-    });
+    }
+
+    if ::log::STATIC_MAX_LEVEL == ::log::LevelFilter::Off {
+        return;
+    }
+
+    if INIT_ONCE.is_completed() {
+        return;
+    }
+
+    INIT_ONCE.call_once(do_init);
 }
 
 #[macro_export]
