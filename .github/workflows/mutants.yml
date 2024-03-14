@@ -1,0 +1,36 @@
+name: Find mutants
+on:
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  incremental-mutants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Relative diff
+        run: git diff origin/${{ github.base_ref }}.. > pr.diff
+
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: stable
+
+      - name: Mutants
+        run: cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff
+
+      - name: Archive mutants.out
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-incremental.out
+          path: mutants.out
