@@ -1937,6 +1937,14 @@ impl Connection {
             };
 
             let path = close.path().borrow();
+            // In some error cases, we will not be able to make a new, permanent path.
+            // For example, if we run out of connection IDs and the error results from
+            // a packet on a new path, we avoid sending (and the privacy risk) rather
+            // than reuse a connection ID.
+            if path.is_temporary() {
+                assert!(!cfg!(test), "attempting to close with a temporary path");
+                return Err(Error::InternalError);
+            }
             let (_, mut builder) = Self::build_packet_header(
                 &path,
                 cspace,
