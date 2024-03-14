@@ -96,15 +96,9 @@ build-essential clang llvm libclang-dev gyp ninja-build \
 pkg-config zlib1g-dev sudo libnss3-dev
 ```
 
-2. Remove orphaned packages and clear local repository (optional)
+1. Install rust. Follow the steps from [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
 
-```shell
-sudo apt-get autoremove -y && sudo apt-get clean -y
-```
-
-3. Install rust. Follow the steps from [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
-
-4. Navigate to your workspace and checkout **Neqo**
+2. Navigate to your workspace and checkout **Neqo**
 
 ```shell
 git clone https://github.com/mozilla/neqo.git
@@ -123,6 +117,6 @@ cargo test -v
 ```shell
 #Start server
 cargo run --bin neqo-server -- [::]:12345 --db ./test-fixture/db
-#Run Client (In seperate shell. Will require LD_LIBRARY_PATH to be exported)
+#Run Client (In seperate shell.)
 ./target/debug/neqo-client http://127.0.0.1:12345/
 ```
