@@ -49,6 +49,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          # https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md#homebrew-note
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew update
           brew install nss
 
@@ -69,7 +71,10 @@ jobs:
             echo "C:\\msys64\\mingw64\\bin"
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss mingw-w64-x86_64-pkg-config
-          find "C:\\msys64"
+          {
+            echo "CFLAGS=-I C:/msys64/mingw64/include"
+            echo "LDFLAGS=-L C:/msys64/mingw64/lib"
+          } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
           rm C:\\msys64\\usr\\bin\\link.exe
