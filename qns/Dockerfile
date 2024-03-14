@@ -25,6 +25,7 @@ USER linuxbrew
 RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 RUN /home/linuxbrew/.linuxbrew/bin/brew install nss pkg-config
 
+USER root
 ADD . /neqo
 
 RUN set -eux; \
