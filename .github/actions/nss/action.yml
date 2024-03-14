@@ -23,13 +23,17 @@ runs:
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
+        echo "pkg-config found"
         NSS_VERSION=$(pkg-config --modversion nss &> /dev/null)
+        echo "NSS_VERSION=$NSS_VERSION"
         if [ "$?" -ne 0 ]; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
+        echo "NSS_MAJOR=$NSS_MAJOR"
+        echo "NSS_MINOR=$NSS_MINOR"
         # Keep this in sync with what the code requires
         if [ "$NSS_MAJOR" -ne 3 ] || [ "$NSS_MINOR" -lt 98 ]; then
           echo "System NSS is too old: $NSS_VERSION"
