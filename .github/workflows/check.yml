@@ -48,13 +48,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends lld
-          sudo apt-get remove libnss3-dev libnspr4-dev
+          sudo apt-get remove libnss3-dev libnspr4-dev pkg-config
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
           # https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md#homebrew-note
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew update
-          brew install nss
-          pkg-config nss
+          brew install nss pkg-config
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
@@ -63,7 +62,6 @@ jobs:
           brew install llvm nss
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-          pkg-config nss
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -80,7 +78,6 @@ jobs:
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
           rm C:\\msys64\\usr\\bin\\link.exe
-          pkg-config nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
