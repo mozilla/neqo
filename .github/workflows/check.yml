@@ -48,14 +48,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends lld
-          sudo apt-get remove libnss3-dev libnspr4-dev pkg-config
+          sudo apt-get remove -y pkg-config
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-          # https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md#homebrew-note
+          # Pull in a newer version of NSS than what Ubuntu 22.04 provides. Once newer
+          # GitHub runners are available, we can check if their NSS is sufficient.
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew update
           brew install nss pkg-config
           echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
-          pkg-config --debug --modversion nss
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
@@ -74,13 +74,9 @@ jobs:
             echo "C:\\msys64\\mingw64\\bin"
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss mingw-w64-x86_64-pkg-config
-          {
-            echo "LIBPATH=$LIBPATH;C:/msys64/mingw64/lib"
-          } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
           rm C:\\msys64\\usr\\bin\\link.exe
-          C:\\msys64\\mingw64\\bin\\pkg-config --debug --modversion nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -95,7 +91,7 @@ jobs:
       - name: Build
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build -vv $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} build -v $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
