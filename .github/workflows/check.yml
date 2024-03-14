@@ -48,16 +48,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends lld
+          sudo apt-get remove libnss3-dev libnspr4-dev
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
           # https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md#homebrew-note
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew update
           brew install nss
-          find /home/linuxbrew/.linuxbrew/
-          {
-            echo "CFLAGS=-I /home/linuxbrew/.linuxbrew/include"
-            echo "LDFLAGS=-L /home/linuxbrew/.linuxbrew/lib"
-          } >> "$GITHUB_ENV"
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
@@ -96,7 +92,7 @@ jobs:
       - name: Build
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} build -vv $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
