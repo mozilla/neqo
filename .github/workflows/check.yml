@@ -69,6 +69,7 @@ jobs:
           /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-nss mingw-w64-x86_64-pkg-config
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
+          rm C:\\msys64\\usr\\bin\\link.exe
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
