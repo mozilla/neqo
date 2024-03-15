@@ -104,6 +104,7 @@ impl EcnInfo {
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
     pub fn count_packets_out(&mut self) {
+        qdebug!("ECN count_packets_out: {:?}", self.state);
         if self.state == EcnValidationState::Testing {
             if self.sent < ECN_TEST_COUNT {
                 self.sent += 1;
@@ -121,6 +122,7 @@ impl EcnInfo {
         acked_packets: &[SentPacket],
         ecn_count: &EcnCount,
     ) {
+        qdebug!("Validating ECN counts: {:?} {:?}", self.state, ecn_count);
         // RFC 9000, Appendix A.4:
         // From the "unknown" state, successful validation of the ECN counts in an ACK frame
         // (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless

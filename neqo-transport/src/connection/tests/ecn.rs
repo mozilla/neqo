@@ -6,9 +6,10 @@
 
 #![warn(clippy::pedantic)]
 
-use neqo_common::{Datagram, IpTosEcn};
+use neqo_common::{qwarn, Datagram, IpTosEcn};
 use test_fixture::now;
 
+use super::{connect_force_idle_with_modifier, send_something_with_modifier};
 use crate::{
     connection::tests::{connect_force_idle, default_client, default_server, send_something},
     ecn::ECN_TEST_COUNT,
@@ -22,20 +23,18 @@ fn assert_ecn_disabled(d: &Datagram) {
     assert_eq!(IpTosEcn::from(d.tos()), IpTosEcn::default());
 }
 
-fn connect_and_send_something_marked(ecn: IpTosEcn) -> Datagram {
+fn connect_and_send_something_with_modifier(mut modifier: impl FnMut(&mut Datagram)) -> Datagram {
     let now = now();
     let mut client = default_client();
     let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
+    connect_force_idle_with_modifier(&mut client, &mut server, &mut modifier);
 
     // Right after the handshake, the ECN validation should still be in progress.
     let client_pkt = send_something(&mut client, now);
     assert_ecn_enabled(&client_pkt);
 
     for _ in 0..ECN_TEST_COUNT {
-        let mut client_pkt = send_something(&mut client, now);
-        // Change the ECN bits on the packet to `ecn`.
-        client_pkt.set_tos(ecn.into());
+        let client_pkt = send_something_with_modifier(&mut client, now, &mut modifier);
         server.process_input(&client_pkt, now);
     }
 
@@ -48,21 +47,26 @@ fn connect_and_send_something_marked(ecn: IpTosEcn) -> Datagram {
     send_something(&mut client, now)
 }
 
+fn set_tos(d: &mut Datagram, ecn: IpTosEcn) {
+    qwarn!("Setting ECN to {:?}", ecn);
+    d.set_tos(ecn.into());
+}
+
 #[test]
 fn disables_when_bleached() {
-    let pkt = connect_and_send_something_marked(IpTosEcn::default());
+    let pkt = connect_and_send_something_with_modifier(|d| set_tos(d, IpTosEcn::default()));
     assert_ecn_disabled(&pkt);
 }
 
 #[test]
 fn disables_when_remarked() {
-    let pkt = connect_and_send_something_marked(IpTosEcn::Ect1);
+    let pkt = connect_and_send_something_with_modifier(|d| set_tos(d, IpTosEcn::Ect1));
     assert_ecn_disabled(&pkt);
 }
 
 #[test]
 fn stay_enabled_under_ce() {
-    let pkt = connect_and_send_something_marked(IpTosEcn::Ce);
+    let pkt = connect_and_send_something_with_modifier(|d| set_tos(d, IpTosEcn::Ce));
     assert_ecn_enabled(&pkt);
 }
 
