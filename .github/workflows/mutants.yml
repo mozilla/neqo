@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -36,7 +35,7 @@ jobs:
           version: stable
 
       - name: Find incremental mutants
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        if: github.event_name == 'pull_request'
         run: |
           git diff origin/${{ github.base_ref }}.. > pr.diff
           set -o pipefail
