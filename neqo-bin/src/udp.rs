@@ -13,10 +13,9 @@ use std::{
     slice,
 };
 
+use neqo_common::{Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 use tokio::io::Interest;
-
-use crate::{Datagram, IpTos};
 
 /// Socket receive buffer size.
 ///
@@ -61,7 +60,7 @@ impl Socket {
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-            contents: d.into_data().into(),
+            contents: Vec::from(d).into(),
             segment_size: None,
             src_ip: None,
         };
@@ -129,8 +128,9 @@ impl Socket {
 
 #[cfg(test)]
 mod tests {
+    use neqo_common::{IpTosDscp, IpTosEcn};
+
     use super::*;
-    use crate::{IpTosDscp, IpTosEcn};
 
     #[tokio::test]
     async fn datagram_tos() -> Result<(), io::Error> {
