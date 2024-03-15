@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ hashFiles('./target/criterion/**.json') }}
+          key: criterion-${{ runner.name }}-${{ github.sha }}
           restore-keys: criterion-${{ runner.name }}-
 
       # Disable turboboost, hyperthreading and use performance governor.
@@ -121,9 +121,14 @@ jobs:
           {
             echo "### Benchmark results"
             echo
-            echo "Performance differences relative to $(cat target/criterion/baseline-sha.txt)."
-            echo
           } > results.md
+          SHA=$(cat target/criterion/baseline-sha.txt)
+          if [ -n "$SHA" ]; then
+            {
+              echo "Performance differences relative to $SHA."
+              echo
+            } >> results.md
+          fi
           grep -Ev 'ignored|running \d+ tests|%\)' results.txt |\
             sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
                     -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
@@ -136,12 +141,18 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
+      - name: Store history
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p target/criterion-history
+          cp -r target/criterion "target/criterion-history/$(date +%s)-${{ github.sha }}"
+
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: ./target/criterion
-          key: criterion-${{ runner.name }}-${{ hashFiles('./target/criterion/**.json') }}
+          key: criterion-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
