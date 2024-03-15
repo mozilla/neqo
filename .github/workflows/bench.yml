@@ -20,8 +20,16 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout
+      - name: Checkout neqo
         uses: actions/checkout@v4
+
+      - name: Checkout msquic
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/msquic
+          ref: main
+          path: msquic
+          submodules: true
 
       - name: Set PATH
         run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
@@ -35,10 +43,17 @@ jobs:
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
 
-      - name: Build
+      - name: Build neqo
         run: |
           cargo "+$TOOLCHAIN" bench --features bench --no-run
           cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
+
+      - name: Build msquic
+        run: |
+          mkdir -p msquic/build
+          cd msquic/build
+          cmake -GNinja -DQUIC_BUILD_TOOLS=1 ..
+          cmake --build .
 
       - name: Download cached main-branch results
         id: criterion-cache
