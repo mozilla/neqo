@@ -92,8 +92,8 @@ runs:
       run: |
         echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
         echo '' >> comment
-        # Ignore all, but table, which starts with "|:--".
-        cat quic-interop-runner/summary | awk '/^\|:--/{flag=1} flag' >> comment
+        # Ignore all, but table, which starts with "| :--" or "|:--".
+        grep -A 999999 -E '^\|\s?:--' quic-interop-runner/summary >> comment
         echo '' >> comment
       shell: bash
 
