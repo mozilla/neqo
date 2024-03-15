@@ -56,7 +56,7 @@ impl Socket {
     }
 
     /// Send the UDP datagram on the specified socket.
-    pub fn send(&self, d: Datagram) -> io::Result<usize> {
+    pub fn send(&self, d: Datagram) -> io::Result<()> {
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
@@ -72,7 +72,7 @@ impl Socket {
 
         assert_eq!(n, 1, "only passed one slice");
 
-        Ok(n)
+        Ok(())
     }
 
     /// Receive a UDP datagram on the specified socket.
