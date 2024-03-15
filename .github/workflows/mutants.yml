@@ -1,8 +1,12 @@
 name: Find mutants
 on:
+  schedule:
+    - cron: '42 3 * * 2,5' # Runs at 03:42 UTC (m and h chosen arbitrarily) twice a week.
+  workflow_dispatch:
   pull_request:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -15,9 +19,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Relative diff
-        run: git diff origin/${{ github.base_ref }}.. > pr.diff
 
       - name: Install dependencies
         env:
@@ -34,13 +35,26 @@ jobs:
         with:
           version: stable
 
-      - name: Mutants
+      - name: Find incremental mutants
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         run: |
-          # Don't fail the build if mutants fail, for now.
+          git diff origin/${{ github.base_ref }}.. > pr.diff
           set -o pipefail
           cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
+          echo 'TITLE="Incremental Mutants"' >> "$GITHUB_ENV"
+
+      - name: Find mutants
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -o pipefail
+          cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true
+          echo 'TITLE="All Mutants"' >> "$GITHUB_ENV"
+
+      - name: Post step summary
+        if: always()
+        run: |
           {
-            echo "### Mutants"
+            echo "### $TITLE"
             echo "See https://mutants.rs/using-results.html for more information."
             echo '```'
             cat results.txt
