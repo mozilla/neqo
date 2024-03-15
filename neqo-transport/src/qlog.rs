@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
+use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder, IpTosEcn};
 use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
@@ -402,6 +402,7 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             ack_delay,
             first_ack_range,
             ack_ranges,
+            ecn_count: ecn_counts,
         } => {
             let ranges =
                 Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges).ok();
@@ -417,9 +418,9 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             QuicFrame::Ack {
                 ack_delay: Some(*ack_delay as f32 / 1000.0),
                 acked_ranges,
-                ect1: None,
-                ect0: None,
-                ce: None,
+                ect1: Some(ecn_counts[IpTosEcn::Ect1]),
+                ect0: Some(ecn_counts[IpTosEcn::Ect0]),
+                ce: Some(ecn_counts[IpTosEcn::Ce]),
             }
         }
         Frame::ResetStream {

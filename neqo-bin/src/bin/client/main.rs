@@ -200,7 +200,7 @@ impl Args {
         // Only use v1 for most QNS tests.
         self.shared.quic_parameters.quic_version = vec![Version::Version1];
         match testcase.as_str() {
-            // TODO: Add "ecn" when that is ready.
+            "ecn" => {}
             "http3" => {
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
