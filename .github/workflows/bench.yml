@@ -125,13 +125,15 @@ jobs:
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
           )
           for server in neqo msquic; do
-            ${server_cmd["$server"]} &
-            PID=$!
-            echo "Running benchmarks for $server server" | tee -a comparison.txt
-            hyperfine -n "$server" -L client neqo,msquic --export-markdown step.md "${client_cmd["{client}"]}" | tee -a comparison.txt || true
-            echo >> comparison.txt
-            kill $PID
-            cat step.md >> comparison.md
+            for client in neqo msquic; do
+              ${server_cmd["$server"]} &
+              PID=$!
+              echo "Running benchmarks for $server server" | tee -a comparison.txt
+              hyperfine -n "$client -> $server" --export-markdown step.md "${client_cmd[$client]}" | tee -a comparison.txt || true
+              echo >> comparison.txt
+              kill $PID
+              cat step.md >> comparison.md
+            done
           done
           rm -r "$TMP"
 
