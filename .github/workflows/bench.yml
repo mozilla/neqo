@@ -116,7 +116,7 @@ jobs:
           openssl req -nodes -new -x509 -keyout key -out cert -subj "/CN=DOMAIN" 2> /dev/null
           truncate -s "$SIZE" "$SIZE"
           declare -A client_cmd=(
-            ["neqo"]="target/release/debug/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
+            ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
           )
           declare -A server_cmd=(
