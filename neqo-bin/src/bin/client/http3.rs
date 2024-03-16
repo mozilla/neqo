@@ -301,8 +301,12 @@ impl StreamHandler for DownloadStreamHandler {
             println!("READ[{}]: 0x{}", stream_id, hex(&data));
         }
 
-        if fin && self.buf_writer.is_none() {
-            println!("<FIN[{stream_id}]>");
+        if fin {
+            if self.buf_writer.is_none() {
+                println!("<FIN[{stream_id}]>");
+            } else {
+                self.buf_writer.take().unwrap().flush()?;
+            }
         }
 
         Ok(true)
