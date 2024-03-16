@@ -108,13 +108,12 @@ jobs:
           SIZE: 1073741824 # 1 GB
 
       - name: Compare neqo and msquic
-        shell: /usr/bin/bash -x --noprofile --norc -e -o pipefail {0}
         env:
           HOST: 127.0.0.1
           PORT: 4433
-          SIZE: 67108864 # 64 MB
+          SIZE: 134217728 # 128 MB
         run: |
-          TMPDIR=$(mktemp -d)
+          TMP=$(mktemp -d)
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2> /dev/null
           truncate -s "$SIZE" "/tmp/$SIZE"
           declare -A client_cmd=(
