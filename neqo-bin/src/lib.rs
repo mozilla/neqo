@@ -91,7 +91,7 @@ pub struct QuicParameters {
 
     #[arg(long = "pacing")]
     /// Whether pacing is enabled.
-    pub pacing: bool,
+    pub pacing: Option<bool>,
 
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
@@ -162,7 +162,7 @@ impl QuicParameters {
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
-            .pacing(self.pacing);
+            .pacing(self.pacing.unwrap_or(false));
 
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {

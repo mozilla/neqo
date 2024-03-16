@@ -574,6 +574,8 @@ async fn main() -> Result<(), io::Error> {
 
     let mut args = Args::parse();
     assert!(!args.key.is_empty(), "Need at least one key");
+    // By default, enable pacing on server.
+    args.shared.quic_parameters.pacing.get_or_insert(true);
 
     init_db(args.db.clone());
 
