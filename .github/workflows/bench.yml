@@ -120,7 +120,7 @@ jobs:
           truncate -s "$SIZE" "/tmp/$SIZE"
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE/"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
@@ -130,8 +130,8 @@ jobs:
             for client in neqo msquic; do
               ${server_cmd["$server"]} &
               PID=$!
-              echo "Running benchmarks for $server server" | tee -a comparison.txt
-              hyperfine -w -n "$client <- $server" --export-markdown step.md "${client_cmd[$client]}" | tee -a comparison.txt || true
+              echo "Running benchmarks for client $client ← $server server" | tee -a comparison.txt
+              hyperfine -w -n "$client ← $server" --export-markdown step.md "${client_cmd[$client]}" | tee -a comparison.txt || true
               echo >> comparison.txt
               kill $PID
               {
