@@ -128,7 +128,7 @@ jobs:
             ${server_cmd["$server"]} &
             PID=$!
             echo "Running benchmarks for $server server" | tee -a comparison.txt
-            hyperfine -n "$server" -L client neqo,msquic--export-markdown step.md "${client_cmd["{client}"]}" | tee -a comparison.txt || true
+            hyperfine -n "$server" -L client neqo,msquic --export-markdown step.md "${client_cmd["{client}"]}" | tee -a comparison.txt || true
             echo >> comparison.txt
             kill $PID
             cat step.md >> comparison.md
