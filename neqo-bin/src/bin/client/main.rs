@@ -36,6 +36,8 @@ use url::{Origin, Url};
 mod http09;
 mod http3;
 
+const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
+
 #[derive(Debug)]
 pub enum ClientError {
     ArgumentError(&'static str),

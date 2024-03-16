@@ -26,7 +26,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use crate::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
+use crate::{get_output_file, qlog_new, Args, KeyUpdateState, Res, BUFWRITER_BUFFER_SIZE};
 
 pub(crate) struct Handler<'a> {
     #[allow(
@@ -255,7 +255,8 @@ impl StreamHandlerType {
         match handler_type {
             Self::Download => {
                 let out_file = get_output_file(url, &args.output_dir, all_paths);
-                let buf_writer = out_file.map(|file| BufWriter::with_capacity(64 * 1024, file));
+                let buf_writer =
+                    out_file.map(|file| BufWriter::with_capacity(BUFWRITER_BUFFER_SIZE, file));
                 client.stream_close_send(client_stream_id).unwrap();
                 Box::new(DownloadStreamHandler { buf_writer })
             }

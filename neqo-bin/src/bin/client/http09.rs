@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
     fs::File,
-    io::Write,
+    io::{BufWriter, Write},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
@@ -26,7 +26,7 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, Args, KeyUpdateState, Res};
-use crate::qlog_new;
+use crate::{qlog_new, BUFWRITER_BUFFER_SIZE};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<File>>,
@@ -219,7 +219,7 @@ impl<'b> Handler<'b> {
         client: &mut Connection,
         stream_id: StreamId,
         output_read_data: bool,
-        maybe_out_file: &mut Option<File>,
+        maybe_out_file: &mut Option<BufWriter<File>>,
     ) -> Res<bool> {
         let mut data = vec![0; 4096];
         loop {
@@ -228,7 +228,7 @@ impl<'b> Handler<'b> {
                 return Ok(fin);
             }
 
-            if let Some(out_file) = maybe_out_file {
+            if let Some(ref mut out_file) = maybe_out_file {
                 out_file.write_all(&data[..sz])?;
             } else if !output_read_data {
                 println!("READ[{stream_id}]: {sz} bytes");
@@ -253,15 +253,21 @@ impl<'b> Handler<'b> {
                 return Ok(());
             }
             Some(maybe_out_file) => {
+                let mut buf_writer = maybe_out_file
+                    .take()
+                    .map(|file| BufWriter::with_capacity(BUFWRITER_BUFFER_SIZE, file));
+
                 let fin_recvd = Self::read_from_stream(
                     client,
                     stream_id,
                     self.args.output_read_data,
-                    maybe_out_file,
+                    &mut buf_writer,
                 )?;
 
                 if fin_recvd {
-                    if maybe_out_file.is_none() {
+                    if buf_writer.is_some() {
+                        buf_writer.take().unwrap().flush()?;
+                    } else {
                         println!("<FIN[{stream_id}]>");
                     }
                     self.streams.remove(&stream_id);
