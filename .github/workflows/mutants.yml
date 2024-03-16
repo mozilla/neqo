@@ -56,7 +56,7 @@ jobs:
             echo "### $TITLE"
             echo "See https://mutants.rs/using-results.html for more information."
             echo '```'
-            sed 's/[^[:print:]]//g' results.txt
+            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
