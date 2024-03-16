@@ -302,10 +302,10 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            if self.buf_writer.is_none() {
-                println!("<FIN[{stream_id}]>");
+            if let Some(buf_writer) = self.buf_writer.take() {
+                buf_writer.flush()?;
             } else {
-                self.buf_writer.take().unwrap().flush()?;
+                println!("<FIN[{stream_id}]>");
             }
         }
 
