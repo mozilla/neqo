@@ -113,14 +113,14 @@ jobs:
           PORT: 4433
           SIZE: 67108864 # 64 MB
         run: |
-          openssl req -nodes -new -x509 -keyout key -out cert -subj "/CN=DOMAIN"
+          openssl req -nodes -new -x509 -keyout key -out cert -subj "/CN=DOMAIN" 2> /dev/null
           truncate -s "$SIZE" "$SIZE"
           declare -A client_cmd=(
-            ["neqo"]="neqo/target/release/debug/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
+            ["neqo"]="target/release/debug/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
           )
           declare -A server_cmd=(
-            ["neqo"]="neqo/target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
+            ["neqo"]="target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:. -listen:$HOST -port:$PORT -file:cert -key:key -noexit"
           )
           for client in neqo msquic; do
