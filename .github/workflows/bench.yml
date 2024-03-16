@@ -9,7 +9,7 @@ env:
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
-  PERF_CMD: record -o perf.data -F997 --call-graph fp -g
+  PERF_OPT: (record -F997 --call-graph fp -g)
 
 jobs:
   bench:
@@ -73,41 +73,71 @@ jobs:
           taskset -c 0 nice -n -20 \
             cargo "+$TOOLCHAIN" bench --features bench -- --noplot | tee results.txt
 
-      # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
-      # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
-      - name: Profile cargo bench transfer
-        run: |
-          # This re-runs part of the previous step, and would hence overwrite part of the criterion results.
-          # Avoid that by shuffling the directories around so this run uses its own results directory.
-          mv target/criterion target/criterion-bench
-          mv target/criterion-transfer-profile target/criterion || true
-          taskset -c 0 nice -n -20 \
-            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
-              --bench --exact "Run multiple transfers with varying seeds" --noplot
-          # And now restore the directories.
-          mv target/criterion target/criterion-transfer-profile
-          mv target/criterion-bench target/criterion
-
-      - name: Profile client/server transfer
+      - name: Compare neqo and msquic
+        env:
+          HOST: 127.0.0.1
+          PORT: 4433
+          SIZE: 134217728 # 128 MB
         run: |
           TMP=$(mktemp -d)
-          { mkdir server; \
-            cd server; \
-            taskset -c 0 nice -n -20 \
-            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- --db ../test-fixture/db "$HOST:4433" || true; } &
-          mkdir client; \
-            cd client; \
-            taskset -c 1 nice -n -20 time \
-            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-client -- --output-dir "$TMP" "https://$HOST:4433/$SIZE"
-          killall -INT neqo-server
-          cd ${{ github.workspace }}
-          [ "$(wc -c < "$TMP/$SIZE")" -eq "$SIZE" ] || exit 1
+          openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
+          truncate -s "$SIZE" "/tmp/$SIZE"
+          declare -A client_cmd=(
+            ["neqo"]="target/release/neqo-client _cc _pacing -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+          )
+          declare -A server_cmd=(
+            ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
+          )
+
+          function transmogrify {
+            CMD=$1
+            local cc=$2
+            local pacing=$3
+            if [ "$cc" != "" ]; then
+              CMD=${CMD//_cc/--cc $cc}
+              EXT="-$cc"
+            fi
+            if [ "$pacing" == "pacing" ]; then
+              CMD=${CMD//_pacing/--pacing}
+              EXT="$EXT-$pacing"
+            fi
+          }
+
+          for server in neqo msquic; do
+            for client in neqo msquic; do
+              if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
+                cc_opt=("")
+                pacing_opt=("")
+              else
+                cc_opt=("reno" "cubic")
+                pacing_opt=("pacing" "")
+              fi
+              for cc in "${cc_opt[@]}"; do
+                for pacing in "${pacing_opt[@]}"; do
+                  TAG="client $client ← $server server $cc $pacing"
+                  echo "Running benchmarks for $TAG" | tee -a comparison.txt
+                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
+                  echo "$CMD"
+                  perf "${PERF_OPT[@]}" -o "$client-$server$EXT.server.perf" CMD &
+                  PID=$!
+                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
+                  echo "$CMD"
+                  perf "${PERF_OPT[@]}" -o "$client-$server$EXT.client.perf" \
+                    hyperfine -w 1 -n "$TAG" --export-markdown step.md "$CMD" |
+                    tee -a comparison.txt || true
+                  echo >>comparison.txt
+                  kill $PID
+                  {
+                    echo
+                    cat step.md
+                  } >>comparison.md
+                done
+              done
+            done
+          done
           rm -r "$TMP"
-        env:
-          HOST: localhost
-          SIZE: 1073741824 # 1 GB
 
       - name: Compare neqo and msquic
         env:
@@ -149,20 +179,23 @@ jobs:
 
       - name: Convert for profiler.firefox.com
         run: |
-          perf script -i perf.data -F +pid > transfer.perf &
-          perf script -i client/perf.data -F +pid > client.perf &
-          perf script -i server/perf.data -F +pid > server.perf &
+          perf script -i transfer.perf -F +pid > transfer.fx.perf &
+          for CC in newreno cubic; do
+            for PEER in client server; do
+              perf script -i "$PEER-$CC.perf" -F +pid > "$PEER-$CC.fx.perf" &
+            done
+          done
           wait
-          mv flamegraph.svg transfer.svg
-          mv client/flamegraph.svg client.svg
-          mv server/flamegraph.svg server.svg
           rm neqo.svg
 
       - name: Generate perf reports
         run: |
-          perf report -i perf.data --no-children --stdio > transfer.perf.txt &
-          perf report -i client/perf.data --no-children --stdio > client.perf.txt &
-          perf report -i server/perf.data --no-children --stdio > server.perf.txt &
+          perf report -i transfer.perf --no-children --stdio > transfer.perf.txt &
+          for CC in newreno cubic; do
+            for PEER in client server; do
+              perf report -i "$PEER-$CC.perf" --no-children --stdio > "$PEER-$CC.txt" &
+             done
+          done
           wait
 
       - name: Format results as Markdown
