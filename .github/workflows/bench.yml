@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p msquic/build
           cd msquic/build
-          cmake -GNinja -DQUIC_BUILD_TOOLS=1 ..
+          cmake -GNinja -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1..
           cmake --build .
 
       - name: Download cached main-branch results
@@ -117,22 +117,22 @@ jobs:
           truncate -s "$SIZE" "$SIZE"
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
+            ["msquic"]="msquic/build/bin/Release/secnetperf -target:$HOST -port:$PORT -exec:maxtput -down:$SIZE"
+            # ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:. -listen:$HOST -port:$PORT -file:cert -key:key -noexit"
+            ["msquic"]="msquic/build/bin/Release/secnetperf -bind:$HOST -port:$PORT -exec:maxtput"
+            # ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:. -listen:$HOST -port:$PORT -file:cert -key:key -noexit"
           )
-          for client in neqo msquic; do
-            for server in neqo msquic; do
-              ${server_cmd["$server"]} &
-              PID=$!
-              echo "Running ${client} against ${server}" | tee -a comparison.txt
-              hyperfine "${client_cmd["$client"]}" | tee -a comparison.txt
-              echo >> comparison.txt
-              kill $PID
-            done
-          done
+          for kind in neqo msquic; do
+            ${server_cmd["$kind"]} &
+            PID=$!
+            echo "Running ${kind} against ${kind}" | tee -a comparison.txt
+            hyperfine "${client_cmd["$kind"]}" | tee -a comparison.txt
+            echo >> comparison.txt
+            kill $PID
+          # done
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
