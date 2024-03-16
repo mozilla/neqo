@@ -113,26 +113,27 @@ jobs:
           PORT: 4433
           SIZE: 67108864 # 64 MB
         run: |
-          openssl req -nodes -new -x509 -keyout key -out cert -subj "/CN=DOMAIN" 2> /dev/null
-          truncate -s "$SIZE" "$SIZE"
+          TMPDIR=$(mktemp -d)
+          openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2> /dev/null
+          truncate -s "$SIZE" "/tmp/$SIZE"
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/secnetperf -target:$HOST -port:$PORT -exec:maxtput -down:$SIZE"
-            # ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/secnetperf -bind:$HOST -port:$PORT -exec:maxtput"
-            # ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:. -listen:$HOST -port:$PORT -file:cert -key:key -noexit"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
           )
-          for kind in neqo msquic; do
-            ${server_cmd["$kind"]} &
+          for server in neqo msquic; do
+            ${server_cmd["$server"]} &
             PID=$!
-            echo "Running ${kind} against ${kind}" | tee -a comparison.txt
-            hyperfine "${client_cmd["$kind"]}" | tee -a comparison.txt
+            echo "Running teste for ${server} server" | tee -a comparison.txt
+            hyperfine -n "$server" -L client neqo,msquic--export-markdown comparison.md "${client_cmd["{client}"]}" | tee -a comparison.txt || true
             echo >> comparison.txt
             kill $PID
+            cat comparison.md >> "$GITHUB_STEP_SUMMARY"
           done
+          rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
