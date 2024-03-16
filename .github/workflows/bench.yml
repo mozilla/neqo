@@ -132,7 +132,7 @@ jobs:
             hyperfine "${client_cmd["$kind"]}" | tee -a comparison.txt
             echo >> comparison.txt
             kill $PID
-          # done
+          done
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
