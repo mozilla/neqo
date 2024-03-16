@@ -302,7 +302,7 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            if let Some(buf_writer) = self.buf_writer.take() {
+            if let Some(mut buf_writer) = self.buf_writer.take() {
                 buf_writer.flush()?;
             } else {
                 println!("<FIN[{stream_id}]>");
