@@ -107,6 +107,33 @@ jobs:
           HOST: localhost
           SIZE: 1073741824 # 1 GB
 
+      - name: Compare neqo and msquic
+        env:
+          HOST: 127.0.0.1
+          PORT: 4433
+          SIZE: 67108864 # 64 MB
+        run: |
+          openssl req -nodes -new -x509 -keyout key -out cert -subj "/CN=DOMAIN"
+          truncate -s "$SIZE" "$SIZE"
+          declare -A client_cmd=(
+            ["neqo"]="neqo/target/release/debug/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
+          )
+          declare -A server_cmd=(
+            ["neqo"]="neqo/target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:. -listen:$HOST -port:$PORT -file:cert -key:key -noexit"
+          )
+          for client in neqo msquic; do
+            for server in neqo msquic; do
+              ${server_cmd["$server"]} &
+              PID=$!
+              echo "Running ${client} against ${server}" | tee -a comparison.txt
+              hyperfine "${client_cmd["$client"]}" | tee -a comparison.txt
+              echo >> comparison.txt
+              kill $PID
+            done
+          done
+
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
