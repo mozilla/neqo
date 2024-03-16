@@ -90,6 +90,7 @@ jobs:
 
       - name: Profile client/server transfer
         run: |
+          TMP=$(mktemp -d)
           { mkdir server; \
             cd server; \
             taskset -c 0 nice -n -20 \
@@ -97,12 +98,13 @@ jobs:
               --bin neqo-server -- --db ../test-fixture/db "$HOST:4433" || true; } &
           mkdir client; \
             cd client; \
-            time taskset -c 1 nice -n -20 \
+            taskset -c 1 nice -n -20 time \
             cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-client -- --output-dir . "https://$HOST:4433/$SIZE"
+              --bin neqo-client -- --output-dir "$TMP" "https://$HOST:4433/$SIZE"
           killall -INT neqo-server
           cd ${{ github.workspace }}
-          [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
+          [ "$(wc -c < "$TMP/$SIZE")" -eq "$SIZE" ] || exit 1
+          rm -r "$TMP"
         env:
           HOST: localhost
           SIZE: 1073741824 # 1 GB
@@ -117,7 +119,7 @@ jobs:
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2> /dev/null
           truncate -s "$SIZE" "/tmp/$SIZE"
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://localhost:4433/$SIZE"
+            ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$SIZE/"
           )
           declare -A server_cmd=(
@@ -132,7 +134,10 @@ jobs:
               hyperfine -n "$client -> $server" --export-markdown step.md "${client_cmd[$client]}" | tee -a comparison.txt || true
               echo >> comparison.txt
               kill $PID
-              cat step.md >> comparison.md
+              {
+                echo
+                cat step.md
+              } >> comparison.md
             done
           done
           rm -r "$TMP"
