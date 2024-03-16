@@ -11,7 +11,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Display,
     fs::File,
-    io::Write,
+    io::{BufWriter, Write},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
@@ -255,8 +255,9 @@ impl StreamHandlerType {
         match handler_type {
             Self::Download => {
                 let out_file = get_output_file(url, &args.output_dir, all_paths);
+                let buf_writer = out_file.map(|file| BufWriter::with_capacity(64 * 1024, file));
                 client.stream_close_send(client_stream_id).unwrap();
-                Box::new(DownloadStreamHandler { out_file })
+                Box::new(DownloadStreamHandler { buf_writer })
             }
             Self::Upload => Box::new(UploadStreamHandler {
                 data: vec![42; args.upload_size],
@@ -269,12 +270,12 @@ impl StreamHandlerType {
 }
 
 struct DownloadStreamHandler {
-    out_file: Option<File>,
+    buf_writer: Option<BufWriter<File>>,
 }
 
 impl StreamHandler for DownloadStreamHandler {
     fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
-        if self.out_file.is_none() {
+        if self.buf_writer.is_none() {
             println!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
         }
     }
@@ -287,9 +288,9 @@ impl StreamHandler for DownloadStreamHandler {
         sz: usize,
         output_read_data: bool,
     ) -> Res<bool> {
-        if let Some(out_file) = &mut self.out_file {
+        if let Some(buf_writer) = &mut self.buf_writer {
             if sz > 0 {
-                out_file.write_all(&data[..sz])?;
+                buf_writer.write_all(&data[..sz])?;
             }
             return Ok(true);
         } else if !output_read_data {
@@ -300,7 +301,7 @@ impl StreamHandler for DownloadStreamHandler {
             println!("READ[{}]: 0x{}", stream_id, hex(&data));
         }
 
-        if fin && self.out_file.is_none() {
+        if fin && self.buf_writer.is_none() {
             println!("<FIN[{stream_id}]>");
         }
 
