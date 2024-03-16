@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  incremental-mutants:
+  mutants:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,14 +40,14 @@ jobs:
           git diff origin/${{ github.base_ref }}.. > pr.diff
           set -o pipefail
           cargo mutants --test-tool=nextest --no-shuffle -j 2 -vV --in-diff pr.diff | tee results.txt || true
-          echo 'TITLE="Incremental Mutants"' >> "$GITHUB_ENV"
+          echo 'TITLE=Incremental Mutants' >> "$GITHUB_ENV"
 
       - name: Find mutants
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           set -o pipefail
           cargo mutants --test-tool=nextest -vV --in-place | tee results.txt || true
-          echo 'TITLE="All Mutants"' >> "$GITHUB_ENV"
+          echo 'TITLE=All Mutants' >> "$GITHUB_ENV"
 
       - name: Post step summary
         if: always()
@@ -56,7 +56,7 @@ jobs:
             echo "### $TITLE"
             echo "See https://mutants.rs/using-results.html for more information."
             echo '```'
-            cat results.txt
+            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
