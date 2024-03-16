@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p msquic/build
           cd msquic/build
-          cmake -GNinja -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1..
+          cmake -GNinja -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
       - name: Download cached main-branch results
