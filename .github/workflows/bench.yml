@@ -127,11 +127,11 @@ jobs:
           for server in neqo msquic; do
             ${server_cmd["$server"]} &
             PID=$!
-            echo "Running teste for ${server} server" | tee -a comparison.txt
-            hyperfine -n "$server" -L client neqo,msquic--export-markdown comparison.md "${client_cmd["{client}"]}" | tee -a comparison.txt || true
+            echo "Running benchmarks for $server server" | tee -a comparison.txt
+            hyperfine -n "$server" -L client neqo,msquic--export-markdown step.md "${client_cmd["{client}"]}" | tee -a comparison.txt || true
             echo >> comparison.txt
             kill $PID
-            cat comparison.md >> "$GITHUB_STEP_SUMMARY"
+            cat step.md >> comparison.md
           done
           rm -r "$TMP"
 
@@ -179,6 +179,11 @@ jobs:
                     -e 's/^([a-z0-9].*)$/* **\1**/gi' \
                     -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
               >> results.md
+          {
+            echo "### Client/server transfer results"
+            cat comparison.md
+          } >> results.md
+          cat results.md > "$GITHUB_STEP_SUMMARY"
 
       - name: Remember main-branch push URL
         if: github.ref == 'refs/heads/main'
