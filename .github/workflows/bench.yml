@@ -108,6 +108,7 @@ jobs:
           SIZE: 1073741824 # 1 GB
 
       - name: Compare neqo and msquic
+        shell: /usr/bin/bash -x --noprofile --norc -e -o pipefail {0}
         env:
           HOST: 127.0.0.1
           PORT: 4433
