@@ -9,7 +9,7 @@ env:
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
-  PERF_OPT: (record -F997 --call-graph fp -g)
+  PERF_OPT: record -F997 --call-graph fp -g
 
 jobs:
   bench:
@@ -120,13 +120,17 @@ jobs:
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
                   echo "$CMD"
-                  perf "${PERF_OPT[@]}" -o "$client-$server$EXT.server.perf" CMD &
+                  # shellcheck disable=SC2086
+                  taskset -c 0 nice -n -20 \
+                    perf $PERF_OPT -o "$client-$server$EXT.server.perf" CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
                   echo "$CMD"
-                  perf "${PERF_OPT[@]}" -o "$client-$server$EXT.client.perf" \
-                    hyperfine -w 1 -n "$TAG" --export-markdown step.md "$CMD" |
-                    tee -a comparison.txt || true
+                  # shellcheck disable=SC2086
+                  taskset -c 0 nice -n -20 \
+                    perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
+                      hyperfine -w 1 -n "$TAG" --export-markdown step.md "$CMD" |
+                      tee -a comparison.txt || true
                   echo >>comparison.txt
                   kill $PID
                   {
@@ -139,39 +143,6 @@ jobs:
           done
           rm -r "$TMP"
 
-      - name: Compare neqo and msquic
-        env:
-          HOST: 127.0.0.1
-          PORT: 4433
-          SIZE: 134217728 # 128 MB
-        run: |
-          TMP=$(mktemp -d)
-          openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2> /dev/null
-          truncate -s "$SIZE" "/tmp/$SIZE"
-          declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-          )
-          declare -A server_cmd=(
-            ["neqo"]="target/release/neqo-server -o -a hq-interop -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
-          )
-          for server in neqo msquic; do
-            for client in neqo msquic; do
-              ${server_cmd["$server"]} &
-              PID=$!
-              echo "Running benchmarks for client $client ← $server server" | tee -a comparison.txt
-              hyperfine -w 1 -n "$client ← $server" --export-markdown step.md "${client_cmd[$client]}" | tee -a comparison.txt || true
-              echo >> comparison.txt
-              kill $PID
-              {
-                echo
-                cat step.md
-              } >> comparison.md
-            done
-          done
-          rm -r "$TMP"
-
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
@@ -179,22 +150,16 @@ jobs:
 
       - name: Convert for profiler.firefox.com
         run: |
-          perf script -i transfer.perf -F +pid > transfer.fx.perf &
-          for CC in newreno cubic; do
-            for PEER in client server; do
-              perf script -i "$PEER-$CC.perf" -F +pid > "$PEER-$CC.fx.perf" &
-            done
+          for f in *.perf; do
+            perf script -i "$f" -F +pid > "$(basename -s .perf $f).fx.perf" &
           done
           wait
           rm neqo.svg
 
       - name: Generate perf reports
         run: |
-          perf report -i transfer.perf --no-children --stdio > transfer.perf.txt &
-          for CC in newreno cubic; do
-            for PEER in client server; do
-              perf report -i "$PEER-$CC.perf" --no-children --stdio > "$PEER-$CC.txt" &
-             done
+          for f in *.perf; do
+            perf report -i "$f" --no-children --stdio > "$f.txt" &
           done
           wait
 
