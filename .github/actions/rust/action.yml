@@ -34,22 +34,28 @@ runs:
 
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.
-    # - name: Use sccache
-    #   uses: mozilla-actions/sccache-action@v0.0.4
+    - name: Use sccache
+      uses: mozilla-actions/sccache-action@v0.0.4
 
-    # - name: Enable sscache
-    #   shell: bash
-    #   run: |
-    #     if [ "${{ runner.os }}" = "Windows" ]; then
-    #       echo "CC=sccache cl" >> "$GITHUB_ENV"
-    #       echo "CXX=sccache cl" >> "$GITHUB_ENV"
-    #     else
-    #       echo "CC=sccache cc" >> "$GITHUB_ENV"
-    #       echo "CXX=sccache c++" >> "$GITHUB_ENV"
-    #     fi
-    #     echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-    #     echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-    #     echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+
+    - name: Enable sscache
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          echo "CC=sccache cl" >> "$GITHUB_ENV"
+          echo "CXX=sccache cl" >> "$GITHUB_ENV"
+        else
+          echo "CC=sccache cc" >> "$GITHUB_ENV"
+          echo "CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        echo "SCCACHE_GCS_BUCKET=neqo-cache" >> "$GITHUB_ENV"
+        echo "SCCACHE_GCS_RW_MODE=READ_WRITE" >> "$GITHUB_ENV"
 
     # Ditto for rust-cache.
     # - name: Use Rust cache
