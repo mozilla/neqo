@@ -101,9 +101,10 @@ jobs:
             fi
             if [ "$pacing" == "on" ]; then
               CMD=${CMD//_pacing/}
-              EXT="$EXT-$pacing"
+              EXT="$EXT-pacing"
             else
               CMD=${CMD//_pacing/--no-pacing}
+              EXT="$EXT-nopacing"
             fi
           }
 
@@ -118,25 +119,22 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  TAG="client $client ← $server server ($cc"
+                  TAG="client $client ← server $server ($cc"
                   if [ "$pacing" == "on" ]; then
                     TAG="$TAG, pacing"
                   fi
                   TAG="$TAG)"
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
-                  echo "perf $PERF_OPT -o $client-$server$EXT.server.perf $CMD"
                   # shellcheck disable=SC2086
                   taskset -c 0 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
-                  echo "perf $PERF_OPT -o $client-$server$EXT.client.perf \
-                      hyperfine -w 1 -n $TAG -u millisecond --export-markdown step.md $CMD"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine -w 1 -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      hyperfine --show-output -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
                   kill $PID
@@ -145,7 +143,9 @@ jobs:
               done
             done
           done
-          sed '/^\| Command/{x;/^$/!d;g;}' steps.md | sed '/^\|:-/{x;/^$/!d;g;}' > comparison.md
+          sed '/^\| Command/{x;/^$/!d;g;}' steps.md | \
+            sed '/^\|:-/{x;/^$/!d;g;}' | \
+            sed 's/\`//g' > comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
