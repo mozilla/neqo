@@ -26,10 +26,10 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, Args, KeyUpdateState, Res};
-use crate::{qlog_new, BUFWRITER_BUFFER_SIZE};
+use crate::qlog_new;
 
 pub struct Handler<'a> {
-    streams: HashMap<StreamId, Option<File>>,
+    streams: HashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
@@ -228,7 +228,7 @@ impl<'b> Handler<'b> {
                 return Ok(fin);
             }
 
-            if let Some(ref mut out_file) = maybe_out_file {
+            if let Some(out_file) = maybe_out_file {
                 out_file.write_all(&data[..sz])?;
             } else if !output_read_data {
                 println!("READ[{stream_id}]: {sz} bytes");
@@ -246,27 +246,22 @@ impl<'b> Handler<'b> {
     }
 
     fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<()> {
-        let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
-        match &mut maybe_maybe_out_file {
+        match self.streams.get_mut(&stream_id) {
             None => {
                 println!("Data on unexpected stream: {stream_id}");
                 return Ok(());
             }
             Some(maybe_out_file) => {
-                let mut buf_writer = maybe_out_file
-                    .take()
-                    .map(|file| BufWriter::with_capacity(BUFWRITER_BUFFER_SIZE, file));
-
                 let fin_recvd = Self::read_from_stream(
                     client,
                     stream_id,
                     self.args.output_read_data,
-                    &mut buf_writer,
+                    maybe_out_file,
                 )?;
 
                 if fin_recvd {
-                    if buf_writer.is_some() {
-                        buf_writer.take().unwrap().flush()?;
+                    if let Some(mut out_file) = maybe_out_file.take() {
+                        out_file.flush()?;
                     } else {
                         println!("<FIN[{stream_id}]>");
                     }

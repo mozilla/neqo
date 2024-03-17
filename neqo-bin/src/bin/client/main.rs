@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
-    io,
+    io::{self, BufWriter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
     pin::Pin,
@@ -254,7 +254,7 @@ fn get_output_file(
     url: &Url,
     output_dir: &Option<PathBuf>,
     all_paths: &mut Vec<PathBuf>,
-) -> Option<File> {
+) -> Option<BufWriter<File>> {
     if let Some(ref dir) = output_dir {
         let mut out_path = dir.clone();
 
@@ -286,7 +286,7 @@ fn get_output_file(
             .ok()?;
 
         all_paths.push(out_path);
-        Some(f)
+        Some(BufWriter::with_capacity(BUFWRITER_BUFFER_SIZE, f))
     } else {
         None
     }

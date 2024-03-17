@@ -26,7 +26,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use crate::{get_output_file, qlog_new, Args, KeyUpdateState, Res, BUFWRITER_BUFFER_SIZE};
+use crate::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
 
 pub(crate) struct Handler<'a> {
     #[allow(
@@ -255,10 +255,8 @@ impl StreamHandlerType {
         match handler_type {
             Self::Download => {
                 let out_file = get_output_file(url, &args.output_dir, all_paths);
-                let buf_writer =
-                    out_file.map(|file| BufWriter::with_capacity(BUFWRITER_BUFFER_SIZE, file));
                 client.stream_close_send(client_stream_id).unwrap();
-                Box::new(DownloadStreamHandler { buf_writer })
+                Box::new(DownloadStreamHandler { out_file })
             }
             Self::Upload => Box::new(UploadStreamHandler {
                 data: vec![42; args.upload_size],
@@ -271,12 +269,12 @@ impl StreamHandlerType {
 }
 
 struct DownloadStreamHandler {
-    buf_writer: Option<BufWriter<File>>,
+    out_file: Option<BufWriter<File>>,
 }
 
 impl StreamHandler for DownloadStreamHandler {
     fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
-        if self.buf_writer.is_none() {
+        if self.out_file.is_none() {
             println!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
         }
     }
@@ -289,9 +287,9 @@ impl StreamHandler for DownloadStreamHandler {
         sz: usize,
         output_read_data: bool,
     ) -> Res<bool> {
-        if let Some(buf_writer) = &mut self.buf_writer {
+        if let Some(out_file) = &mut self.out_file {
             if sz > 0 {
-                buf_writer.write_all(&data[..sz])?;
+                out_file.write_all(&data[..sz])?;
             }
             return Ok(true);
         } else if !output_read_data {
@@ -303,8 +301,8 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            if let Some(mut buf_writer) = self.buf_writer.take() {
-                buf_writer.flush()?;
+            if let Some(mut out_file) = self.out_file.take() {
+                out_file.flush()?;
             } else {
                 println!("<FIN[{stream_id}]>");
             }
