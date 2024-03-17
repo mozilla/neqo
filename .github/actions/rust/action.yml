@@ -40,10 +40,10 @@ runs:
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.4
 
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: '${{ inputs.token }}'
+    # - name: Authenticate to Google Cloud
+    #   uses: google-github-actions/auth@v2
+    #   with:
+    #     credentials_json: '${{ inputs.token }}'
 
     - name: Enable sscache
       shell: bash
@@ -55,10 +55,11 @@ runs:
           echo "CC=sccache cc" >> "$GITHUB_ENV"
           echo "CXX=sccache c++" >> "$GITHUB_ENV"
         fi
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
         echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-        echo "SCCACHE_GCS_BUCKET=neqo-cache" >> "$GITHUB_ENV"
-        echo "SCCACHE_GCS_RW_MODE=READ_WRITE" >> "$GITHUB_ENV"
+        # echo "SCCACHE_GCS_BUCKET=neqo-cache" >> "$GITHUB_ENV"
+        # echo "SCCACHE_GCS_RW_MODE=READ_WRITE" >> "$GITHUB_ENV"
 
     # Ditto for rust-cache.
     # - name: Use Rust cache
