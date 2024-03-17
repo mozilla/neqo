@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p msquic/build
           cd msquic/build
-          cmake -GNinja -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
       - name: Download cached main-branch results
@@ -116,7 +116,11 @@ jobs:
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
-                  TAG="client $client ← $server server $cc $pacing"
+                  TAG="client $client ← $server server ($cc"
+                  if [ "$pacing" == "pacing" ]; then
+                    TAG="$TAG, pacing"
+                  fi
+                  TAG="$TAG)"
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
                   # shellcheck disable=SC2086
@@ -125,7 +129,7 @@ jobs:
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
                   # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 \
+                  taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
                       hyperfine -w 1 -n "$TAG" --export-markdown step.md "$CMD" |
                       tee -a comparison.txt || true
@@ -146,20 +150,18 @@ jobs:
         run: sudo /root/bin/unprep.sh
         if: success() || failure() || cancelled()
 
-      - name: Convert for profiler.firefox.com
+      - name: Post-process perf data
         run: |
           for f in *.perf; do
-            perf script -i "$f" -F +pid > "$(basename -s .perf "$f").fx.perf" &
+            # Convert for profiler.firefox.com
+            perf script -i "$f" -F +pid > "$f.fx" &
+            # Generate perf reports
+            perf report -i "$f" --no-children --stdio > "$f.txt" &
+            # Generate flamegraphs
+            flamegraph --perfdata "$f" -o "${f//.perf/.svg}" &
           done
           wait
           rm neqo.svg
-
-      - name: Generate perf reports
-        run: |
-          for f in *.perf; do
-            perf report -i "$f" --no-children --stdio > "$f.txt" &
-          done
-          wait
 
       - name: Format results as Markdown
         id: results
