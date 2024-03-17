@@ -437,8 +437,6 @@ async fn main() -> Res<()> {
     init();
 
     let mut args = Args::parse();
-    // By default, disable pacing on client.
-    args.shared.quic_parameters.pacing.get_or_insert(false);
     args.update_for_tests();
 
     let urls_by_origin = args
