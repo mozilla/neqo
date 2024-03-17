@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
     fs::File,
-    io::Write,
+    io::{BufWriter, Write},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
@@ -29,7 +29,7 @@ use super::{get_output_file, Args, KeyUpdateState, Res};
 use crate::qlog_new;
 
 pub struct Handler<'a> {
-    streams: HashMap<StreamId, Option<File>>,
+    streams: HashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
@@ -219,7 +219,7 @@ impl<'b> Handler<'b> {
         client: &mut Connection,
         stream_id: StreamId,
         output_read_data: bool,
-        maybe_out_file: &mut Option<File>,
+        maybe_out_file: &mut Option<BufWriter<File>>,
     ) -> Res<bool> {
         let mut data = vec![0; 4096];
         loop {
@@ -246,8 +246,7 @@ impl<'b> Handler<'b> {
     }
 
     fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<()> {
-        let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
-        match &mut maybe_maybe_out_file {
+        match self.streams.get_mut(&stream_id) {
             None => {
                 println!("Data on unexpected stream: {stream_id}");
                 return Ok(());
@@ -261,7 +260,9 @@ impl<'b> Handler<'b> {
                 )?;
 
                 if fin_recvd {
-                    if maybe_out_file.is_none() {
+                    if let Some(mut out_file) = maybe_out_file.take() {
+                        out_file.flush()?;
+                    } else {
                         println!("<FIN[{stream_id}]>");
                     }
                     self.streams.remove(&stream_id);
