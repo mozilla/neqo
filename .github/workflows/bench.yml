@@ -151,7 +151,7 @@ jobs:
       - name: Convert for profiler.firefox.com
         run: |
           for f in *.perf; do
-            perf script -i "$f" -F +pid > "$(basename -s .perf $f).fx.perf" &
+            perf script -i "$f" -F +pid > "$(basename -s .perf "$f").fx.perf" &
           done
           wait
           rm neqo.svg
