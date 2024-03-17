@@ -90,7 +90,7 @@ pub struct QuicParameters {
     pub congestion_control: CongestionControlAlgorithm,
 
     #[arg(long = "no-pacing")]
-    /// Whether pacing is enabled.
+    /// Whether to disable pacing.
     pub no_pacing: bool,
 
     #[arg(name = "preferred-address-v4", long)]
