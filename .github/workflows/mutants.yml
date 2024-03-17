@@ -33,6 +33,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: stable
+          token: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'
