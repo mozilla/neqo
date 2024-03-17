@@ -8,6 +8,9 @@ inputs:
   components:
     description: 'Rust components to install'
     default: ''
+  token:
+    description: 'GCS access token'
+    required: true
 
 runs:
   using: composite
@@ -40,7 +43,7 @@ runs:
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
-        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+        credentials_json: '${{ inputs.token }}'
 
     - name: Enable sscache
       shell: bash

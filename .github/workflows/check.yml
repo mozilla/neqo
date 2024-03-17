@@ -101,6 +101,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
+          token: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss

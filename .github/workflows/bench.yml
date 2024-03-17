@@ -31,6 +31,7 @@ jobs:
         with:
           version: $TOOLCHAIN
           components: rustfmt
+          token: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
