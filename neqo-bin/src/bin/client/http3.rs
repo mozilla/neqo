@@ -11,7 +11,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Display,
     fs::File,
-    io::Write,
+    io::{BufWriter, Write},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
@@ -269,7 +269,7 @@ impl StreamHandlerType {
 }
 
 struct DownloadStreamHandler {
-    out_file: Option<File>,
+    out_file: Option<BufWriter<File>>,
 }
 
 impl StreamHandler for DownloadStreamHandler {
@@ -300,8 +300,12 @@ impl StreamHandler for DownloadStreamHandler {
             println!("READ[{}]: 0x{}", stream_id, hex(&data));
         }
 
-        if fin && self.out_file.is_none() {
-            println!("<FIN[{stream_id}]>");
+        if fin {
+            if let Some(mut out_file) = self.out_file.take() {
+                out_file.flush()?;
+            } else {
+                println!("<FIN[{stream_id}]>");
+            }
         }
 
         Ok(true)
