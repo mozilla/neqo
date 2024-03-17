@@ -102,6 +102,8 @@ jobs:
             if [ "$pacing" == "pacing" ]; then
               CMD=${CMD//_pacing/--pacing}
               EXT="$EXT-$pacing"
+            else
+              CMD=${CMD//_pacing/}
             fi
           }
 
