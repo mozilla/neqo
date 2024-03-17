@@ -99,11 +99,11 @@ jobs:
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
             fi
-            if [ "$pacing" == "pacing" ]; then
-              CMD=${CMD//_pacing/--pacing}
+            if [ "$pacing" == "on" ]; then
+              CMD=${CMD//_pacing/}
               EXT="$EXT-$pacing"
             else
-              CMD=${CMD//_pacing/}
+              CMD=${CMD//_pacing/--no-pacing}
             fi
           }
 
@@ -114,12 +114,12 @@ jobs:
                 pacing_opt=("")
               else
                 cc_opt=("reno" "cubic")
-                pacing_opt=("pacing" "")
+                pacing_opt=("on" "")
               fi
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
                   TAG="client $client ← $server server ($cc"
-                  if [ "$pacing" == "pacing" ]; then
+                  if [ "$pacing" == "on" ]; then
                     TAG="$TAG, pacing"
                   fi
                   TAG="$TAG)"
