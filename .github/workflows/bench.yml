@@ -83,12 +83,12 @@ jobs:
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           truncate -s "$SIZE" "/tmp/$SIZE"
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client _cc _pacing -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            ["neqo"]="target/release/neqo-client _cc _pacing -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE 2> /dev/null"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE > /dev/null"
           )
           declare -A server_cmd=(
-            ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit || true"
+            ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT 2> /dev/null"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit > /dev/null || true"
           )
 
           function transmogrify {
@@ -145,9 +145,9 @@ jobs:
               done
             done
           done
-          sed '/^\| Command/{x;/^$/!d;g;}' steps.md | \
-            sed '/^\|:-/{x;/^$/!d;g;}' | \
-            sed 's/\`//g' > comparison.md
+          sed 's/`//g' steps.md |\
+            awk '!/^\| Command/ || !c++' |\
+            awk '!/^\|:/ || !c++' > comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
@@ -163,7 +163,7 @@ jobs:
             # Generate perf reports
             perf report -i "$f" --no-children --stdio > "$f.txt" &
             # Generate flamegraphs
-            flamegraph --perfdata "$f" -o "${f//.perf/.svg}" &
+            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
           done
           wait
           rm neqo.svg
