@@ -456,10 +456,10 @@ fn setup_for_gecko() -> Vec<String> {
 fn main() {
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
-    } else if env::var("NSS_DIR").is_err() {
-        pkg_config()
+    } else if let Ok(nss_dir) = env::var("NSS_DIR") {
+        setup_standalone(nss_dir)
     } else {
-        setup_standalone()
+        pkg_config()
     };
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
