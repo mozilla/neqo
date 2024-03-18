@@ -141,6 +141,7 @@ jobs:
                   echo >> comparison.txt
                   kill $PID
                   cat step.md >> steps.md
+                  ls -l
                   [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
                 done
               done
