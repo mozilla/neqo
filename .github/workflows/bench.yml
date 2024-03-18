@@ -83,7 +83,7 @@ jobs:
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           truncate -s "$SIZE" "/tmp/$SIZE"
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client _cc _pacing -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE 2> /dev/null"
+            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE 2> /dev/null"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE > /dev/null"
           )
           declare -A server_cmd=(
@@ -141,6 +141,7 @@ jobs:
                   echo >> comparison.txt
                   kill $PID
                   cat step.md >> steps.md
+                  [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
                 done
               done
             done
