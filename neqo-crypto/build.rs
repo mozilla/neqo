@@ -308,7 +308,7 @@ fn pkg_config() -> Vec<String> {
     let modversion = modversion.trim().to_string();
     // The NSS version number does not follow semver numbering, because it omits the patch version
     // when that's 0. Deal with that.
-    let modversion_for_cmp = if modversion.split('.').count() == 2 {
+    let modversion_for_cmp = if modversion.chars().filter(|c| c == '.').count() == 1 {
         modversion.clone() + ".0"
     } else {
         modversion.clone()
