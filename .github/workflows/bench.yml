@@ -88,7 +88,7 @@ jobs:
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit || true"
           )
 
           function transmogrify {
@@ -134,7 +134,7 @@ jobs:
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine --show-output -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      hyperfine -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
                   kill $PID
