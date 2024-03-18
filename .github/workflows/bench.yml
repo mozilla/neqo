@@ -85,11 +85,11 @@ jobs:
           # Make a cert and key for msquic.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make a test file for msquic to serve.
-          truncate -s "$SIZE" "/tmp/$SIZE"
+          truncate -s "$SIZE" "$TMP/$SIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE 2> /dev/null"
-            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -timeout:99999999 -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE > /dev/null"
+            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT 2> /dev/null"
@@ -145,7 +145,7 @@ jobs:
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      hyperfine -N --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
                   kill $PID
