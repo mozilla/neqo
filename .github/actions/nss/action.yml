@@ -27,7 +27,7 @@ runs:
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
-        NSS_VERSION=$(pkg-config --modversion nss)
+        NSS_VERSION="$(pkg-config --modversion nss)"
         if [ "$?" -ne 0 ]; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
