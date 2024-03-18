@@ -135,13 +135,11 @@ jobs:
                   TAG="$TAG)"
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
-                  echo "$CMD"
                   # shellcheck disable=SC2086
                   taskset -c 0 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
-                  echo "$CMD"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
@@ -150,7 +148,6 @@ jobs:
                   echo >> comparison.txt
                   kill $PID
                   cat step.md >> steps.md
-                  ls -l
                   # Sanity check the size of the last retrieved file.
                   [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
                 done
