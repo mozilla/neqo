@@ -2,6 +2,13 @@ name: Bench
 on:
   workflow_call:
   workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -67,11 +74,11 @@ jobs:
       - name: Prepare machine
         run: sudo /root/bin/prep.sh
 
-      # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
-      - name: Run cargo bench
-        run: |
-          taskset -c 0 nice -n -20 \
-            cargo "+$TOOLCHAIN" bench --features bench -- --noplot | tee results.txt
+      # # Pin the benchmark run to core 0 and run all benchmarks at elevated priority.
+      # - name: Run cargo bench
+      #   run: |
+      #     taskset -c 0 nice -n -20 \
+      #       cargo "+$TOOLCHAIN" bench --features bench -- --noplot | tee results.txt
 
       - name: Compare neqo and msquic
         env:
@@ -108,8 +115,8 @@ jobs:
             fi
           }
 
-          for server in neqo msquic; do
-            for client in neqo msquic; do
+          for server in msquic neqo; do
+            for client in msquic neqo; do
               if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
                 cc_opt=("")
                 pacing_opt=("")
@@ -126,19 +133,21 @@ jobs:
                   TAG="$TAG)"
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
                   transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
-                  echo "perf $PERF_OPT -o $client-$server$EXT.server.perf $CMD"
+                  echo "$CMD"
                   # shellcheck disable=SC2086
                   taskset -c 0 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                   PID=$!
                   transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
-                  echo "perf $PERF_OPT -o $client-$server$EXT.client.perf hyperfine -n $TAG -u millisecond --export-markdown step.md $CMD"
+                  echo "$CMD"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
                       hyperfine -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
+                  ps -ef
+                  echo "Killing $PID"
                   kill $PID
                   cat step.md >> steps.md
                 done
