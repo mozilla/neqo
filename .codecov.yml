@@ -1,8 +1,6 @@
-# neqo has no test coverage for its example client, server and interop test
+# neqo has no test coverage for its example client and server
 ignore:
-  - "neqo-client"
-  - "neqo-interop"
-  - "neqo-server"
+  - "neqo-bin"
 
 # Do not notify until at least three results have been uploaded from the CI pipeline.
 # (This corresponds to the three main platforms we support: Linux, macOS, and Windows.)

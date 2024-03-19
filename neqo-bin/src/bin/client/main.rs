@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
-    io,
+    io::{self, BufWriter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
     pin::Pin,
@@ -21,7 +21,8 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_common::{self as common, qdebug, qinfo, qlog::NeqoQlog, udp, Datagram, Role};
+use neqo_bin::udp;
+use neqo_common::{self as common, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -34,6 +35,8 @@ use url::{Origin, Url};
 
 mod http09;
 mod http3;
+
+const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -251,7 +254,7 @@ fn get_output_file(
     url: &Url,
     output_dir: &Option<PathBuf>,
     all_paths: &mut Vec<PathBuf>,
-) -> Option<File> {
+) -> Option<BufWriter<File>> {
     if let Some(ref dir) = output_dir {
         let mut out_path = dir.clone();
 
@@ -283,7 +286,7 @@ fn get_output_file(
             .ok()?;
 
         all_paths.push(out_path);
-        Some(f)
+        Some(BufWriter::with_capacity(BUFWRITER_BUFFER_SIZE, f))
     } else {
         None
     }
