@@ -305,13 +305,13 @@ fn pkg_config() -> Vec<String> {
         .expect("pkg-config reports NSS as absent")
         .stdout;
     let modversion = String::from_utf8(modversion).expect("non-UTF8 from pkg-config");
-    let modversion = modversion.trim().to_string();
+    let modversion = modversion.trim();
     // The NSS version number does not follow semver numbering, because it omits the patch version
     // when that's 0. Deal with that.
-    let modversion_for_cmp = if modversion.chars().filter(|c| c == '.').count() == 1 {
-        modversion.clone() + ".0"
+    let modversion_for_cmp = if modversion.chars().filter(|c| *c == '.').count() == 1 {
+        modversion.to_owned() + ".0"
     } else {
-        modversion.clone()
+        modversion.to_owned()
     };
     let modversion_for_cmp =
         Version::parse(&modversion_for_cmp).expect("NSS version not in semver format");
@@ -345,7 +345,7 @@ fn pkg_config() -> Vec<String> {
     flags
 }
 
-fn setup_standalone() -> Vec<String> {
+fn setup_standalone(_nss: &str) -> Vec<String> {
     setup_clang();
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
@@ -457,7 +457,7 @@ fn main() {
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
-        setup_standalone(nss_dir)
+        setup_standalone(&nss_dir)
     } else {
         pkg_config()
     };
