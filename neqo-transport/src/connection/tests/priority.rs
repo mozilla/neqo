@@ -7,7 +7,7 @@
 use std::{cell::RefCell, mem, rc::Rc};
 
 use neqo_common::event::Provider;
-use test_fixture::{self, now};
+use test_fixture::now;
 
 use super::{
     super::{Connection, Error, Output},

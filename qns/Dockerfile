@@ -4,8 +4,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git mercurial \
     build-essential libclang-dev lld \
     gyp ninja-build zlib1g-dev python \
- && apt-get autoremove -y && apt-get clean -y \
- && rm -rf /var/lib/apt/lists/*
+    && apt-get autoremove -y && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG RUST_VERSION=stable
 
@@ -21,8 +21,8 @@ ENV NSS_DIR=/nss \
     LD_LIBRARY_PATH=/dist/Release/lib
 
 RUN set -eux; \
-    hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
-    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+    git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"; \
+    git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
@@ -31,7 +31,7 @@ ADD . /neqo
 RUN set -eux; \
     cd /neqo; \
     RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release \
-      --bin neqo-client --bin neqo-server
+    --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
 

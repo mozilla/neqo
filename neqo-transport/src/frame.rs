@@ -6,7 +6,7 @@
 
 // Directly relating to QUIC frames.
 
-use std::{convert::TryFrom, ops::RangeInclusive};
+use std::ops::RangeInclusive;
 
 use neqo_common::{qtrace, Decoder};
 
@@ -617,7 +617,11 @@ impl<'a> Frame<'a> {
 mod tests {
     use neqo_common::{Decoder, Encoder};
 
-    use super::*;
+    use crate::{
+        cid::MAX_CONNECTION_ID_LEN,
+        frame::{AckRange, Frame, FRAME_TYPE_ACK},
+        CloseError, Error, StreamId, StreamType,
+    };
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);

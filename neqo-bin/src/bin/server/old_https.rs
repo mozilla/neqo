@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
-
 use std::{
     cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
 };
@@ -138,7 +136,7 @@ impl Http09Server {
             return;
         };
 
-        let re = if args.qns_test.is_some() {
+        let re = if args.shared.qns_test.is_some() {
             Regex::new(r"GET +/(\S+)(?:\r)?\n").unwrap()
         } else {
             Regex::new(r"GET +/(\d+)(?:\r)?\n").unwrap()
@@ -152,7 +150,7 @@ impl Http09Server {
             Some(path) => {
                 let path = path.as_str();
                 eprintln!("Path = '{path}'");
-                if args.qns_test.is_some() {
+                if args.shared.qns_test.is_some() {
                     qns_read_response(path)
                 } else {
                     let count = path.parse().unwrap();

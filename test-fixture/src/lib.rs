@@ -4,13 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
-    convert::TryFrom,
     fmt::Display,
     io::{Cursor, Result, Write},
     mem,

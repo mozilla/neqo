@@ -9,13 +9,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-enum-map = "2.7"
+enum-map = { version = "2.7", default-features = false }
 env_logger = { version = "0.10", default-features = false }
 log = { version = "0.4", default-features = false }
-qlog = "0.12"
-time = { version = "0.3", features = ["formatting"] }
+qlog = { version = "0.12", default-features = false }
+time = { version = "0.3", default-features = false, features = ["formatting"] }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
@@ -26,3 +29,7 @@ ci = []
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"
 features = ["timeapi"]
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false

@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    convert::TryFrom,
     fmt::{self, Debug},
     mem,
     net::{IpAddr, SocketAddr},
@@ -258,7 +257,7 @@ pub struct Connection {
     /// Some packets were received, but not tracked.
     received_untracked: bool,
 
-    /// This is responsible for the QuicDatagrams' handling:
+    /// This is responsible for the `QuicDatagrams`' handling:
     /// <https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram>
     quic_datagrams: QuicDatagrams,
 
@@ -272,8 +271,8 @@ pub struct Connection {
     new_token: NewTokenState,
     stats: StatsCell,
     qlog: NeqoQlog,
-    /// A session ticket was received without NEW_TOKEN,
-    /// this is when that turns into an event without NEW_TOKEN.
+    /// A session ticket was received without `NEW_TOKEN`,
+    /// this is when that turns into an event without `NEW_TOKEN`.
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
     hrtime: hrtime::Handle,
@@ -1938,6 +1937,14 @@ impl Connection {
             };
 
             let path = close.path().borrow();
+            // In some error cases, we will not be able to make a new, permanent path.
+            // For example, if we run out of connection IDs and the error results from
+            // a packet on a new path, we avoid sending (and the privacy risk) rather
+            // than reuse a connection ID.
+            if path.is_temporary() {
+                assert!(!cfg!(test), "attempting to close with a temporary path");
+                return Err(Error::InternalError);
+            }
             let (_, mut builder) = Self::build_packet_header(
                 &path,
                 cspace,

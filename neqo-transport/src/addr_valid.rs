@@ -7,7 +7,6 @@
 // This file implements functions necessary for address validation.
 
 use std::{
-    convert::TryFrom,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -48,9 +47,9 @@ const MAX_SAVED_TOKENS: usize = 8;
 pub enum ValidateAddress {
     /// Require address validation never.
     Never,
-    /// Require address validation unless a NEW_TOKEN token is provided.
+    /// Require address validation unless a `NEW_TOKEN` token is provided.
     NoToken,
-    /// Require address validation even if a NEW_TOKEN token is provided.
+    /// Require address validation even if a `NEW_TOKEN` token is provided.
     Always,
 }
 
@@ -234,7 +233,7 @@ impl AddressValidation {
                     qinfo!("AddressValidation: valid Retry token for {}", cid);
                     AddressValidationResult::ValidRetry(cid)
                 } else {
-                    panic!("AddressValidation: Retry token with small CID {}", cid);
+                    panic!("AddressValidation: Retry token with small CID {cid}");
                 }
             } else if cid.is_empty() {
                 // An empty connection ID means NEW_TOKEN.
@@ -246,7 +245,7 @@ impl AddressValidation {
                     AddressValidationResult::Pass
                 }
             } else {
-                panic!("AddressValidation: NEW_TOKEN token with CID {}", cid);
+                panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
             }
         } else {
             // From here on, we have a token that we couldn't decrypt.
@@ -405,7 +404,7 @@ impl NewTokenFrameStatus {
 
 #[derive(Default)]
 pub struct NewTokenSender {
-    /// The unacknowledged NEW_TOKEN frames we are yet to send.
+    /// The unacknowledged `NEW_TOKEN` frames we are yet to send.
     tokens: Vec<NewTokenFrameStatus>,
     /// A sequence number that is used to track individual tokens
     /// by reference (so that recovery tokens can be simple).

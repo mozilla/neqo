@@ -1,6 +1,12 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion, Throughput};
 use test_fixture::{
     boxed,
     sim::{
@@ -15,7 +21,9 @@ const JITTER: Duration = Duration::from_millis(10);
 const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<str>>) {
-    c.bench_function(label, |b| {
+    let mut group = c.benchmark_group("transfer");
+    group.throughput(Throughput::Bytes(u64::try_from(TRANSFER_AMOUNT).unwrap()));
+    group.bench_function(label, |b| {
         b.iter_batched(
             || {
                 let nodes = boxed![
@@ -38,6 +46,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
             SmallInput,
         )
     });
+    group.finish();
 }
 
 fn benchmark_transfer_variable(c: &mut Criterion) {

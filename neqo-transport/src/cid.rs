@@ -10,7 +10,6 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
-    convert::{AsRef, TryFrom},
     ops::Deref,
     rc::Rc,
 };
@@ -454,7 +453,7 @@ pub struct ConnectionIdManager {
     limit: usize,
     /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
     next_seqno: u64,
-    /// Outstanding, but lost NEW_CONNECTION_ID frames will be stored here.
+    /// Outstanding, but lost `NEW_CONNECTION_ID` frames will be stored here.
     lost_new_connection_id: Vec<ConnectionIdEntry<[u8; 16]>>,
 }
 
@@ -597,7 +596,7 @@ impl ConnectionIdManager {
 mod tests {
     use test_fixture::fixture_init;
 
-    use super::*;
+    use crate::{cid::MAX_CONNECTION_ID_LEN, ConnectionId};
 
     #[test]
     fn generate_initial_cid() {
@@ -606,8 +605,7 @@ mod tests {
             let cid = ConnectionId::generate_initial();
             assert!(
                 matches!(cid.len(), 8..=MAX_CONNECTION_ID_LEN),
-                "connection ID length {:?}",
-                cid,
+                "connection ID length {cid:?}",
             );
         }
     }

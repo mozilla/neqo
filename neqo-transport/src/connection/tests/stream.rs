@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap, convert::TryFrom, mem};
+use std::{cmp::max, collections::HashMap, mem};
 
 use neqo_common::{event::Provider, qdebug};
 use test_fixture::now;
@@ -114,12 +114,6 @@ fn transfer() {
     let (received3, fin3) = server.stream_recv(second_stream, &mut buf).unwrap();
     assert_eq!(received3, 60);
     assert!(fin3);
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct IdEntry {
-    sendorder: StreamOrder,
-    stream_id: StreamId,
 }
 
 // tests stream sendorder priorization

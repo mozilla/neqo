@@ -7,9 +7,7 @@
 // Functions that handle capturing QLOG traces.
 
 use std::{
-    convert::TryFrom,
     ops::{Deref, RangeInclusive},
-    string::String,
     time::Duration,
 };
 

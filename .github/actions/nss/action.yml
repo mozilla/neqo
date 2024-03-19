@@ -1,21 +1,68 @@
-name: Checkout NSS and NSPR
+name: Fetch and build NSS
+description: Fetch and build NSS
+
+inputs:
+  type:
+    description: "Whether to do a debug or release build of NSS"
+    default: "Release"
+
+# This step might be removed if the distro included a recent enough
+# version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
+# (neqo-crypto/build.rs would also need to query pkg-config to get the
+# right build flags rather than building NSS.)
+#
+# Also see https://github.com/mozilla/neqo/issues/1711
 
 runs:
   using: composite
   steps:
-    - name: Fetch NSS and NSPR
+    # Ideally, we'd use this. But things are sufficiently flaky that we're better off
+    # trying both hg and git. Leaving this here in case we want to re-try in the future.
+    #
+    # - name: Checkout NSPR
+    #   uses: actions/checkout@v4
+    #   with:
+    #     repository: "nss-dev/nspr"
+    #     path: ${{ github.workspace }}/nspr
+
+    # - name: Checkout NSS
+    #   uses: actions/checkout@v4
+    #   with:
+    #     repository: "nss-dev/nss"
+    #     path: ${{ github.workspace }}/nss
+
+    - name: Checkout NSPR
       shell: bash
       run: |
-        for i in {1..$RETRIES}; do
-          hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR" && break || sleep $DELAY && false
-        done
-        for i in {1..$RETRIES}; do
-          hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR" && break || sleep $DELAY && false
-        done
+        hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
+          git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
+
+    - name: Checkout NSS
+      shell: bash
+      run: |
+        hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
+          git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
+
+    - name: Build
+      shell: bash
+      run: |
+        if [ "${{ inputs.type }}" != "Debug" ]; then
+          # We want to do an optimized build for accurate CPU profiling, but
+          # we also want debug symbols and frame pointers for that, which the normal optimized NSS
+          # build process doesn't provide.
+          OPT="-o"
+          NSS_TARGET=Release
+          [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+        else
+          NSS_TARGET=Debug
+        fi
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
+        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
+        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        echo "NSPR_DIR=$NSPR_DIR" >> "$GITHUB_ENV"
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
-        RETRIES: 10
-        DELAY: 10
