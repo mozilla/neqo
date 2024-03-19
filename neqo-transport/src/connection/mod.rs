@@ -44,7 +44,7 @@ use crate::{
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
-    recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
+    recovery::{LossRecovery, RecoveryToken, SendProfile},
     recv_stream::RecvStreamStats,
     rtt::GRANULARITY,
     send_stream::SendStream,
@@ -55,7 +55,7 @@ use crate::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
     },
-    tracking::{AckTracker, PacketNumberSpace},
+    tracking::{AckTracker, PacketNumberSpace, SentPacket},
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
@@ -2336,7 +2336,7 @@ impl Connection {
                         packets.len(),
                         mtu
                     );
-                    initial.add_padding(mtu - packets.len());
+                    initial.size += mtu - packets.len();
                     packets.resize(mtu, 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
@@ -2855,7 +2855,7 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
         for lost in lost_packets {
-            for token in lost.tokens() {
+            for token in &lost.tokens {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
@@ -2891,12 +2891,12 @@ impl Connection {
     fn handle_ack<R>(
         &mut self,
         space: PacketNumberSpace,
-        largest_acknowledged: PacketNumber,
+        largest_acknowledged: u64,
         ack_ranges: R,
         ack_delay: u64,
         now: Instant,
     ) where
-        R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
+        R: IntoIterator<Item = RangeInclusive<u64>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qinfo!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
@@ -2910,7 +2910,7 @@ impl Connection {
             now,
         );
         for acked in acked_packets {
-            for token in acked.tokens() {
+            for token in &acked.tokens {
                 match token {
                     RecoveryToken::Stream(stream_token) => self.streams.acked(stream_token),
                     RecoveryToken::Ack(at) => self.acks.acked(at),

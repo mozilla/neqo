@@ -18,8 +18,8 @@ use neqo_common::qlog::NeqoQlog;
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
-    recovery::SentPacket,
     rtt::RttEstimate,
+    tracking::SentPacket,
 };
 
 /// The number of packets we allow to burst from the pacer.
@@ -109,7 +109,7 @@ impl PacketSender {
 
     pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {
         self.pacer
-            .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
+            .spend(pkt.time_sent, rtt, self.cc.cwnd(), pkt.size);
         self.cc.on_packet_sent(pkt);
     }
 

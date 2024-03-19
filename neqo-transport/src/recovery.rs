@@ -6,29 +6,30 @@
 
 // Tracking of sent packets and detecting their loss.
 
-mod sent;
-mod token;
-
 use std::{
     cmp::{max, min},
-    convert::TryFrom,
+    collections::BTreeMap,
+    mem,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
 
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
-pub use sent::SentPacket;
-use sent::SentPackets;
 use smallvec::{smallvec, SmallVec};
-pub use token::{RecoveryToken, StreamRecoveryToken};
 
 use crate::{
+    ackrate::AckRate,
+    cid::ConnectionIdEntry,
+    crypto::CryptoRecoveryToken,
     packet::PacketNumber,
     path::{Path, PathRef},
     qlog::{self, QlogMetric},
+    quic_datagrams::DatagramTracking,
     rtt::RttEstimate,
+    send_stream::SendStreamRecoveryToken,
     stats::{Stats, StatsCell},
-    tracking::{PacketNumberSpace, PacketNumberSpaceSet},
+    stream_id::{StreamId, StreamType},
+    tracking::{AckToken, PacketNumberSpace, PacketNumberSpaceSet, SentPacket},
 };
 
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
@@ -46,6 +47,54 @@ pub(crate) const MAX_OUTSTANDING_UNACK: usize = 200;
 pub(crate) const MIN_OUTSTANDING_UNACK: usize = 16;
 /// The scale we use for the fast PTO feature.
 pub const FAST_PTO_SCALE: u8 = 100;
+
+#[derive(Debug, Clone)]
+#[allow(clippy::module_name_repetitions)]
+pub enum StreamRecoveryToken {
+    Stream(SendStreamRecoveryToken),
+    ResetStream {
+        stream_id: StreamId,
+    },
+    StopSending {
+        stream_id: StreamId,
+    },
+
+    MaxData(u64),
+    DataBlocked(u64),
+
+    MaxStreamData {
+        stream_id: StreamId,
+        max_data: u64,
+    },
+    StreamDataBlocked {
+        stream_id: StreamId,
+        limit: u64,
+    },
+
+    MaxStreams {
+        stream_type: StreamType,
+        max_streams: u64,
+    },
+    StreamsBlocked {
+        stream_type: StreamType,
+        limit: u64,
+    },
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::module_name_repetitions)]
+pub enum RecoveryToken {
+    Stream(StreamRecoveryToken),
+    Ack(AckToken),
+    Crypto(CryptoRecoveryToken),
+    HandshakeDone,
+    KeepAlive, // Special PING.
+    NewToken(usize),
+    NewConnectionId(ConnectionIdEntry<[u8; 16]>),
+    RetireConnectionId(u64),
+    AckFrequency(AckRate),
+    Datagram(DatagramTracking),
+}
 
 /// `SendProfile` tells a sender how to send packets.
 #[derive(Debug)]
@@ -131,8 +180,7 @@ pub(crate) struct LossRecoverySpace {
     /// This might be less than the number of ACK-eliciting packets,
     /// because PTO packets don't count.
     in_flight_outstanding: usize,
-    /// The packets that we have sent and are tracking.
-    sent_packets: SentPackets,
+    sent_packets: BTreeMap<u64, SentPacket>,
     /// The time that the first out-of-order packet was sent.
     /// This is `None` if there were no out-of-order packets detected.
     /// When set to `Some(T)`, time-based loss detection should be enabled.
@@ -147,7 +195,7 @@ impl LossRecoverySpace {
             largest_acked_sent_time: None,
             last_ack_eliciting: None,
             in_flight_outstanding: 0,
-            sent_packets: SentPackets::default(),
+            sent_packets: BTreeMap::default(),
             first_ooo_time: None,
         }
     }
@@ -172,9 +220,9 @@ impl LossRecoverySpace {
     pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
         self.sent_packets
             .iter_mut()
-            .filter_map(|sent| {
+            .filter_map(|(pn, sent)| {
                 if sent.pto() {
-                    qtrace!("PTO: marking packet {} lost ", sent.pn());
+                    qtrace!("PTO: marking packet {} lost ", pn);
                     Some(&*sent)
                 } else {
                     None
@@ -207,16 +255,16 @@ impl LossRecoverySpace {
 
     pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
         if sent_packet.ack_eliciting() {
-            self.last_ack_eliciting = Some(sent_packet.time_sent());
+            self.last_ack_eliciting = Some(sent_packet.time_sent);
             self.in_flight_outstanding += 1;
         } else if self.space != PacketNumberSpace::ApplicationData
             && self.last_ack_eliciting.is_none()
         {
             // For Initial and Handshake spaces, make sure that we have a PTO baseline
             // always. See `LossRecoverySpace::pto_base_time()` for details.
-            self.last_ack_eliciting = Some(sent_packet.time_sent());
+            self.last_ack_eliciting = Some(sent_packet.time_sent);
         }
-        self.sent_packets.track(sent_packet);
+        self.sent_packets.insert(sent_packet.pn, sent_packet);
     }
 
     /// If we are only sending ACK frames, send a PING frame after 2 PTOs so that
@@ -246,31 +294,46 @@ impl LossRecoverySpace {
         }
     }
 
-    /// Remove all newly acknowledged packets.
+    /// Remove all acknowledged packets.
     /// Returns all the acknowledged packets, with the largest packet number first.
     /// ...and a boolean indicating if any of those packets were ack-eliciting.
     /// This operates more efficiently because it assumes that the input is sorted
     /// in the order that an ACK frame is (from the top).
     fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> (Vec<SentPacket>, bool)
     where
-        R: IntoIterator<Item = RangeInclusive<PacketNumber>>,
+        R: IntoIterator<Item = RangeInclusive<u64>>,
         R::IntoIter: ExactSizeIterator,
     {
-        let mut eliciting = false;
+        let acked_ranges = acked_ranges.into_iter();
+        let mut keep = Vec::with_capacity(acked_ranges.len());
+
         let mut acked = Vec::new();
+        let mut eliciting = false;
         for range in acked_ranges {
-            self.sent_packets.take_range(range, &mut acked);
-        }
-        for p in &acked {
-            self.remove_packet(p);
-            eliciting |= p.ack_eliciting();
-            if p.lost() {
-                stats.late_ack += 1;
+            let first_keep = *range.end() + 1;
+            if let Some((&first, _)) = self.sent_packets.range(range).next() {
+                let mut tail = self.sent_packets.split_off(&first);
+                if let Some((&next, _)) = tail.range(first_keep..).next() {
+                    keep.push(tail.split_off(&next));
+                }
+                for (_, p) in tail.into_iter().rev() {
+                    self.remove_packet(&p);
+                    eliciting |= p.ack_eliciting();
+                    if p.lost() {
+                        stats.late_ack += 1;
+                    }
+                    if p.pto_fired() {
+                        stats.pto_ack += 1;
+                    }
+                    acked.push(p);
+                }
             }
-            if p.pto_fired() {
-                stats.pto_ack += 1;
-            }
         }
+
+        for mut k in keep.into_iter().rev() {
+            self.sent_packets.append(&mut k);
+        }
+
         (acked, eliciting)
     }
 
@@ -279,12 +342,12 @@ impl LossRecoverySpace {
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
         self.in_flight_outstanding = 0;
-        std::mem::take(&mut self.sent_packets).drain_all()
+        mem::take(&mut self.sent_packets).into_values()
     }
 
     /// Remove the primary path marking on any packets this is tracking.
     fn migrate(&mut self) {
-        for pkt in self.sent_packets.iter_mut() {
+        for pkt in self.sent_packets.values_mut() {
             pkt.clear_primary_path();
         }
     }
@@ -295,8 +358,23 @@ impl LossRecoverySpace {
     /// might remove all in-flight packets and stop sending probes.
     #[allow(clippy::option_if_let_else)] // Hard enough to read as-is.
     fn remove_old_lost(&mut self, now: Instant, cd: Duration) {
-        for p in self.sent_packets.remove_expired(now, cd) {
-            self.remove_packet(&p);
+        let mut it = self.sent_packets.iter();
+        // If the first item is not expired, do nothing.
+        if it.next().map_or(false, |(_, p)| p.expired(now, cd)) {
+            // Find the index of the first unexpired packet.
+            let to_remove = if let Some(first_keep) =
+                it.find_map(|(i, p)| if p.expired(now, cd) { None } else { Some(*i) })
+            {
+                // Some packets haven't expired, so keep those.
+                let keep = self.sent_packets.split_off(&first_keep);
+                mem::replace(&mut self.sent_packets, keep)
+            } else {
+                // All packets are expired.
+                mem::take(&mut self.sent_packets)
+            };
+            for (_, p) in to_remove {
+                self.remove_packet(&p);
+            }
         }
     }
 
@@ -323,39 +401,44 @@ impl LossRecoverySpace {
 
         let largest_acked = self.largest_acked;
 
-        for packet in self
+        // Lost for retrans/CC purposes
+        let mut lost_pns = SmallVec::<[_; 8]>::new();
+
+        for (pn, packet) in self
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
+            .take_while(|(&k, _)| k < largest_acked.unwrap_or(PacketNumber::MAX))
         {
             // Packets sent before now - loss_delay are deemed lost.
-            if packet.time_sent() + loss_delay <= now {
+            if packet.time_sent + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {:?}",
-                    packet.pn(),
-                    packet.time_sent(),
+                    pn,
+                    packet.time_sent,
                     loss_delay
                 );
-            } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
+            } else if largest_acked >= Some(*pn + PACKET_THRESHOLD) {
                 qtrace!(
                     "lost={}, is >= {} from largest acked {:?}",
-                    packet.pn(),
+                    pn,
                     PACKET_THRESHOLD,
                     largest_acked
                 );
             } else {
                 if largest_acked.is_some() {
-                    self.first_ooo_time = Some(packet.time_sent());
+                    self.first_ooo_time = Some(packet.time_sent);
                 }
                 // No more packets can be declared lost after this one.
                 break;
             };
 
             if packet.declare_lost(now) {
-                lost_packets.push(packet.clone());
+                lost_pns.push(*pn);
             }
         }
+
+        lost_packets.extend(lost_pns.iter().map(|pn| self.sent_packets[pn].clone()));
     }
 }
 
@@ -545,8 +628,8 @@ impl LossRecovery {
     }
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
-        let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
-        qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
+        let pn_space = PacketNumberSpace::from(sent_packet.pt);
+        qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn);
         if let Some(space) = self.spaces.get_mut(pn_space) {
             path.borrow_mut().packet_sent(&mut sent_packet);
             space.on_packet_sent(sent_packet);
@@ -555,7 +638,7 @@ impl LossRecovery {
                 [self],
                 "ignoring {}-{} from dropped space",
                 pn_space,
-                sent_packet.pn()
+                sent_packet.pn
             );
         }
     }
@@ -586,13 +669,13 @@ impl LossRecovery {
         &mut self,
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
-        largest_acked: PacketNumber,
+        largest_acked: u64,
         acked_ranges: R,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
     where
-        R: IntoIterator<Item = RangeInclusive<PacketNumber>>,
+        R: IntoIterator<Item = RangeInclusive<u64>>,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!(
@@ -622,11 +705,11 @@ impl LossRecovery {
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
             let largest_acked_pkt = acked_packets.first().expect("must be there");
-            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent());
+            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting && largest_acked_pkt.on_primary_path() {
                 self.rtt_sample(
                     primary_path.borrow_mut().rtt_mut(),
-                    largest_acked_pkt.time_sent(),
+                    largest_acked_pkt.time_sent,
                     now,
                     ack_delay,
                 );
@@ -934,7 +1017,6 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use std::{
         cell::RefCell,
-        convert::TryInto,
         ops::{Deref, DerefMut, RangeInclusive},
         rc::Rc,
         time::{Duration, Instant},
@@ -949,7 +1031,7 @@ mod tests {
     use crate::{
         cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
-        packet::{PacketNumber, PacketType},
+        packet::PacketType,
         path::{Path, PathRef},
         rtt::RttEstimate,
         stats::{Stats, StatsCell},
@@ -976,8 +1058,8 @@ mod tests {
         pub fn on_ack_received(
             &mut self,
             pn_space: PacketNumberSpace,
-            largest_acked: PacketNumber,
-            acked_ranges: Vec<RangeInclusive<PacketNumber>>,
+            largest_acked: u64,
+            acked_ranges: Vec<RangeInclusive<u64>>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
@@ -1146,8 +1228,8 @@ mod tests {
         );
     }
 
-    fn add_sent(lrs: &mut LossRecoverySpace, max_pn: PacketNumber) {
-        for pn in 0..=max_pn {
+    fn add_sent(lrs: &mut LossRecoverySpace, packet_numbers: &[u64]) {
+        for &pn in packet_numbers {
             lrs.on_packet_sent(SentPacket::new(
                 PacketType::Short,
                 pn,
@@ -1159,18 +1241,15 @@ mod tests {
         }
     }
 
-    fn match_acked(acked: &[SentPacket], expected: &[PacketNumber]) {
-        assert_eq!(
-            acked.iter().map(SentPacket::pn).collect::<Vec<_>>(),
-            expected
-        );
+    fn match_acked(acked: &[SentPacket], expected: &[u64]) {
+        assert!(acked.iter().map(|p| &p.pn).eq(expected));
     }
 
     #[test]
     fn remove_acked() {
         let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
         let mut stats = Stats::default();
-        add_sent(&mut lrs, 10);
+        add_sent(&mut lrs, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         let (acked, _) = lrs.remove_acked(vec![], &mut stats);
         assert!(acked.is_empty());
         let (acked, _) = lrs.remove_acked(vec![7..=8, 2..=4], &mut stats);
@@ -1178,7 +1257,7 @@ mod tests {
         let (acked, _) = lrs.remove_acked(vec![8..=11], &mut stats);
         match_acked(&acked, &[10, 9]);
         let (acked, _) = lrs.remove_acked(vec![0..=2], &mut stats);
-        match_acked(&acked, &[1, 0]);
+        match_acked(&acked, &[1]);
         let (acked, _) = lrs.remove_acked(vec![5..=6], &mut stats);
         match_acked(&acked, &[6, 5]);
     }
@@ -1413,7 +1492,7 @@ mod tests {
             PacketType::Short,
         ] {
             let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
-            let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
+            let pn_space = PacketNumberSpace::from(sent_pkt.pt);
             lr.on_packet_sent(sent_pkt);
             lr.on_ack_received(pn_space, 1, vec![1..=1], Duration::from_secs(0), pn_time(3));
             let mut lost = Vec::new();
@@ -1514,7 +1593,7 @@ mod tests {
 
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
-            0,
+            1,
             now(),
             true,
             Vec::new(),

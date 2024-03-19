@@ -14,7 +14,7 @@ use std::{
 
 use neqo_common::qlog::NeqoQlog;
 
-use crate::{path::PATH_MTU_V6, recovery::SentPacket, rtt::RttEstimate, Error};
+use crate::{path::PATH_MTU_V6, rtt::RttEstimate, tracking::SentPacket, Error};
 
 mod classic_cc;
 mod cubic;
