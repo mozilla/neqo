@@ -97,7 +97,7 @@ jobs:
           )
 
           # Replace various placeholders in the commands with the actual values.
-          # Also generate an extension to append to the test tag.
+          # Also generate an extension to append to the file name.
           function transmogrify {
             CMD=$1
             local cc=$2
