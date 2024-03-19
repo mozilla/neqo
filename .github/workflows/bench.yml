@@ -155,9 +155,9 @@ jobs:
           sed 's/`//g' steps.md |\
             awk '!/^\| Command/ || !c++' |\
             awk '!/^\|:/ || !c++' |\
-            sed -e 's/^\|:/\|:---\|:---\|:---\|:/g' |\
-            sed -e 's/,/ \| /g' |\
-            sed -e 's/^\| Command/\| Client \| Server \| CC \| Pacing/g' >> comparison.md
+            sed -E 's/^\|:/\|:---\|:---\|:---\|:/g' |\
+            sed -E 's/,/ \| /g' |\
+            sed -E 's/^\| Command/\| Client \| Server \| CC \| Pacing/g' >> comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
