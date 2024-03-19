@@ -24,11 +24,11 @@ use crate::{
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
-    recovery::RecoveryToken,
+    recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
     stats::FrameStats,
-    tracking::{PacketNumberSpace, SentPacket},
+    tracking::PacketNumberSpace,
     Stats,
 };
 
@@ -943,12 +943,12 @@ impl Path {
             qinfo!(
                 [self],
                 "discarding a packet without an RTT estimate; guessing RTT={:?}",
-                now - sent.time_sent
+                now - sent.time_sent()
             );
             stats.rtt_init_guess = true;
             self.rtt.update(
                 &mut self.qlog,
-                now - sent.time_sent,
+                now - sent.time_sent(),
                 Duration::new(0, 0),
                 false,
                 now,
