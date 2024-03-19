@@ -119,7 +119,7 @@ impl SendMessage {
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
-        qinfo!("Create a request stream_id={}", stream_id);
+        qdebug!("Create a request stream_id={}", stream_id);
         Self {
             state: MessageState::WaitingForHeaders,
             message_type,

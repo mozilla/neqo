@@ -25,7 +25,7 @@ use futures::{
     FutureExt,
 };
 use neqo_bin::udp;
-use neqo_common::{hex, qinfo, qwarn, Datagram, Header};
+use neqo_common::{hex, qerror, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -89,6 +89,9 @@ impl std::error::Error for ServerError {}
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    #[command(flatten)]
+    verbose: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
+
     #[command(flatten)]
     shared: neqo_bin::SharedArgs,
 
@@ -166,17 +169,17 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
     OpenOptions::new()
         .read(true)
         .open(&file_path)
-        .map_err(|_e| eprintln!("Could not open {}", file_path.display()))
+        .map_err(|_e| qerror!("Could not open {}", file_path.display()))
         .ok()
         .and_then(|mut f| {
             let mut data = Vec::new();
             match f.read_to_end(&mut data) {
                 Ok(sz) => {
-                    println!("{} bytes read from {}", sz, file_path.display());
+                    qinfo!("{} bytes read from {}", sz, file_path.display());
                     Some(data)
                 }
                 Err(e) => {
-                    eprintln!("Error reading data: {e:?}");
+                    qerror!("Error reading data: {e:?}");
                     None
                 }
             }
@@ -312,7 +315,7 @@ impl HttpServer for SimpleServer {
                     headers,
                     fin,
                 } => {
-                    println!("Headers (request={stream} fin={fin}): {headers:?}");
+                    qinfo!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     let post = if let Some(method) = headers.iter().find(|&h| h.name() == ":method")
                     {
@@ -428,7 +431,7 @@ impl ServersRunner {
     pub fn new(args: Args) -> Result<Self, io::Error> {
         let hosts = args.listen_addresses();
         if hosts.is_empty() {
-            eprintln!("No valid hosts defined");
+            qerror!("No valid hosts defined");
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
         }
         let sockets = hosts
@@ -436,7 +439,7 @@ impl ServersRunner {
             .map(|host| {
                 let socket = udp::Socket::bind(host)?;
                 let local_addr = socket.local_addr()?;
-                println!("Server waiting for connection on: {local_addr:?}");
+                qinfo!("Server waiting for connection on: {local_addr:?}");
 
                 Ok((host, socket))
             })
@@ -479,7 +482,7 @@ impl ServersRunner {
         }
         if args.ech {
             let cfg = svr.enable_ech();
-            println!("ECHConfigList: {}", hex(cfg));
+            qinfo!("ECHConfigList: {}", hex(cfg));
         }
         svr
     }
@@ -573,6 +576,7 @@ async fn main() -> Result<(), io::Error> {
     const HQ_INTEROP: &str = "hq-interop";
 
     let mut args = Args::parse();
+    neqo_common::log::init(Some(args.verbose.log_level_filter()));
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());

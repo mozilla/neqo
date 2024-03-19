@@ -17,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, Datagram};
+use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
@@ -50,13 +50,13 @@ impl<'a> super::Handler for Handler<'a> {
                     self.read(client, stream_id)?;
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    println!("stream {stream_id} writable");
+                    qdebug!("stream {stream_id} writable");
                 }
                 ConnectionEvent::SendStreamComplete { stream_id } => {
-                    println!("stream {stream_id} complete");
+                    qdebug!("stream {stream_id} complete");
                 }
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
-                    println!("stream {stream_type:?} creatable");
+                    qdebug!("stream {stream_type:?} creatable");
                     if stream_type == StreamType::BiDi {
                         self.download_urls(client);
                     }
@@ -64,7 +64,7 @@ impl<'a> super::Handler for Handler<'a> {
                 ConnectionEvent::StateChange(
                     State::WaitInitial | State::Handshaking | State::Connected,
                 ) => {
-                    println!("{event:?}");
+                    qdebug!("{event:?}");
                     self.download_urls(client);
                 }
                 ConnectionEvent::StateChange(State::Confirmed) => {
@@ -74,7 +74,7 @@ impl<'a> super::Handler for Handler<'a> {
                     self.token = Some(token);
                 }
                 _ => {
-                    println!("Unhandled event {event:?}");
+                    qwarn!("Unhandled event {event:?}");
                 }
             }
         }
@@ -183,7 +183,7 @@ impl<'b> Handler<'b> {
 
     fn download_next(&mut self, client: &mut Connection) -> bool {
         if self.key_update.needed() {
-            println!("Deferring requests until after first key update");
+            qdebug!("Deferring requests until after first key update");
             return false;
         }
         let url = self
@@ -192,7 +192,7 @@ impl<'b> Handler<'b> {
             .expect("download_next called with empty queue");
         match client.stream_create(StreamType::BiDi) {
             Ok(client_stream_id) => {
-                println!("Created stream {client_stream_id} for {url}");
+                qinfo!("Created stream {client_stream_id} for {url}");
                 let req = format!("GET {}\r\n", url.path());
                 _ = client
                     .stream_send(client_stream_id, req.as_bytes())
@@ -203,7 +203,7 @@ impl<'b> Handler<'b> {
                 true
             }
             Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {
-                println!("Cannot create stream {e:?}");
+                qwarn!("Cannot create stream {e:?}");
                 self.url_queue.push_front(url);
                 false
             }
@@ -231,9 +231,9 @@ impl<'b> Handler<'b> {
             if let Some(out_file) = maybe_out_file {
                 out_file.write_all(&data[..sz])?;
             } else if !output_read_data {
-                println!("READ[{stream_id}]: {sz} bytes");
+                qdebug!("READ[{stream_id}]: {sz} bytes");
             } else {
-                println!(
+                qdebug!(
                     "READ[{}]: {}",
                     stream_id,
                     String::from_utf8(data.clone()).unwrap()
@@ -248,7 +248,7 @@ impl<'b> Handler<'b> {
     fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<()> {
         match self.streams.get_mut(&stream_id) {
             None => {
-                println!("Data on unexpected stream: {stream_id}");
+                qwarn!("Data on unexpected stream: {stream_id}");
                 return Ok(());
             }
             Some(maybe_out_file) => {
@@ -263,7 +263,7 @@ impl<'b> Handler<'b> {
                     if let Some(mut out_file) = maybe_out_file.take() {
                         out_file.flush()?;
                     } else {
-                        println!("<FIN[{stream_id}]>");
+                        qinfo!("<FIN[{stream_id}]>");
                     }
                     self.streams.remove(&stream_id);
                     self.download_urls(client);
