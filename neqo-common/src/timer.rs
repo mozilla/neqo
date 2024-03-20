@@ -5,7 +5,9 @@
 // except according to those terms.
 
 use std::{
-    collections::VecDeque, mem, time::{Duration, Instant}
+    collections::VecDeque,
+    mem,
+    time::{Duration, Instant},
 };
 
 /// Internal structure for a timer item.
@@ -149,6 +151,9 @@ impl<T> Timer<T> {
 
     /// Given knowledge of the time an item was added, remove it.
     /// This requires use of a predicate that identifies matching items.
+    ///
+    /// # Panics
+    /// Impossible, I think.
     pub fn remove<F>(&mut self, time: Instant, mut selector: F) -> Option<T>
     where
         F: FnMut(&T) -> bool,
