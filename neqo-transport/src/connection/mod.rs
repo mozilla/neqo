@@ -1562,10 +1562,6 @@ impl Connection {
         let mut d = Decoder::from(&packet[..]);
         while d.remaining() > 0 {
             let f = Frame::decode(&mut d)?;
-            // Skip padding
-            if let Frame::Padding { .. } = f {
-                continue;
-            }
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
