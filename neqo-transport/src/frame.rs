@@ -409,7 +409,7 @@ impl<'a> Frame<'a> {
         }
 
         // TODO(ekr@rtfm.com): check for minimal encoding
-        let t = d(dec.decode_varint())?;
+        let t = dv(dec)?;
         match t {
             FRAME_TYPE_PADDING => {
                 let mut length = 1;
@@ -426,7 +426,7 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_PING => Ok(Self::Ping),
             FRAME_TYPE_RESET_STREAM => Ok(Self::ResetStream {
                 stream_id: StreamId::from(dv(dec)?),
-                application_error_code: d(dec.decode_varint())?,
+                application_error_code: dv(dec)?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
                     _ => return Err(Error::NoMoreData),
@@ -468,7 +468,7 @@ impl<'a> Frame<'a> {
             }
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
                 stream_id: StreamId::from(dv(dec)?),
-                application_error_code: d(dec.decode_varint())?,
+                application_error_code: dv(dec)?,
             }),
             FRAME_TYPE_CRYPTO => {
                 let offset = dv(dec)?;
@@ -574,7 +574,7 @@ impl<'a> Frame<'a> {
                 Ok(Self::PathResponse { data: datav })
             }
             FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT | FRAME_TYPE_CONNECTION_CLOSE_APPLICATION => {
-                let error_code = CloseError::from_type_bit(t, d(dec.decode_varint())?);
+                let error_code = CloseError::from_type_bit(t, dv(dec)?);
                 let frame_type = if t == FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT {
                     dv(dec)?
                 } else {
