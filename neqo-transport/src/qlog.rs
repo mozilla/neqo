@@ -395,7 +395,7 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
 fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     match frame {
-        Frame::Padding => QuicFrame::Padding,
+        Frame::Padding { .. } => QuicFrame::Padding,
         Frame::Ping => QuicFrame::Ping,
         Frame::Ack {
             largest_acknowledged,
