@@ -2678,8 +2678,8 @@ impl Connection {
                 .input_frame(&frame, &mut self.stats.borrow_mut().frame_rx);
         }
         match frame {
-            Frame::Padding { length } => {
-                self.stats.borrow_mut().frame_rx.padding += usize::try_from(length).unwrap();
+            Frame::Padding(length) => {
+                self.stats.borrow_mut().frame_rx.padding += usize::from(length);
             }
             Frame::Ping => {
                 // If we get a PING and there are outstanding CRYPTO frames,

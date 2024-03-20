@@ -103,9 +103,7 @@ pub struct AckRange {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Frame<'a> {
-    Padding {
-        length: u64,
-    },
+    Padding(u16),
     Ping,
     Ack {
         largest_acknowledged: u64,
@@ -368,7 +366,7 @@ impl<'a> Frame<'a> {
                 data.len(),
                 fin,
             ),
-            Self::Padding { length } => format!("Padding {{ len: {length} }}"),
+            Self::Padding(length) => format!("Padding {{ len: {length} }}"),
             Self::Datagram { data, .. } => format!("Datagram {{ len: {} }}", data.len()),
             _ => format!("{self:?}"),
         }
@@ -412,16 +410,15 @@ impl<'a> Frame<'a> {
         let t = dv(dec)?;
         match t {
             FRAME_TYPE_PADDING => {
-                let mut length = 1;
-                // TODO: It may be worthwhile to find a more efficient way to skip
-                // over runs of zero bytes.
-                while dec.remaining() > 0
-                    && u64::from(dec.peek_byte().unwrap()) == FRAME_TYPE_PADDING
-                {
-                    d(dec.decode_byte())?;
+                let mut length: u16 = 1;
+                while let Some(b) = dec.peek_byte() {
+                    if u64::from(b) != FRAME_TYPE_PADDING {
+                        break;
+                    }
                     length += 1;
+                    dec.skip(1);
                 }
-                Ok(Self::Padding { length })
+                Ok(Self::Padding(length))
             }
             FRAME_TYPE_PING => Ok(Self::Ping),
             FRAME_TYPE_RESET_STREAM => Ok(Self::ResetStream {
@@ -642,9 +639,9 @@ mod tests {
 
     #[test]
     fn padding() {
-        let f = Frame::Padding { length: 1 };
+        let f = Frame::Padding(1);
         just_dec(&f, "00");
-        let f = Frame::Padding { length: 2 };
+        let f = Frame::Padding(2);
         just_dec(&f, "0000");
     }
 
@@ -901,8 +898,8 @@ mod tests {
 
     #[test]
     fn test_compare() {
-        let f1 = Frame::Padding { length: 1 };
-        let f2 = Frame::Padding { length: 1 };
+        let f1 = Frame::Padding(1);
+        let f2 = Frame::Padding(1);
         let f3 = Frame::Crypto {
             offset: 0,
             data: &[1, 2, 3],
