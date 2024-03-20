@@ -21,17 +21,18 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_bin::udp;
 use neqo_common::{self as common, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
 };
-use neqo_http3::{Error, Output};
+use neqo_http3::Output;
 use neqo_transport::{AppError, ConnectionId, Error as TransportError, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
+
+use crate::{udp, SharedArgs};
 
 mod http09;
 mod http3;
@@ -39,7 +40,7 @@ mod http3;
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
-pub enum ClientError {
+pub enum Error {
     ArgumentError(&'static str),
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
@@ -47,40 +48,40 @@ pub enum ClientError {
     TransportError(neqo_transport::Error),
 }
 
-impl From<io::Error> for ClientError {
+impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Self::IoError(err)
     }
 }
 
-impl From<neqo_http3::Error> for ClientError {
+impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
         Self::Http3Error(err)
     }
 }
 
-impl From<qlog::Error> for ClientError {
+impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
         Self::QlogError
     }
 }
 
-impl From<neqo_transport::Error> for ClientError {
+impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
     }
 }
 
-impl Display for ClientError {
+impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error: {self:?}")?;
         Ok(())
     }
 }
 
-impl std::error::Error for ClientError {}
+impl std::error::Error for Error {}
 
-type Res<T> = Result<T, ClientError>;
+type Res<T> = Result<T, Error>;
 
 /// Track whether a key update is needed.
 #[derive(Debug, PartialEq, Eq)]
@@ -90,14 +91,14 @@ impl KeyUpdateState {
     pub fn maybe_update<F, E>(&mut self, update_fn: F) -> Res<()>
     where
         F: FnOnce() -> Result<(), E>,
-        E: Into<ClientError>,
+        E: Into<Error>,
     {
         if self.0 {
             if let Err(e) = update_fn() {
                 let e = e.into();
                 match e {
-                    ClientError::TransportError(TransportError::KeyUpdateBlocked)
-                    | ClientError::Http3Error(Error::TransportError(
+                    Error::TransportError(TransportError::KeyUpdateBlocked)
+                    | Error::Http3Error(neqo_http3::Error::TransportError(
                         TransportError::KeyUpdateBlocked,
                     )) => (),
                     _ => return Err(e),
@@ -120,7 +121,7 @@ impl KeyUpdateState {
 #[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
     #[command(flatten)]
-    shared: neqo_bin::SharedArgs,
+    shared: SharedArgs,
 
     urls: Vec<Url>,
 
@@ -182,6 +183,34 @@ pub struct Args {
 }
 
 impl Args {
+    #[must_use]
+    #[cfg(feature = "bench")]
+    #[allow(clippy::missing_panics_doc)]
+    pub fn new(requests: &[u64], download_in_series: bool) -> Self {
+        use std::str::FromStr;
+        Self {
+            shared: crate::SharedArgs::default(),
+            urls: requests
+                .iter()
+                .map(|r| Url::from_str(&format!("http://127.0.0.1:12345/{r}")).unwrap())
+                .collect(),
+            method: "GET".into(),
+            header: vec![],
+            max_concurrent_push_streams: 10,
+            download_in_series,
+            concurrency: 100,
+            output_read_data: false,
+            output_dir: Some("/tmp/out".into()),
+            resume: false,
+            key_update: false,
+            ech: None,
+            ipv4_only: false,
+            ipv6_only: false,
+            test: None,
+            upload_size: 100,
+        }
+    }
+
     fn get_ciphers(&self) -> Vec<Cipher> {
         self.shared
             .ciphers
@@ -434,11 +463,9 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Res<()> {
+pub async fn client(mut args: Args) -> Res<()> {
     init();
 
-    let mut args = Args::parse();
     args.update_for_tests();
 
     let urls_by_origin = args
