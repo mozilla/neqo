@@ -179,6 +179,10 @@ pub struct Args {
     /// The request size that will be used for upload test.
     #[arg(name = "upload-size", long, default_value = "100")]
     upload_size: usize,
+
+    /// Print connection stats after close.
+    #[arg(name = "stats", long)]
+    stats: bool,
 }
 
 impl Args {
@@ -327,6 +331,7 @@ trait Client {
     where
         S: AsRef<str> + Display;
     fn is_closed(&self) -> bool;
+    fn stats(&self) -> neqo_transport::Stats;
 }
 
 struct Runner<'a, H: Handler> {
@@ -361,6 +366,9 @@ impl<'a, H: Handler> Runner<'a, H> {
             self.process(None).await?;
 
             if self.client.is_closed() {
+                if self.args.stats {
+                    qinfo!("{:?}", self.client.stats());
+                }
                 return Ok(self.handler.take_token());
             }
 

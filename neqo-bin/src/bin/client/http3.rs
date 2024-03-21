@@ -125,6 +125,10 @@ impl super::Client for Http3Client {
     {
         self.close(now, app_error, msg);
     }
+
+    fn stats(&self) -> neqo_transport::Stats {
+        self.transport_stats()
+    }
 }
 
 impl<'a> super::Handler for Handler<'a> {
