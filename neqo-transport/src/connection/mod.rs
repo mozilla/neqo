@@ -778,7 +778,7 @@ impl Connection {
             });
             enc.encode(extra);
             let records = s.send_ticket(now, enc.as_ref())?;
-            qinfo!([self], "send session ticket {}", hex(&enc));
+            qdebug!([self], "send session ticket {}", hex(&enc));
             self.crypto.buffer_records(records)?;
         } else {
             unreachable!();
@@ -824,7 +824,7 @@ impl Connection {
     /// the connection to fail.  However, if no packets have been
     /// exchanged, it's not OK.
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
-        qinfo!([self], "Authenticated {:?}", status);
+        qdebug!([self], "Authenticated {:?}", status);
         self.crypto.tls.authenticated(status);
         let res = self.handshake(now, self.version, PacketNumberSpace::Handshake, None);
         self.absorb_error(now, res);
@@ -1154,7 +1154,7 @@ impl Connection {
 
     fn discard_keys(&mut self, space: PacketNumberSpace, now: Instant) {
         if self.crypto.discard(space) {
-            qinfo!([self], "Drop packet number space {}", space);
+            qdebug!([self], "Drop packet number space {}", space);
             let primary = self.paths.primary();
             self.loss_recovery.discard(&primary, space, now);
             self.acks.drop_space(space);
@@ -2307,7 +2307,7 @@ impl Connection {
         }
 
         if encoder.is_empty() {
-            qinfo!("TX blocked, profile={:?} ", profile);
+            qdebug!("TX blocked, profile={:?} ", profile);
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
@@ -2351,7 +2351,7 @@ impl Connection {
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
-        qinfo!([self], "client_start");
+        qdebug!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, &self.paths.primary());
         qlog::client_version_information_initiated(&mut self.qlog, self.conn_params.get_versions());
@@ -2583,7 +2583,7 @@ impl Connection {
 
     fn confirm_version(&mut self, v: Version) {
         if self.version != v {
-            qinfo!([self], "Compatible upgrade {:?} ==> {:?}", self.version, v);
+            qdebug!([self], "Compatible upgrade {:?} ==> {:?}", self.version, v);
         }
         self.crypto.confirm_version(v);
         self.version = v;
@@ -2882,7 +2882,7 @@ impl Connection {
         R: IntoIterator<Item = RangeInclusive<u64>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
-        qinfo!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
+        qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &self.paths.primary(),
@@ -2936,7 +2936,7 @@ impl Connection {
     }
 
     fn set_connected(&mut self, now: Instant) -> Res<()> {
-        qinfo!([self], "TLS connection complete");
+        qdebug!([self], "TLS connection complete");
         if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
             qwarn!([self], "No ALPN. Closing connection.");
             // 120 = no_application_protocol
@@ -2979,7 +2979,7 @@ impl Connection {
 
     fn set_state(&mut self, state: State) {
         if state > self.state {
-            qinfo!([self], "State change from {:?} -> {:?}", self.state, state);
+            qdebug!([self], "State change from {:?} -> {:?}", self.state, state);
             self.state = state.clone();
             if self.state.closed() {
                 self.streams.clear_streams();
