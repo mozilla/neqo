@@ -153,6 +153,10 @@ impl super::Client for Connection {
     fn is_closed(&self) -> bool {
         matches!(self.state(), State::Closed(..))
     }
+
+    fn stats(&self) -> neqo_transport::Stats {
+        self.stats()
+    }
 }
 
 impl<'b> Handler<'b> {

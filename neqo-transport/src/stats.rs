@@ -206,7 +206,7 @@ impl Debug for Stats {
             "  tx: {} lost {} lateack {} ptoack {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack
         )?;
-        writeln!(f, "  resumed: {} ", self.resumed)?;
+        writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
         self.frame_rx.fmt(f)?;
         writeln!(f, "  frames tx:")?;
