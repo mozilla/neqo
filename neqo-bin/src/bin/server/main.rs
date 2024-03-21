@@ -25,7 +25,7 @@ use futures::{
     FutureExt,
 };
 use neqo_bin::udp;
-use neqo_common::{hex, qerror, qinfo, qwarn, Datagram, Header};
+use neqo_common::{hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
@@ -315,7 +315,7 @@ impl HttpServer for SimpleServer {
                     headers,
                     fin,
                 } => {
-                    qinfo!("Headers (request={stream} fin={fin}): {headers:?}");
+                    qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     let post = if let Some(method) = headers.iter().find(|&h| h.name() == ":method")
                     {
@@ -510,7 +510,7 @@ impl ServersRunner {
                     socket.send(dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    qinfo!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {:?}", new_timeout);
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
