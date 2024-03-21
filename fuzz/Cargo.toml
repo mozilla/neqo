@@ -1,0 +1,30 @@
+[package]
+name = "neqo-fuzz"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+neqo-crypto = { path = "../neqo-crypto" }
+neqo-transport = { path = "../neqo-transport" }
+
+[lints]
+workspace = true
+
+# [dependencies.neqo-bin]
+# path = ".."
+
+[[bin]]
+name = "packet"
+path = "fuzz_targets/packet.rs"
+test = false
+doc = false
+bench = false
