@@ -19,9 +19,9 @@ mod events;
 mod fc;
 mod frame;
 mod pace;
-#[cfg(feature = "fuzz")]
+#[cfg(fuzzing)]
 pub mod packet;
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(fuzzing))]
 mod packet;
 mod path;
 mod qlog;

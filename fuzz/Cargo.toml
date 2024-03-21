@@ -19,9 +19,6 @@ neqo-transport = { path = "../neqo-transport" }
 [lints]
 workspace = true
 
-# [dependencies.neqo-bin]
-# path = ".."
-
 [[bin]]
 name = "packet"
 path = "fuzz_targets/packet.rs"
