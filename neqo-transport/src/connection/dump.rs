@@ -38,7 +38,8 @@ pub fn dump_packet(
             s.push_str(" [broken]...");
             break;
         };
-        if let Some(x) = f.dump() {
+        let x = f.dump();
+        if !x.is_empty() {
             write!(&mut s, "\n  {} {}", dir, &x).unwrap();
         }
     }
