@@ -114,6 +114,7 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci,disable-encryption --no-fail-fast --lcov --output-path lcov-de.info
           cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
