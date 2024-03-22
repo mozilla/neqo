@@ -317,7 +317,7 @@ impl Crypto {
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        qinfo!(
+        qdebug!(
             "Acked crypto frame space={} offset={} length={}",
             token.space,
             token.offset,
@@ -367,7 +367,7 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                qinfo!("resumption token {}", hex_snip_middle(enc.as_ref()));
+                qdebug!("resumption token {}", hex_snip_middle(enc.as_ref()));
                 Some(ResumptionToken::new(enc.into(), t.expiration_time()))
             } else {
                 None
@@ -433,7 +433,7 @@ impl CryptoDxState {
         cipher: Cipher,
         fuzzing: bool,
     ) -> Self {
-        qinfo!(
+        qdebug!(
             "Making {:?} {} CryptoDxState, v={:?} cipher={}",
             direction,
             epoch,
@@ -980,7 +980,7 @@ impl CryptoStates {
         };
 
         for v in versions {
-            qinfo!(
+            qdebug!(
                 [self],
                 "Creating initial cipher state v={:?}, role={:?} dcid={}",
                 v,

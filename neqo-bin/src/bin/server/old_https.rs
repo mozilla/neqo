@@ -8,7 +8,7 @@ use std::{
     cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, Datagram};
+use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::{
@@ -149,7 +149,7 @@ impl Http09Server {
             }
             Some(path) => {
                 let path = path.as_str();
-                eprintln!("Path = '{path}'");
+                qdebug!("Path = '{path}'");
                 if args.shared.qns_test.is_some() {
                     qns_read_response(path)
                 } else {
@@ -164,7 +164,7 @@ impl Http09Server {
     fn stream_writable(&mut self, stream_id: StreamId, conn: &mut ActiveConnectionRef) {
         match self.write_state.get_mut(&stream_id) {
             None => {
-                eprintln!("Unknown stream {stream_id}, ignoring event");
+                qwarn!("Unknown stream {stream_id}, ignoring event");
             }
             Some(stream_state) => {
                 stream_state.writable = true;
@@ -177,7 +177,7 @@ impl Http09Server {
                     *offset += sent;
                     self.server.add_to_waiting(conn);
                     if *offset == data.len() {
-                        eprintln!("Sent {sent} on {stream_id}, closing");
+                        qinfo!("Sent {sent} on {stream_id}, closing");
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();
                         self.write_state.remove(&stream_id);
                     } else {
@@ -202,7 +202,7 @@ impl HttpServer for Http09Server {
                     None => break,
                     Some(e) => e,
                 };
-                eprintln!("Event {event:?}");
+                qdebug!("Event {event:?}");
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
                         self.write_state
@@ -222,7 +222,7 @@ impl HttpServer for Http09Server {
                     }
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamComplete { .. } => (),
-                    e => eprintln!("unhandled event {e:?}"),
+                    e => qwarn!("unhandled event {e:?}"),
                 }
             }
         }
