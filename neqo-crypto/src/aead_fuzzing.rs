@@ -20,6 +20,7 @@ pub struct FuzzingAead {
 }
 
 impl FuzzingAead {
+    #![allow(clippy::missing_errors_doc)]
     pub fn new(
         fuzzing: bool,
         version: Version,
