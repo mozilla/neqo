@@ -605,7 +605,7 @@ fn reorder_1rtt() {
     }
 }
 
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn corrupted_initial() {
     let mut client = default_client();
@@ -808,7 +808,7 @@ fn anti_amplification() {
     assert_eq!(*server.state(), State::Confirmed);
 }
 
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn garbage_initial() {
     let mut client = default_client();

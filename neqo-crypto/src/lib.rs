@@ -8,7 +8,7 @@
 #![allow(clippy::unseparated_literal_suffix, clippy::used_underscore_binding)] // For bindgen code.
 
 mod aead;
-#[cfg(feature = "fuzzing")]
+#[cfg(feature = "disable-encryption")]
 mod aead_fuzzing;
 pub mod agent;
 mod agentio;
@@ -33,11 +33,11 @@ mod time;
 
 use std::{ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "disable-encryption"))]
 pub use self::aead::RealAead as Aead;
-#[cfg(feature = "fuzzing")]
+#[cfg(feature = "disable-encryption")]
 pub use self::aead::RealAead;
-#[cfg(feature = "fuzzing")]
+#[cfg(feature = "disable-encryption")]
 pub use self::aead_fuzzing::FuzzingAead as Aead;
 pub use self::{
     agent::{

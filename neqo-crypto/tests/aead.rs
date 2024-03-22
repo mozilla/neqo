@@ -5,7 +5,7 @@
 // except according to those terms.
 
 #![warn(clippy::pedantic)]
-#![cfg(not(feature = "fuzzing"))]
+#![cfg(not(feature = "disable-encryption"))]
 
 use neqo_crypto::{
     constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},

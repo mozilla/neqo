@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg(feature = "fuzzing")]
+#![cfg(feature = "disable-encryption")]
 
 use neqo_crypto::FIXED_TAG_FUZZING;
 use test_fixture::now;
