@@ -16,7 +16,26 @@ mod codes {
     #![allow(non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
     include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
-    include!(concat!(env!("OUT_DIR"), "/mozpkix.rs"));
+
+    pub mod mozilla_pkix_ErrorCode {
+        pub type Type = ::std::os::raw::c_int;
+        pub const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE: Type = -16384;
+        pub const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY: Type = -16383;
+        pub const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE: Type = -16382;
+        pub const MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA: Type = -16381;
+        pub const MOZILLA_PKIX_ERROR_NO_RFC822NAME_MATCH: Type = -16380;
+        pub const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE: Type = -16379;
+        pub const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE: Type = -16378;
+        pub const MOZILLA_PKIX_ERROR_SIGNATURE_ALGORITHM_MISMATCH: Type = -16377;
+        pub const MOZILLA_PKIX_ERROR_OCSP_RESPONSE_FOR_CERT_MISSING: Type = -16376;
+        pub const MOZILLA_PKIX_ERROR_VALIDITY_TOO_LONG: Type = -16375;
+        pub const MOZILLA_PKIX_ERROR_REQUIRED_TLS_FEATURE_MISSING: Type = -16374;
+        pub const MOZILLA_PKIX_ERROR_INVALID_INTEGER_ENCODING: Type = -16373;
+        pub const MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME: Type = -16372;
+        pub const MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED: Type = -16371;
+        pub const MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT: Type = -16370;
+        pub const MOZILLA_PKIX_ERROR_MITM_DETECTED: Type = -16369;
+    }
 }
 pub use codes::{mozilla_pkix_ErrorCode as mozpkix, SECErrorCodes as sec, SSLErrorCodes as ssl};
 pub mod nspr {
