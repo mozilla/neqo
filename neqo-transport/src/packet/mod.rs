@@ -256,6 +256,10 @@ impl PacketBuilder {
     /// Maybe pad with "PADDING" frames.
     /// Only does so if padding was needed and this is a short packet.
     /// Returns true if padding was added.
+    ///
+    /// # Panics
+    ///
+    /// Cannot happen.
     pub fn pad(&mut self) -> bool {
         if self.padding && !self.is_long() {
             self.encoder
