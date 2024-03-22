@@ -20,19 +20,16 @@ pub struct FuzzingAead {
 }
 
 impl FuzzingAead {
-    pub fn new(
-        fuzzing: bool,
-        version: Version,
-        cipher: Cipher,
-        secret: &SymKey,
-        prefix: &str,
-    ) -> Res<Self> {
-        let real = if fuzzing {
-            None
-        } else {
-            Some(RealAead::new(false, version, cipher, secret, prefix)?)
-        };
-        Ok(Self { real })
+    #[cfg(feature = "disable-encryption")]
+    pub fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
+        Ok(Self { real: None })
+    }
+
+    #[cfg(not(feature = "disable-encryption"))]
+    pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
+        Ok(Self {
+            real: Some(RealAead::new(version, cipher, secret, prefix)?),
+        })
     }
 
     #[must_use]

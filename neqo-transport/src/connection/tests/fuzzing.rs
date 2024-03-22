@@ -6,7 +6,7 @@
 
 #![cfg(feature = "disable-encryption")]
 
-use neqo_crypto::FIXED_TAG_FUZZING;
+use neqo_crypto::aead_fuzzing::FIXED_TAG_FUZZING;
 use test_fixture::now;
 
 use super::{connect_force_idle, default_client, default_server};
