@@ -9,7 +9,7 @@
 
 mod aead;
 #[cfg(feature = "fuzzing")]
-mod aead_fuzzing;
+pub mod aead_fuzzing;
 pub mod agent;
 mod agentio;
 mod auth;
