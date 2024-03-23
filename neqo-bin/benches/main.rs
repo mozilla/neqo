@@ -40,7 +40,7 @@ fn transfer(c: &mut Criterion) {
             name: "1-conn/1-100mb-resp".to_string(),
             requests: vec![100 * 1024 * 1024],
             download_in_series: false,
-            sample_size: Some(10),
+            sample_size: None,
         },
         Benchmark {
             name: "1-conn/10_000-1b-seq-resp (aka. RPS)".to_string(),
