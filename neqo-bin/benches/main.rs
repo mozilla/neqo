@@ -18,6 +18,7 @@ struct Benchmark {
 }
 
 fn transfer(c: &mut Criterion) {
+    neqo_common::log::init(Some(log::LevelFilter::Off));
     // TODO: Init log level here once https://github.com/mozilla/neqo/pull/1692 is merged.
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap());
 
