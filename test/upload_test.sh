@@ -2,6 +2,8 @@
 
 set -e
 
+export RUST_LOG=neqo_transport::cc=debug
+
 server_address=127.0.0.1
 server_port=4433
 upload_size=8388608

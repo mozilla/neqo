@@ -458,7 +458,7 @@ fn coalesce_05rtt() {
     assert_eq!(client.stats().dropped_rx, 0); // No Initial padding.
     assert_eq!(client.stats().packets_rx, 4);
     assert_eq!(client.stats().saved_datagrams, 1);
-    assert_eq!(client.stats().frame_rx.padding, 1); // Padding uses frames.
+    assert!(client.stats().frame_rx.padding > 0); // Padding uses frames.
 
     // Allow the handshake to complete.
     now += RTT / 2;

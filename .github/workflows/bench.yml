@@ -115,7 +115,7 @@ jobs:
             echo "### Benchmark results"
             echo
           } > results.md
-          SHA=$(cat target/criterion/baseline-sha.txt)
+          SHA=$(cat target/criterion/baseline-sha.txt || true)
           if [ -n "$SHA" ]; then
             {
               echo "Performance differences relative to $SHA."
