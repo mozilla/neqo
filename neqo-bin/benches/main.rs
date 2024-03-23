@@ -30,27 +30,25 @@ fn transfer(c: &mut Criterion) {
         sample_size,
     } in [
         Benchmark {
-            name: "single-request-1gb".to_string(),
+            name: "1-conn/1-1gb-resp".to_string(),
             requests: vec![1024 * 1024 * 1024],
             download_in_series: false,
             sample_size: Some(10),
         },
         Benchmark {
-            name: "single-request-1mb".to_string(),
-            requests: vec![1024 * 1024],
+            name: "1-conn/1-100mb-resp".to_string(),
+            requests: vec![100 * 1024 * 1024],
             download_in_series: false,
-            sample_size: None,
+            sample_size: Some(10),
         },
         Benchmark {
-            name: "requests-per-second(10_000)".to_string(),
-            // TODO: Reconsider value.
+            name: "1-conn/10_000-1b-seq-resp (aka. RPS)".to_string(),
             requests: vec![1; 10_000],
             download_in_series: false,
             sample_size: None,
         },
         Benchmark {
-            name: "handshakes-per-second(100)".to_string(),
-            // TODO: Reconsider value.
+            name: "100-seq-conn/1-1b-resp (aka. HPS)".to_string(),
             requests: vec![1; 100],
             download_in_series: true,
             sample_size: None,
@@ -58,6 +56,7 @@ fn transfer(c: &mut Criterion) {
     ] {
         let mut group = c.benchmark_group(name);
         group.throughput(if requests[0] > 1 {
+            assert_eq!(requests.len(), 1);
             Throughput::Bytes(requests[0])
         } else {
             Throughput::Elements(requests.len() as u64)
