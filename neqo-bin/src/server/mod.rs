@@ -122,7 +122,6 @@ pub struct Args {
 impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr;
-
         Self {
             verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
             shared: crate::SharedArgs::default(),

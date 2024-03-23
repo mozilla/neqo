@@ -200,7 +200,7 @@ impl Args {
             shared: crate::SharedArgs::default(),
             urls: requests
                 .iter()
-                .map(|r| Url::from_str(&format!("http://127.0.0.1:12345/{r}")).unwrap())
+                .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())
                 .collect(),
             method: "GET".into(),
             header: vec![],
