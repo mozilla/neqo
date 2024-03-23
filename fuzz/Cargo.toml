@@ -13,7 +13,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = { version = "0.4" }
-neqo-crypto = { path = "../neqo-crypto", features = ["fuzzing"] }
+neqo-common = { path = "../neqo-common" }
+neqo-crypto = { path = "../neqo-crypto" }
 neqo-transport = { path = "../neqo-transport", features = ["fuzzing"] }
 
 [lints]
@@ -22,6 +23,13 @@ workspace = true
 [[bin]]
 name = "packet"
 path = "fuzz_targets/packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame"
+path = "fuzz_targets/frame.rs"
 test = false
 doc = false
 bench = false
