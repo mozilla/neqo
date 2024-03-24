@@ -31,16 +31,10 @@ fn transfer(c: &mut Criterion) {
         sample_size,
     } in [
         Benchmark {
-            name: "1-conn/1-1gb-resp".to_string(),
-            requests: vec![1024 * 1024 * 1024],
-            download_in_series: false,
-            sample_size: Some(10),
-        },
-        Benchmark {
             name: "1-conn/1-100mb-resp".to_string(),
             requests: vec![100 * 1024 * 1024],
             download_in_series: false,
-            sample_size: None,
+            sample_size: Some(10),
         },
         Benchmark {
             name: "1-conn/10_000-1b-seq-resp (aka. RPS)".to_string(),
