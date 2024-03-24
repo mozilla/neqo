@@ -208,7 +208,7 @@ impl Args {
             download_in_series,
             concurrency: 100,
             output_read_data: false,
-            output_dir: Some("/tmp/out".into()),
+            output_dir: Some("/dev/null".into()),
             resume: false,
             key_update: false,
             ech: None,

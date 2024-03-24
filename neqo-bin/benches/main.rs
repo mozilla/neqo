@@ -19,7 +19,6 @@ struct Benchmark {
 
 fn transfer(c: &mut Criterion) {
     neqo_common::log::init(Some(log::LevelFilter::Off));
-    // TODO: Init log level here once https://github.com/mozilla/neqo/pull/1692 is merged.
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap());
 
     let done_sender = spawn_server();
@@ -31,7 +30,7 @@ fn transfer(c: &mut Criterion) {
         sample_size,
     } in [
         Benchmark {
-            name: "1-conn/1-100mb-resp".to_string(),
+            name: "1-conn/1-100mb-resp (aka. Download)".to_string(),
             requests: vec![100 * 1024 * 1024],
             download_in_series: false,
             sample_size: Some(10),
