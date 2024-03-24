@@ -7,6 +7,8 @@
 use std::{path::PathBuf, str::FromStr};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
+use neqo_bin::{client, server};
+use neqo_common::log;
 use tokio::runtime::Runtime;
 
 struct Benchmark {
@@ -18,7 +20,7 @@ struct Benchmark {
 }
 
 fn transfer(c: &mut Criterion) {
-    neqo_common::log::init(Some(log::LevelFilter::Off));
+    log::init(Some(log::LevelFilter::Off));
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap());
 
     let done_sender = spawn_server();
@@ -60,12 +62,7 @@ fn transfer(c: &mut Criterion) {
         }
         group.bench_function("client", |b| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || {
-                    neqo_bin::client::client(neqo_bin::client::Args::new(
-                        &requests,
-                        download_in_series,
-                    ))
-                },
+                || client::client(client::Args::new(&requests, download_in_series)),
                 |client| async move {
                     client.await.unwrap();
                 },
@@ -82,7 +79,7 @@ fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         Runtime::new().unwrap().block_on(async {
-            let mut server = Box::pin(neqo_bin::server::server(neqo_bin::server::Args::default()));
+            let mut server = Box::pin(server::server(server::Args::default()));
             tokio::select! {
                 _ = &mut done_receiver => {}
                 _ = &mut server  => {}
