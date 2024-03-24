@@ -23,6 +23,7 @@ const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<str>>) {
     let mut group = c.benchmark_group("transfer");
     group.throughput(Throughput::Bytes(u64::try_from(TRANSFER_AMOUNT).unwrap()));
+    group.noise_threshold(0.03);
     group.bench_function(label, |b| {
         b.iter_batched(
             || {
