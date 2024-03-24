@@ -8,7 +8,6 @@ use std::{path::PathBuf, str::FromStr};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};
-use neqo_common::log;
 use tokio::runtime::Runtime;
 
 struct Benchmark {
@@ -20,7 +19,7 @@ struct Benchmark {
 }
 
 fn transfer(c: &mut Criterion) {
-    log::init(Some(log::LevelFilter::Off));
+    neqo_common::log::init(Some(log::LevelFilter::Off));
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap());
 
     let done_sender = spawn_server();
