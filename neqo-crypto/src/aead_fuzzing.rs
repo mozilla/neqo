@@ -41,6 +41,7 @@ impl FuzzingAead {
         }
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn encrypt<'a>(
         &self,
         count: u64,
@@ -58,6 +59,7 @@ impl FuzzingAead {
         Ok(&output[..l + 16])
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn decrypt<'a>(
         &self,
         count: u64,

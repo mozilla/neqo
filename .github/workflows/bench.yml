@@ -2,6 +2,9 @@ name: Bench
 on:
   workflow_call:
   workflow_dispatch:
+  schedule:
+    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    - cron: '0 1 * * *'
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -115,7 +118,7 @@ jobs:
             echo "### Benchmark results"
             echo
           } > results.md
-          SHA=$(cat target/criterion/baseline-sha.txt)
+          SHA=$(cat target/criterion/baseline-sha.txt || true)
           if [ -n "$SHA" ]; then
             {
               echo "Performance differences relative to $SHA."
