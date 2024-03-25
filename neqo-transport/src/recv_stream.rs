@@ -1018,6 +1018,7 @@ mod tests {
     use crate::{
         fc::ReceiverFlowControl,
         packet::PacketBuilder,
+        recovery::RecoveryTokenVec,
         recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
         stats::FrameStats,
         ConnectionEvents, Error, StreamId, RECV_BUFFER_SIZE,

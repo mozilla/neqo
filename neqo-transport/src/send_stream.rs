@@ -1770,7 +1770,7 @@ mod tests {
         events::ConnectionEvent,
         fc::SenderFlowControl,
         packet::PacketBuilder,
-        recovery::{RecoveryToken, StreamRecoveryToken},
+        recovery::{RecoveryToken, RecoveryTokenVec, StreamRecoveryToken},
         send_stream::{
             RangeState, RangeTracker, SendStream, SendStreamState, SendStreams, TxBuffer,
         },
