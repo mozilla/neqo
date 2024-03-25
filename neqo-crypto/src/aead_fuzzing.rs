@@ -21,11 +21,13 @@ pub struct FuzzingAead {
 
 impl FuzzingAead {
     #[cfg(feature = "disable-encryption")]
+    #[allow(clippy::missing_errors_doc)]
     pub fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
         Ok(Self { real: None })
     }
 
     #[cfg(not(feature = "disable-encryption"))]
+    #[allow(clippy::missing_errors_doc)]
     pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
         Ok(Self {
             real: Some(RealAead::new(version, cipher, secret, prefix)?),
