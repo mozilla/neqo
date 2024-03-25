@@ -278,7 +278,7 @@ mod tests {
 
     const PACKET_GAP: Duration = Duration::from_secs(1);
     fn start_time() -> Instant {
-        thread_local!(static STARTING_TIME: OnceCell<Instant> = OnceCell::new());
+        thread_local!(static STARTING_TIME: OnceCell<Instant> = const { OnceCell::new() });
         STARTING_TIME.with(|t| *t.get_or_init(Instant::now))
     }
 
