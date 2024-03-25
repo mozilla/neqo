@@ -21,6 +21,7 @@ qlog = { version = "0.12", default-features = false }
 time = { version = "0.3", default-features = false, features = ["formatting"] }
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
@@ -33,3 +34,7 @@ features = ["timeapi"]
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
+
+[[bench]]
+name = "timer"
+harness = false
