@@ -11,7 +11,7 @@ use neqo_common::timer::Timer;
 use test_fixture::now;
 
 fn benchmark_timer(c: &mut Criterion) {
-    c.bench_function(&format!("drain a timer quickly"), |b| {
+    c.bench_function("drain a timer quickly", |b| {
         b.iter_batched_ref(
             make_timer,
             |(_now, timer)| {
@@ -20,7 +20,7 @@ fn benchmark_timer(c: &mut Criterion) {
                 }
             },
             criterion::BatchSize::SmallInput,
-        )
+        );
     });
 }
 
