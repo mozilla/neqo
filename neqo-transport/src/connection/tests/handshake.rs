@@ -16,9 +16,10 @@ use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
+#[cfg(not(feature = "fuzzing"))]
+use test_fixture::datagram;
 use test_fixture::{
-    assertions, assertions::assert_coalesced_0rtt, datagram, fixture_init, now, split_datagram,
-    DEFAULT_ADDR,
+    assertions, assertions::assert_coalesced_0rtt, fixture_init, now, split_datagram, DEFAULT_ADDR,
 };
 
 use super::{
