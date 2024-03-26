@@ -59,7 +59,8 @@ pub use self::{
     ssl::Opt,
 };
 
-include!("../min_version.rs");
+mod min_version;
+use min_version::MINIMUM_NSS_VERSION;
 
 #[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
 #[allow(clippy::upper_case_acronyms)]

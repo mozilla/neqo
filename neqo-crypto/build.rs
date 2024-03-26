@@ -15,7 +15,9 @@ use bindgen::Builder;
 use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
 
-include!("min_version.rs");
+#[path = "src/min_version.rs"]
+mod min_version;
+use min_version::MINIMUM_NSS_VERSION;
 
 const BINDINGS_DIR: &str = "bindings";
 const BINDINGS_CONFIG: &str = "bindings.toml";
