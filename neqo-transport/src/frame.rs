@@ -21,7 +21,7 @@ use crate::{
 #[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
 
-const FRAME_TYPE_PADDING: FrameType = 0x0;
+pub const FRAME_TYPE_PADDING: FrameType = 0x0;
 pub const FRAME_TYPE_PING: FrameType = 0x1;
 pub const FRAME_TYPE_ACK: FrameType = 0x2;
 pub const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
@@ -104,7 +104,7 @@ pub struct AckRange {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Frame<'a> {
-    Padding,
+    Padding(u16),
     Ping,
     Ack {
         largest_acknowledged: u64,
@@ -217,7 +217,7 @@ impl<'a> Frame<'a> {
 
     pub fn get_type(&self) -> FrameType {
         match self {
-            Self::Padding => FRAME_TYPE_PADDING,
+            Self::Padding { .. } => FRAME_TYPE_PADDING,
             Self::Ping => FRAME_TYPE_PING,
             Self::Ack { .. } => FRAME_TYPE_ACK,
             Self::ResetStream { .. } => FRAME_TYPE_RESET_STREAM,
@@ -290,7 +290,7 @@ impl<'a> Frame<'a> {
     pub fn ack_eliciting(&self) -> bool {
         !matches!(
             self,
-            Self::Ack { .. } | Self::Padding | Self::ConnectionClose { .. }
+            Self::Ack { .. } | Self::Padding { .. } | Self::ConnectionClose { .. }
         )
     }
 
@@ -299,7 +299,7 @@ impl<'a> Frame<'a> {
     pub fn path_probing(&self) -> bool {
         matches!(
             self,
-            Self::Padding
+            Self::Padding { .. }
                 | Self::NewConnectionId { .. }
                 | Self::PathChallenge { .. }
                 | Self::PathResponse { .. }
@@ -349,36 +349,34 @@ impl<'a> Frame<'a> {
         Ok(acked_ranges)
     }
 
-    pub fn dump(&self) -> Option<String> {
+    pub fn dump(&self) -> String {
         match self {
-            Self::Crypto { offset, data } => Some(format!(
-                "Crypto {{ offset: {}, len: {} }}",
-                offset,
-                data.len()
-            )),
+            Self::Crypto { offset, data } => {
+                format!("Crypto {{ offset: {}, len: {} }}", offset, data.len())
+            }
             Self::Stream {
                 stream_id,
                 offset,
                 fill,
                 data,
                 fin,
-            } => Some(format!(
+            } => format!(
                 "Stream {{ stream_id: {}, offset: {}, len: {}{}, fin: {} }}",
                 stream_id.as_u64(),
                 offset,
                 if *fill { ">>" } else { "" },
                 data.len(),
                 fin,
-            )),
-            Self::Padding => None,
-            Self::Datagram { data, .. } => Some(format!("Datagram {{ len: {} }}", data.len())),
-            _ => Some(format!("{self:?}")),
+            ),
+            Self::Padding(length) => format!("Padding {{ len: {length} }}"),
+            Self::Datagram { data, .. } => format!("Datagram {{ len: {} }}", data.len()),
+            _ => format!("{self:?}"),
         }
     }
 
     pub fn is_allowed(&self, pt: PacketType) -> bool {
         match self {
-            Self::Padding | Self::Ping => true,
+            Self::Padding { .. } | Self::Ping => true,
             Self::Crypto { .. }
             | Self::Ack { .. }
             | Self::ConnectionClose {
@@ -446,13 +444,23 @@ impl<'a> Frame<'a> {
         }
 
         // TODO(ekr@rtfm.com): check for minimal encoding
-        let t = d(dec.decode_varint())?;
+        let t = dv(dec)?;
         match t {
-            FRAME_TYPE_PADDING => Ok(Self::Padding),
+            FRAME_TYPE_PADDING => {
+                let mut length: u16 = 1;
+                while let Some(b) = dec.peek_byte() {
+                    if u64::from(b) != FRAME_TYPE_PADDING {
+                        break;
+                    }
+                    length += 1;
+                    dec.skip(1);
+                }
+                Ok(Self::Padding(length))
+            }
             FRAME_TYPE_PING => Ok(Self::Ping),
             FRAME_TYPE_RESET_STREAM => Ok(Self::ResetStream {
                 stream_id: StreamId::from(dv(dec)?),
-                application_error_code: d(dec.decode_varint())?,
+                application_error_code: dv(dec)?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
                     _ => return Err(Error::NoMoreData),
@@ -461,7 +469,7 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => decode_ack(dec, t),
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
                 stream_id: StreamId::from(dv(dec)?),
-                application_error_code: d(dec.decode_varint())?,
+                application_error_code: dv(dec)?,
             }),
             FRAME_TYPE_CRYPTO => {
                 let offset = dv(dec)?;
@@ -567,7 +575,7 @@ impl<'a> Frame<'a> {
                 Ok(Self::PathResponse { data: datav })
             }
             FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT | FRAME_TYPE_CONNECTION_CLOSE_APPLICATION => {
-                let error_code = CloseError::from_type_bit(t, d(dec.decode_varint())?);
+                let error_code = CloseError::from_type_bit(t, dv(dec)?);
                 let frame_type = if t == FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT {
                     dv(dec)?
                 } else {
@@ -636,8 +644,10 @@ mod tests {
 
     #[test]
     fn padding() {
-        let f = Frame::Padding;
+        let f = Frame::Padding(1);
         just_dec(&f, "00");
+        let f = Frame::Padding(2);
+        just_dec(&f, "0000");
     }
 
     #[test]
@@ -902,8 +912,8 @@ mod tests {
 
     #[test]
     fn test_compare() {
-        let f1 = Frame::Padding;
-        let f2 = Frame::Padding;
+        let f1 = Frame::Padding(1);
+        let f2 = Frame::Padding(1);
         let f3 = Frame::Crypto {
             offset: 0,
             data: &[1, 2, 3],

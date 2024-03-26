@@ -59,10 +59,6 @@ impl Datagram {
     pub(crate) fn into_data(self) -> Vec<u8> {
         self.d
     }
-
-    pub fn set_tos(&mut self, tos: IpTos) {
-        self.tos = tos;
-    }
 }
 
 impl Deref for Datagram {
@@ -84,6 +80,12 @@ impl std::fmt::Debug for Datagram {
             self.dst,
             hex_with_len(&self.d)
         )
+    }
+}
+
+impl From<Datagram> for Vec<u8> {
+    fn from(datagram: Datagram) -> Self {
+        datagram.d
     }
 }
 
