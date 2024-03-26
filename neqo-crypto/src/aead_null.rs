@@ -32,8 +32,8 @@ impl AeadNull {
     #[allow(clippy::missing_errors_doc)]
     pub fn encrypt<'a>(
         &self,
-        count: u64,
-        aad: &[u8],
+        _count: u64,
+        _aad: &[u8],
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
@@ -46,8 +46,8 @@ impl AeadNull {
     #[allow(clippy::missing_errors_doc)]
     pub fn decrypt<'a>(
         &self,
-        count: u64,
-        aad: &[u8],
+        _count: u64,
+        _aad: &[u8],
         input: &[u8],
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
