@@ -9,7 +9,7 @@
 
 mod aead;
 #[cfg(feature = "disable-encryption")]
-pub mod aead_fuzzing;
+pub mod aead_null;
 pub mod agent;
 mod agentio;
 mod auth;
@@ -38,7 +38,7 @@ pub use self::aead::RealAead as Aead;
 #[cfg(feature = "disable-encryption")]
 pub use self::aead::RealAead;
 #[cfg(feature = "disable-encryption")]
-pub use self::aead_fuzzing::FuzzingAead as Aead;
+pub use self::aead_null::AeadNull as Aead;
 pub use self::{
     agent::{
         Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken,
