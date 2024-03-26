@@ -670,7 +670,7 @@ impl SecretAgent {
             let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
             HandshakeState::Complete(info)
         };
-        qinfo!([self], "state -> {:?}", self.state);
+        qdebug!([self], "state -> {:?}", self.state);
         Ok(())
     }
 
@@ -898,7 +898,7 @@ impl Client {
         let len = usize::try_from(len).unwrap();
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
-        qinfo!(
+        qdebug!(
             [format!("{fd:p}")],
             "Got resumption token {}",
             hex_snip_middle(&v)
