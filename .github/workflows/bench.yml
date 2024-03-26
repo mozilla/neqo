@@ -80,8 +80,8 @@ jobs:
 
           for config in "${benchmarks[@]}"; do
             read -r cpu_pinning packages <<< "${config}"
-            # run all benchmarks at elevated priority.
-            $cpu_pinning nice -n -20 cargo "+$TOOLCHAIN" bench $packages --features bench -- --noplot | tee -a results.txt
+            # Run all benchmarks at elevated priority.
+            $cpu_pinning nice -n -20 cargo "+$TOOLCHAIN" bench "$packages" --features bench -- --noplot | tee -a results.txt
           done
 
       # Compare various configurations of neqo against msquic, and gather perf data
