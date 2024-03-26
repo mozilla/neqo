@@ -315,7 +315,7 @@ fn pkg_config() -> Vec<String> {
     };
     let modversion_for_cmp =
         Version::parse(&modversion_for_cmp).expect("NSS version not in semver format");
-    let version_req = VersionReq::parse(&(">=".to_owned() + MINIMUM_NSS_VERSION.trim())).unwrap();
+    let version_req = VersionReq::parse(&format!(">={}", MINIMUM_NSS_VERSION.trim())).unwrap();
     assert!(
         version_req.matches(&modversion_for_cmp),
         "neqo has NSS version requirement {version_req}, found {modversion}"
