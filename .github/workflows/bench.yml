@@ -72,7 +72,7 @@ jobs:
 
       - name: Run cargo bench
         run: |
-          # Pin all but neqo-bin benchmarks to CPU 0.
+          # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run both a client and a server, thus benefiting from multiple CPU core.
           benchmarks=(
             ("taskset -c 0" "--exclude neqo-bin")
             ("" "--package neqo-bin")
