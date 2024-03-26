@@ -45,6 +45,7 @@ pub enum ClientError {
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    InternalError,
 }
 
 impl From<io::Error> for ClientError {
@@ -451,7 +452,7 @@ async fn main() -> Res<()> {
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
     args.update_for_tests();
 
-    init();
+    init().map_err(|_| ClientError::InternalError)?;
 
     let urls_by_origin = args
         .urls

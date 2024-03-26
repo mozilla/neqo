@@ -579,7 +579,7 @@ async fn main() -> Result<(), io::Error> {
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
     assert!(!args.key.is_empty(), "Need at least one key");
 
-    init_db(args.db.clone());
+    init_db(args.db.clone()).map_err(|_| io::Error::other("init_db failure"))?;
 
     if let Some(testcase) = args.shared.qns_test.as_ref() {
         if args.shared.quic_parameters.quic_version.is_empty() {

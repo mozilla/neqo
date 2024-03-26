@@ -42,7 +42,7 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 /// fixture function that depends on setup.  Other functions in the fixture
 /// that depend on this setup call the function for you.
 pub fn fixture_init() {
-    init_db(NSS_DB_PATH);
+    let _ = init_db(NSS_DB_PATH);
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.

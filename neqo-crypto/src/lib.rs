@@ -89,7 +89,7 @@ impl Drop for NssLoaded {
     }
 }
 
-static INITIALIZED: OnceLock<NssLoaded> = OnceLock::new();
+static INITIALIZED: OnceLock<Res<NssLoaded>> = OnceLock::new();
 
 fn already_initialized() -> bool {
     unsafe { nss::NSS_IsInitialized() != 0 }
@@ -107,24 +107,27 @@ fn version_check() {
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance
 /// that
 ///
-/// # Panics
+/// # Errors
 ///
 /// When NSS initialization fails.
-pub fn init() {
+pub fn init() -> Res<()> {
     // Set time zero.
     time::init();
-    _ = INITIALIZED.get_or_init(|| {
+    let res = INITIALIZED.get_or_init(|| {
         version_check();
         if already_initialized() {
-            return NssLoaded::External;
+            return Ok(NssLoaded::External);
         }
 
-        secstatus_to_res(unsafe { nss::NSS_NoDB_Init(null()) }).expect("NSS_NoDB_Init failed");
-        secstatus_to_res(unsafe { nss::NSS_SetDomesticPolicy() })
-            .expect("NSS_SetDomesticPolicy failed");
+        secstatus_to_res(unsafe { nss::NSS_NoDB_Init(null()) })?;
+        secstatus_to_res(unsafe { nss::NSS_SetDomesticPolicy() })?;
 
-        NssLoaded::NoDb
+        Ok(NssLoaded::NoDb)
     });
+    match res {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.clone()),
+    }
 }
 
 /// This enables SSLTRACE by calling a simple, harmless function to trigger its
@@ -141,22 +144,24 @@ fn enable_ssl_trace() {
 
 /// Initialize with a database.
 ///
-/// # Panics
+/// # Errors
 ///
 /// If NSS cannot be initialized.
-pub fn init_db<P: Into<PathBuf>>(dir: P) {
+pub fn init_db<P: Into<PathBuf>>(dir: P) -> Res<()> {
     time::init();
-    _ = INITIALIZED.get_or_init(|| {
+    let res = INITIALIZED.get_or_init(|| {
         version_check();
         if already_initialized() {
-            return NssLoaded::External;
+            return Ok(NssLoaded::External);
         }
 
         let path = dir.into();
-        assert!(path.is_dir());
-        let pathstr = path.to_str().expect("path converts to string").to_string();
-        let dircstr = CString::new(pathstr).unwrap();
-        let empty = CString::new("").unwrap();
+        if !path.is_dir() {
+            return Err(Error::InternalError);
+        }
+        let pathstr = path.to_str().ok_or(Error::InternalError)?;
+        let dircstr = CString::new(pathstr)?;
+        let empty = CString::new("")?;
         secstatus_to_res(unsafe {
             nss::NSS_Initialize(
                 dircstr.as_ptr(),
@@ -165,21 +170,22 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
                 nss::SECMOD_DB.as_ptr().cast(),
                 nss::NSS_INIT_READONLY,
             )
-        })
-        .expect("NSS_Initialize failed");
+        })?;
 
-        secstatus_to_res(unsafe { nss::NSS_SetDomesticPolicy() })
-            .expect("NSS_SetDomesticPolicy failed");
+        secstatus_to_res(unsafe { nss::NSS_SetDomesticPolicy() })?;
         secstatus_to_res(unsafe {
             ssl::SSL_ConfigServerSessionIDCache(1024, 0, 0, dircstr.as_ptr())
-        })
-        .expect("SSL_ConfigServerSessionIDCache failed");
+        })?;
 
         #[cfg(debug_assertions)]
         enable_ssl_trace();
 
-        NssLoaded::Db
+        Ok(NssLoaded::Db)
     });
+    match res {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.clone()),
+    }
 }
 
 /// # Panics
