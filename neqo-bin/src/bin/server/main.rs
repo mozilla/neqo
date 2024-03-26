@@ -212,7 +212,7 @@ impl From<Vec<u8>> for ResponseData {
     fn from(data: Vec<u8>) -> Self {
         let remaining = data.len();
         Self {
-            data: Cow::Owned(data.into()),
+            data: Cow::Owned(data),
             offset: 0,
             remaining,
         }
