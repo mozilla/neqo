@@ -59,6 +59,10 @@ impl Datagram {
     pub(crate) fn into_data(self) -> Vec<u8> {
         self.d
     }
+
+    pub fn set_tos(&mut self, tos: IpTos) {
+        self.tos = tos;
+    }
 }
 
 impl Deref for Datagram {
