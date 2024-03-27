@@ -124,10 +124,7 @@ pub fn init() -> Res<()> {
 
         Ok(NssLoaded::NoDb)
     });
-    match res {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.clone()),
-    }
+    res.clone()
 }
 
 /// This enables SSLTRACE by calling a simple, harmless function to trigger its
