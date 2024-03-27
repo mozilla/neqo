@@ -72,16 +72,11 @@ jobs:
 
       - name: Run cargo bench
         run: |
+          # Run all benchmarks at elevated priority.
           # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run both a client and a server, thus benefiting from multiple CPU core.
-          benchmarks=(
-            "taskset -c 0,--exclude neqo-bin"
-            ",--package neqo-bin"
-          )
-          for config in "${benchmarks[@]}"; do
-            IFS=',' read -r cpu_pinning packages <<< "$config"
-            # Run all benchmarks at elevated priority.
-            $cpu_pinning nice -n -20 cargo "+$TOOLCHAIN" bench "$packages" --features bench -- --noplot | tee -a results.txt
-          done
+          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+
 
       # Compare various configurations of neqo against msquic, and gather perf data
       # during the hyperfine runs.
