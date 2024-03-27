@@ -19,7 +19,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -384,7 +384,6 @@ impl Connection {
             agent,
             protocols.iter().map(P::as_ref).map(String::from).collect(),
             Rc::clone(&tphandler),
-            conn_params.is_fuzzing(),
         )?;
 
         let stats = StatsCell::default();

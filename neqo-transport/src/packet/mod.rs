@@ -868,7 +868,7 @@ impl Deref for DecryptedPacket {
     }
 }
 
-#[cfg(all(test, not(feature = "fuzzing")))]
+#[cfg(all(test, not(feature = "disable-encryption")))]
 mod tests {
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
