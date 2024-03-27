@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use std::{
+    borrow::Cow,
     cell::RefCell,
     cmp::min,
     collections::HashMap,
@@ -212,7 +213,7 @@ trait HttpServer: Display {
 }
 
 struct ResponseData {
-    data: Vec<u8>,
+    data: Cow<'static, [u8]>,
     offset: usize,
     remaining: usize,
 }
@@ -227,7 +228,7 @@ impl From<Vec<u8>> for ResponseData {
     fn from(data: Vec<u8>) -> Self {
         let remaining = data.len();
         Self {
-            data,
+            data: Cow::Owned(data),
             offset: 0,
             remaining,
         }
@@ -235,9 +236,9 @@ impl From<Vec<u8>> for ResponseData {
 }
 
 impl ResponseData {
-    fn repeat(buf: &[u8], total: usize) -> Self {
+    fn repeat(buf: &'static [u8], total: usize) -> Self {
         Self {
-            data: buf.to_owned(),
+            data: Cow::Borrowed(buf),
             offset: 0,
             remaining: total,
         }
@@ -276,14 +277,7 @@ struct SimpleServer {
 }
 
 impl SimpleServer {
-    const MESSAGE: &'static [u8] = b"I am the very model of a modern Major-General,\n\
-        I've information vegetable, animal, and mineral,\n\
-        I know the kings of England, and I quote the fights historical\n\
-        From Marathon to Waterloo, in order categorical;\n\
-        I'm very well acquainted, too, with matters mathematical,\n\
-        I understand equations, both the simple and quadratical,\n\
-        About binomial theorem, I'm teeming with a lot o' news,\n\
-        With many cheerful facts about the square of the hypotenuse.\n";
+    const MESSAGE: &'static [u8] = &[0; 4096];
 
     pub fn new(
         args: &Args,
