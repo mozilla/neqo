@@ -114,8 +114,6 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
-          # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci,disable-encryption --no-fail-fast --lcov --output-path lcov-de.info
           cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
@@ -162,7 +160,7 @@ jobs:
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: lcov.info,lcov-de.info
+          file: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
