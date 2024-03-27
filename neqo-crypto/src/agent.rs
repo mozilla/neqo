@@ -16,7 +16,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
