@@ -406,7 +406,6 @@ impl<'a> Frame<'a> {
     /// # Errors
     ///
     /// Returns an error if the frame cannot be decoded.
-    ///
     #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
         /// Maximum ACK Range Count in ACK Frame
