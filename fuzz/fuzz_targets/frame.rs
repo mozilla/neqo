@@ -1,6 +1,4 @@
 #![no_main]
-#![cfg(not(windows))]
-
 use libfuzzer_sys::fuzz_target;
 use neqo_common::Decoder;
 use neqo_transport::frame::Frame;
