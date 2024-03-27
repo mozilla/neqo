@@ -31,7 +31,7 @@ pub mod selfencrypt;
 mod ssl;
 mod time;
 
-use std::{ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
+use std::{clone::Clone, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
 #[cfg(not(feature = "fuzzing"))]
 pub use self::aead::RealAead as Aead;
@@ -125,10 +125,7 @@ pub fn init() -> Res<()> {
 
         Ok(NssLoaded::NoDb)
     });
-    match res {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.clone()),
-    }
+    res.as_ref().map(|_| ()).map_err(Clone::clone)
 }
 
 /// This enables SSLTRACE by calling a simple, harmless function to trigger its
@@ -182,10 +179,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) -> Res<()> {
 
         Ok(NssLoaded::Db)
     });
-    match res {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e.clone()),
-    }
+    res.as_ref().map(|_| ()).map_err(Clone::clone)
 }
 
 /// # Panics
