@@ -77,7 +77,7 @@ jobs:
           #
           # Run all benchmarks at elevated priority.
           taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
-          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+          nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
 
       # Compare various configurations of neqo against msquic, and gather perf data
