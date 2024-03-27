@@ -124,7 +124,10 @@ pub fn init() -> Res<()> {
 
         Ok(NssLoaded::NoDb)
     });
-    res.clone()
+    match res {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.clone()),
+    }
 }
 
 /// This enables SSLTRACE by calling a simple, harmless function to trigger its
@@ -132,11 +135,10 @@ pub fn init() -> Res<()> {
 /// global options are accessed.  Reading an option is the least impact approach.
 /// This allows us to use SSLTRACE in all of our unit tests and programs.
 #[cfg(debug_assertions)]
-fn enable_ssl_trace() {
+fn enable_ssl_trace() -> Res<()> {
     let opt = ssl::Opt::Locking.as_int();
     let mut v: ::std::os::raw::c_int = 0;
     secstatus_to_res(unsafe { ssl::SSL_OptionGetDefault(opt, &mut v) })
-        .expect("SSL_OptionGetDefault failed");
 }
 
 /// Initialize with a database.
@@ -175,7 +177,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) -> Res<()> {
         })?;
 
         #[cfg(debug_assertions)]
-        enable_ssl_trace();
+        enable_ssl_trace()?;
 
         Ok(NssLoaded::Db)
     });

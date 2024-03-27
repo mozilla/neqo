@@ -51,6 +51,13 @@ pub enum ServerError {
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    InternalError(neqo_crypto::Error),
+}
+
+impl From<neqo_crypto::Error> for ServerError {
+    fn from(err: neqo_crypto::Error) -> Self {
+        Self::InternalError(err)
+    }
 }
 
 impl From<io::Error> for ServerError {
@@ -85,6 +92,8 @@ impl Display for ServerError {
 }
 
 impl std::error::Error for ServerError {}
+
+type Res<T> = Result<T, ServerError>;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -541,7 +550,7 @@ impl ServersRunner {
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
-    async fn run(&mut self) -> Result<(), io::Error> {
+    async fn run(&mut self) -> Res<()> {
         loop {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
@@ -572,14 +581,14 @@ enum Ready {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), io::Error> {
+async fn main() -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
     let mut args = Args::parse();
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
     assert!(!args.key.is_empty(), "Need at least one key");
 
-    init_db(args.db.clone()).map_err(|_| io::Error::other("init_db failure"))?;
+    init_db(args.db.clone())?;
 
     if let Some(testcase) = args.shared.qns_test.as_ref() {
         if args.shared.quic_parameters.quic_version.is_empty() {
