@@ -11,12 +11,12 @@ license.workspace = true
 
 [[bin]]
 name = "neqo-client"
-path = "src/bin/client/main.rs"
+path = "src/bin/client.rs"
 bench = false
 
 [[bin]]
 name = "neqo-server"
-path = "src/bin/server/main.rs"
+path = "src/bin/server.rs"
 bench = false
 
 [lints]
@@ -40,6 +40,18 @@ regex = { version = "1.9", default-features = false, features = ["unicode-perl"]
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }
 
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports", "async_tokio"] }
+tokio = { version = "1", default-features = false, features = ["sync"] }
+
+[features]
+bench = []
+
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
+
+[[bench]]
+name = "main"
+harness = false
+required-features = ["bench"]
