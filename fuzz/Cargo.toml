@@ -12,10 +12,12 @@ license.workspace = true
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = { version = "0.4" }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-transport = { path = "../neqo-transport", features = ["fuzzing"] }
+
+[target.'cfg(not(windows))'.dependencies]
+libfuzzer-sys = { version = "0.4" }
 
 [lints]
 workspace = true

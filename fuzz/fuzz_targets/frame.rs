@@ -1,5 +1,5 @@
 #![no_main]
-#![cfg(not(target_os = "windows"))]
+#![cfg(not(windows))]
 
 use libfuzzer_sys::fuzz_target;
 use neqo_common::Decoder;

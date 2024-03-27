@@ -1,5 +1,5 @@
 #![no_main]
-#![cfg(not(target_os = "windows"))]
+#![cfg(not(windows))]
 
 use std::sync::Once;
 
