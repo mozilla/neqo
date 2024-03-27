@@ -49,33 +49,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
-      # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
-      # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
-      # from the build directory and avoid various other test failures. This seems to always be
-      # the case on any macos-13 runner, but not consistently on macos-latest (which is currently
-      # macos-12, FWIW).
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
         run: |
-          csrutil status | grep disabled
-          brew install ninja mercurial llvm
+          brew update
+          brew install llvm nss
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-          ln -s /opt/homebrew/bin/python3 /opt/homebrew/bin/python
-          # python3 -m pip install gyp-next
-          # Above does not work, since pypi only has gyp 0.15.0, which is too old
-          # for the homebrew python3. Install from source instead.
-          python3 -m pip install git+https://github.com/nodejs/gyp-next
-          python3 -m pip install packaging
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
-      - name: Use MSYS2 environment and install more dependencies (Windows)
+      - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
           # shellcheck disable=SC2028
           {
-            echo "C:\\msys64\\usr\\bin"
-            echo "C:\\msys64\\mingw64\\bin"
+            echo C:/msys64/usr/bin
+            echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
           python3 -m pip install git+https://github.com/nodejs/gyp-next
@@ -148,7 +136,7 @@ jobs:
           # respective default features only. Can reveal warnings otherwise
           # hidden given that a plain cargo clippy combines all features of the
           # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
-          cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
+          cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
         if: success() || failure()
 
       - name: Check rustdoc links

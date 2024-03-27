@@ -16,6 +16,8 @@ use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
+#[cfg(not(feature = "disable-encryption"))]
+use test_fixture::datagram;
 use test_fixture::{
     assertions, assertions::assert_coalesced_0rtt, fixture_init, now, split_datagram, DEFAULT_ADDR,
 };
@@ -604,7 +606,7 @@ fn reorder_1rtt() {
     }
 }
 
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn corrupted_initial() {
     let mut client = default_client();
@@ -807,7 +809,7 @@ fn anti_amplification() {
     assert_eq!(*server.state(), State::Confirmed);
 }
 
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn garbage_initial() {
     let mut client = default_client();

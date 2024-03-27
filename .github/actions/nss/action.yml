@@ -16,16 +16,46 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check system NSS version
+      shell: bash
+      run: |
+        if ! command -v pkg-config &> /dev/null; then
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        if ! pkg-config --exists nss; then
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        NSS_VERSION="$(pkg-config --modversion nss)"
+        if [ "$?" -ne 0 ]; then
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
+        NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
+        REQ_NSS_MAJOR=$(cat neqo-crypto/min_version.txt | cut -d. -f1)
+        REQ_NSS_MINOR=$(cat neqo-crypto/min_version.txt | cut -d. -f2)
+        if [ "$NSS_MAJOR" -lt "REQ_NSS_MAJOR" ] || [ "$NSS_MAJOR" -eq "REQ_NSS_MAJOR" -a "$NSS_MINOR" -lt "REQ_NSS_MINOR"]; then
+          echo "System NSS is too old: $NSS_VERSION"
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        echo "System NSS is suitable: $NSS_VERSION"
+        echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+
     # Ideally, we'd use this. But things are sufficiently flaky that we're better off
     # trying both hg and git. Leaving this here in case we want to re-try in the future.
     #
     # - name: Checkout NSPR
+    #   if: env.BUILD_NSS == '1'
     #   uses: actions/checkout@v4
     #   with:
     #     repository: "nss-dev/nspr"
     #     path: ${{ github.workspace }}/nspr
 
     # - name: Checkout NSS
+    #   if: env.BUILD_NSS == '1'
     #   uses: actions/checkout@v4
     #   with:
     #     repository: "nss-dev/nss"
@@ -33,18 +63,21 @@ runs:
 
     - name: Checkout NSPR
       shell: bash
+      if: env.BUILD_NSS == '1'
       run: |
         hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
           git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
 
     - name: Checkout NSS
       shell: bash
+      if: env.BUILD_NSS == '1'
       run: |
         hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
           git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
 
     - name: Build
       shell: bash
+      if: env.BUILD_NSS == '1'
       run: |
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but

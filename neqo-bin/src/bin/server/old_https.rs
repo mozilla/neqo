@@ -202,7 +202,6 @@ impl HttpServer for Http09Server {
                     None => break,
                     Some(e) => e,
                 };
-                qdebug!("Event {event:?}");
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
                         self.write_state
@@ -221,6 +220,7 @@ impl HttpServer for Http09Server {
                             .unwrap();
                     }
                     ConnectionEvent::StateChange(_)
+                    | ConnectionEvent::SendStreamCreatable { .. }
                     | ConnectionEvent::SendStreamComplete { .. } => (),
                     e => qwarn!("unhandled event {e:?}"),
                 }
