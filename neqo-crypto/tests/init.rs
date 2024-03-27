@@ -15,13 +15,7 @@ use neqo_crypto::{assert_initialized, init_db};
 
 // Pull in the NSS internals so that we can ask NSS if it thinks that
 // it is properly initialized.
-#[allow(
-    dead_code,
-    non_upper_case_globals,
-    clippy::redundant_static_lifetimes,
-    clippy::unseparated_literal_suffix,
-    clippy::upper_case_acronyms
-)]
+#[allow(dead_code, non_upper_case_globals)]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
@@ -32,8 +26,19 @@ fn init_nodb() {
     init();
     assert_initialized();
     unsafe {
-        assert!(nss::NSS_IsInitialized() != 0);
+        assert_ne!(nss::NSS_IsInitialized(), 0);
     }
+}
+
+#[cfg(nss_nodb)]
+#[test]
+fn init_twice_nodb() {
+    unsafe {
+        nss::NSS_NoDB_Init(null());
+        assert_ne!(nss::NSS_IsInitialized(), 0);
+    }
+    // Now do it again
+    init_nodb();
 }
 
 #[cfg(not(nss_nodb))]
@@ -42,6 +47,30 @@ fn init_withdb() {
     init_db(::test_fixture::NSS_DB_PATH).unwrap();
     assert_initialized();
     unsafe {
-        assert!(nss::NSS_IsInitialized() != 0);
+        assert_ne!(nss::NSS_IsInitialized(), 0);
     }
+}
+
+#[cfg(not(nss_nodb))]
+#[test]
+fn init_twice_withdb() {
+    use std::{ffi::CString, path::PathBuf};
+
+    let empty = CString::new("").unwrap();
+    let path: PathBuf = ::test_fixture::NSS_DB_PATH.into();
+    assert!(path.is_dir());
+    let pathstr = path.to_str().unwrap();
+    let dircstr = CString::new(pathstr).unwrap();
+    unsafe {
+        nss::NSS_Initialize(
+            dircstr.as_ptr(),
+            empty.as_ptr(),
+            empty.as_ptr(),
+            nss::SECMOD_DB.as_ptr().cast(),
+            nss::NSS_INIT_READONLY,
+        );
+        assert_ne!(nss::NSS_IsInitialized(), 0);
+    }
+    // Now do it again
+    init_withdb();
 }
