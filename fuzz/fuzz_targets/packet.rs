@@ -1,4 +1,6 @@
 #![no_main]
+#![cfg(not(target_os = "windows"))]
+
 use std::sync::Once;
 
 use libfuzzer_sys::fuzz_target;
