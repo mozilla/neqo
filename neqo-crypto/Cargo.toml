@@ -21,6 +21,7 @@ neqo-common = { path = "../neqo-common" }
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
 mozbuild = { version = "0.1", default-features = false, optional = true }
+semver = { version = "1.0", default-features = false }
 serde = { version = "1.0", default-features = false }
 serde_derive = { version = "1.0", default-features = false }
 toml = { version = "0.5", default-features = false }
