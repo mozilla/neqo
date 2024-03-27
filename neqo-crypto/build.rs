@@ -95,46 +95,6 @@ fn setup_clang() {
     }
 }
 
-fn nss_dir() -> PathBuf {
-    let dir = if let Ok(dir) = env::var("NSS_DIR") {
-        let path = PathBuf::from(dir.trim());
-        assert!(
-            !path.is_relative(),
-            "The NSS_DIR environment variable is expected to be an absolute path."
-        );
-        path
-    } else {
-        let out_dir = env::var("OUT_DIR").unwrap();
-        let dir = Path::new(&out_dir).join("nss");
-        if !dir.exists() {
-            Command::new("hg")
-                .args([
-                    "clone",
-                    "https://hg.mozilla.org/projects/nss",
-                    dir.to_str().unwrap(),
-                ])
-                .status()
-                .expect("can't clone nss");
-        }
-        let nspr_dir = Path::new(&out_dir).join("nspr");
-        if !nspr_dir.exists() {
-            Command::new("hg")
-                .args([
-                    "clone",
-                    "https://hg.mozilla.org/projects/nspr",
-                    nspr_dir.to_str().unwrap(),
-                ])
-                .status()
-                .expect("can't clone nspr");
-        }
-        dir
-    };
-    assert!(dir.is_dir(), "NSS_DIR {dir:?} doesn't exist");
-    // Note that this returns a relative path because UNC
-    // paths on windows cause certain tools to explode.
-    dir
-}
-
 fn get_bash() -> PathBuf {
     // If BASH is set, use that.
     if let Ok(bash) = env::var("BASH") {
@@ -347,11 +307,16 @@ fn pkg_config() -> Vec<String> {
     flags
 }
 
-fn setup_standalone(_nss: &str) -> Vec<String> {
+fn setup_standalone(nss: &str) -> Vec<String> {
     setup_clang();
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
-    let nss = nss_dir();
+    let nss = PathBuf::from(nss);
+    assert!(
+        !nss.is_relative(),
+        "The NSS_DIR environment variable is expected to be an absolute path."
+    );
+
     build_nss(nss.clone());
 
     // $NSS_DIR/../dist/
@@ -459,7 +424,7 @@ fn main() {
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else if let Ok(nss_dir) = env::var("NSS_DIR") {
-        setup_standalone(&nss_dir)
+        setup_standalone(nss_dir.trim())
     } else {
         pkg_config()
     };
