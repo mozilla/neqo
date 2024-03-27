@@ -1,13 +1,17 @@
-#![no_main]
-use std::sync::Once;
+#![cfg_attr(not(windows), no_main)]
 
+#[cfg(not(windows))]
 use libfuzzer_sys::fuzz_target;
-use neqo_transport::{packet::PublicPacket, RandomConnectionIdGenerator};
 
-static INIT: Once = Once::new();
-static mut DECODER: Option<neqo_transport::RandomConnectionIdGenerator> = None;
-
+#[cfg(not(windows))]
 fuzz_target!(|data: &[u8]| {
+    use std::sync::Once;
+
+    use neqo_transport::{packet::PublicPacket, RandomConnectionIdGenerator};
+
+    static INIT: Once = Once::new();
+    static mut DECODER: Option<neqo_transport::RandomConnectionIdGenerator> = None;
+
     // Initialize things
     unsafe {
         INIT.call_once(|| {
@@ -20,3 +24,6 @@ fuzz_target!(|data: &[u8]| {
     // Run the fuzzer
     let _ = PublicPacket::decode(data, decoder);
 });
+
+#[cfg(windows)]
+fn main() {}

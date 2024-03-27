@@ -22,16 +22,12 @@ libfuzzer-sys = { version = "0.4" }
 [lints]
 workspace = true
 
-[features]
-fuzzing = []
-
 [[bin]]
 name = "packet"
 path = "fuzz_targets/packet.rs"
 test = false
 doc = false
 bench = false
-required-features = ["fuzzing"]
 
 [[bin]]
 name = "frame"
@@ -39,4 +35,3 @@ path = "fuzz_targets/frame.rs"
 test = false
 doc = false
 bench = false
-required-features = ["fuzzing"]
