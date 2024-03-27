@@ -23,7 +23,7 @@ mod nss {
 #[cfg(nss_nodb)]
 #[test]
 fn init_nodb() {
-    init();
+    neqo_crypto::init().unwrap();
     assert_initialized();
     unsafe {
         assert_ne!(nss::NSS_IsInitialized(), 0);
@@ -34,7 +34,7 @@ fn init_nodb() {
 #[test]
 fn init_twice_nodb() {
     unsafe {
-        nss::NSS_NoDB_Init(null());
+        nss::NSS_NoDB_Init(std::ptr::null());
         assert_ne!(nss::NSS_IsInitialized(), 0);
     }
     // Now do it again
