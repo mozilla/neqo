@@ -452,7 +452,7 @@ async fn main() -> Res<()> {
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
     args.update_for_tests();
 
-    init().map_err(|_| ClientError::InternalError)?;
+    init()?;
 
     let urls_by_origin = args
         .urls
