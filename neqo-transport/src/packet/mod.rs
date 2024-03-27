@@ -256,6 +256,10 @@ impl PacketBuilder {
     /// Maybe pad with "PADDING" frames.
     /// Only does so if padding was needed and this is a short packet.
     /// Returns true if padding was added.
+    ///
+    /// # Panics
+    ///
+    /// Cannot happen.
     pub fn pad(&mut self) -> bool {
         if self.padding && !self.is_long() {
             self.encoder
@@ -290,6 +294,10 @@ impl PacketBuilder {
     /// The length is filled in after calling `build`.
     /// Does nothing if there isn't 4 bytes available other than render this builder
     /// unusable; if `remaining()` returns 0 at any point, call `abort()`.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the packet number length is too large.
     pub fn pn(&mut self, pn: PacketNumber, pn_len: usize) {
         if self.remaining() < 4 {
             self.limit = 0;
@@ -354,6 +362,10 @@ impl PacketBuilder {
     }
 
     /// Build the packet and return the encoder.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if the packet is too large.
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
@@ -378,7 +390,9 @@ impl PacketBuilder {
 
         // Calculate the mask.
         let offset = SAMPLE_OFFSET - self.offsets.pn.len();
-        assert!(offset + SAMPLE_SIZE <= ciphertext.len());
+        if offset + SAMPLE_SIZE > ciphertext.len() {
+            return Err(Error::InternalError);
+        }
         let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
         let mask = crypto.compute_mask(sample)?;
 
@@ -412,6 +426,10 @@ impl PacketBuilder {
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
     /// this returns a [`Vec<u8>`] rather than building on an encoder.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if AEAD encrypt fails.
     #[allow(clippy::similar_names)] // scid and dcid are fine here.
     pub fn retry(
         version: Version,
@@ -445,6 +463,7 @@ impl PacketBuilder {
 
     /// Make a Version Negotiation packet.
     #[allow(clippy::similar_names)] // scid and dcid are fine here.
+    #[must_use]
     pub fn version_negotiation(
         dcid: &[u8],
         scid: &[u8],
@@ -556,6 +575,10 @@ impl<'a> PublicPacket<'a> {
 
     /// Decode the common parts of a packet.  This provides minimal parsing and validation.
     /// Returns a tuple of a `PublicPacket` and a slice with any remainder from the datagram.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if the packet could not be decoded.
     #[allow(clippy::similar_names)] // For dcid and scid, which are fine.
     pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
         let mut decoder = Decoder::new(data);
@@ -587,7 +610,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Generic long header.
-        let version = WireVersion::try_from(Self::opt(decoder.decode_uint(4))?).unwrap();
+        let version = WireVersion::try_from(Self::opt(decoder.decode_uint(4))?)?;
         let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
         let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
 
@@ -647,11 +670,14 @@ impl<'a> PublicPacket<'a> {
     }
 
     /// Validate the given packet as though it were a retry.
+    #[must_use]
     pub fn is_valid_retry(&self, odcid: &ConnectionId) -> bool {
         if self.packet_type != PacketType::Retry {
             return false;
         }
-        let version = self.version().unwrap();
+        let Some(version) = self.version() else {
+            return false;
+        };
         let expansion = retry::expansion(version);
         if self.data.len() <= expansion {
             return false;
@@ -667,6 +693,7 @@ impl<'a> PublicPacket<'a> {
         .unwrap_or(false)
     }
 
+    #[must_use]
     pub fn is_valid_initial(&self) -> bool {
         // Packet has to be an initial, with a DCID of 8 bytes, or a token.
         // Note: the Server class validates the token and checks the length.
@@ -674,32 +701,42 @@ impl<'a> PublicPacket<'a> {
             && (self.dcid().len() >= 8 || !self.token.is_empty())
     }
 
+    #[must_use]
     pub fn packet_type(&self) -> PacketType {
         self.packet_type
     }
 
+    #[must_use]
     pub fn dcid(&self) -> ConnectionIdRef<'a> {
         self.dcid
     }
 
+    /// # Panics
+    ///
+    /// This will panic if called for a short header packet.
+    #[must_use]
     pub fn scid(&self) -> ConnectionIdRef<'a> {
         self.scid
             .expect("should only be called for long header packets")
     }
 
+    #[must_use]
     pub fn token(&self) -> &'a [u8] {
         self.token
     }
 
+    #[must_use]
     pub fn version(&self) -> Option<Version> {
         self.version.and_then(|v| Version::try_from(v).ok())
     }
 
+    #[must_use]
     pub fn wire_version(&self) -> WireVersion {
         debug_assert!(self.version.is_some());
         self.version.unwrap_or(0)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()
     }
@@ -778,6 +815,9 @@ impl<'a> PublicPacket<'a> {
         ))
     }
 
+    /// # Errors
+    ///
+    /// This will return an error if the packet cannot be decrypted.
     pub fn decrypt(&self, crypto: &mut CryptoStates, release_at: Instant) -> Res<DecryptedPacket> {
         let cspace: CryptoSpace = self.packet_type.into();
         // When we don't have a version, the crypto code doesn't need a version
@@ -792,7 +832,10 @@ impl<'a> PublicPacket<'a> {
             // too small (which is public information).
             let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
             qtrace!([rx], "decoded header: {:?}", header);
-            let rx = crypto.rx(version, cspace, key_phase).unwrap();
+            let Some(rx) = crypto.rx(version, cspace, key_phase) else {
+                return Err(Error::DecryptError);
+            };
+            // let rx = crypto.rx(version, cspace, key_phase).unwrap();
             let version = rx.version(); // Version fixup; see above.
             let d = rx.decrypt(pn, &header, body)?;
             // If this is the first packet ever successfully decrypted
@@ -815,8 +858,14 @@ impl<'a> PublicPacket<'a> {
         }
     }
 
+    /// # Errors
+    ///
+    /// This will return an error if the packet is not a version negotiation packet
+    /// or if the versions cannot be decoded.
     pub fn supported_versions(&self) -> Res<Vec<WireVersion>> {
-        assert_eq!(self.packet_type, PacketType::VersionNegotiation);
+        if self.packet_type != PacketType::VersionNegotiation {
+            return Err(Error::InvalidPacket);
+        }
         let mut decoder = Decoder::new(&self.data[self.header_len..]);
         let mut res = Vec::new();
         while decoder.remaining() > 0 {
@@ -847,14 +896,17 @@ pub struct DecryptedPacket {
 }
 
 impl DecryptedPacket {
+    #[must_use]
     pub fn version(&self) -> Version {
         self.version
     }
 
+    #[must_use]
     pub fn packet_type(&self) -> PacketType {
         self.pt
     }
 
+    #[must_use]
     pub fn pn(&self) -> PacketNumber {
         self.pn
     }
