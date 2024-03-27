@@ -12,7 +12,7 @@ env:
   RUST_BACKTRACE: 1
   TOOLCHAIN: nightly
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
-  PERF_CMD: record -o perf.data -F997 --call-graph fp -g
+  PERF_OPT: record -F997 --call-graph fp -g
 
 jobs:
   bench:
@@ -23,8 +23,16 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout
+      - name: Checkout neqo
         uses: actions/checkout@v4
+
+      - name: Checkout msquic
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/msquic
+          ref: main
+          path: msquic
+          submodules: true
 
       - name: Set PATH
         run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
@@ -38,10 +46,17 @@ jobs:
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss
 
-      - name: Build
+      - name: Build neqo
         run: |
           cargo "+$TOOLCHAIN" bench --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
+          cargo "+$TOOLCHAIN" build --release
+
+      - name: Build msquic
+        run: |
+          mkdir -p msquic/build
+          cd msquic/build
+          cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
+          cmake --build .
 
       - name: Download cached main-branch results
         id: criterion-cache
@@ -61,55 +76,106 @@ jobs:
           taskset -c 0 nice -n -20 \
             cargo "+$TOOLCHAIN" bench --features bench -- --noplot | tee results.txt
 
-      # Pin the transfer benchmark to core 0 and run it at elevated priority inside perf.
-      # Work around https://github.com/flamegraph-rs/flamegraph/issues/248 by passing explicit perf arguments.
-      - name: Profile cargo bench transfer
-        run: |
-          taskset -c 0 nice -n -20 \
-            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" --features bench --bench transfer -- \
-              --bench --exact "Run multiple transfers with varying seeds" --noplot
-
-      - name: Profile client/server transfer
-        run: |
-          { mkdir server; \
-            cd server; \
-            taskset -c 0 nice -n -20 \
-            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-server -- --db ../test-fixture/db "$HOST:4433" || true; } &
-          mkdir client; \
-            cd client; \
-            time taskset -c 1 nice -n -20 \
-            cargo "+$TOOLCHAIN" flamegraph -v -c "$PERF_CMD" \
-              --bin neqo-client -- --output-dir . "https://$HOST:4433/$SIZE"
-          killall -INT neqo-server
-          cd ${{ github.workspace }}
-          [ "$(wc -c < client/"$SIZE")" -eq "$SIZE" ] || exit 1
+      # Compare various configurations of neqo against msquic, and gather perf data
+      # during the hyperfine runs.
+      - name: Compare neqo and msquic
         env:
-          HOST: localhost
-          SIZE: 1073741824 # 1 GB
+          HOST: 127.0.0.1
+          PORT: 4433
+          SIZE: 134217728 # 128 MB
+        run: |
+          TMP=$(mktemp -d)
+          # Make a cert and key for msquic.
+          openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
+          # Make a test file for msquic to serve.
+          truncate -s "$SIZE" "$TMP/$SIZE"
+          # Define the commands to run for each client and server.
+          declare -A client_cmd=(
+            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
+            ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+          )
+          declare -A server_cmd=(
+            ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT 2> /dev/null"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit > /dev/null || true"
+          )
+
+          # Replace various placeholders in the commands with the actual values.
+          # Also generate an extension to append to the file name.
+          function transmogrify {
+            CMD=$1
+            local cc=$2
+            local pacing=$3
+            if [ "$cc" != "" ]; then
+              CMD=${CMD//_cc/--cc $cc}
+              EXT="-$cc"
+            fi
+            if [ "$pacing" == "on" ]; then
+              CMD=${CMD//_pacing/}
+              EXT="$EXT-pacing"
+            else
+              CMD=${CMD//_pacing/--no-pacing}
+              EXT="$EXT-nopacing"
+            fi
+          }
+
+          for server in msquic neqo; do
+            for client in msquic neqo; do
+              # msquic doesn't let us configure the congestion control or pacing.
+              if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
+                cc_opt=("")
+                pacing_opt=("")
+              else
+                cc_opt=("reno" "cubic")
+                pacing_opt=("on" "")
+              fi
+              for cc in "${cc_opt[@]}"; do
+                for pacing in "${pacing_opt[@]}"; do
+                  # Make a tag string for this test, for the results.
+                  TAG="$client,$server,$cc,$pacing"
+                  echo "Running benchmarks for $TAG" | tee -a comparison.txt
+                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
+                  # shellcheck disable=SC2086
+                  taskset -c 0 nice -n -20 \
+                    perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
+                  PID=$!
+                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
+                  # shellcheck disable=SC2086
+                  taskset -c 1 nice -n -20 \
+                    perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
+                      hyperfine -N --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      tee -a comparison.txt
+                  echo >> comparison.txt
+                  kill $PID
+                  cat step.md >> steps.md
+                  # Sanity check the size of the last retrieved file.
+                  [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+                done
+              done
+            done
+          done
+          # Merge the results tables generated by hyperfine into a single table.
+          echo "Transfer of $SIZE bytes over loopback." > comparison.md
+          awk '(!/^\| Command/ || !c++) && (!/^\|:/ || !d++)' < steps.md |\
+            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing/g' >> comparison.md
+          rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
         run: sudo /root/bin/unprep.sh
         if: success() || failure() || cancelled()
 
-      - name: Convert for profiler.firefox.com
+      - name: Post-process perf data
         run: |
-          perf script -i perf.data -F +pid > transfer.perf &
-          perf script -i client/perf.data -F +pid > client.perf &
-          perf script -i server/perf.data -F +pid > server.perf &
+          for f in *.perf; do
+            # Convert for profiler.firefox.com
+            perf script -i "$f" -F +pid > "$f.fx" &
+            # Generate perf reports
+            perf report -i "$f" --no-children --stdio > "$f.txt" &
+            # Generate flamegraphs
+            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}" &
+          done
           wait
-          mv flamegraph.svg transfer.svg
-          mv client/flamegraph.svg client.svg
-          mv server/flamegraph.svg server.svg
           rm neqo.svg
-
-      - name: Generate perf reports
-        run: |
-          perf report -i perf.data --no-children --stdio > transfer.perf.txt &
-          perf report -i client/perf.data --no-children --stdio > client.perf.txt &
-          perf report -i server/perf.data --no-children --stdio > server.perf.txt &
-          wait
 
       - name: Format results as Markdown
         id: results
@@ -132,6 +198,11 @@ jobs:
                     -e 's/^([a-z0-9].*)$/* **\1**/gi' \
                     -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
               >> results.md
+          {
+            echo "### Client/server transfer results"
+            cat comparison.md
+          } >> results.md
+          cat results.md > "$GITHUB_STEP_SUMMARY"
 
       - name: Remember main-branch push URL
         if: github.ref == 'refs/heads/main'
@@ -158,6 +229,7 @@ jobs:
           path: |
             *.svg
             *.perf
+            *.perf.fx
             *.txt
             results.*
             target/criterion*
