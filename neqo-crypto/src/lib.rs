@@ -8,8 +8,8 @@
 #![allow(clippy::unseparated_literal_suffix, clippy::used_underscore_binding)] // For bindgen code.
 
 mod aead;
-#[cfg(feature = "fuzzing")]
-mod aead_fuzzing;
+#[cfg(feature = "disable-encryption")]
+pub mod aead_null;
 pub mod agent;
 mod agentio;
 mod auth;
@@ -33,12 +33,12 @@ mod time;
 
 use std::{ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "disable-encryption"))]
 pub use self::aead::RealAead as Aead;
-#[cfg(feature = "fuzzing")]
+#[cfg(feature = "disable-encryption")]
 pub use self::aead::RealAead;
-#[cfg(feature = "fuzzing")]
-pub use self::aead_fuzzing::FuzzingAead as Aead;
+#[cfg(feature = "disable-encryption")]
+pub use self::aead_null::AeadNull as Aead;
 pub use self::{
     agent::{
         Agent, AllowZeroRtt, Client, HandshakeState, Record, RecordList, ResumptionToken,
@@ -59,7 +59,8 @@ pub use self::{
     ssl::Opt,
 };
 
-const MINIMUM_NSS_VERSION: &str = "3.97";
+mod min_version;
+use min_version::MINIMUM_NSS_VERSION;
 
 #[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
 #[allow(clippy::upper_case_acronyms)]
