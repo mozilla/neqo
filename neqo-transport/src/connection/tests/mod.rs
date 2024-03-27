@@ -620,14 +620,6 @@ fn send_something(sender: &mut Connection, now: Instant) -> Datagram {
     send_something_with_modifier(sender, now, Some)
 }
 
-fn send_something_with_modifier(
-    sender: &mut Connection,
-    now: Instant,
-    modifier: impl FnMut(&mut Datagram),
-) -> Datagram {
-    send_something_paced_with_modifier(sender, now, false, modifier).0
-}
-
 /// Send something on a stream from `sender` to `receiver`.
 /// Return any ACK that might result.
 fn send_and_receive(

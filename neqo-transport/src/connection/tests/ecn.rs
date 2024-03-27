@@ -9,7 +9,7 @@
 use neqo_common::{qwarn, Datagram, IpTosEcn};
 use test_fixture::now;
 
-use super::{connect_force_idle_with_modifier, send_something_with_modifier};
+use super::{connect_force_idle_with_modifier, send_something_with_modifier, DatagramModifier};
 use crate::{
     connection::tests::{connect_force_idle, default_client, default_server, send_something},
     ecn::ECN_TEST_COUNT,
@@ -23,7 +23,7 @@ fn assert_ecn_disabled(d: &Datagram) {
     assert_eq!(IpTosEcn::from(d.tos()), IpTosEcn::default());
 }
 
-fn connect_and_send_something_with_modifier(mut modifier: impl FnMut(&mut Datagram)) -> Datagram {
+fn connect_and_send_something_with_modifier(mut modifier: impl DatagramModifier) -> Datagram {
     let now = now();
     let mut client = default_client();
     let mut server = default_server();
@@ -47,26 +47,27 @@ fn connect_and_send_something_with_modifier(mut modifier: impl FnMut(&mut Datagr
     send_something(&mut client, now)
 }
 
-fn set_tos(d: &mut Datagram, ecn: IpTosEcn) {
+fn set_tos(mut d: Datagram, ecn: IpTosEcn) -> neqo_common::Datagram {
     qwarn!("Setting ECN to {:?}", ecn);
     d.set_tos(ecn.into());
+    d
 }
 
 #[test]
 fn disables_when_bleached() {
-    let pkt = connect_and_send_something_with_modifier(|d| set_tos(d, IpTosEcn::default()));
+    let pkt = connect_and_send_something_with_modifier(|d| Some(set_tos(d, IpTosEcn::default())));
     assert_ecn_disabled(&pkt);
 }
 
 #[test]
 fn disables_when_remarked() {
-    let pkt = connect_and_send_something_with_modifier(|d| set_tos(d, IpTosEcn::Ect1));
+    let pkt = connect_and_send_something_with_modifier(|d| Some(set_tos(d, IpTosEcn::Ect1)));
     assert_ecn_disabled(&pkt);
 }
 
 #[test]
 fn stay_enabled_under_ce() {
-    let pkt = connect_and_send_something_with_modifier(|d| set_tos(d, IpTosEcn::Ce));
+    let pkt = connect_and_send_something_with_modifier(|d| Some(set_tos(d, IpTosEcn::Ce)));
     assert_ecn_enabled(&pkt);
 }
 
