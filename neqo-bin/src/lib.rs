@@ -4,6 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
+
 use std::{
     fmt::{self, Display},
     net::{SocketAddr, ToSocketAddrs},
@@ -17,7 +20,9 @@ use neqo_transport::{
     Version,
 };
 
-pub mod udp;
+pub mod client;
+pub mod server;
+mod udp;
 
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
@@ -55,6 +60,23 @@ pub struct SharedArgs {
 
     #[command(flatten)]
     pub quic_parameters: QuicParameters,
+}
+
+#[cfg(feature = "bench")]
+impl Default for SharedArgs {
+    fn default() -> Self {
+        Self {
+            alpn: "h3".into(),
+            qlog_dir: None,
+            max_table_size_encoder: 16384,
+            max_table_size_decoder: 16384,
+            max_blocked_streams: 10,
+            ciphers: vec![],
+            qns_test: None,
+            use_old_http: false,
+            quic_parameters: QuicParameters::default(),
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -100,6 +122,22 @@ pub struct QuicParameters {
     #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
     pub preferred_address_v6: Option<String>,
+}
+
+#[cfg(feature = "bench")]
+impl Default for QuicParameters {
+    fn default() -> Self {
+        Self {
+            quic_version: vec![],
+            max_streams_bidi: 16,
+            max_streams_uni: 16,
+            idle_timeout: 30,
+            congestion_control: CongestionControlAlgorithm::NewReno,
+            no_pacing: false,
+            preferred_address_v4: None,
+            preferred_address_v6: None,
+        }
+    }
 }
 
 impl QuicParameters {

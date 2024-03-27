@@ -96,6 +96,12 @@ impl From<ConnectionError> for CloseError {
     }
 }
 
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(_err: std::array::TryFromSliceError) -> Self {
+        Self::FrameEncodingError
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Default, Clone)]
 pub struct AckRange {
     pub(crate) gap: u64,
@@ -215,6 +221,7 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[must_use]
     pub fn get_type(&self) -> FrameType {
         match self {
             Self::Padding { .. } => FRAME_TYPE_PADDING,
@@ -256,6 +263,7 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[must_use]
     pub fn is_stream(&self) -> bool {
         matches!(
             self,
@@ -271,6 +279,7 @@ impl<'a> Frame<'a> {
         )
     }
 
+    #[must_use]
     pub fn stream_type(fin: bool, nonzero_offset: bool, fill: bool) -> u64 {
         let mut t = FRAME_TYPE_STREAM;
         if fin {
@@ -287,6 +296,7 @@ impl<'a> Frame<'a> {
 
     /// If the frame causes a recipient to generate an ACK within its
     /// advertised maximum acknowledgement delay.
+    #[must_use]
     pub fn ack_eliciting(&self) -> bool {
         !matches!(
             self,
@@ -296,6 +306,7 @@ impl<'a> Frame<'a> {
 
     /// If the frame can be sent in a path probe
     /// without initiating migration to that path.
+    #[must_use]
     pub fn path_probing(&self) -> bool {
         matches!(
             self,
@@ -309,6 +320,10 @@ impl<'a> Frame<'a> {
     /// Converts `AckRanges` as encoded in a ACK frame (see -transport
     /// 19.3.1) into ranges of acked packets (end, start), inclusive of
     /// start and end values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ranges are invalid.
     pub fn decode_ack_frame(
         largest_acked: u64,
         first_ack_range: u64,
@@ -349,6 +364,7 @@ impl<'a> Frame<'a> {
         Ok(acked_ranges)
     }
 
+    #[must_use]
     pub fn dump(&self) -> String {
         match self {
             Self::Crypto { offset, data } => {
@@ -374,6 +390,7 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[must_use]
     pub fn is_allowed(&self, pt: PacketType) -> bool {
         match self {
             Self::Padding { .. } | Self::Ping => true,
@@ -388,6 +405,9 @@ impl<'a> Frame<'a> {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the frame cannot be decoded.
     #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
         /// Maximum ACK Range Count in ACK Frame
@@ -474,7 +494,7 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_CRYPTO => {
                 let offset = dv(dec)?;
                 let data = d(dec.decode_vvec())?;
-                if offset + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                if offset + u64::try_from(data.len())? > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
                 Ok(Self::Crypto { offset, data })
@@ -501,7 +521,7 @@ impl<'a> Frame<'a> {
                     qtrace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
-                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                if o + u64::try_from(data.len())? > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
                 Ok(Self::Stream {
@@ -550,7 +570,7 @@ impl<'a> Frame<'a> {
                     return Err(Error::DecodingFrame);
                 }
                 let srt = d(dec.decode(16))?;
-                let stateless_reset_token = <&[_; 16]>::try_from(srt).unwrap();
+                let stateless_reset_token = <&[_; 16]>::try_from(srt)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,
