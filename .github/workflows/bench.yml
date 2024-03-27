@@ -72,9 +72,11 @@ jobs:
 
       - name: Run cargo bench
         run: |
+          # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run
+          # both a client and a server, thus benefiting from multiple CPU cores.
+          #
           # Run all benchmarks at elevated priority.
-          # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run both a client and a server, thus benefiting from multiple CPU core.
-          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
           taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
 
