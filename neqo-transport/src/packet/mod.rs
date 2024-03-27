@@ -835,7 +835,6 @@ impl<'a> PublicPacket<'a> {
             let Some(rx) = crypto.rx(version, cspace, key_phase) else {
                 return Err(Error::DecryptError);
             };
-            // let rx = crypto.rx(version, cspace, key_phase).unwrap();
             let version = rx.version(); // Version fixup; see above.
             let d = rx.decrypt(pn, &header, body)?;
             // If this is the first packet ever successfully decrypted
