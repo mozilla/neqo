@@ -17,8 +17,14 @@ mod connection;
 mod crypto;
 mod events;
 mod fc;
+#[cfg(feature = "fuzzing")]
+pub mod frame;
+#[cfg(not(feature = "fuzzing"))]
 mod frame;
 mod pace;
+#[cfg(feature = "fuzzing")]
+pub mod packet;
+#[cfg(not(feature = "fuzzing"))]
 mod packet;
 mod path;
 mod qlog;

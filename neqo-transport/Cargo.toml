@@ -28,6 +28,7 @@ test-fixture = { path = "../test-fixture" }
 [features]
 bench = []
 disable-encryption = ["neqo-crypto/disable-encryption"]
+fuzzing = []
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
