@@ -31,7 +31,7 @@ pub mod selfencrypt;
 mod ssl;
 mod time;
 
-use std::{clone::Clone, ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
+use std::{ffi::CString, path::PathBuf, ptr::null, sync::OnceLock};
 
 #[cfg(not(feature = "disable-encryption"))]
 pub use self::aead::RealAead as Aead;
