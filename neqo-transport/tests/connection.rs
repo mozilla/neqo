@@ -127,6 +127,56 @@ fn reorder_server_initial() {
     assert_eq!(*client.state(), State::Confirmed);
 }
 
+/// Test that the stack treats a packet without any frames as a protocol violation.
+#[test]
+fn packet_without_frames() {
+    let mut client = new_client(
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+    );
+    let mut server = default_server();
+
+    let client_initial = client.process_output(now());
+    let (_, client_dcid, _, _) =
+        decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client);
+    let client_dcid = client_dcid.to_owned();
+
+    let server_packet = server.process(client_initial.as_dgram_ref(), now()).dgram();
+    let (server_initial, _server_hs) = split_datagram(server_packet.as_ref().unwrap());
+    let (protected_header, _, _, payload) = decode_initial_header(&server_initial, Role::Server);
+
+    // Now decrypt the packet.
+    let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
+    let (mut header, pn) = remove_header_protection(&hp, protected_header, payload);
+    assert_eq!(pn, 0);
+    // Re-encode the packet number as a four-byte varint, so we have enough material for the header
+    // protection sample.
+    let hl = header.len();
+    header[hl - 2] = u8::try_from(4 + aead.expansion()).unwrap();
+    header.resize(header.len() + 3, 0);
+    let hl = header.len();
+    header[hl - 4..].copy_from_slice(&[0; 4]);
+    header[0] |= 0b0000_0011; // Set the packet number length to 4.
+
+    // And build an empty packet.
+    let mut packet = header.clone();
+    packet.resize(header.len() + aead.expansion(), 0);
+    aead.encrypt(pn, &header, &[], &mut packet[header.len()..])
+        .unwrap();
+    apply_header_protection(&hp, &mut packet, protected_header.len()..header.len());
+    let empty = Datagram::new(
+        server_initial.source(),
+        server_initial.destination(),
+        server_initial.tos(),
+        server_initial.ttl(),
+        packet,
+    );
+    client.process_input(&empty, now());
+    assert!(matches!(
+        client.state(),
+        State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+    ));
+}
+
 /// Overflow the crypto buffer.
 #[allow(clippy::similar_names)] // For ..._scid and ..._dcid, which are fine.
 #[test]
