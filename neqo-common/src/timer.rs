@@ -202,15 +202,9 @@ impl<T> Timer<T> {
             }
         }
 
-        let idx = self.bucket(0);
-        for i in idx..self.items.len() {
-            let res = maybe_take(&mut self.items[i], until);
-            if res.is_some() {
-                return res;
-            }
-        }
-        for i in 0..idx {
-            let res = maybe_take(&mut self.items[i], until);
+        for i in self.cursor..(self.cursor + self.delta(until)) {
+            let i = i % self.items.len();
+            let res = maybe_take(&mut self.items[i], until)?;
             if res.is_some() {
                 return res;
             }
