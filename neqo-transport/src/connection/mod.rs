@@ -1560,14 +1560,20 @@ impl Connection {
         let mut ack_eliciting = false;
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
+        let mut decoded_frames = false;
         while d.remaining() > 0 {
             let f = Frame::decode(&mut d)?;
+            decoded_frames = true;
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
             if let Err(e) = self.input_frame(path, packet.version(), packet.packet_type(), f, now) {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
             }
+        }
+        if !decoded_frames {
+            qerror!([self], "Received packet with no frames");
+            return Err(Error::ProtocolViolation);
         }
 
         let largest_received = if let Some(space) = self
