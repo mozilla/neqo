@@ -284,7 +284,7 @@ handle parsing and sending of HTTP part of the control stream. When HTTP headers
 `WebTransportSessionListener` as the `RecvMessage` event listener.
 
 `WebTransportSendStream` and `WebTransportRecvStream` are associated with a `WebTransportSession`
-and they will be canceled if the session is closed. To be avle to do this `WebTransportSession`
+and they will be canceled if the session is closed. To be able to do this `WebTransportSession`
 holds a list of its active streams and clean up is done in `remove_extended_connect`.
 
 ###  `WebTransportSendStream` and `WebTransportRecvStream`
@@ -1286,6 +1286,8 @@ impl Http3Connection {
         // This really can't fail, panics if it does
         conn.stream_fairness(stream_id, true).unwrap();
 
+        conn.stream_keep_alive(session_id, true).unwrap();
+
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
@@ -1303,6 +1305,7 @@ impl Http3Connection {
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
+        conn: &mut Connection,
     ) -> Res<()> {
         qtrace!(
             "Create new WebTransport stream session={} stream_id={}",
@@ -1316,6 +1319,8 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)?
             .webtransport()
             .ok_or(Error::InvalidStreamId)?;
+
+        conn.stream_keep_alive(session_id, true).unwrap();
 
         self.webtransport_create_stream_internal(
             wt,
@@ -1337,7 +1342,6 @@ impl Http3Connection {
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
     ) {
-        // TODO conn.stream_keep_alive(stream_id, true)?;
         webtransport_session.borrow_mut().add_stream(stream_id);
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
