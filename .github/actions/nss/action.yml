@@ -34,9 +34,9 @@ runs:
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        REQ_NSS_MAJOR=$(cat neqo-crypto/min_version.txt | cut -d. -f1)
-        REQ_NSS_MINOR=$(cat neqo-crypto/min_version.txt | cut -d. -f2)
-        if [ "$NSS_MAJOR" -lt "REQ_NSS_MAJOR" ] || [ "$NSS_MAJOR" -eq "REQ_NSS_MAJOR" -a "$NSS_MINOR" -lt "REQ_NSS_MINOR"]; then
+        REQ_NSS_MAJOR=$(cut -d. -f1 < neqo-crypto/min_version.txt)
+        REQ_NSS_MINOR=$(cut -d. -f2 < neqo-crypto/min_version.txt)
+        if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
           echo "System NSS is too old: $NSS_VERSION"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
