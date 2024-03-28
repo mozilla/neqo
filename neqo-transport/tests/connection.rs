@@ -148,7 +148,7 @@ fn packet_without_frames() {
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
     let (mut header, pn) = remove_header_protection(&hp, protected_header, payload);
     assert_eq!(pn, 0);
-    // Re-encode the packet number as a four-byte varint, so we have enough material for the header
+    // Re-encode the packet number as four bytes, so we have enough material for the header
     // protection sample.
     let hl = header.len();
     header[hl - 2] = u8::try_from(4 + aead.expansion()).unwrap();
