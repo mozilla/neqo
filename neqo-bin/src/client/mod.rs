@@ -49,7 +49,7 @@ pub enum Error {
     CryptoError(neqo_crypto::Error),
 }
 
-impl From<neqo_crypto::Error> for ClientError {
+impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
         Self::CryptoError(err)
     }
@@ -485,7 +485,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
 
 pub async fn client(mut args: Args) -> Res<()> {
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
-    init();
+    init()?;
 
     args.update_for_tests();
 
