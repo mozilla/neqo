@@ -45,7 +45,7 @@ pub enum ClientError {
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
-    InternalError(neqo_crypto::Error),
+    CryptoError(neqo_crypto::Error),
 }
 
 impl From<neqo_crypto::Error> for ClientError {
