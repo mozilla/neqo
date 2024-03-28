@@ -25,8 +25,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use super::{get_output_file, Args, KeyUpdateState, Res};
-use crate::qlog_new;
+use super::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
