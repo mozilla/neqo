@@ -22,6 +22,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
+    ecn::{EcnCount, EcnInfo},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
     recovery::RecoveryToken,
@@ -41,7 +42,7 @@ pub const PATH_MTU_V6: usize = 1337;
 /// The path MTU for IPv4 can be 20 bytes larger than for v6.
 pub const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 /// The number of times that a path will be probed before it is considered failed.
-const MAX_PATH_PROBES: usize = 3;
+pub const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
@@ -532,8 +533,6 @@ pub struct Path {
     rtt: RttEstimate,
     /// A packet sender for the path, which includes congestion control and a pacer.
     sender: PacketSender,
-    /// The DSCP/ECN marking to use for outgoing packets on this path.
-    tos: IpTos,
     /// The IP TTL to use for outgoing packets on this path.
     ttl: u8,
 
@@ -543,6 +542,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
+    /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
+    ecn_info: EcnInfo,
 
     /// For logging of events.
     qlog: NeqoQlog,
@@ -572,12 +573,17 @@ impl Path {
             challenge: None,
             rtt: RttEstimate::default(),
             sender,
-            tos: IpTos::default(), // TODO: Default to Ect0 when ECN is supported.
-            ttl: 64,               // This is the default TTL on many OSes.
+            ttl: 64, // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
+            ecn_info: EcnInfo::default(),
             qlog,
         }
+    }
+
+    /// Return the DSCP/ECN marking to use for outgoing packets on this path.
+    pub fn tos(&self) -> IpTos {
+        self.ecn_info.ecn_mark().into()
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -695,8 +701,9 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
-        Datagram::new(self.local, self.remote, self.tos, Some(self.ttl), payload)
+    pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V) -> Datagram {
+        self.ecn_info.count_packets_out();
+        Datagram::new(self.local, self.remote, self.tos(), Some(self.ttl), payload)
     }
 
     /// Get local address as `SocketAddr`
@@ -959,9 +966,16 @@ impl Path {
     }
 
     /// Record packets as acknowledged with the sender.
-    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant) {
+    pub fn on_packets_acked(
+        &mut self,
+        space: PacketNumberSpace,
+        acked_pkts: &[SentPacket],
+        ecn_count: &EcnCount,
+        now: Instant,
+    ) {
         debug_assert!(self.is_primary());
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
+        self.ecn_info.validate_ack_ecn(space, acked_pkts, ecn_count);
     }
 
     /// Record packets as lost with the sender.

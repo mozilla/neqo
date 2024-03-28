@@ -612,7 +612,7 @@ pub async fn server(mut args: Args) -> Res<()> {
 
         // TODO: More options to deduplicate with client?
         match testcase.as_str() {
-            "http3" => (),
+            "http3" | "ecn" => (),
             "zerortt" => {
                 args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
