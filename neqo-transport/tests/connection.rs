@@ -171,10 +171,10 @@ fn packet_without_frames() {
         packet,
     );
     client.process_input(&empty, now());
-    assert!(matches!(
+    assert_eq!(
         client.state(),
-        State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
-    ));
+        &State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+    );
 }
 
 /// Overflow the crypto buffer.
