@@ -153,8 +153,6 @@ fn packet_without_frames() {
     let hl = header.len();
     header[hl - 2] = u8::try_from(4 + aead.expansion()).unwrap();
     header.resize(header.len() + 3, 0);
-    let hl = header.len();
-    header[hl - 4..].copy_from_slice(&[0; 4]);
     header[0] |= 0b0000_0011; // Set the packet number length to 4.
 
     // And build an empty packet.
