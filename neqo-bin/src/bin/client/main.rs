@@ -50,7 +50,7 @@ pub enum ClientError {
 
 impl From<neqo_crypto::Error> for ClientError {
     fn from(err: neqo_crypto::Error) -> Self {
-        Self::InternalError(err)
+        Self::CryptoError(err)
     }
 }
 
