@@ -16,6 +16,7 @@ use crate::{
         MAX_DATAGRAM_SIZE,
     },
     packet::PacketType,
+    recovery::RecoveryTokenVec,
     rtt::RttEstimate,
     tracking::SentPacket,
 };
@@ -44,59 +45,59 @@ fn issue_876() {
     let sent_packets = &[
         SentPacket::new(
             PacketType::Short,
-            1,                     // pn
-            time_before,           // time sent
-            true,                  // ack eliciting
-            Vec::new(),            // tokens
-            MAX_DATAGRAM_SIZE - 1, // size
+            1,                       // pn
+            time_before,             // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE - 1,   // size
         ),
         SentPacket::new(
             PacketType::Short,
-            2,                     // pn
-            time_before,           // time sent
-            true,                  // ack eliciting
-            Vec::new(),            // tokens
-            MAX_DATAGRAM_SIZE - 2, // size
+            2,                       // pn
+            time_before,             // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE - 2,   // size
         ),
         SentPacket::new(
             PacketType::Short,
-            3,                 // pn
-            time_before,       // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            3,                       // pn
+            time_before,             // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         ),
         SentPacket::new(
             PacketType::Short,
-            4,                 // pn
-            time_before,       // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            4,                       // pn
+            time_before,             // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         ),
         SentPacket::new(
             PacketType::Short,
-            5,                 // pn
-            time_before,       // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            5,                       // pn
+            time_before,             // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         ),
         SentPacket::new(
             PacketType::Short,
-            6,                 // pn
-            time_before,       // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            6,                       // pn
+            time_before,             // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         ),
         SentPacket::new(
             PacketType::Short,
-            7,                     // pn
-            time_after,            // time sent
-            true,                  // ack eliciting
-            Vec::new(),            // tokens
-            MAX_DATAGRAM_SIZE - 3, // size
+            7,                       // pn
+            time_after,              // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE - 3,   // size
         ),
     ];
 
@@ -146,11 +147,11 @@ fn issue_1465() {
     let mut next_packet = |now| {
         let p = SentPacket::new(
             PacketType::Short,
-            pn,                // pn
-            now,               // time_sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            pn,                      // pn
+            now,                     // time_sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         );
         pn += 1;
         p

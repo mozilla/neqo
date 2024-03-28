@@ -19,8 +19,11 @@ use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Error, Res,
+    frame::FRAME_TYPE_NEW_CONNECTION_ID,
+    packet::PacketBuilder,
+    recovery::{RecoveryToken, RecoveryTokenVec},
+    stats::FrameStats,
+    Error, Res,
 };
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
@@ -539,7 +542,7 @@ impl ConnectionIdManager {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {

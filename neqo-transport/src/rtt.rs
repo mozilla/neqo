@@ -17,7 +17,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     packet::PacketBuilder,
     qlog::{self, QlogMetric},
-    recovery::RecoveryToken,
+    recovery::RecoveryTokenVec,
     stats::FrameStats,
     tracking::PacketNumberSpace,
 };
@@ -180,7 +180,7 @@ impl RttEstimate {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
+        tokens: &mut RecoveryTokenVec,
         stats: &mut FrameStats,
     ) {
         self.ack_delay.write_frames(builder, tokens, stats);
