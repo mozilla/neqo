@@ -26,7 +26,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use crate::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
+use super::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
 
 pub(crate) struct Handler<'a> {
     #[allow(
