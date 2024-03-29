@@ -202,8 +202,8 @@ impl<T> Timer<T> {
             }
         }
 
-        for i in self.cursor..(self.cursor + self.delta(until)) {
-            let i = i % self.items.len();
+        let items_len = self.items.len();
+        for i in (self.cursor..=(self.cursor + self.delta(until))).map(|i| i % items_len) {
             let res = maybe_take(&mut self.items[i], until);
             if res.is_some() {
                 return res;
@@ -264,7 +264,7 @@ impl<T> Timer<T> {
 
 #[cfg(test)]
 mod test {
-    use std::sync::OnceLock;
+    use std::{iter, sync::OnceLock};
 
     use super::{Duration, Instant, Timer};
 
@@ -410,5 +410,19 @@ mod test {
         t.add(future, v);
 
         assert_eq!(None, t.remove(too_far_future, |candidate| *candidate == v));
+    }
+
+    #[test]
+    fn take_next() {
+        const TIMES: &[u64] = &[1, 2, 3, 5, 8, 13, 21, 34];
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        for &time in TIMES {
+            t.add(now() + Duration::from_millis(time), time);
+        }
+
+        assert_eq!(
+            TIMES,
+            iter::from_fn(|| t.next_time().and_then(|time| t.take_next(time))).collect::<Vec<_>>()
+        );
     }
 }
