@@ -193,22 +193,27 @@ impl<T> Timer<T> {
 
     /// Take the next item, unless there are no items with
     /// a timeout in the past relative to `until`.
+    ///
+    /// # Panics
+    ///
+    /// Impossible, I think.
     pub fn take_next(&mut self, until: Instant) -> Option<T> {
-        fn maybe_take<T>(v: &mut VecDeque<TimerItem<T>>, until: Instant) -> Option<T> {
-            if !v.is_empty() && v[0].time <= until {
-                Some(v.pop_front().unwrap().item)
-            } else {
-                None
+        let delta = self.delta(until);
+        let range = if self.cursor < delta {
+            #[allow(clippy::range_plus_one)] // non-inclusive range to match with type below
+            (self.cursor..(self.cursor + delta + 1)).chain(0..0) // additional empty range to match
+                                                                 // with type below
+        } else {
+            (self.cursor..self.items.len()).chain(0..delta)
+        };
+
+        for i in range {
+            let slot = &mut self.items[i];
+            if slot.front().is_some_and(|t| t.time <= until) {
+                return Some(slot.pop_front().unwrap().item);
             }
         }
 
-        let items_len = self.items.len();
-        for i in (self.cursor..=(self.cursor + self.delta(until))).map(|i| i % items_len) {
-            let res = maybe_take(&mut self.items[i], until);
-            if res.is_some() {
-                return res;
-            }
-        }
         None
     }
 
