@@ -200,7 +200,7 @@ impl<T> Timer<T> {
     pub fn take_next(&mut self, until: Instant) -> Option<T> {
         let last_bucket = self.cursor + self.delta(until);
 
-        let range = if last_bucket <= self.items.len() {
+        let range = if last_bucket < self.items.len() {
             // Simple case, no wrap around.
             #[allow(clippy::range_plus_one)] // non-inclusive range to match with type below
             (self.cursor..(last_bucket + 1)).chain(0..0) // additional empty range to match with
