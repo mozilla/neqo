@@ -12,14 +12,14 @@ use test_fixture::now;
 
 fn benchmark_timer(c: &mut Criterion) {
     c.bench_function("drain a small timer quickly", |b| {
-        b.iter_batched(make_small_timer, drain, criterion::BatchSize::SmallInput)
+        b.iter_batched(make_small_timer, drain, criterion::BatchSize::SmallInput);
     });
     c.bench_function("drain a large mostly empty timer quickly", |b| {
         b.iter_batched(
             make_large_mostly_empty_timer,
             drain,
             criterion::BatchSize::SmallInput,
-        )
+        );
     });
 }
 
