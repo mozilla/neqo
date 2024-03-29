@@ -204,7 +204,7 @@ impl<T> Timer<T> {
 
         for i in self.cursor..(self.cursor + self.delta(until)) {
             let i = i % self.items.len();
-            let res = maybe_take(&mut self.items[i], until)?;
+            let res = maybe_take(&mut self.items[i], until);
             if res.is_some() {
                 return res;
             }
