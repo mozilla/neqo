@@ -12,7 +12,7 @@ use test_fixture::now;
 
 fn benchmark_timer(c: &mut Criterion) {
     c.bench_function("drain a timer quickly", |b| {
-        b.iter_batched(
+        b.iter_batched_ref(
             || {
                 const TIMES: &[u64] = &[1, 2, 3, 5, 8, 13, 21, 34];
                 let now = now();
@@ -22,7 +22,7 @@ fn benchmark_timer(c: &mut Criterion) {
                 }
                 timer
             },
-            |mut timer| {
+            |timer| {
                 while let Some(t) = timer.next_time() {
                     assert!(timer.take_next(t).is_some());
                 }
@@ -31,15 +31,15 @@ fn benchmark_timer(c: &mut Criterion) {
         );
     });
     c.bench_function("drain an empty timer", |b| {
-        b.iter_batched(
+        b.iter_batched_ref(
             || {
                 let now = now();
                 let timer = Timer::<()>::new(now, Duration::from_millis(4), 16384);
                 let lookup_time = now + Duration::from_millis(400);
                 (timer, lookup_time)
             },
-            |(mut timer, lookup_time)| {
-                assert_eq!(None, timer.take_next(lookup_time));
+            |(timer, lookup_time)| {
+                assert_eq!(None, timer.take_next(*lookup_time));
             },
             criterion::BatchSize::SmallInput,
         );
