@@ -15,12 +15,12 @@ use std::{
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::{Rc, Weak},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use neqo_common::{
     self as common, event::Provider, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn,
-    timer::Timer, Datagram, Decoder, Role,
+    Datagram, Decoder, Role,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -46,13 +46,6 @@ pub enum InitialResult {
 /// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
 /// a new connection across all QUIC versions this server supports.
 const MIN_INITIAL_PACKET_SIZE: usize = 1200;
-/// The size of timer buckets.  This is higher than the actual timer granularity
-/// as this depends on there being some distribution of events.
-const TIMER_GRANULARITY: Duration = Duration::from_millis(4);
-/// The number of buckets in the timer.  As mentioned in the definition of `Timer`,
-/// the granularity and capacity need to multiply to be larger than the largest
-/// delay that might be used.  That's the idle timeout (currently 30s).
-const TIMER_CAPACITY: usize = 16384;
 
 type StateRef = Rc<RefCell<ServerConnectionState>>;
 type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
@@ -61,7 +54,7 @@ type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 pub struct ServerConnectionState {
     c: Connection,
     active_attempt: Option<AttemptKey>,
-    last_timer: Instant,
+    last_timer: Option<Instant>,
 }
 
 impl Deref for ServerConnectionState {
@@ -174,14 +167,13 @@ pub struct Server {
     active: HashSet<ActiveConnectionRef>,
     /// The set of connections that need immediate processing.
     waiting: VecDeque<StateRef>,
-    /// Outstanding timers for connections.
-    timers: Timer<StateRef>,
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
     qlog_dir: Option<PathBuf>,
     /// Encrypted client hello (ECH) configuration.
     ech_config: Option<EchConfig>,
+    callback: Option<Instant>,
 }
 
 impl Server {
@@ -219,10 +211,10 @@ impl Server {
             connections: Rc::default(),
             active: HashSet::default(),
             waiting: VecDeque::default(),
-            timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
             address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
             ech_config: None,
+            callback: None,
         })
     }
 
@@ -260,11 +252,7 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
-    fn remove_timer(&mut self, c: &StateRef) {
-        let last = c.borrow().last_timer;
-        self.timers.remove(last, |t| Rc::ptr_eq(t, c));
-    }
-
+    #[inline(never)]
     fn process_connection(
         &mut self,
         c: &StateRef,
@@ -280,16 +268,12 @@ impl Server {
             }
             Output::Callback(delay) => {
                 let next = now + delay;
-                if next != c.borrow().last_timer {
-                    qtrace!([self], "Change timer to {:?}", next);
-                    self.remove_timer(c);
-                    c.borrow_mut().last_timer = next;
-                    self.timers.add(next, Rc::clone(c));
+                c.borrow_mut().last_timer = Some(next);
+                if self.callback.map_or(true, |c| c > next) {
+                    self.callback = Some(next);
                 }
             }
-            Output::None => {
-                self.remove_timer(c);
-            }
+            Output::None => {}
         }
         if c.borrow().has_events() {
             qtrace!([self], "Connection active: {:?}", c);
@@ -507,7 +491,7 @@ impl Server {
                 self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
                 let c = Rc::new(RefCell::new(ServerConnectionState {
                     c,
-                    last_timer: now,
+                    last_timer: None,
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
@@ -556,6 +540,7 @@ impl Server {
         }
     }
 
+    #[inline(never)]
     fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Option<Datagram> {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
@@ -639,6 +624,7 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
+    #[inline(never)]
     fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
         qtrace!([self], "No packet to send, look at waiting connections");
         while let Some(c) = self.waiting.pop_front() {
@@ -646,24 +632,28 @@ impl Server {
                 return Some(d);
             }
         }
+
         qtrace!([self], "No packet to send still, run timers");
-        while let Some(c) = self.timers.take_next(now) {
-            if let Some(d) = self.process_connection(&c, None, now) {
+        loop {
+            let connection = self
+                .connections
+                .borrow()
+                .values()
+                .find(|c| c.borrow().last_timer.map_or(false, |t| t <= now))
+                .cloned()?;
+            connection.borrow_mut().last_timer = None;
+            if let Some(d) = self.process_connection(&connection, None, now) {
                 return Some(d);
             }
         }
-        None
     }
 
-    fn next_time(&mut self, now: Instant) -> Option<Duration> {
-        if self.waiting.is_empty() {
-            self.timers.next_time().map(|x| x - now)
-        } else {
-            Some(Duration::new(0, 0))
-        }
-    }
-
+    #[inline(never)]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+        if self.callback.map_or(false, |c| c <= now) {
+            self.callback = None;
+        }
+
         dgram
             .and_then(|d| self.process_input(d, now))
             .or_else(|| self.process_next_output(now))
@@ -671,12 +661,7 @@ impl Server {
                 qtrace!([self], "Send packet: {:?}", d);
                 Output::Datagram(d)
             })
-            .or_else(|| {
-                self.next_time(now).map(|delay| {
-                    qtrace!([self], "Wait: {:?}", delay);
-                    Output::Callback(delay)
-                })
-            })
+            .or_else(|| self.callback.take().map(|c| Output::Callback(c - now)))
             .unwrap_or_else(|| {
                 qtrace!([self], "Go dormant");
                 Output::None
