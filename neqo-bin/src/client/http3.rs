@@ -22,7 +22,8 @@ use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
-    AppError, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output, StreamId,
+    AppError, Connection, ConnectionError, EmptyConnectionIdGenerator, Error as TransportError,
+    Output, StreamId,
 };
 use url::Url;
 
@@ -111,8 +112,11 @@ pub(crate) fn create_client(
 }
 
 impl super::Client for Http3Client {
-    fn is_closed(&self) -> bool {
-        matches!(self.state(), Http3State::Closed(..))
+    fn is_closed(&self) -> Option<ConnectionError> {
+        if let Http3State::Closed(err) = self.state() {
+            return Some(err);
+        }
+        None
     }
 
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
