@@ -8,7 +8,7 @@ use std::{
     cell::RefCell, collections::HashMap, fmt::Display, path::PathBuf, rc::Rc, time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram};
+use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::{
@@ -142,20 +142,25 @@ impl Http09Server {
             Regex::new(r"GET +/(\d+)(?:\r)?\n").unwrap()
         };
         let m = re.captures(msg);
-        let resp = match m.and_then(|m| m.get(1)) {
-            None => {
-                self.save_partial(stream_id, buf, conn);
-                return;
-            }
-            Some(path) => {
-                let path = path.as_str();
-                qdebug!("Path = '{path}'");
-                if args.shared.qns_test.is_some() {
-                    qns_read_response(path)
-                } else {
-                    let count = path.parse().unwrap();
-                    Some(vec![b'a'; count])
+        let Some(path) = m.and_then(|m| m.get(1)) else {
+            self.save_partial(stream_id, buf, conn);
+            return;
+        };
+
+        let resp = {
+            let path = path.as_str();
+            qdebug!("Path = '{path}'");
+            if args.shared.qns_test.is_some() {
+                match qns_read_response(path) {
+                    Ok(data) => Some(data),
+                    Err(e) => {
+                        qerror!("Failed to read {path}: {e}");
+                        return;
+                    }
                 }
+            } else {
+                let count = path.parse().unwrap();
+                Some(vec![b'a'; count])
             }
         };
         self.write(stream_id, resp, conn);
