@@ -1552,6 +1552,10 @@ impl Connection {
         packet: &DecryptedPacket,
         now: Instant,
     ) -> Res<bool> {
+        (!packet.is_empty())
+            .then_some(())
+            .ok_or(Error::ProtocolViolation)?;
+
         // TODO(ekr@rtfm.com): Have the server blow away the initial
         // crypto state if this fails? Otherwise, we will get a panic
         // on the assert for doesn't exist.
