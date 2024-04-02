@@ -54,7 +54,7 @@ type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 pub struct ServerConnectionState {
     c: Connection,
     active_attempt: Option<AttemptKey>,
-    last_timer: Option<Instant>,
+    callback: Option<Instant>,
 }
 
 impl Deref for ServerConnectionState {
@@ -167,13 +167,14 @@ pub struct Server {
     active: HashSet<ActiveConnectionRef>,
     /// The set of connections that need immediate processing.
     waiting: VecDeque<StateRef>,
+    /// The latest [`Output::Callback`] returned from [`Server::process`].
+    callback: Option<Instant>,
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
     qlog_dir: Option<PathBuf>,
     /// Encrypted client hello (ECH) configuration.
     ech_config: Option<EchConfig>,
-    callback: Option<Instant>,
 }
 
 impl Server {
@@ -252,7 +253,6 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
-    #[inline(never)]
     fn process_connection(
         &mut self,
         c: &StateRef,
@@ -268,7 +268,7 @@ impl Server {
             }
             Output::Callback(delay) => {
                 let next = now + delay;
-                c.borrow_mut().last_timer = Some(next);
+                c.borrow_mut().callback = Some(next);
                 if self.callback.map_or(true, |c| c > next) {
                     self.callback = Some(next);
                 }
@@ -491,7 +491,7 @@ impl Server {
                 self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
                 let c = Rc::new(RefCell::new(ServerConnectionState {
                     c,
-                    last_timer: None,
+                    callback: None,
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
@@ -540,7 +540,6 @@ impl Server {
         }
     }
 
-    #[inline(never)]
     fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Option<Datagram> {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
@@ -624,7 +623,6 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    #[inline(never)]
     fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
         qtrace!([self], "No packet to send, look at waiting connections");
         while let Some(c) = self.waiting.pop_front() {
@@ -633,22 +631,21 @@ impl Server {
             }
         }
 
-        qtrace!([self], "No packet to send still, run timers");
+        qtrace!([self], "No packet to send still, check callbacks");
         loop {
             let connection = self
                 .connections
                 .borrow()
                 .values()
-                .find(|c| c.borrow().last_timer.map_or(false, |t| t <= now))
+                .find(|c| c.borrow().callback.map_or(false, |t| t <= now))
                 .cloned()?;
-            connection.borrow_mut().last_timer = None;
+            connection.borrow_mut().callback = None;
             if let Some(d) = self.process_connection(&connection, None, now) {
                 return Some(d);
             }
         }
     }
 
-    #[inline(never)]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         if self.callback.map_or(false, |c| c <= now) {
             self.callback = None;
