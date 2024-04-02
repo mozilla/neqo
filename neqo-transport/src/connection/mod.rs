@@ -1552,6 +1552,8 @@ impl Connection {
         packet: &DecryptedPacket,
         now: Instant,
     ) -> Res<bool> {
+        (!packet.is_empty()).then_some(()).ok_or(Error::ProtocolViolation)?;
+
         // TODO(ekr@rtfm.com): Have the server blow away the initial
         // crypto state if this fails? Otherwise, we will get a panic
         // on the assert for doesn't exist.
@@ -1560,20 +1562,14 @@ impl Connection {
         let mut ack_eliciting = false;
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
-        let mut decoded_frames = false;
         while d.remaining() > 0 {
             let f = Frame::decode(&mut d)?;
-            decoded_frames = true;
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
             if let Err(e) = self.input_frame(path, packet.version(), packet.packet_type(), f, now) {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
             }
-        }
-        if !decoded_frames {
-            qerror!([self], "Received packet with no frames");
-            return Err(Error::ProtocolViolation);
         }
 
         let largest_received = if let Some(space) = self
