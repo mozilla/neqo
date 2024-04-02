@@ -7,7 +7,7 @@
 use clap::Parser;
 
 #[tokio::main]
-async fn main() -> Result<(), std::io::Error> {
+async fn main() -> Result<(), neqo_bin::server::Error> {
     let args = neqo_bin::server::Args::parse();
 
     neqo_bin::server::server(args).await

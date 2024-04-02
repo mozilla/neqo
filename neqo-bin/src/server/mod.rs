@@ -52,6 +52,13 @@ pub enum Error {
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    CryptoError(neqo_crypto::Error),
+}
+
+impl From<neqo_crypto::Error> for Error {
+    fn from(err: neqo_crypto::Error) -> Self {
+        Self::CryptoError(err)
+    }
 }
 
 impl From<io::Error> for Error {
@@ -86,6 +93,8 @@ impl Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+type Res<T> = Result<T, Error>;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -551,7 +560,7 @@ impl ServersRunner {
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
-    async fn run(&mut self) -> Result<(), io::Error> {
+    async fn run(&mut self) -> Res<()> {
         loop {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
@@ -581,13 +590,13 @@ enum Ready {
     Timeout,
 }
 
-pub async fn server(mut args: Args) -> Result<(), io::Error> {
+pub async fn server(mut args: Args) -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
     assert!(!args.key.is_empty(), "Need at least one key");
 
-    init_db(args.db.clone());
+    init_db(args.db.clone())?;
 
     if let Some(testcase) = args.shared.qns_test.as_ref() {
         if args.shared.quic_parameters.quic_version.is_empty() {
