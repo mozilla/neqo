@@ -32,6 +32,8 @@ pub(crate) const BATCH_SIZE: usize = 1;
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
 pub struct Socket {
+    #[allow(unknown_lints)] // available with Rust v1.75
+    #[allow(clippy::struct_field_names)]
     socket: tokio::net::UdpSocket,
     state: UdpSocketState,
     recv_bufs: [Vec<u8>; BATCH_SIZE],

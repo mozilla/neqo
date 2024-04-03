@@ -21,17 +21,18 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_bin::udp;
-use neqo_common::{self as common, qdebug, qinfo, qlog::NeqoQlog, Datagram, Role};
+use neqo_common::{self as common, qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
 };
-use neqo_http3::{Error, Output};
+use neqo_http3::Output;
 use neqo_transport::{AppError, ConnectionId, Error as TransportError, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
+
+use crate::{udp, SharedArgs};
 
 mod http09;
 mod http3;
@@ -39,48 +40,55 @@ mod http3;
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
-pub enum ClientError {
+pub enum Error {
     ArgumentError(&'static str),
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    CryptoError(neqo_crypto::Error),
 }
 
-impl From<io::Error> for ClientError {
+impl From<neqo_crypto::Error> for Error {
+    fn from(err: neqo_crypto::Error) -> Self {
+        Self::CryptoError(err)
+    }
+}
+
+impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Self::IoError(err)
     }
 }
 
-impl From<neqo_http3::Error> for ClientError {
+impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
         Self::Http3Error(err)
     }
 }
 
-impl From<qlog::Error> for ClientError {
+impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
         Self::QlogError
     }
 }
 
-impl From<neqo_transport::Error> for ClientError {
+impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
     }
 }
 
-impl Display for ClientError {
+impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error: {self:?}")?;
         Ok(())
     }
 }
 
-impl std::error::Error for ClientError {}
+impl std::error::Error for Error {}
 
-type Res<T> = Result<T, ClientError>;
+type Res<T> = Result<T, Error>;
 
 /// Track whether a key update is needed.
 #[derive(Debug, PartialEq, Eq)]
@@ -90,20 +98,20 @@ impl KeyUpdateState {
     pub fn maybe_update<F, E>(&mut self, update_fn: F) -> Res<()>
     where
         F: FnOnce() -> Result<(), E>,
-        E: Into<ClientError>,
+        E: Into<Error>,
     {
         if self.0 {
             if let Err(e) = update_fn() {
                 let e = e.into();
                 match e {
-                    ClientError::TransportError(TransportError::KeyUpdateBlocked)
-                    | ClientError::Http3Error(Error::TransportError(
+                    Error::TransportError(TransportError::KeyUpdateBlocked)
+                    | Error::Http3Error(neqo_http3::Error::TransportError(
                         TransportError::KeyUpdateBlocked,
                     )) => (),
                     _ => return Err(e),
                 }
             } else {
-                println!("Keys updated");
+                qerror!("Keys updated");
                 self.0 = false;
             }
         }
@@ -120,7 +128,10 @@ impl KeyUpdateState {
 #[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
     #[command(flatten)]
-    shared: neqo_bin::SharedArgs,
+    verbose: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
+
+    #[command(flatten)]
+    shared: SharedArgs,
 
     urls: Vec<Url>,
 
@@ -179,9 +190,43 @@ pub struct Args {
     /// The request size that will be used for upload test.
     #[arg(name = "upload-size", long, default_value = "100")]
     upload_size: usize,
+
+    /// Print connection stats after close.
+    #[arg(name = "stats", long)]
+    stats: bool,
 }
 
 impl Args {
+    #[must_use]
+    #[cfg(feature = "bench")]
+    #[allow(clippy::missing_panics_doc)]
+    pub fn new(requests: &[u64], download_in_series: bool) -> Self {
+        use std::str::FromStr;
+        Self {
+            verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
+            shared: crate::SharedArgs::default(),
+            urls: requests
+                .iter()
+                .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())
+                .collect(),
+            method: "GET".into(),
+            header: vec![],
+            max_concurrent_push_streams: 10,
+            download_in_series,
+            concurrency: 100,
+            output_read_data: false,
+            output_dir: Some("/dev/null".into()),
+            resume: false,
+            key_update: false,
+            ech: None,
+            ipv4_only: false,
+            ipv6_only: false,
+            test: None,
+            upload_size: 100,
+            stats: false,
+        }
+    }
+
     fn get_ciphers(&self) -> Vec<Cipher> {
         self.shared
             .ciphers
@@ -207,7 +252,7 @@ impl Args {
             "http3" => {
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
-                        eprintln!("Unsupported test case: {testcase}");
+                        qerror!("Unsupported test case: {testcase}");
                         exit(127)
                     }
 
@@ -219,7 +264,7 @@ impl Args {
             }
             "zerortt" | "resumption" => {
                 if self.urls.len() < 2 {
-                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    qerror!("Warning: resumption tests won't work without >1 URL");
                     exit(127);
                 }
                 self.shared.use_old_http = true;
@@ -268,11 +313,11 @@ fn get_output_file(
         out_path.push(url_path);
 
         if all_paths.contains(&out_path) {
-            eprintln!("duplicate path {}", out_path.display());
+            qerror!("duplicate path {}", out_path.display());
             return None;
         }
 
-        eprintln!("Saving {url} to {out_path:?}");
+        qinfo!("Saving {url} to {out_path:?}");
 
         if let Some(parent) = out_path.parent() {
             create_dir_all(parent).ok()?;
@@ -329,6 +374,7 @@ trait Client {
     where
         S: AsRef<str> + Display;
     fn is_closed(&self) -> bool;
+    fn stats(&self) -> neqo_transport::Stats;
 }
 
 struct Runner<'a, H: Handler> {
@@ -363,6 +409,9 @@ impl<'a, H: Handler> Runner<'a, H> {
             self.process(None).await?;
 
             if self.client.is_closed() {
+                if self.args.stats {
+                    qinfo!("{:?}", self.client.stats());
+                }
                 return Ok(self.handler.take_token());
             }
 
@@ -394,7 +443,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                     self.socket.send(dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    qinfo!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {:?}", new_timeout);
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -438,12 +487,13 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Res<()> {
-    init();
+pub async fn client(mut args: Args) -> Res<()> {
+    neqo_common::log::init(Some(args.verbose.log_level_filter()));
+    init()?;
 
-    let mut args = Args::parse();
     args.update_for_tests();
+
+    init()?;
 
     let urls_by_origin = args
         .urls
@@ -457,14 +507,14 @@ async fn main() -> Res<()> {
         .filter_map(|(origin, urls)| match origin {
             Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
             Origin::Opaque(x) => {
-                eprintln!("Opaque origin {x:?}");
+                qwarn!("Opaque origin {x:?}");
                 None
             }
         });
 
     for ((host, port), mut urls) in urls_by_origin {
         if args.resume && urls.len() < 2 {
-            eprintln!("Resumption to {host} cannot work without at least 2 URLs.");
+            qerror!("Resumption to {host} cannot work without at least 2 URLs.");
             exit(127);
         }
 
@@ -475,7 +525,7 @@ async fn main() -> Res<()> {
             )
         });
         let Some(remote_addr) = remote_addr else {
-            eprintln!("No compatible address found for: {host}");
+            qerror!("No compatible address found for: {host}");
             exit(1);
         };
 
@@ -486,7 +536,7 @@ async fn main() -> Res<()> {
 
         let mut socket = udp::Socket::bind(local_addr)?;
         let real_local = socket.local_addr().unwrap();
-        println!(
+        qinfo!(
             "{} Client connecting: {:?} -> {:?}",
             if args.shared.use_old_http { "H9" } else { "H3" },
             real_local,
