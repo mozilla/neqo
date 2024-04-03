@@ -11,7 +11,7 @@ fuzz_target!(|data: &[u8]| {
         static ref DECODER: RandomConnectionIdGenerator = RandomConnectionIdGenerator::new(20);
     }
 
-    neqo_crypto::init();
+    neqo_crypto::init().unwrap();
 
     // Run the fuzzer
     let _ = PublicPacket::decode(data, &*DECODER);
