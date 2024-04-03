@@ -18,8 +18,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTosEcn, Role
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -35,7 +34,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    ecn::EcnCount,
+    ecn::{EcnCount, EcnInfo, PacketSpaceEcnCounts},
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -333,6 +332,7 @@ impl Connection {
             remote_addr,
             c.conn_params.get_cc_algorithm(),
             c.conn_params.pacing_enabled(),
+            EcnInfo::new(PacketSpaceEcnCounts::default()),
             NeqoQlog::default(),
             now,
         );
@@ -1424,11 +1424,12 @@ impl Connection {
         // Since we processed frames from this IP packet now,
         // update the ECN counts (RFC9000, Section 13.4.1).
         let space = PacketNumberSpace::from(packet.packet_type());
-        if let Some(space) = self.acks.get_mut(space) {
-            *space.ecn_count() += d.tos().into();
-        } else {
-            qdebug!("Not tracking ECN for dropped packet number space");
-        }
+        *path.borrow_mut().received_ecn(space) += IpTosEcn::from(d.tos());
+        qdebug!(
+            [self],
+            "New ECN count: {:?}",
+            *path.borrow_mut().received_ecn(space)
+        );
 
         if self.state == State::WaitInitial {
             self.start_handshake(path, packet, now);
@@ -1978,6 +1979,7 @@ impl Connection {
             encoder = builder.build(tx)?;
         }
 
+        qdebug!([self], "XXX TX");
         Ok(SendOption::Yes(close.path().borrow_mut().datagram(encoder)))
     }
 
@@ -2134,10 +2136,12 @@ impl Connection {
 
         if primary {
             let stats = &mut self.stats.borrow_mut().frame_tx;
+            let mut path_ref = path.borrow_mut();
             self.acks.write_frame(
                 space,
                 now,
-                path.borrow().rtt().estimate(),
+                path_ref.rtt().estimate(),
+                path_ref.received_ecn(space),
                 builder,
                 &mut tokens,
                 stats,
@@ -2291,6 +2295,7 @@ impl Connection {
             let sent = SentPacket::new(
                 pt,
                 pn,
+                path.borrow().tos().into(),
                 now,
                 ack_eliciting,
                 tokens,
@@ -2341,6 +2346,7 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial);
             }
             path.borrow_mut().add_sent(packets.len());
+            qdebug!([self], "XXX TX");
             Ok(SendOption::Yes(path.borrow_mut().datagram(packets)))
         }
     }
@@ -2899,7 +2905,7 @@ impl Connection {
         space: PacketNumberSpace,
         largest_acknowledged: u64,
         ack_ranges: R,
-        ecn_count: &EcnCount,
+        ack_ecn: &EcnCount,
         ack_delay: u64,
         now: Instant,
     ) where
@@ -2913,7 +2919,7 @@ impl Connection {
             space,
             largest_acknowledged,
             ack_ranges,
-            ecn_count,
+            ack_ecn,
             self.decode_ack_delay(ack_delay),
             now,
         );

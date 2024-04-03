@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::{Add, AddAssign, Deref, DerefMut, Sub};
+use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::EnumMap;
 use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
@@ -16,7 +16,7 @@ pub const ECN_TEST_COUNT: usize = 10;
 
 /// The state information related to testing a path for ECN capability.
 /// See RFC9000, Appendix A.4.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 enum EcnValidationState {
     /// The path is currently being tested for ECN capability.
     #[default]
@@ -30,7 +30,7 @@ enum EcnValidationState {
 }
 
 /// The counts for different ECN marks.
-#[derive(PartialEq, Eq, Debug, Clone, Default)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
 pub struct EcnCount(EnumMap<IpTosEcn, u64>);
 
 impl Deref for EcnCount {
@@ -72,14 +72,18 @@ impl<'a, 'b> Sub<&'a EcnCount> for &'b EcnCount {
     }
 }
 
-impl Add<IpTosEcn> for EcnCount {
-    type Output = Self;
+// impl Sub<EcnCount> for EcnCount {
+//     type Output = EcnCount;
 
-    fn add(mut self, ecn: IpTosEcn) -> Self::Output {
-        self += ecn;
-        self
-    }
-}
+//     /// Subtract the ECN counts in `other` from `self`.
+//     fn sub(self, other: EcnCount) -> EcnCount {
+//         let mut diff = EcnCount::default();
+//         for (ecn, count) in &mut *diff {
+//             *count = self[ecn].saturating_sub(other[ecn]);
+//         }
+//         diff
+//     }
+// }
 
 impl AddAssign<IpTosEcn> for EcnCount {
     fn add_assign(&mut self, ecn: IpTosEcn) {
@@ -87,31 +91,82 @@ impl AddAssign<IpTosEcn> for EcnCount {
     }
 }
 
-#[derive(Debug, Default)]
+
+#[derive(Debug, Default, Clone)]
+pub struct PacketSpaceEcnCounts(EnumMap<PacketNumberSpace, EcnCount>);
+
+impl Deref for PacketSpaceEcnCounts {
+    type Target = EnumMap<PacketNumberSpace, EcnCount>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for PacketSpaceEcnCounts {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug)]
 pub struct EcnInfo {
     /// The current state of ECN validation on this path.
     state: EcnValidationState,
-    /// The number of packets sent so far on the path during the ECN validation.
-    sent: usize,
-    /// The ECN counts received in the last ACK on this path, for each packet number space.
-    /// Won't be updated after ECN has been tested on the path.
-    count: EnumMap<PacketNumberSpace, EcnCount>,
+    /// The number of probes sent so far on the path during the ECN validation.
+    probes_sent: usize,
+    // The ECN counts received in the last ACK on this path, for each packet number space.
+    received_ecn: PacketSpaceEcnCounts,
+    baseline: PacketSpaceEcnCounts,
 }
 
 impl EcnInfo {
+    pub fn new(received_ecn: PacketSpaceEcnCounts) -> Self {
+        qdebug!("XXX new ECN Info {:?}", received_ecn);
+        let baseline = received_ecn.clone();
+        Self {
+            state: EcnValidationState::Testing,
+            probes_sent: 0,
+            received_ecn,
+            baseline,
+        }
+    }
+
+    // pub fn sent_ecn(&mut self) -> &mut EcnCount {
+    //     &mut self.sent_ecn
+    // }
+
+    // pub fn received_ecn(&mut self) -> &mut EcnCount {
+    //     &mut self.received_ecn
+    // }
+
+    pub fn received_ecn(&mut self) -> &mut PacketSpaceEcnCounts {
+        &mut self.received_ecn
+    }
+
     /// Count the number of packets sent out on this path during ECN validation.
     /// Exit ECN validation if the number of packets sent exceeds `ECN_TEST_COUNT`.
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
-    pub fn count_packets_out(&mut self) {
-        qdebug!("ECN count_packets_out: {:?}", self.state);
-        if self.state == EcnValidationState::Testing {
-            if self.sent < ECN_TEST_COUNT {
-                self.sent += 1;
-            } else {
-                qdebug!("ECN probing concluded with {} packet sent", self.sent);
-                self.state = EcnValidationState::Unknown;
-            }
+    pub fn count_probes(&mut self) {
+        qdebug!("ECN count_packets_out: {:?}", self.received_ecn);
+        if self.state != EcnValidationState::Testing {
+            return;
+        }
+
+        self.probes_sent += 1;
+        if self.probes_sent < ECN_TEST_COUNT {
+            qdebug!(
+                "ECN count_packets_out: {:?} {}",
+                self.state,
+                self.probes_sent,
+            );
+        } else {
+            qdebug!(
+                "ECN probing concluded with {} packet sent",
+                self.probes_sent
+            );
+            self.state = EcnValidationState::Unknown;
         }
     }
 
@@ -120,24 +175,23 @@ impl EcnInfo {
         &mut self,
         space: PacketNumberSpace,
         acked_packets: &[SentPacket],
-        ecn_count: &EcnCount,
+        ack_ecn: &EcnCount,
     ) {
-        qdebug!("Validating ECN counts: {:?} {:?}", self.state, ecn_count);
+        if self.state != EcnValidationState::Unknown {
+            return;
+        }
+
+        qdebug!("Validating ECN counts: {:?}", self.state);
         // RFC 9000, Appendix A.4:
         // From the "unknown" state, successful validation of the ECN counts in an ACK frame
         // (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
         // no marked packet has been acknowledged.
-        if self.state != EcnValidationState::Unknown {
-            return;
-        }
 
         // RFC 9000, Section 13.4.2.1:
         //
         // > An endpoint that receives an ACK frame with ECN counts therefore validates
         // > the counts before using them. It performs this validation by comparing newly
         // > received counts against those from the last successfully processed ACK frame.
-        //
-        // RFC 9000 fails to state that this is done *per packet number space*.
         //
         // > If an ACK frame newly acknowledges a packet that the endpoint sent with
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
@@ -151,21 +205,35 @@ impl EcnInfo {
         // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
         // > less than the number of newly acknowledged packets that were originally sent with an
         // > ECT(0) marking.
-        let newly_acked = acked_packets.len().try_into().unwrap();
-        let ecn_diff = ecn_count - &self.count[space];
+        let newly_acked_sent_with_ect0 = acked_packets
+            .iter()
+            .filter(|p| p.ecn_mark == IpTosEcn::Ect0)
+            .count();
+        let mut ecn_diff = ack_ecn - &self.received_ecn[space];
+        ecn_diff = &ecn_diff - &self.baseline[space];
+        qdebug!(
+            "ack_ecn {:?} - received_ecn {:?} - baseline {:?} = ecn_diff {:?}",
+            ack_ecn,
+            self.received_ecn[space],
+            self.baseline[space],
+            ecn_diff
+        );
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
-        if sum_inc < newly_acked {
+        if sum_inc < newly_acked_sent_with_ect0.try_into().unwrap() {
             qwarn!(
-                "ACK had {} new marks, but acked {} packets, ECN validation failed",
+                "ACK had {} new marks, but {} of newly acked packets were sent with ECN, ECN validation failed",
                 sum_inc,
-                newly_acked
+                newly_acked_sent_with_ect0
             );
             self.state = EcnValidationState::Failed;
         } else {
-            qinfo!("ECN validation succeeded, path is capable");
+            qinfo!(
+                "ECN validation succeeded {} {}, path is capable",
+                sum_inc,
+                newly_acked_sent_with_ect0
+            );
             self.state = EcnValidationState::Capable;
         }
-        self.count[space] = ecn_count.clone();
     }
 
     /// The ECN mark to use for packets sent on this path.

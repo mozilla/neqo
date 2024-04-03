@@ -537,7 +537,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use neqo_common::qinfo;
+    use neqo_common::{qinfo, IpTosEcn};
     use test_fixture::now;
 
     use super::{
@@ -581,6 +581,7 @@ mod tests {
         SentPacket::new(
             PacketType::Short,
             pn,
+            IpTosEcn::default(),
             now() + t,
             ack_eliciting,
             Vec::new(),
@@ -794,6 +795,7 @@ mod tests {
                 SentPacket::new(
                     PacketType::Short,
                     u64::try_from(i).unwrap(),
+                    IpTosEcn::default(),
                     by_pto(t),
                     true,
                     Vec::new(),
@@ -914,6 +916,7 @@ mod tests {
         lost[0] = SentPacket::new(
             lost[0].pt,
             lost[0].pn,
+            lost[0].ecn_mark,
             lost[0].time_sent,
             false,
             Vec::new(),
@@ -1014,11 +1017,12 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,           // pn
-                    now,               // time sent
-                    true,              // ack eliciting
-                    Vec::new(),        // tokens
-                    MAX_DATAGRAM_SIZE, // size
+                    next_pn,
+                    IpTosEcn::default(),
+                    now,
+                    true,
+                    Vec::new(),
+                    MAX_DATAGRAM_SIZE,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1038,11 +1042,12 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,           // pn
-                now,               // time sent
-                true,              // ack eliciting
-                Vec::new(),        // tokens
-                MAX_DATAGRAM_SIZE, // size
+                next_pn,
+                IpTosEcn::default(),
+                now,
+                true,
+                Vec::new(),
+                MAX_DATAGRAM_SIZE,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1081,11 +1086,12 @@ mod tests {
 
         let p_lost = SentPacket::new(
             PacketType::Short,
-            1,                 // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            1,
+            IpTosEcn::default(),
+            now,
+            true,
+            Vec::new(),
+            MAX_DATAGRAM_SIZE,
         );
         cc.on_packet_sent(&p_lost);
         cwnd_is_default(&cc);
@@ -1094,11 +1100,12 @@ mod tests {
         cwnd_is_halved(&cc);
         let p_not_lost = SentPacket::new(
             PacketType::Short,
-            2,                 // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            2,
+            IpTosEcn::default(),
+            now,
+            true,
+            Vec::new(),
+            MAX_DATAGRAM_SIZE,
         );
         cc.on_packet_sent(&p_not_lost);
         now += RTT;
@@ -1117,11 +1124,12 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,           // pn
-                    now,               // time sent
-                    true,              // ack eliciting
-                    Vec::new(),        // tokens
-                    MAX_DATAGRAM_SIZE, // size
+                    next_pn,
+                    IpTosEcn::default(),
+                    now,
+                    true,
+                    Vec::new(),
+                    MAX_DATAGRAM_SIZE,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1147,11 +1155,12 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,           // pn
-                now,               // time sent
-                true,              // ack eliciting
-                Vec::new(),        // tokens
-                MAX_DATAGRAM_SIZE, // size
+                next_pn,
+                IpTosEcn::default(),
+                now,
+                true,
+                Vec::new(),
+                MAX_DATAGRAM_SIZE,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);

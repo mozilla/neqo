@@ -673,7 +673,7 @@ impl LossRecovery {
         pn_space: PacketNumberSpace,
         largest_acked: u64,
         acked_ranges: R,
-        ecn_count: &EcnCount,
+        ack_ecn: &EcnCount,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -747,7 +747,7 @@ impl LossRecovery {
         // when it shouldn't.
         primary_path
             .borrow_mut()
-            .on_packets_acked(pn_space, &acked_packets, ecn_count, now);
+            .on_packets_acked(pn_space, &acked_packets, ack_ecn, now);
 
         self.pto_state = None;
 
@@ -1025,7 +1025,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::qlog::NeqoQlog;
+    use neqo_common::{qlog::NeqoQlog, IpTosEcn};
     use test_fixture::{now, DEFAULT_ADDR};
 
     use super::{
@@ -1034,7 +1034,7 @@ mod tests {
     use crate::{
         cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
-        ecn::EcnCount,
+        ecn::{EcnCount, EcnInfo, PacketSpaceEcnCounts},
         packet::PacketType,
         path::{Path, PathRef},
         rtt::RttEstimate,
@@ -1064,7 +1064,7 @@ mod tests {
             pn_space: PacketNumberSpace,
             largest_acked: u64,
             acked_ranges: Vec<RangeInclusive<u64>>,
-            ecn_count: &EcnCount,
+            ack_ecn: &EcnCount,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
@@ -1073,7 +1073,7 @@ mod tests {
                 pn_space,
                 largest_acked,
                 acked_ranges,
-                ecn_count,
+                ack_ecn,
                 ack_delay,
                 now,
             )
@@ -1112,6 +1112,7 @@ mod tests {
                 DEFAULT_ADDR,
                 CC,
                 true,
+                EcnInfo::new(PacketSpaceEcnCounts::default()),
                 NeqoQlog::default(),
                 now(),
             );
@@ -1214,6 +1215,7 @@ mod tests {
             lr.on_packet_sent(SentPacket::new(
                 PacketType::Short,
                 pn,
+                IpTosEcn::default(),
                 pn_time(pn),
                 true,
                 Vec::new(),
@@ -1240,6 +1242,7 @@ mod tests {
             lrs.on_packet_sent(SentPacket::new(
                 PacketType::Short,
                 pn,
+                IpTosEcn::default(),
                 pn_time(pn),
                 true,
                 Vec::new(),
@@ -1360,6 +1363,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
             0,
+            IpTosEcn::default(),
             pn_time(0),
             true,
             Vec::new(),
@@ -1368,6 +1372,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
             1,
+            IpTosEcn::default(),
             pn_time(0) + TEST_RTT / 4,
             true,
             Vec::new(),
@@ -1474,6 +1479,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
             0,
+            IpTosEcn::default(),
             pn_time(0),
             true,
             Vec::new(),
@@ -1482,6 +1488,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Handshake,
             0,
+            IpTosEcn::default(),
             pn_time(1),
             true,
             Vec::new(),
@@ -1490,6 +1497,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
             0,
+            IpTosEcn::default(),
             pn_time(2),
             true,
             Vec::new(),
@@ -1502,7 +1510,15 @@ mod tests {
             PacketType::Handshake,
             PacketType::Short,
         ] {
-            let sent_pkt = SentPacket::new(*sp, 1, pn_time(3), true, Vec::new(), ON_SENT_SIZE);
+            let sent_pkt = SentPacket::new(
+                *sp,
+                1,
+                IpTosEcn::default(),
+                pn_time(3),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            );
             let pn_space = PacketNumberSpace::from(sent_pkt.pt);
             lr.on_packet_sent(sent_pkt);
             lr.on_ack_received(
@@ -1534,6 +1550,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
             0,
+            IpTosEcn::default(),
             pn_time(3),
             true,
             Vec::new(),
@@ -1548,6 +1565,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
             0,
+            IpTosEcn::default(),
             now(),
             true,
             Vec::new(),
@@ -1568,6 +1586,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Handshake,
             0,
+            IpTosEcn::default(),
             now(),
             true,
             Vec::new(),
@@ -1576,6 +1595,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
             0,
+            IpTosEcn::default(),
             now(),
             true,
             Vec::new(),
@@ -1613,6 +1633,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
             1,
+            IpTosEcn::default(),
             now(),
             true,
             Vec::new(),

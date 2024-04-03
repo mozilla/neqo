@@ -22,7 +22,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
-    ecn::{EcnCount, EcnInfo},
+    ecn::{EcnCount, EcnInfo, PacketSpaceEcnCounts},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
     recovery::RecoveryToken,
@@ -42,7 +42,7 @@ pub const PATH_MTU_V6: usize = 1337;
 /// The path MTU for IPv4 can be 20 bytes larger than for v6.
 pub const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 /// The number of times that a path will be probed before it is considered failed.
-pub const MAX_PATH_PROBES: usize = 3;
+const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
@@ -96,7 +96,16 @@ impl Paths {
                 }
             })
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now);
+                let ecn_info = EcnInfo::new(if let Some(primary) = &self.primary {
+                    let x = primary.borrow_mut().ecn_info.received_ecn().clone();
+                    qdebug!("XXX find_path: using primary {:?}", x);
+                    x
+                } else {
+                    qdebug!("XXX find_path: using default");
+                    PacketSpaceEcnCounts::default()
+                });
+                let mut p =
+                    Path::temporary(local, remote, cc, pacing, ecn_info, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -135,11 +144,20 @@ impl Paths {
                 })
             })
             .unwrap_or_else(|| {
+                let ecn_info = EcnInfo::new(if let Some(primary) = &self.primary {
+                    let x = primary.borrow_mut().ecn_info.received_ecn().clone();
+                    qdebug!("XXX find_path_with_rebinding: using primary {:?}", x);
+                    x
+                } else {
+                    qdebug!("XXX find_path_with_rebinding: using default");
+                    PacketSpaceEcnCounts::default()
+                });
                 Rc::new(RefCell::new(Path::temporary(
                     local,
                     remote,
                     cc,
                     pacing,
+                    ecn_info,
                     self.qlog.clone(),
                     now,
                 )))
@@ -544,7 +562,6 @@ pub struct Path {
     sent_bytes: usize,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: EcnInfo,
-
     /// For logging of events.
     qlog: NeqoQlog,
 }
@@ -557,6 +574,7 @@ impl Path {
         remote: SocketAddr,
         cc: CongestionControlAlgorithm,
         pacing: bool,
+        ecn_info: EcnInfo,
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
@@ -576,7 +594,7 @@ impl Path {
             ttl: 64, // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
-            ecn_info: EcnInfo::default(),
+            ecn_info,
             qlog,
         }
     }
@@ -584,6 +602,10 @@ impl Path {
     /// Return the DSCP/ECN marking to use for outgoing packets on this path.
     pub fn tos(&self) -> IpTos {
         self.ecn_info.ecn_mark().into()
+    }
+
+    pub fn received_ecn(&mut self, space: PacketNumberSpace) -> &mut EcnCount {
+        &mut self.ecn_info.received_ecn()[space]
     }
 
     /// Whether this path is the primary or current path for the connection.
@@ -702,7 +724,7 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V) -> Datagram {
-        self.ecn_info.count_packets_out();
+        self.ecn_info.count_probes();
         Datagram::new(self.local, self.remote, self.tos(), Some(self.ttl), payload)
     }
 
@@ -970,12 +992,12 @@ impl Path {
         &mut self,
         space: PacketNumberSpace,
         acked_pkts: &[SentPacket],
-        ecn_count: &EcnCount,
+        ack_ecn: &EcnCount,
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
-        self.ecn_info.validate_ack_ecn(space, acked_pkts, ecn_count);
+        self.ecn_info.validate_ack_ecn(space, acked_pkts, ack_ecn);
     }
 
     /// Record packets as lost with the sender.
