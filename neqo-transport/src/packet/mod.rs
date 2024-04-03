@@ -765,14 +765,10 @@ impl<'a> PublicPacket<'a> {
         assert_ne!(self.packet_type, PacketType::Retry);
         assert_ne!(self.packet_type, PacketType::VersionNegotiation);
 
-        qtrace!(
-            "unmask hdr={}",
-            hex(&self.data[..self.header_len + SAMPLE_OFFSET])
-        );
-
         let sample_offset = self.header_len + SAMPLE_OFFSET;
         let mask = if let Some(sample) = self.data.get(sample_offset..(sample_offset + SAMPLE_SIZE))
         {
+            qtrace!("unmask hdr={}", hex(&self.data[..sample_offset]));
             crypto.compute_mask(sample)
         } else {
             Err(Error::NoMoreData)
