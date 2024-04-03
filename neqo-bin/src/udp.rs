@@ -12,7 +12,6 @@ use std::{
     io::{self, IoSliceMut},
     mem::MaybeUninit,
     net::{SocketAddr, ToSocketAddrs},
-    slice,
 };
 
 use neqo_common::{qwarn, Datagram, IpTos};
@@ -67,21 +66,24 @@ impl Socket {
     }
 
     /// Send the UDP datagram on the specified socket.
-    pub fn send(&self, d: Datagram) -> io::Result<()> {
-        let transmit = Transmit {
-            destination: d.destination(),
-            ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-            contents: Vec::from(d).into(),
-            segment_size: None,
-            src_ip: None,
-        };
+    pub async fn send(&self, d: impl Iterator<Item = Datagram>) -> io::Result<()> {
+        let mut transmits: Vec<_> = d
+            .map(|d| Transmit {
+                destination: d.destination(),
+                ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
+                contents: Vec::from(d).into(),
+                segment_size: None,
+                src_ip: None,
+            })
+            .collect();
 
-        let n = self.socket.try_io(Interest::WRITABLE, || {
-            self.state
-                .send((&self.socket).into(), slice::from_ref(&transmit))
-        })?;
-
-        assert_eq!(n, 1, "only passed one slice");
+        while !transmits.is_empty() {
+            self.writable().await?;
+            let n = self.socket.try_io(Interest::WRITABLE, || {
+                self.state.send((&self.socket).into(), &transmits)
+            })?;
+            transmits.drain(0..n);
+        }
 
         Ok(())
     }
@@ -162,7 +164,7 @@ mod tests {
         );
 
         sender.writable().await?;
-        sender.send(datagram.clone())?;
+        sender.send(std::iter::once(datagram.clone())).await?;
 
         receiver.readable().await?;
         let received_datagram = receiver
@@ -209,7 +211,7 @@ mod tests {
         let n = sender.socket.try_io(Interest::WRITABLE, || {
             sender
                 .state
-                .send((&sender.socket).into(), slice::from_ref(&transmit))
+                .send((&sender.socket).into(), std::slice::from_ref(&transmit))
         })?;
         assert_eq!(n, 1, "only passed one slice");
 

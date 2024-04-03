@@ -518,21 +518,32 @@ impl ServersRunner {
     }
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+        let mut dgrams = Vec::new();
         loop {
+            let mut should_break = false;
+
             match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
-                    let socket = self.find_socket(dgram.source());
-                    socket.writable().await?;
-                    socket.send(dgram)?;
+                    dgrams.push(dgram);
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {:?}", new_timeout);
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+                    should_break = true;
                 }
                 Output::None => {
-                    break;
+                    should_break = true;
                 }
+            }
+
+            if !dgrams.is_empty() && (should_break || dgrams.len() >= 32) {
+                // TODO
+                let socket = self.find_socket(dgrams[0].source());
+                socket.send(dgrams.drain(0..)).await?;
+            }
+
+            if should_break {
+                break;
             }
         }
         Ok(())

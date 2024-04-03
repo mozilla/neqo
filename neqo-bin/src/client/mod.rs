@@ -436,21 +436,30 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+        let mut dgrams = Vec::new();
         loop {
+            let mut should_break = false;
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
-                    self.socket.writable().await?;
-                    self.socket.send(dgram)?;
+                    dgrams.push(dgram);
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {:?}", new_timeout);
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+                    should_break = true;
                 }
                 Output::None => {
                     qdebug!("Output::None");
-                    break;
+                    should_break = true;
                 }
+            }
+
+            if !dgrams.is_empty() && (should_break || dgrams.len() >= 32) {
+                self.socket.send(dgrams.drain(0..)).await?;
+            }
+
+            if should_break {
+                break;
             }
         }
 
