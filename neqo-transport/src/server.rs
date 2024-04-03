@@ -57,6 +57,20 @@ pub struct ServerConnectionState {
     wake_at: Option<Instant>,
 }
 
+impl ServerConnectionState {
+    fn set_wake_at(&mut self, at: Instant) {
+        self.wake_at = Some(at);
+    }
+
+    fn needs_waking(&self, now: Instant) -> bool {
+        self.wake_at.map_or(false, |t| t <= now)
+    }
+
+    fn woken(&mut self) {
+        self.wake_at = None;
+    }
+}
+
 impl Deref for ServerConnectionState {
     type Target = Connection;
     fn deref(&self) -> &Self::Target {
@@ -268,7 +282,7 @@ impl Server {
             }
             Output::Callback(delay) => {
                 let next = now + delay;
-                c.borrow_mut().wake_at = Some(next);
+                c.borrow_mut().set_wake_at(next);
                 if self.wake_at.map_or(true, |c| c > next) {
                     self.wake_at = Some(next);
                 }
@@ -637,11 +651,12 @@ impl Server {
                 .connections
                 .borrow()
                 .values()
-                .find(|c| c.borrow().callback.map_or(false, |t| t <= now))
+                .find(|c| c.borrow().needs_waking(now))
                 .cloned()?;
-            connection.borrow_mut().callback = None;
-            if let Some(d) = self.process_connection(&connection, None, now) {
-                return Some(d);
+            let datagram = self.process_connection(&connection, None, now);
+            connection.borrow_mut().woken();
+            if datagram.is_some() {
+                return datagram;
             }
         }
     }
