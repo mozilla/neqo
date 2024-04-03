@@ -54,7 +54,7 @@ type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 pub struct ServerConnectionState {
     c: Connection,
     active_attempt: Option<AttemptKey>,
-    callback: Option<Instant>,
+    wake_at: Option<Instant>,
 }
 
 impl Deref for ServerConnectionState {
@@ -168,7 +168,7 @@ pub struct Server {
     /// The set of connections that need immediate processing.
     waiting: VecDeque<StateRef>,
     /// The latest [`Output::Callback`] returned from [`Server::process`].
-    callback: Option<Instant>,
+    wake_at: Option<Instant>,
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
@@ -215,7 +215,7 @@ impl Server {
             address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
             ech_config: None,
-            callback: None,
+            wake_at: None,
         })
     }
 
@@ -268,9 +268,9 @@ impl Server {
             }
             Output::Callback(delay) => {
                 let next = now + delay;
-                c.borrow_mut().callback = Some(next);
-                if self.callback.map_or(true, |c| c > next) {
-                    self.callback = Some(next);
+                c.borrow_mut().wake_at = Some(next);
+                if self.wake_at.map_or(true, |c| c > next) {
+                    self.wake_at = Some(next);
                 }
             }
             Output::None => {}
@@ -491,7 +491,7 @@ impl Server {
                 self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
                 let c = Rc::new(RefCell::new(ServerConnectionState {
                     c,
-                    callback: None,
+                    wake_at: None,
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
@@ -631,7 +631,7 @@ impl Server {
             }
         }
 
-        qtrace!([self], "No packet to send still, check callbacks");
+        qtrace!([self], "No packet to send still, check wake up times");
         loop {
             let connection = self
                 .connections
@@ -647,8 +647,8 @@ impl Server {
     }
 
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        if self.callback.map_or(false, |c| c <= now) {
-            self.callback = None;
+        if self.wake_at.map_or(false, |c| c <= now) {
+            self.wake_at = None;
         }
 
         dgram
@@ -658,7 +658,7 @@ impl Server {
                 qtrace!([self], "Send packet: {:?}", d);
                 Output::Datagram(d)
             })
-            .or_else(|| self.callback.take().map(|c| Output::Callback(c - now)))
+            .or_else(|| self.wake_at.take().map(|c| Output::Callback(c - now)))
             .unwrap_or_else(|| {
                 qtrace!([self], "Go dormant");
                 Output::None
