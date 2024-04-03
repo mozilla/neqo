@@ -168,7 +168,6 @@ mod tests {
         let received_datagram = receiver
             .recv(&receiver_addr)
             .expect("receive to succeed")
-            .into_iter()
             .next()
             .expect("receive to yield datagram");
 
@@ -221,7 +220,6 @@ mod tests {
             receiver
                 .recv(&receiver_addr)
                 .expect("receive to succeed")
-                .into_iter()
                 .for_each(|d| {
                     assert_eq!(
                         SEGMENT_SIZE,
