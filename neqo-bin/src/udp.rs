@@ -10,7 +10,6 @@
 use std::{
     array,
     io::{self, IoSliceMut},
-    mem::MaybeUninit,
     net::{SocketAddr, ToSocketAddrs},
 };
 
@@ -98,19 +97,15 @@ impl Socket {
     ) -> Result<impl Iterator<Item = Datagram> + 'a, io::Error> {
         let mut metas = [RecvMeta::default(); BATCH_SIZE];
 
-        // TODO: Safe? Double check.
-        let mut iovs = MaybeUninit::<[IoSliceMut<'_>; BATCH_SIZE]>::uninit();
-        for (i, iov) in self
-            .recv_bufs
-            .iter_mut()
-            .map(|b| IoSliceMut::new(b))
-            .enumerate()
-        {
-            unsafe {
-                iovs.as_mut_ptr().cast::<IoSliceMut>().add(i).write(iov);
-            };
-        }
-        let mut iovs = unsafe { iovs.assume_init() };
+        let mut iovs: [IoSliceMut<'_>; BATCH_SIZE] = {
+            let mut recv_bufs = self.recv_bufs.iter_mut().map(|b| IoSliceMut::new(b));
+
+            array::from_fn(|_| {
+                recv_bufs
+                    .next()
+                    .expect("recv_bufs to have BATCH_SIZE items")
+            })
+        };
 
         let msgs = match self.socket.try_io(Interest::READABLE, || {
             self.state
