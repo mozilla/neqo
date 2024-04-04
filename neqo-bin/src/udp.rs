@@ -19,7 +19,7 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 use tokio::io::Interest;
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-// Chosen somewhat arbitrarily; might benefit from additional tuning.
+// TODO: Find value. Quinn uses 32.
 pub(crate) const BATCH_SIZE: usize = 32;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -28,6 +28,9 @@ pub(crate) const BATCH_SIZE: usize = 1;
 /// Socket receive buffer size.
 ///
 /// Allows reading multiple datagrams in a single [`Socket::recv`] call.
+///
+/// TODO: Find value.
+/// For comparision, MSQUIC buffer size: <https://github.com/microsoft/msquic/blob/e7b897d0661fb61830fd6d62b7039f421bb1015d/src/platform/datapath_epoll.c#L36>
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
 pub struct Socket {

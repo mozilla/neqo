@@ -536,7 +536,7 @@ impl ServersRunner {
                 }
             }
 
-            if !dgrams.is_empty() && (should_break || dgrams.len() >= 32) {
+            if !dgrams.is_empty() && (should_break || dgrams.len() >= udp::BATCH_SIZE) {
                 // TODO
                 let socket = self.find_socket(dgrams[0].source());
                 socket.send(dgrams.drain(0..)).await?;

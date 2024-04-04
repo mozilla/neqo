@@ -454,7 +454,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 }
             }
 
-            if !dgrams.is_empty() && (should_break || dgrams.len() >= 32) {
+            if !dgrams.is_empty() && (should_break || dgrams.len() >= udp::BATCH_SIZE) {
                 self.socket.send(dgrams.drain(0..)).await?;
             }
 
