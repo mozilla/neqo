@@ -367,8 +367,7 @@ trait Handler {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    // TODO: datagram option needed?
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    fn process_output(&mut self, now: Instant) -> Output;
     fn process_input(&mut self, dgram: &Datagram, now: Instant);
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
@@ -406,7 +405,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                     }
                 }
 
-            self.process(None).await?;
+            self.process().await?;
 
             if self.client.is_closed() {
                 if self.args.stats {
@@ -435,12 +434,12 @@ impl<'a, H: Handler> Runner<'a, H> {
         }
     }
 
-    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+    async fn process(&mut self) -> Result<(), io::Error> {
         // Accumulate up to BATCH_SIZE datagrams before sending.
         let mut dgrams = Vec::new();
 
         loop {
-            match self.client.process(dgram.take(), Instant::now()) {
+            match self.client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     dgrams.push(dgram);
                 }

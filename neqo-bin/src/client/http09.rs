@@ -138,8 +138,8 @@ pub(crate) fn create_client(
 }
 
 impl super::Client for Connection {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        self.process(dgram, now)
+    fn process_output(&mut self, now: Instant) -> Output {
+        self.process_output(now)
     }
 
     fn process_input(&mut self, dgram: &Datagram, now: Instant) {

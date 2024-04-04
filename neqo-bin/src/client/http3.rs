@@ -115,8 +115,8 @@ impl super::Client for Http3Client {
         matches!(self.state(), Http3State::Closed(..))
     }
 
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        self.process(dgram, now)
+    fn process_output(&mut self, now: Instant) -> Output {
+        self.process_output(now)
     }
 
     fn process_input(&mut self, dgram: &Datagram, now: Instant) {
