@@ -89,6 +89,7 @@ runs:
         path: quic-interop-runner/logs
 
     - name: Format GitHub comment
+      if: always()
       run: |
         echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
         echo '' >> comment
@@ -98,6 +99,7 @@ runs:
       shell: bash
 
     - name: Export PR comment data
+      if: always()
       uses: ./.github/actions/pr-comment-data-export
       with:
         name: qns
