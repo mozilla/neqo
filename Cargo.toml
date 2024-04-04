@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "neqo-fuzz",
+  "fuzz",
   "neqo-bin",
   "neqo-common",
   "neqo-crypto",
