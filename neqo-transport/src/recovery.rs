@@ -747,7 +747,7 @@ impl LossRecovery {
         // when it shouldn't.
         primary_path
             .borrow_mut()
-            .on_packets_acked(pn_space, &acked_packets, ack_ecn, now);
+            .on_packets_acked(&acked_packets, ack_ecn, now);
 
         self.pto_state = None;
 
@@ -1034,7 +1034,7 @@ mod tests {
     use crate::{
         cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
-        ecn::{EcnCount, EcnInfo, PacketSpaceEcnCounts},
+        ecn::EcnCount,
         packet::PacketType,
         path::{Path, PathRef},
         rtt::RttEstimate,
@@ -1112,7 +1112,6 @@ mod tests {
                 DEFAULT_ADDR,
                 CC,
                 true,
-                EcnInfo::new(PacketSpaceEcnCounts::default()),
                 NeqoQlog::default(),
                 now(),
             );

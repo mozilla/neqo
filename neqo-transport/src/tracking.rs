@@ -384,7 +384,7 @@ pub struct RecvdPackets {
     /// for the purposes of generating immediate acknowledgment.
     ignore_order: bool,
     // The counts of different ECN marks that have been received.
-    // received_ecn: EcnCount,
+    ecn_count: EcnCount,
 }
 
 impl RecvdPackets {
@@ -402,14 +402,14 @@ impl RecvdPackets {
             unacknowledged_count: 0,
             unacknowledged_tolerance: DEFAULT_ACK_PACKET_TOLERANCE,
             ignore_order: false,
-            // received_ecn: EcnCount::default(),
+            ecn_count: EcnCount::default(),
         }
     }
 
-    // /// Get the ECN counts.
-    // pub fn received_ecn(&mut self) -> &mut EcnCount {
-    //     &mut self.received_ecn
-    // }
+    /// Get the ECN counts.
+    pub fn ecn_marks(&mut self) -> &mut EcnCount {
+        &mut self.ecn_count
+    }
 
     /// Get the time at which the next ACK should be sent.
     pub fn ack_time(&self) -> Option<Instant> {
@@ -573,7 +573,6 @@ impl RecvdPackets {
         &mut self,
         now: Instant,
         rtt: Duration,
-        received_ecn: EcnCount,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
@@ -608,7 +607,7 @@ impl RecvdPackets {
             .cloned()
             .collect::<Vec<_>>();
 
-        builder.encode_varint(if received_ecn.is_some() {
+        builder.encode_varint(if self.ecn_count.is_some() {
             FRAME_TYPE_ACK_ECN
         } else {
             FRAME_TYPE_ACK
@@ -636,10 +635,10 @@ impl RecvdPackets {
             last = r.smallest;
         }
 
-        if received_ecn.is_some() {
-            builder.encode_varint(received_ecn[IpTosEcn::Ect0]);
-            builder.encode_varint(received_ecn[IpTosEcn::Ect1]);
-            builder.encode_varint(received_ecn[IpTosEcn::Ce]);
+        if self.ecn_count.is_some() {
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ect0]);
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ect1]);
+            builder.encode_varint(self.ecn_count[IpTosEcn::Ce]);
         }
 
         // We've sent an ACK, reset the timer.
@@ -737,19 +736,17 @@ impl AckTracker {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn write_frame(
         &mut self,
         pn_space: PacketNumberSpace,
         now: Instant,
         rtt: Duration,
-        received_ecn: &EcnCount,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
         if let Some(space) = self.get_mut(pn_space) {
-            space.write_frame(now, rtt, *received_ecn, builder, tokens, stats);
+            space.write_frame(now, rtt, builder, tokens, stats);
         }
     }
 }
@@ -778,7 +775,6 @@ mod tests {
         RecvdPackets, MAX_TRACKED_RANGES,
     };
     use crate::{
-        ecn::EcnCount,
         frame::Frame,
         packet::{PacketBuilder, PacketNumber},
         stats::FrameStats,
@@ -913,14 +909,7 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let mut stats = FrameStats::default();
         let mut tokens = Vec::new();
-        rp.write_frame(
-            now,
-            RTT,
-            EcnCount::default(),
-            &mut builder,
-            &mut tokens,
-            &mut stats,
-        );
+        rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
         assert!(!tokens.is_empty());
         assert_eq!(stats.ack, 1);
     }
@@ -1088,7 +1077,6 @@ mod tests {
             PacketNumberSpace::Initial,
             now(),
             RTT,
-            &EcnCount::default(),
             &mut builder,
             &mut tokens,
             &mut stats,
@@ -1115,7 +1103,6 @@ mod tests {
             PacketNumberSpace::Initial,
             now(),
             RTT,
-            &EcnCount::default(),
             &mut builder,
             &mut tokens,
             &mut stats,
@@ -1147,7 +1134,6 @@ mod tests {
             PacketNumberSpace::Initial,
             now(),
             RTT,
-            &EcnCount::default(),
             &mut builder,
             &mut Vec::new(),
             &mut stats,
@@ -1179,7 +1165,6 @@ mod tests {
             PacketNumberSpace::Initial,
             now(),
             RTT,
-            &EcnCount::default(),
             &mut builder,
             &mut Vec::new(),
             &mut stats,
