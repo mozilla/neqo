@@ -59,7 +59,7 @@ impl Socket {
     }
 
     /// See [`tokio::net::UdpSocket::writable`].
-    pub async fn writable(&self) -> Result<(), io::Error> {
+    async fn writable(&self) -> Result<(), io::Error> {
         self.socket.writable().await
     }
 

@@ -518,34 +518,39 @@ impl ServersRunner {
     }
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
-        let mut dgrams = Vec::new();
-        loop {
-            let mut should_break = false;
+        // Accumulate up to BATCH_SIZE datagrams per socket before sending.
+        let mut dgrams: HashMap<SocketAddr, Vec<_>> = HashMap::new();
 
+        loop {
             match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
-                    dgrams.push(dgram);
+                    dgrams.entry(dgram.source()).or_default().push(dgram);
                 }
-                Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
-                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    should_break = true;
-                }
-                Output::None => {
-                    should_break = true;
+                maybe_callback => {
+                    if let Output::Callback(new_timeout) = maybe_callback {
+                        qdebug!("Setting timeout of {:?}", new_timeout);
+                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    }
+                    break;
                 }
             }
 
-            if !dgrams.is_empty() && (should_break || dgrams.len() >= udp::BATCH_SIZE) {
-                // TODO
-                let socket = self.find_socket(dgrams[0].source());
-                socket.send(dgrams.drain(0..)).await?;
-            }
-
-            if should_break {
-                break;
+            // Reached BATCH_SIZE for one socket. Send batch.
+            if let Some((source, dgrams)) = dgrams
+                .iter_mut()
+                .find(|(_, dgrams)| dgrams.len() == udp::BATCH_SIZE)
+            {
+                let socket = self.find_socket(*source);
+                socket.send(dgrams.drain(..)).await?;
             }
         }
+
+        // About to exit. Send remaining datagrams.
+        for (source, mut dgrams) in dgrams.drain().filter(|(_, dgrams)| !dgrams.is_empty()) {
+            let socket = self.find_socket(source);
+            socket.send(dgrams.drain(..)).await?;
+        }
+
         Ok(())
     }
 

@@ -436,31 +436,32 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+        // Accumulate up to BATCH_SIZE datagrams before sending.
         let mut dgrams = Vec::new();
+
         loop {
-            let mut should_break = false;
             match self.client.process(dgram.take(), Instant::now()) {
                 Output::Datagram(dgram) => {
                     dgrams.push(dgram);
                 }
-                Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
-                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    should_break = true;
-                }
-                Output::None => {
-                    qdebug!("Output::None");
-                    should_break = true;
+                maybe_callback => {
+                    if let Output::Callback(new_timeout) = maybe_callback {
+                        qdebug!("Setting timeout of {:?}", new_timeout);
+                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    }
+                    break;
                 }
             }
 
-            if !dgrams.is_empty() && (should_break || dgrams.len() >= udp::BATCH_SIZE) {
-                self.socket.send(dgrams.drain(0..)).await?;
+            // Reached BATCH_SIZE. Send batch.
+            if dgrams.len() == udp::BATCH_SIZE {
+                self.socket.send(dgrams.drain(..)).await?;
             }
+        }
 
-            if should_break {
-                break;
-            }
+        // About to exit. Send remaining datagrams.
+        if !dgrams.is_empty() {
+            self.socket.send(dgrams.drain(..)).await?;
         }
 
         Ok(())
