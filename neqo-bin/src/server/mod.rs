@@ -336,13 +336,10 @@ impl HttpServer for SimpleServer {
                 } => {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
-                    let post = if let Some(method) = headers.iter().find(|&h| h.name() == ":method")
+                    if headers
+                        .iter()
+                        .any(|h| h.name() == ":method" && h.value() == "POST")
                     {
-                        method.value() == "POST"
-                    } else {
-                        false
-                    };
-                    if post {
                         self.posts.insert(stream, 0);
                         continue;
                     }
