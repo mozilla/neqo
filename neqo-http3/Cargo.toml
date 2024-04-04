@@ -28,7 +28,7 @@ url = { version = "2.5", default-features = false }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-fuzzing = ["neqo-transport/fuzzing", "neqo-crypto/fuzzing"]
+disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

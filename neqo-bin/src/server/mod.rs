@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use std::{
+    borrow::Cow,
     cell::RefCell,
     cmp::min,
     collections::HashMap,
@@ -24,76 +25,85 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use neqo_bin::udp;
 use neqo_common::{hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     generate_ech_keys, init_db, random, AntiReplay, Cipher,
 };
 use neqo_http3::{
-    Error, Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
+    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{
     server::ValidateAddress, ConnectionIdGenerator, Output, RandomConnectionIdGenerator, Version,
 };
+use old_https::Http09Server;
 use tokio::time::Sleep;
 
-use crate::old_https::Http09Server;
+use crate::{udp, SharedArgs};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
 mod old_https;
 
 #[derive(Debug)]
-pub enum ServerError {
+pub enum Error {
     ArgumentError(&'static str),
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    CryptoError(neqo_crypto::Error),
 }
 
-impl From<io::Error> for ServerError {
+impl From<neqo_crypto::Error> for Error {
+    fn from(err: neqo_crypto::Error) -> Self {
+        Self::CryptoError(err)
+    }
+}
+
+impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Self::IoError(err)
     }
 }
 
-impl From<neqo_http3::Error> for ServerError {
+impl From<neqo_http3::Error> for Error {
     fn from(err: neqo_http3::Error) -> Self {
         Self::Http3Error(err)
     }
 }
 
-impl From<qlog::Error> for ServerError {
+impl From<qlog::Error> for Error {
     fn from(_err: qlog::Error) -> Self {
         Self::QlogError
     }
 }
 
-impl From<neqo_transport::Error> for ServerError {
+impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
     }
 }
 
-impl Display for ServerError {
+impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error: {self:?}")?;
         Ok(())
     }
 }
 
-impl std::error::Error for ServerError {}
+impl std::error::Error for Error {}
+
+type Res<T> = Result<T, Error>;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+pub struct Args {
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
 
     #[command(flatten)]
-    shared: neqo_bin::SharedArgs,
+    shared: SharedArgs,
 
     /// List of IP:port to listen on
     #[arg(default_value = "[::]:4433")]
@@ -116,6 +126,22 @@ struct Args {
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
     ech: bool,
+}
+
+#[cfg(feature = "bench")]
+impl Default for Args {
+    fn default() -> Self {
+        use std::str::FromStr;
+        Self {
+            verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
+            shared: crate::SharedArgs::default(),
+            hosts: vec!["[::]:12345".to_string()],
+            db: PathBuf::from_str("../test-fixture/db").unwrap(),
+            key: "key".to_string(),
+            retry: false,
+            ech: false,
+        }
+    }
 }
 
 impl Args {
@@ -196,7 +222,7 @@ trait HttpServer: Display {
 }
 
 struct ResponseData {
-    data: Vec<u8>,
+    data: Cow<'static, [u8]>,
     offset: usize,
     remaining: usize,
 }
@@ -211,7 +237,7 @@ impl From<Vec<u8>> for ResponseData {
     fn from(data: Vec<u8>) -> Self {
         let remaining = data.len();
         Self {
-            data,
+            data: Cow::Owned(data),
             offset: 0,
             remaining,
         }
@@ -219,9 +245,9 @@ impl From<Vec<u8>> for ResponseData {
 }
 
 impl ResponseData {
-    fn repeat(buf: &[u8], total: usize) -> Self {
+    fn repeat(buf: &'static [u8], total: usize) -> Self {
         Self {
-            data: buf.to_owned(),
+            data: Cow::Borrowed(buf),
             offset: 0,
             remaining: total,
         }
@@ -260,14 +286,7 @@ struct SimpleServer {
 }
 
 impl SimpleServer {
-    const MESSAGE: &'static [u8] = b"I am the very model of a modern Major-General,\n\
-        I've information vegetable, animal, and mineral,\n\
-        I know the kings of England, and I quote the fights historical\n\
-        From Marathon to Waterloo, in order categorical;\n\
-        I'm very well acquainted, too, with matters mathematical,\n\
-        I understand equations, both the simple and quadratical,\n\
-        About binomial theorem, I'm teeming with a lot o' news,\n\
-        With many cheerful facts about the square of the hypotenuse.\n";
+    const MESSAGE: &'static [u8] = &[0; 4096];
 
     pub fn new(
         args: &Args,
@@ -317,13 +336,10 @@ impl HttpServer for SimpleServer {
                 } => {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
-                    let post = if let Some(method) = headers.iter().find(|&h| h.name() == ":method")
+                    if headers
+                        .iter()
+                        .any(|h| h.name() == ":method" && h.value() == "POST")
                     {
-                        method.value() == "POST"
-                    } else {
-                        false
-                    };
-                    if post {
                         self.posts.insert(stream, 0);
                         continue;
                     }
@@ -345,7 +361,7 @@ impl HttpServer for SimpleServer {
                             }
                         } else {
                             stream
-                                .cancel_fetch(Error::HttpRequestIncomplete.code())
+                                .cancel_fetch(neqo_http3::Error::HttpRequestIncomplete.code())
                                 .unwrap();
                             continue;
                         };
@@ -541,7 +557,7 @@ impl ServersRunner {
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
-    async fn run(&mut self) -> Result<(), io::Error> {
+    async fn run(&mut self) -> Res<()> {
         loop {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
@@ -571,15 +587,13 @@ enum Ready {
     Timeout,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), io::Error> {
+pub async fn server(mut args: Args) -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
-    let mut args = Args::parse();
     neqo_common::log::init(Some(args.verbose.log_level_filter()));
     assert!(!args.key.is_empty(), "Need at least one key");
 
-    init_db(args.db.clone());
+    init_db(args.db.clone())?;
 
     if let Some(testcase) = args.shared.qns_test.as_ref() {
         if args.shared.quic_parameters.quic_version.is_empty() {
