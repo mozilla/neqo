@@ -157,11 +157,6 @@ impl SendMessage {
     fn get_stream_info(&self) -> Http3StreamInfo {
         Http3StreamInfo::new(self.stream_id(), Http3StreamType::Http)
     }
-
-    fn stream_avail_send_space(&self, conn: &Connection) -> Res<usize> {
-        conn.stream_avail_send_space(self.stream_id())
-            .map_err(|e| Error::map_stream_send_errors(&e.into()))
-    }
 }
 
 impl Stream for SendMessage {
@@ -179,7 +174,9 @@ impl SendStream for SendMessage {
         if self.stream.has_buffered_data() {
             return Ok(0);
         }
-        let available = self.stream_avail_send_space(conn)?;
+        let available = conn
+            .stream_avail_send_space(self.stream_id())
+            .map_err(|e| Error::map_stream_send_errors(&e.into()))?;
         if available <= 2 {
             return Ok(0);
         }
@@ -256,8 +253,7 @@ impl SendStream for SendMessage {
                     Error::HttpInternal(6),
                 )?;
                 qtrace!([self], "done sending request");
-            } else if self.stream_avail_send_space(conn)? > 2 {
-                // TODO: Deduplicate and document 2
+            } else {
                 // DataWritable is just a signal for an application to try to write more data,
                 // if writing fails it is fine. Therefore we do not need to properly check
                 // whether more credits are available on the transport layer.
