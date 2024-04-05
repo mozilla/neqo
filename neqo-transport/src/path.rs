@@ -974,7 +974,7 @@ impl Path {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        ack_ecn: &EcnCount,
+        ack_ecn: Option<EcnCount>,
         now: Instant,
     ) {
         debug_assert!(self.is_primary());

@@ -399,7 +399,7 @@ impl From<&Frame<'_>> for QuicFrame {
                 ack_delay,
                 first_ack_range,
                 ack_ranges,
-                ecn_count: ecn_counts,
+                ecn_count,
             } => {
                 let ranges =
                     Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges)
@@ -416,9 +416,21 @@ impl From<&Frame<'_>> for QuicFrame {
                 QuicFrame::Ack {
                     ack_delay: Some(*ack_delay as f32 / 1000.0),
                     acked_ranges,
-                    ect1: Some(ecn_counts[IpTosEcn::Ect1]),
-                    ect0: Some(ecn_counts[IpTosEcn::Ect0]),
-                    ce: Some(ecn_counts[IpTosEcn::Ce]),
+                    ect1: if ecn_count.is_none() {
+                        None
+                    } else {
+                        Some(ecn_count.unwrap()[IpTosEcn::Ect1])
+                    },
+                    ect0: if ecn_count.is_none() {
+                        None
+                    } else {
+                        Some(ecn_count.unwrap()[IpTosEcn::Ect0])
+                    },
+                    ce: if ecn_count.is_none() {
+                        None
+                    } else {
+                        Some(ecn_count.unwrap()[IpTosEcn::Ce])
+                    },
                 }
             }
             Frame::ResetStream {

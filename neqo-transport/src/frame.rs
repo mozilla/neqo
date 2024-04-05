@@ -117,7 +117,7 @@ pub enum Frame<'a> {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: Vec<AckRange>,
-        ecn_count: EcnCount,
+        ecn_count: Option<EcnCount>,
     },
     ResetStream {
         stream_id: StreamId,
@@ -449,9 +449,9 @@ impl<'a> Frame<'a> {
             }
 
             // Now check for the values for ACK_ECN.
-            let ecn_count: EcnCount = match t {
-                FRAME_TYPE_ACK_ECN => EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?),
-                _ => EcnCount::default(),
+            let ecn_count: Option<EcnCount> = match t {
+                FRAME_TYPE_ACK_ECN => Some(EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?)),
+                _ => None,
             };
 
             Ok(Frame::Ack {
@@ -685,7 +685,7 @@ mod tests {
             ack_delay: 0x1235,
             first_ack_range: 0x1236,
             ack_ranges: ar.clone(),
-            ecn_count: EcnCount::default(),
+            ecn_count: None,
         };
 
         just_dec(&f, "025234523502523601020304");
@@ -696,7 +696,7 @@ mod tests {
         assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
 
         // Try to parse ACK_ECN with ECN values
-        let ecn_count = EcnCount::new(0, 1, 2, 3);
+        let ecn_count = Some(EcnCount::new(0, 1, 2, 3));
         let fe = Frame::Ack {
             largest_acknowledged: 0x1234,
             ack_delay: 0x1235,

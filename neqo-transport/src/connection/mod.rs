@@ -2718,7 +2718,7 @@ impl Connection {
                     space,
                     largest_acknowledged,
                     ranges,
-                    &ecn_count,
+                    ecn_count,
                     ack_delay,
                     now,
                 );
@@ -2898,7 +2898,7 @@ impl Connection {
         space: PacketNumberSpace,
         largest_acknowledged: u64,
         ack_ranges: R,
-        ack_ecn: &EcnCount,
+        ack_ecn: Option<EcnCount>,
         ack_delay: u64,
         now: Instant,
     ) where

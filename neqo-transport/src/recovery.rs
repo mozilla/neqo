@@ -673,7 +673,7 @@ impl LossRecovery {
         pn_space: PacketNumberSpace,
         largest_acked: u64,
         acked_ranges: R,
-        ack_ecn: &EcnCount,
+        ack_ecn: Option<EcnCount>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -1064,7 +1064,7 @@ mod tests {
             pn_space: PacketNumberSpace,
             largest_acked: u64,
             acked_ranges: Vec<RangeInclusive<u64>>,
-            ack_ecn: &EcnCount,
+            ack_ecn: Option<EcnCount>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
@@ -1230,7 +1230,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             pn,
             vec![pn..=pn],
-            &EcnCount::default(),
+            None,
             ACK_DELAY,
             pn_time(pn) + delay,
         );
@@ -1381,7 +1381,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             1,
             vec![1..=1],
-            &EcnCount::default(),
+            None,
             ACK_DELAY,
             pn_time(0) + (TEST_RTT * 5 / 4),
         );
@@ -1405,7 +1405,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             2,
             vec![2..=2],
-            &EcnCount::default(),
+            None,
             ACK_DELAY,
             pn2_ack_time,
         );
@@ -1435,7 +1435,7 @@ mod tests {
             PacketNumberSpace::ApplicationData,
             4,
             vec![2..=4],
-            &EcnCount::default(),
+            None,
             ACK_DELAY,
             pn_time(4),
         );
@@ -1464,7 +1464,7 @@ mod tests {
             PacketNumberSpace::Initial,
             0,
             vec![],
-            &EcnCount::default(),
+            None,
             Duration::from_millis(0),
             pn_time(0),
         );
@@ -1524,7 +1524,7 @@ mod tests {
                 pn_space,
                 1,
                 vec![1..=1],
-                &EcnCount::default(),
+                None,
                 Duration::from_secs(0),
                 pn_time(3),
             );
@@ -1577,7 +1577,7 @@ mod tests {
             PacketNumberSpace::Initial,
             0,
             vec![0..=0],
-            &EcnCount::default(),
+            None,
             Duration::new(0, 0),
             now() + rtt,
         );

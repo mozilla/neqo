@@ -4,12 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::{AddAssign, Deref, DerefMut, Sub};
+use std::{
+    cmp::max,
+    ops::{AddAssign, Deref, DerefMut, Sub},
+};
 
 use enum_map::EnumMap;
 use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 
-use crate::tracking::SentPacket;
+use crate::{packet::PacketNumber, tracking::SentPacket};
 
 /// The number of packets to use for testing a path for ECN capability.
 pub const ECN_TEST_COUNT: usize = 10;
@@ -59,11 +62,11 @@ impl EcnCount {
     }
 }
 
-impl<'a, 'b> Sub<&'a EcnCount> for &'b EcnCount {
+impl Sub<EcnCount> for EcnCount {
     type Output = EcnCount;
 
     /// Subtract the ECN counts in `other` from `self`.
-    fn sub(self, other: &'a EcnCount) -> EcnCount {
+    fn sub(self, other: EcnCount) -> EcnCount {
         let mut diff = EcnCount::default();
         for (ecn, count) in &mut *diff {
             *count = self[ecn].saturating_sub(other[ecn]);
@@ -82,9 +85,14 @@ impl AddAssign<IpTosEcn> for EcnCount {
 pub struct EcnInfo {
     /// The current state of ECN validation on this path.
     state: EcnValidationState,
+
     /// The number of probes sent so far on the path during the ECN validation.
     probes_sent: usize,
-    /// The ECN counts from the last ACK frame.
+
+    /// The largest ACK seen so far.
+    largest_acked: PacketNumber,
+
+    /// The ECN counts from the last ACK frame that increased `largest_acked`.
     baseline: EcnCount,
 }
 
@@ -119,15 +127,25 @@ impl EcnInfo {
     }
 
     /// After the ECN validation test has ended, check if the path is ECN capable.
-    pub fn validate_ack_ecn(&mut self, acked_packets: &[SentPacket], ack_ecn: &EcnCount) {
+    pub fn validate_ack_ecn(&mut self, acked_packets: &[SentPacket], ack_ecn: Option<EcnCount>) {
+        // RFC 9000, Appendix A.4:
+        //
+        // > From the "unknown" state, successful validation of the ECN counts in an ACK frame
+        // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
+        // > no marked packet has been acknowledged.
         if self.state != EcnValidationState::Unknown {
             return;
         }
 
-        // RFC 9000, Appendix A.4:
-        // From the "unknown" state, successful validation of the ECN counts in an ACK frame
-        // (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
-        // no marked packet has been acknowledged.
+        // RFC 9000, Section 13.4.2.1:
+        //
+        // > Validating ECN counts from reordered ACK frames can result in failure. An endpoint MUST
+        // > NOT fail ECN validation as a result of processing an ACK frame that does not increase
+        // > the largest acknowledged packet number.
+        let largest_acked = acked_packets.first().expect("must be there").pn;
+        if largest_acked <= self.largest_acked {
+            return;
+        }
 
         // RFC 9000, Section 13.4.2.1:
         //
@@ -138,37 +156,51 @@ impl EcnInfo {
         // > If an ACK frame newly acknowledges a packet that the endpoint sent with
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
         // > corresponding ECN counts are not present in the ACK frame.
-        //
+        if ack_ecn.is_none() {
+            qwarn!("ECN validation failed, no ECN counts in ACK frame");
+            self.state = EcnValidationState::Failed;
+            return;
+        }
+        let ack_ecn = ack_ecn.unwrap();
+
         // We always mark with ECT(0) - if at all - so we only need to check for that.
-        // Also, if we sent a packet with ECT(0) and get only an ACK frame (and not an
-        // ACK-ECN frame), `ecn_counts` will be all zero and the check below will fail,
-        // so no need to explicitly check for the above.
         //
         // > ECN validation also fails if the sum of the increase in ECT(0) and ECN-CE counts is
         // > less than the number of newly acknowledged packets that were originally sent with an
         // > ECT(0) marking.
-        let newly_acked_sent_with_ect0 = acked_packets
+        let newly_acked_sent_with_ect0: u64 = acked_packets
             .iter()
             .filter(|p| p.ecn_mark == IpTosEcn::Ect0)
-            .count();
-        let ecn_diff = ack_ecn - &self.baseline;
+            .count()
+            .try_into()
+            .unwrap();
+        if newly_acked_sent_with_ect0 == 0 {
+            qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
+            self.state = EcnValidationState::Failed;
+            return;
+        }
+        let ecn_diff = ack_ecn - self.baseline;
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
-        if sum_inc < newly_acked_sent_with_ect0.try_into().unwrap() {
+        if sum_inc < newly_acked_sent_with_ect0 {
             qwarn!(
-                "ACK had {} new marks, but {} of newly acked packets were sent with ECN, ECN validation failed",
+                "ECN validation failed, ACK counted {} new marks, but {} of newly acked packets were sent with ECT(0)",
                 sum_inc,
                 newly_acked_sent_with_ect0
             );
             self.state = EcnValidationState::Failed;
+        } else if ack_ecn[IpTosEcn::Ect1] > 0 {
+            qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
+            self.state = EcnValidationState::Failed;
         } else {
             qinfo!(
-                "ECN validation succeeded {} {}, path is capable",
+                "ECN validation succeeded XXX {} {}, path is capable",
                 sum_inc,
                 newly_acked_sent_with_ect0
             );
             self.state = EcnValidationState::Capable;
         }
-        self.baseline = *ack_ecn;
+        self.baseline = ack_ecn;
+        self.largest_acked = max(self.largest_acked, largest_acked);
     }
 
     /// The ECN mark to use for packets sent on this path.
