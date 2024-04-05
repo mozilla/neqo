@@ -64,13 +64,15 @@ impl Http3ServerHandler {
         data: &[u8],
         conn: &mut Connection,
     ) -> Res<usize> {
-        self.base_handler.stream_has_pending_data(stream_id);
-        self.needs_processing = true;
-        self.base_handler
+        let n = self
+            .base_handler
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send_data(conn, data)
+            .send_data(conn, data)?;
+        self.base_handler.stream_might_have_pending_data(stream_id);
+        self.needs_processing = true;
+        Ok(n)
     }
 
     /// Supply response heeaders for a request.
@@ -87,7 +89,7 @@ impl Http3ServerHandler {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?
             .send_headers(headers, conn)?;
-        self.base_handler.stream_has_pending_data(stream_id);
+        self.base_handler.stream_might_have_pending_data(stream_id);
         self.needs_processing = true;
         Ok(())
     }
@@ -100,7 +102,7 @@ impl Http3ServerHandler {
     pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
         qdebug!([self], "Close sending side stream={}.", stream_id);
         self.base_handler.stream_close_send(conn, stream_id)?;
-        self.base_handler.stream_has_pending_data(stream_id);
+        self.base_handler.stream_might_have_pending_data(stream_id);
         self.needs_processing = true;
         Ok(())
     }
