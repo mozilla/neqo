@@ -247,6 +247,10 @@ impl HttpServer for Http09Server {
             .expect("enable ECH");
         self.server.ech_config()
     }
+
+    fn has_events(&self) -> bool {
+        self.server.has_active_connections()
+    }
 }
 
 impl Display for Http09Server {

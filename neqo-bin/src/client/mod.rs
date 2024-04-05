@@ -369,6 +369,7 @@ trait Handler {
 trait Client {
     fn process_output(&mut self, now: Instant) -> Output;
     fn process_input(&mut self, dgram: &Datagram, now: Instant);
+    fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
@@ -391,20 +392,21 @@ impl<'a, H: Handler> Runner<'a, H> {
             let handler_done = self.handler.handle(&mut self.client)?;
 
             match (handler_done, self.args.resume, self.handler.has_token()) {
-                    // Handler isn't done. Continue.
-                    (false, _, _) => {},
-                    // Handler done. Resumption token needed but not present. Continue.
-                    (true, true, false) => {
-                        qdebug!("Handler done. Waiting for resumption token.");
-                    }
-                    // Handler is done, no resumption token needed. Close.
-                    (true, false, _) |
-                    // Handler is done, resumption token needed and present. Close.
-                    (true, true, true) => {
-                        self.client.close(Instant::now(), 0, "kthxbye!");
-                    }
+                // Handler isn't done. Continue.
+                (false, _, _) => {},
+                // Handler done. Resumption token needed but not present. Continue.
+                (true, true, false) => {
+                    qdebug!("Handler done. Waiting for resumption token.");
                 }
+                // Handler is done, no resumption token needed. Close.
+                (true, false, _) |
+                // Handler is done, resumption token needed and present. Close.
+                (true, true, true) => {
+                    self.client.close(Instant::now(), 0, "kthxbye!");
+                }
+            }
 
+            // TODO: Rename process_output.
             self.process().await?;
 
             if self.client.is_closed() {
@@ -412,6 +414,10 @@ impl<'a, H: Handler> Runner<'a, H> {
                     qinfo!("{:?}", self.client.stats());
                 }
                 return Ok(self.handler.take_token());
+            }
+
+            if self.client.has_events() {
+                continue;
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
