@@ -1102,10 +1102,18 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("packet", d);
             self.input(d, now, now);
             self.process_saved(now);
         }
-        self.process_output(now)
+        #[warn(clippy::let_and_return)]
+        let output = self.process_output(now);
+        #[cfg(feature = "build-fuzzing-corpus")]
+        if let Output::Datagram(ref d) = output {
+            neqo_common::write_item_to_fuzzing_corpus("packet", d);
+        }
+        output
     }
 
     fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) {
@@ -1565,7 +1573,11 @@ impl Connection {
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
         while d.remaining() > 0 {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let pos = d.offset();
             let f = Frame::decode(&mut d)?;
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &packet[pos..d.offset()]);
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();

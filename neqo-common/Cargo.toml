@@ -16,6 +16,7 @@ workspace = true
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = { version = "2.7", default-features = false }
 env_logger = { version = "0.10", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.12", default-features = false }
 time = { version = "0.3", default-features = false, features = ["formatting"] }
@@ -26,6 +27,7 @@ test-fixture = { path = "../test-fixture" }
 
 [features]
 ci = []
+build-fuzzing-corpus = ["hex"]
 
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"

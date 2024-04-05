@@ -17,6 +17,7 @@ impl Random {
     #[must_use]
     #[allow(clippy::missing_panics_doc)] // These are impossible.
     pub fn new(seed: &[u8; 32]) -> Self {
+        #[cfg(not(feature = "disable-random"))]
         assert!(seed.iter().any(|&x| x != 0));
         let mut dec = Decoder::from(&seed);
         Self {
@@ -29,6 +30,12 @@ impl Random {
         }
     }
 
+    #[cfg(feature = "disable-random")]
+    pub fn random(&mut self) -> u64 {
+        return 0;
+    }
+
+    #[cfg(not(feature = "disable-random"))]
     pub fn random(&mut self) -> u64 {
         let result = (self.state[1].overflowing_mul(5).0)
             .rotate_right(7)

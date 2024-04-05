@@ -27,8 +27,13 @@ test-fixture = { path = "../test-fixture" }
 
 [features]
 bench = []
+build-fuzzing-corpus = [
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-crypto/disable-encryption",
+        "neqo-crypto/disable-random",
+        "test-fixture/disable-random",
+]
 disable-encryption = ["neqo-crypto/disable-encryption"]
-fuzzing = []
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
