@@ -5,8 +5,9 @@
 // except according to those terms.
 
 use std::{
+    collections::hash_map::DefaultHasher,
     fs::File,
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
     io::Write,
     path::Path,
 };
