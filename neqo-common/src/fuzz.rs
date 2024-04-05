@@ -13,6 +13,10 @@ use std::{
 
 /// Write a data item `data` for the fuzzing target `target` to the fuzzing corpus. The caller needs
 /// to make sure that `target` is the correct fuzzing target name for the data written.
+///
+/// # Panics
+///
+/// Panics if the corpus directory does not exist or if the corpus item cannot be written.
 pub fn write_item_to_fuzzing_corpus(target: &str, data: &[u8]) {
     // This bakes in the assumption that we're executing in the root of the neqo workspace.
     // Unfortuntely, `cargo fuzz` doesn't provide a way to learn the location of the corpus

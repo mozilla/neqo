@@ -32,7 +32,7 @@ impl Random {
 
     #[cfg(feature = "disable-random")]
     pub fn random(&mut self) -> u64 {
-        return 0;
+        0
     }
 
     #[cfg(not(feature = "disable-random"))]
