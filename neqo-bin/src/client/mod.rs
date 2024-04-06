@@ -384,6 +384,7 @@ struct Runner<'a, H: Handler> {
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
+    dgrams: Vec<Datagram>,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -442,12 +443,10 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process(&mut self) -> Result<(), io::Error> {
         // Accumulate up to BATCH_SIZE datagrams before sending.
-        let mut dgrams = Vec::new();
-
         loop {
             match self.client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
-                    dgrams.push(dgram);
+                    self.dgrams.push(dgram);
                 }
                 maybe_callback => {
                     if let Output::Callback(new_timeout) = maybe_callback {
@@ -459,14 +458,14 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
 
             // Reached BATCH_SIZE. Send batch.
-            if dgrams.len() == udp::BATCH_SIZE {
-                self.socket.send(dgrams.drain(..)).await?;
+            if self.dgrams.len() == udp::BATCH_SIZE {
+                self.socket.send(self.dgrams.drain(..)).await?;
             }
         }
 
         // About to exit. Send remaining datagrams.
-        if !dgrams.is_empty() {
-            self.socket.send(dgrams.drain(..)).await?;
+        if !self.dgrams.is_empty() {
+            self.socket.send(self.dgrams.drain(..)).await?;
         }
 
         Ok(())
@@ -586,6 +585,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     local_addr: real_local,
                     socket: &mut socket,
                     timeout: None,
+                    dgrams: vec![],
                 }
                 .run()
                 .await?
@@ -602,6 +602,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     local_addr: real_local,
                     socket: &mut socket,
                     timeout: None,
+                    dgrams: vec![],
                 }
                 .run()
                 .await?

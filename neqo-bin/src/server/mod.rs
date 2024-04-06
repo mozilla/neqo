@@ -23,7 +23,7 @@ use std::{
 use clap::Parser;
 use futures::{
     future::{select, select_all, Either},
-    FutureExt,
+    FutureExt, TryFutureExt,
 };
 use neqo_common::{hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{
@@ -445,7 +445,7 @@ struct ServersRunner {
     args: Args,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, udp::Socket)>,
+    sockets: HashMap<SocketAddr, (udp::Socket, Vec<Datagram>)>,
 }
 
 impl ServersRunner {
@@ -462,7 +462,7 @@ impl ServersRunner {
                 let local_addr = socket.local_addr()?;
                 qinfo!("Server waiting for connection on: {local_addr:?}");
 
-                Ok((host, socket))
+                Ok((host, (socket, vec![])))
             })
             .collect::<Result<_, io::Error>>()?;
         let server = Self::create_server(&args);
@@ -508,28 +508,16 @@ impl ServersRunner {
         svr
     }
 
-    /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(&mut self, addr: SocketAddr) -> &mut udp::Socket {
-        let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
-        rest.iter_mut()
-            .map(|(_host, socket)| socket)
-            .find(|socket| {
-                socket
-                    .local_addr()
-                    .ok()
-                    .map_or(false, |socket_addr| socket_addr == addr)
-            })
-            .unwrap_or(first_socket)
-    }
-
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
         // Accumulate up to BATCH_SIZE datagrams per socket before sending.
-        let mut dgrams: HashMap<SocketAddr, Vec<_>> = HashMap::new();
-
         loop {
             match self.server.process(dgram.take(), self.args.now()) {
                 Output::Datagram(dgram) => {
-                    dgrams.entry(dgram.source()).or_default().push(dgram);
+                    self.sockets
+                        .get_mut(&dgram.source())
+                        .expect("TODO")
+                        .1
+                        .push(dgram);
                 }
                 maybe_callback => {
                     if let Output::Callback(new_timeout) = maybe_callback {
@@ -541,18 +529,21 @@ impl ServersRunner {
             }
 
             // Reached BATCH_SIZE for one socket. Send batch.
-            if let Some((source, dgrams)) = dgrams
+            if let Some((_, (socket, dgrams))) = self
+                .sockets
                 .iter_mut()
-                .find(|(_, dgrams)| dgrams.len() == udp::BATCH_SIZE)
+                .find(|(_, (_, dgrams))| dgrams.len() == udp::BATCH_SIZE)
             {
-                let socket = self.find_socket(*source);
                 socket.send(dgrams.drain(..)).await?;
             }
         }
 
         // About to exit. Send remaining datagrams.
-        for (source, mut dgrams) in dgrams.drain().filter(|(_, dgrams)| !dgrams.is_empty()) {
-            let socket = self.find_socket(source);
+        for (_, (socket, dgrams)) in self
+            .sockets
+            .iter_mut()
+            .filter(|(_, (_, dgrams))| !dgrams.is_empty())
+        {
             socket.send(dgrams.drain(..)).await?;
         }
 
@@ -564,10 +555,10 @@ impl ServersRunner {
         let sockets_ready = select_all(
             self.sockets
                 .iter()
-                .map(|(_host, socket)| Box::pin(socket.readable())),
+                .map(|(addr, (socket, _))| Box::pin(socket.readable().map_ok(|()| *addr))),
         )
-        .map(|(res, inx, _)| match res {
-            Ok(()) => Ok(Ready::Socket(inx)),
+        .map(|(res, _, _)| match res {
+            Ok(addr) => Ok(Ready::Socket(addr)),
             Err(e) => Err(e),
         });
         let timeout_ready = self
@@ -589,10 +580,11 @@ impl ServersRunner {
             }
 
             match self.ready().await? {
-                Ready::Socket(inx) => loop {
-                    let (host, socket) = self.sockets.get_mut(inx).unwrap();
+                Ready::Socket(addr) => loop {
+                    let (socket, _) = self.sockets.get_mut(&addr).unwrap();
                     // TODO: Remove collect.
-                    let dgrams: Vec<_> = socket.recv(host)?.collect();
+                    // TODO: Rename to input_dgrams?
+                    let dgrams: Vec<_> = socket.recv(&addr)?.collect();
                     if dgrams.is_empty() {
                         break;
                     }
@@ -610,7 +602,7 @@ impl ServersRunner {
 }
 
 enum Ready {
-    Socket(usize),
+    Socket(SocketAddr),
     Timeout,
 }
 
