@@ -390,22 +390,24 @@ struct Runner<'a, H: Handler> {
 impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
+            self.process_output().await?;
+
             let handler_done = self.handler.handle(&mut self.client)?;
 
             match (handler_done, self.args.resume, self.handler.has_token()) {
-                    // Handler isn't done. Continue.
-                    (false, _, _) => {},
-                    // Handler done. Resumption token needed but not present. Continue.
-                    (true, true, false) => {
-                        qdebug!("Handler done. Waiting for resumption token.");
-                    }
-                    // Handler is done, no resumption token needed. Close.
-                    (true, false, _) |
-                    // Handler is done, resumption token needed and present. Close.
-                    (true, true, true) => {
-                        self.client.close(Instant::now(), 0, "kthxbye!");
-                    }
+                // Handler isn't done. Continue.
+                (false, _, _) => {},
+                // Handler done. Resumption token needed but not present. Continue.
+                (true, true, false) => {
+                    qdebug!("Handler done. Waiting for resumption token.");
                 }
+                // Handler is done, no resumption token needed. Close.
+                (true, false, _) |
+                // Handler is done, resumption token needed and present. Close.
+                (true, true, true) => {
+                    self.client.close(Instant::now(), 0, "kthxbye!");
+                }
+            }
 
             self.process_output().await?;
 
