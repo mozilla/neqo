@@ -432,6 +432,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                     if is_empty {
                         break;
                     }
+                    self.process().await?;
                     self.handler.maybe_key_update(&mut self.client)?;
                 },
                 Ready::Timeout => {
