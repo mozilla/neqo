@@ -390,8 +390,6 @@ struct Runner<'a, H: Handler> {
 impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
-            self.process_output().await?;
-
             let handler_done = self.handler.handle(&mut self.client)?;
 
             match (handler_done, self.args.resume, self.handler.has_token()) {
@@ -419,7 +417,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
-                Ready::Socket => self.process_multiple_input()?,
+                Ready::Socket => self.process_multiple_input().await?,
                 Ready::Timeout => {
                     self.timeout = None;
                 }
@@ -449,7 +447,7 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(())
     }
 
-    fn process_multiple_input(&mut self) -> Res<()> {
+    async fn process_multiple_input(&mut self) -> Res<()> {
         loop {
             let dgrams = self.socket.recv(&self.local_addr)?;
             if dgrams.is_empty() {
@@ -457,6 +455,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
             self.client
                 .process_multiple_input(dgrams.iter(), Instant::now());
+            self.process_output().await?;
             self.handler.maybe_key_update(&mut self.client)?;
         }
 
