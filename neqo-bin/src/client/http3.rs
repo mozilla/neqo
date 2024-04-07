@@ -115,8 +115,15 @@ impl super::Client for Http3Client {
         matches!(self.state(), Http3State::Closed(..))
     }
 
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        self.process(dgram, now)
+    fn process_output(&mut self, now: Instant) -> Output {
+        self.process_output(now)
+    }
+
+    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>,
+    {
+        self.process_multiple_input(dgrams, now);
     }
 
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
