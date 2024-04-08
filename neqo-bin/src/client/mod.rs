@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionId, Error as TransportError, Version};
+use neqo_transport::{AppError, ConnectionError, ConnectionId, Error as TransportError, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -46,6 +46,7 @@ pub enum Error {
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    ApplicationError(neqo_transport::AppError),
     CryptoError(neqo_crypto::Error),
 }
 
@@ -76,6 +77,15 @@ impl From<qlog::Error> for Error {
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
+    }
+}
+
+impl From<neqo_transport::ConnectionError> for Error {
+    fn from(err: neqo_transport::ConnectionError) -> Self {
+        match err {
+            ConnectionError::Transport(e) => Self::TransportError(e),
+            ConnectionError::Application(e) => Self::ApplicationError(e),
+        }
     }
 }
 
@@ -371,7 +381,11 @@ trait Client {
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
-    fn is_closed(&self) -> bool;
+    /// Returns [`Some(_)`] if the connection is closed.
+    ///
+    /// Note that connection was closed without error on
+    /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
+    fn is_closed(&self) -> Option<ConnectionError>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -406,11 +420,15 @@ impl<'a, H: Handler> Runner<'a, H> {
 
             self.process(None).await?;
 
-            if self.client.is_closed() {
+            if let Some(reason) = self.client.is_closed() {
                 if self.args.stats {
                     qinfo!("{:?}", self.client.stats());
                 }
-                return Ok(self.handler.take_token());
+                return match reason {
+                    ConnectionError::Transport(TransportError::NoError)
+                    | ConnectionError::Application(0) => Ok(self.handler.take_token()),
+                    _ => Err(reason.into()),
+                };
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {

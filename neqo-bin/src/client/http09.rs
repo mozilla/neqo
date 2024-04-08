@@ -20,8 +20,8 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
-    StreamType,
+    Connection, ConnectionError, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
+    StreamId, StreamType,
 };
 use url::Url;
 
@@ -149,8 +149,11 @@ impl super::Client for Connection {
         self.close(now, app_error, msg);
     }
 
-    fn is_closed(&self) -> bool {
-        matches!(self.state(), State::Closed(..))
+    fn is_closed(&self) -> Option<ConnectionError> {
+        if let State::Closed(err) = self.state() {
+            return Some(err.clone());
+        }
+        None
     }
 
     fn stats(&self) -> neqo_transport::Stats {
