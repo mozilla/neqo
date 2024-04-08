@@ -33,7 +33,7 @@ fn transfer(c: &mut Criterion) {
             sample_size: Some(10),
         },
         Benchmark {
-            name: "1-conn/10_000-1b-seq-resp (aka. RPS)".to_string(),
+            name: "1-conn/10_000-parallel-1b-resp (aka. RPS)".to_string(),
             requests: vec![1; 10_000],
             sample_size: None,
         },
