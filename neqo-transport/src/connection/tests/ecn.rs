@@ -87,7 +87,7 @@ fn disables_on_loss() {
     assert_ecn_disabled(client_pkt.tos());
 }
 
-/// This function performs a handshake over a path that modifies packets via `old_path_modifier`.
+/// This function performs a handshake over a path that modifies packets via `orig_path_modifier`.
 /// It then sends `path_packets` packets on that path, and then migrates to a new path that
 /// modifies packets via `new_path_modifier`.  It sends `path_packets` packets on the new path.
 /// The function returns the TOS value of the last packet sent on the old path and the TOS value
