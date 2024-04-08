@@ -91,15 +91,22 @@ runs:
     - name: Format GitHub comment
       if: always()
       run: |
+        if [ -s quic-interop-runner/summary ]; then
+          exit 0
+        fi
         echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
         echo '' >> comment
         # Ignore all, but table, which starts with "|".
-        grep -E '^\|' quic-interop-runner/summary >> comment
+        grep -E '^\|' quic-interop-runner/summary |\
+          awk '(!/^\| *:-/ || (d++ && d < 3))' |\
+          sed -E -e 's/✓/:white_check_mark:/gi' -e 's/✕/:x:/gi' -e 's/\?/:grey_question:/gi' \
+          >> comment
         echo '' >> comment
+        echo "EXPORT_COMMENT=1" >> "$GITHUB_ENV"
       shell: bash
 
     - name: Export PR comment data
-      if: always()
+      if: env.EXPORT_COMMENT == '1'
       uses: ./.github/actions/pr-comment-data-export
       with:
         name: qns
