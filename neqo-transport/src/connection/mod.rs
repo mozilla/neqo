@@ -2916,7 +2916,6 @@ impl Connection {
             self.decode_ack_delay(ack_delay),
             now,
         );
-
         for acked in acked_packets {
             for token in &acked.tokens {
                 match token {
