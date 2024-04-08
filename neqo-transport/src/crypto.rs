@@ -758,7 +758,7 @@ impl CryptoDxAppData {
     }
 
     pub fn next(&self) -> Res<Self> {
-        if self.dx.epoch == usize::max_value() {
+        if self.dx.epoch == usize::MAX {
             // Guard against too many key updates.
             return Err(Error::KeysExhausted);
         }
