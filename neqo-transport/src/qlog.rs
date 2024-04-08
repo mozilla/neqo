@@ -416,21 +416,9 @@ impl From<&Frame<'_>> for QuicFrame {
                 QuicFrame::Ack {
                     ack_delay: Some(*ack_delay as f32 / 1000.0),
                     acked_ranges,
-                    ect1: if ecn_count.is_none() {
-                        None
-                    } else {
-                        Some(ecn_count.unwrap()[IpTosEcn::Ect1])
-                    },
-                    ect0: if ecn_count.is_none() {
-                        None
-                    } else {
-                        Some(ecn_count.unwrap()[IpTosEcn::Ect0])
-                    },
-                    ce: if ecn_count.is_none() {
-                        None
-                    } else {
-                        Some(ecn_count.unwrap()[IpTosEcn::Ce])
-                    },
+                    ect1: ecn_count.map(|c| c[IpTosEcn::Ect1]),
+                    ect0: ecn_count.map(|c| c[IpTosEcn::Ect0]),
+                    ce: ecn_count.map(|c| c[IpTosEcn::Ce]),
                 }
             }
             Frame::ResetStream {
