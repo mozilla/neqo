@@ -200,7 +200,7 @@ impl Args {
     #[must_use]
     #[cfg(feature = "bench")]
     #[allow(clippy::missing_panics_doc)]
-    pub fn new(requests: &[u64], download_in_series: bool) -> Self {
+    pub fn new(requests: &[u64]) -> Self {
         use std::str::FromStr;
         Self {
             verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
@@ -212,7 +212,7 @@ impl Args {
             method: "GET".into(),
             header: vec![],
             max_concurrent_push_streams: 10,
-            download_in_series,
+            download_in_series: false,
             concurrency: 100,
             output_read_data: false,
             output_dir: Some("/dev/null".into()),
