@@ -196,7 +196,6 @@ fn handshake_with_modifier(
     };
 
     let mut did_ping = enum_map! {_ => false};
-    let mut output_got_dropped = false;
     while !is_done(a) {
         _ = maybe_authenticate(a);
         let had_input = input.is_some();
@@ -213,38 +212,17 @@ fn handshake_with_modifier(
         if should_ping {
             a.test_frame_writer = Some(Box::new(PingWriter {}));
         }
-        qdebug!("a.process");
-        let output = a.process(input.as_ref(), now);
-        match output {
-            Output::Callback(t) => {
-                qdebug!("handshake: t += {:?}", t);
-                now += t;
-            }
-            Output::Datagram(d) => {
-                if should_ping {
-                    a.test_frame_writer = None;
-                    did_ping[a.role()] = true;
-                }
-                qdebug!(
-                    "had_input={} output={:?} output_got_dropped={:?}",
-                    had_input,
-                    d,
-                    output_got_dropped
-                );
-                // assert!(had_input || (output.is_some() || output_got_dropped));
-                output_got_dropped = false;
-
-                input = modifier(d);
-                if input.is_none() {
-                    qdebug!("output got dropped");
-                    output_got_dropped = true;
-                }
-            }
-            Output::None => {
-                input = None;
-            }
+        let output = a.process(input.as_ref(), now).dgram();
+        if should_ping {
+            a.test_frame_writer = None;
+            did_ping[a.role()] = true;
         }
-
+        assert!(had_input || output.is_some());
+        if let Some(d) = output {
+            input = modifier(d);
+        } else {
+            input = output;
+        }
         qtrace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
         mem::swap(&mut a, &mut b);
@@ -292,8 +270,8 @@ fn connect_with_rtt_and_modifier(
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
 
-    // check_rtt(&client.stats(), rtt);
-    // check_rtt(&server.stats(), rtt);
+    check_rtt(&client.stats(), rtt);
+    check_rtt(&server.stats(), rtt);
     now
 }
 
@@ -344,11 +322,11 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
         server.conn_params.get_idle_timeout(),
     );
     // Client started its idle period half an RTT before now.
-    // assert_eq!(
-    //     client.process_output(now),
-    //     Output::Callback(idle_timeout - rtt / 2)
-    // );
-    // assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
+    assert_eq!(
+        client.process_output(now),
+        Output::Callback(idle_timeout - rtt / 2)
+    );
+    assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
 }
 
 /// Connect with an RTT and then force both peers to be idle.

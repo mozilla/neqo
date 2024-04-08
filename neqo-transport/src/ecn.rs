@@ -188,7 +188,7 @@ impl EcnInfo {
                 newly_acked_sent_with_ect0
             );
             self.state = EcnValidationState::Failed;
-        } else if ack_ecn[IpTosEcn::Ect1] > 0 {
+        } else if ecn_diff[IpTosEcn::Ect1] > 0 {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.state = EcnValidationState::Failed;
         } else {
