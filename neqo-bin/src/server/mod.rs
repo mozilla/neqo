@@ -609,13 +609,13 @@ pub async fn server(mut args: Args) -> Res<()> {
 
         // TODO: More options to deduplicate with client?
         match testcase.as_str() {
-            "http3" | "ecn" => (),
+            "http3" => (),
             "zerortt" => {
                 args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
                 args.shared.quic_parameters.max_streams_bidi = 100;
             }
-            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" => {
+            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {
                 args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
             }

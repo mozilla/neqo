@@ -248,7 +248,6 @@ impl Args {
         // Only use v1 for most QNS tests.
         self.shared.quic_parameters.quic_version = vec![Version::Version1];
         match testcase.as_str() {
-            "ecn" => {}
             "http3" => {
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
@@ -259,7 +258,7 @@ impl Args {
                     self.method = String::from("POST");
                 }
             }
-            "handshake" | "transfer" | "retry" => {
+            "handshake" | "transfer" | "retry" | "ecn" => {
                 self.shared.use_old_http = true;
             }
             "zerortt" | "resumption" => {
