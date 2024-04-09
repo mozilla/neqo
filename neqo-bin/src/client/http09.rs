@@ -153,7 +153,9 @@ impl super::Client for Connection {
     where
         S: AsRef<str> + std::fmt::Display,
     {
-        self.close(now, app_error, msg);
+        if !self.state().closed() {
+            self.close(now, app_error, msg);
+        }
     }
 
     fn is_closed(&self) -> Option<ConnectionError> {
