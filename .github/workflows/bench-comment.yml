@@ -25,4 +25,5 @@ jobs:
       - uses: ./.github/actions/pr-comment
         with:
           name: bench
+          mode: upsert
           token: ${{ secrets.GITHUB_TOKEN }}

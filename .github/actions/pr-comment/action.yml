@@ -5,6 +5,9 @@ inputs:
   name:
     description: 'Artifact name to import comment data from.'
     required: true
+  mode:
+    description: 'Mode of operation (upsert/recreate/delete).'
+    required: true
   token:
     description: 'A Github PAT'
     required: true
