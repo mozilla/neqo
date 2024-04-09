@@ -381,6 +381,7 @@ trait Client {
     fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = &'a Datagram>;
+    fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
@@ -432,6 +433,10 @@ impl<'a, H: Handler> Runner<'a, H> {
                     | ConnectionError::Application(0) => Ok(self.handler.take_token()),
                     _ => Err(reason.into()),
                 };
+            }
+
+            if self.client.has_events() {
+                continue;
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {

@@ -140,6 +140,10 @@ impl super::Client for Http3Client {
     fn stats(&self) -> neqo_transport::Stats {
         self.transport_stats()
     }
+
+    fn has_events(&self) -> bool {
+        neqo_common::event::Provider::has_events(self)
+    }
 }
 
 impl<'a> super::Handler for Handler<'a> {

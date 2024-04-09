@@ -215,6 +215,7 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
 trait HttpServer: Display {
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
     fn process_events(&mut self, args: &Args, now: Instant);
+    fn has_events(&self) -> bool;
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
     fn validate_address(&mut self, when: ValidateAddress);
@@ -434,6 +435,10 @@ impl HttpServer for SimpleServer {
             .unwrap();
         self.server.ech_config()
     }
+
+    fn has_events(&self) -> bool {
+        self.server.has_events()
+    }
 }
 
 struct ServersRunner {
@@ -559,6 +564,14 @@ impl ServersRunner {
 
     async fn run(&mut self) -> Res<()> {
         loop {
+            self.server.process_events(&self.args, self.args.now());
+
+            self.process(None).await?;
+
+            if self.server.has_events() {
+                continue;
+            }
+
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
@@ -575,9 +588,6 @@ impl ServersRunner {
                     self.process(None).await?;
                 }
             }
-
-            self.server.process_events(&self.args, self.args.now());
-            self.process(None).await?;
         }
     }
 }

@@ -166,6 +166,10 @@ impl super::Client for Connection {
     fn stats(&self) -> neqo_transport::Stats {
         self.stats()
     }
+
+    fn has_events(&self) -> bool {
+        neqo_common::event::Provider::has_events(self)
+    }
 }
 
 impl<'b> Handler<'b> {
