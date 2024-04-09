@@ -20,8 +20,8 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
-    StreamType,
+    Connection, ConnectionError, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
+    StreamId, StreamType,
 };
 use url::Url;
 
@@ -138,8 +138,15 @@ pub(crate) fn create_client(
 }
 
 impl super::Client for Connection {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        self.process(dgram, now)
+    fn process_output(&mut self, now: Instant) -> Output {
+        self.process_output(now)
+    }
+
+    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>,
+    {
+        self.process_multiple_input(dgrams, now);
     }
 
     fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)
@@ -149,8 +156,11 @@ impl super::Client for Connection {
         self.close(now, app_error, msg);
     }
 
-    fn is_closed(&self) -> bool {
-        matches!(self.state(), State::Closed(..))
+    fn is_closed(&self) -> Option<ConnectionError> {
+        if let State::Closed(err) = self.state() {
+            return Some(err.clone());
+        }
+        None
     }
 
     fn stats(&self) -> neqo_transport::Stats {

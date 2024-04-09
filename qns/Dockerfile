@@ -1,7 +1,7 @@
 FROM martenseemann/quic-network-simulator-endpoint:latest AS buildimage
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git mercurial \
+    curl git mercurial coreutils \
     build-essential libclang-dev lld \
     gyp ninja-build zlib1g-dev python \
     && apt-get autoremove -y && apt-get clean -y \
@@ -30,7 +30,7 @@ ADD . /neqo
 
 RUN set -eux; \
     cd /neqo; \
-    RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release \
+    RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo build --release \
     --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.

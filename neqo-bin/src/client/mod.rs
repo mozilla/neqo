@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionId, Error as TransportError, Version};
+use neqo_transport::{AppError, ConnectionError, ConnectionId, Error as TransportError, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -46,6 +46,7 @@ pub enum Error {
     IoError(io::Error),
     QlogError,
     TransportError(neqo_transport::Error),
+    ApplicationError(neqo_transport::AppError),
     CryptoError(neqo_crypto::Error),
 }
 
@@ -76,6 +77,15 @@ impl From<qlog::Error> for Error {
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
+    }
+}
+
+impl From<neqo_transport::ConnectionError> for Error {
+    fn from(err: neqo_transport::ConnectionError) -> Self {
+        match err {
+            ConnectionError::Transport(e) => Self::TransportError(e),
+            ConnectionError::Application(e) => Self::ApplicationError(e),
+        }
     }
 }
 
@@ -366,11 +376,18 @@ trait Handler {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    fn process_output(&mut self, now: Instant) -> Output;
+    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
-    fn is_closed(&self) -> bool;
+    /// Returns [`Some(_)`] if the connection is closed.
+    ///
+    /// Note that connection was closed without error on
+    /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
+    fn is_closed(&self) -> Option<ConnectionError>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -389,40 +406,35 @@ impl<'a, H: Handler> Runner<'a, H> {
             let handler_done = self.handler.handle(&mut self.client)?;
 
             match (handler_done, self.args.resume, self.handler.has_token()) {
-                    // Handler isn't done. Continue.
-                    (false, _, _) => {},
-                    // Handler done. Resumption token needed but not present. Continue.
-                    (true, true, false) => {
-                        qdebug!("Handler done. Waiting for resumption token.");
-                    }
-                    // Handler is done, no resumption token needed. Close.
-                    (true, false, _) |
-                    // Handler is done, resumption token needed and present. Close.
-                    (true, true, true) => {
-                        self.client.close(Instant::now(), 0, "kthxbye!");
-                    }
+                // Handler isn't done. Continue.
+                (false, _, _) => {},
+                // Handler done. Resumption token needed but not present. Continue.
+                (true, true, false) => {
+                    qdebug!("Handler done. Waiting for resumption token.");
                 }
+                // Handler is done, no resumption token needed. Close.
+                (true, false, _) |
+                // Handler is done, resumption token needed and present. Close.
+                (true, true, true) => {
+                    self.client.close(Instant::now(), 0, "kthxbye!");
+                }
+            }
 
-            self.process(None).await?;
+            self.process_output().await?;
 
-            if self.client.is_closed() {
+            if let Some(reason) = self.client.is_closed() {
                 if self.args.stats {
                     qinfo!("{:?}", self.client.stats());
                 }
-                return Ok(self.handler.take_token());
+                return match reason {
+                    ConnectionError::Transport(TransportError::NoError)
+                    | ConnectionError::Application(0) => Ok(self.handler.take_token()),
+                    _ => Err(reason.into()),
+                };
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
-                Ready::Socket => loop {
-                    let dgrams = self.socket.recv(&self.local_addr)?;
-                    if dgrams.is_empty() {
-                        break;
-                    }
-                    for dgram in &dgrams {
-                        self.process(Some(dgram)).await?;
-                    }
-                    self.handler.maybe_key_update(&mut self.client)?;
-                },
+                Ready::Socket => self.process_multiple_input().await?,
                 Ready::Timeout => {
                     self.timeout = None;
                 }
@@ -430,9 +442,9 @@ impl<'a, H: Handler> Runner<'a, H> {
         }
     }
 
-    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+    async fn process_output(&mut self) -> Result<(), io::Error> {
         loop {
-            match self.client.process(dgram.take(), Instant::now()) {
+            match self.client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
                     self.socket.send(dgram)?;
@@ -447,6 +459,21 @@ impl<'a, H: Handler> Runner<'a, H> {
                     break;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    async fn process_multiple_input(&mut self) -> Res<()> {
+        loop {
+            let dgrams = self.socket.recv(&self.local_addr)?;
+            if dgrams.is_empty() {
+                break;
+            }
+            self.client
+                .process_multiple_input(dgrams.iter(), Instant::now());
+            self.process_output().await?;
+            self.handler.maybe_key_update(&mut self.client)?;
         }
 
         Ok(())
