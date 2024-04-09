@@ -2215,11 +2215,11 @@ impl Connection {
             } else {
                 (tokens, ack_eliciting, padded) =
                     self.write_frames(path, *space, &profile, &mut builder, now);
-                if builder.packet_empty() {
-                    // Nothing to include in this packet.
-                    encoder = builder.abort();
-                    continue;
-                }
+            }
+            if builder.packet_empty() {
+                // Nothing to include in this packet.
+                encoder = builder.abort();
+                continue;
             }
 
             dump_packet(
