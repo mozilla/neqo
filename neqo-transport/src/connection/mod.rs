@@ -1839,7 +1839,7 @@ impl Connection {
                     // For example, if we run out of connection IDs and the error results from
                     // a packet on a new path, we avoid sending (and the privacy risk) rather
                     // than reuse a connection ID.
-                    let res = if details.path().borrow().is_temporary() {
+                    let res = if path.borrow().is_temporary() {
                         assert!(!cfg!(test), "attempting to close with a temporary path");
                         Err(Error::InternalError)
                     } else {
