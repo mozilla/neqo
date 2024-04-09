@@ -377,7 +377,10 @@ trait Handler {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    fn process_output(&mut self, now: Instant) -> Output;
+    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
@@ -404,21 +407,21 @@ impl<'a, H: Handler> Runner<'a, H> {
             let handler_done = self.handler.handle(&mut self.client)?;
 
             match (handler_done, self.args.resume, self.handler.has_token()) {
-                    // Handler isn't done. Continue.
-                    (false, _, _) => {},
-                    // Handler done. Resumption token needed but not present. Continue.
-                    (true, true, false) => {
-                        qdebug!("Handler done. Waiting for resumption token.");
-                    }
-                    // Handler is done, no resumption token needed. Close.
-                    (true, false, _) |
-                    // Handler is done, resumption token needed and present. Close.
-                    (true, true, true) => {
-                        self.client.close(Instant::now(), 0, "kthxbye!");
-                    }
+                // Handler isn't done. Continue.
+                (false, _, _) => {},
+                // Handler done. Resumption token needed but not present. Continue.
+                (true, true, false) => {
+                    qdebug!("Handler done. Waiting for resumption token.");
                 }
+                // Handler is done, no resumption token needed. Close.
+                (true, false, _) |
+                // Handler is done, resumption token needed and present. Close.
+                (true, true, true) => {
+                    self.client.close(Instant::now(), 0, "kthxbye!");
+                }
+            }
 
-            self.process(None).await?;
+            self.process_output().await?;
 
             if let Some(reason) = self.client.is_closed() {
                 if self.args.stats {
@@ -432,16 +435,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
-                Ready::Socket => loop {
-                    let dgrams = self.socket.recv(&self.local_addr)?;
-                    if dgrams.is_empty() {
-                        break;
-                    }
-                    for dgram in &dgrams {
-                        self.process(Some(dgram)).await?;
-                    }
-                    self.handler.maybe_key_update(&mut self.client)?;
-                },
+                Ready::Socket => self.process_multiple_input().await?,
                 Ready::Timeout => {
                     self.timeout = None;
                 }
@@ -449,9 +443,9 @@ impl<'a, H: Handler> Runner<'a, H> {
         }
     }
 
-    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+    async fn process_output(&mut self) -> Result<(), io::Error> {
         loop {
-            match self.client.process(dgram.take(), Instant::now()) {
+            match self.client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
                     self.socket.send(dgram)?;
@@ -466,6 +460,21 @@ impl<'a, H: Handler> Runner<'a, H> {
                     break;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    async fn process_multiple_input(&mut self) -> Res<()> {
+        loop {
+            let dgrams = self.socket.recv(&self.local_addr)?;
+            if dgrams.is_empty() {
+                break;
+            }
+            self.client
+                .process_multiple_input(dgrams.iter(), Instant::now());
+            self.process_output().await?;
+            self.handler.maybe_key_update(&mut self.client)?;
         }
 
         Ok(())
