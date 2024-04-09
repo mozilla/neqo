@@ -155,7 +155,7 @@ impl Http09Server {
                     Ok(data) => Some(data),
                     Err(e) => {
                         qerror!("Failed to read {path}: {e}");
-                        return;
+                        Some(b"404".to_vec())
                     }
                 }
             } else {

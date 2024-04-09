@@ -342,8 +342,9 @@ impl HttpServer for SimpleServer {
                             Err(e) => {
                                 qerror!("Failed to read {}: {e}", path.value());
                                 stream
-                                    .cancel_fetch(neqo_http3::Error::HttpRequestRejected.code())
+                                    .send_headers(&[Header::new(":status", "404")])
                                     .unwrap();
+                                stream.stream_close_send().unwrap();
                                 continue;
                             }
                         }
