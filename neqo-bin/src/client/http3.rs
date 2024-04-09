@@ -27,7 +27,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
+use super::{get_output_file, qlog_new, Args, Res};
 
 pub(crate) struct Handler<'a> {
     #[allow(
@@ -36,17 +36,12 @@ pub(crate) struct Handler<'a> {
         clippy::redundant_field_names
     )]
     url_handler: UrlHandler<'a>,
-    key_update: KeyUpdateState,
     token: Option<ResumptionToken>,
     output_read_data: bool,
 }
 
 impl<'a> Handler<'a> {
-    pub(crate) fn new(
-        url_queue: VecDeque<Url>,
-        args: &'a Args,
-        key_update: KeyUpdateState,
-    ) -> Self {
+    pub(crate) fn new(url_queue: VecDeque<Url>, args: &'a Args) -> Self {
         let url_handler = UrlHandler {
             url_queue,
             stream_handlers: HashMap::new(),
@@ -61,7 +56,6 @@ impl<'a> Handler<'a> {
 
         Self {
             url_handler,
-            key_update,
             token: None,
             output_read_data: args.output_read_data,
         }
@@ -223,12 +217,6 @@ impl<'a> super::Handler for Handler<'a> {
         }
 
         Ok(self.url_handler.done())
-    }
-
-    fn maybe_key_update(&mut self, c: &mut Http3Client) -> Res<()> {
-        self.key_update.maybe_update(|| c.initiate_key_update())?;
-        self.url_handler.process_urls(c);
-        Ok(())
     }
 
     fn take_token(&mut self) -> Option<ResumptionToken> {
