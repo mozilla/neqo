@@ -32,5 +32,6 @@ runs:
     - uses: thollander/actions-comment-pull-request@v2
       with:
         filePath: contents
+        mode: ${{ inputs.mode }}
         pr_number: ${{ steps.pr-number.outputs.number }}
         comment_tag: ${{ inputs.name }}-comment
