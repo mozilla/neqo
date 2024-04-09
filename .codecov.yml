@@ -9,3 +9,9 @@ codecov:
         after_n_builds: 3
 comment:
     after_n_builds: 3
+
+coverage:
+  status:
+    project:
+      default:
+        threshold: 0.05%

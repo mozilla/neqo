@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min},
     fmt::{self, Debug},
-    mem,
+    iter, mem,
     net::{IpAddr, SocketAddr},
     ops::RangeInclusive,
     rc::{Rc, Weak},
@@ -978,19 +978,16 @@ impl Connection {
 
     /// Process new input datagrams on the connection.
     pub fn process_input(&mut self, d: &Datagram, now: Instant) {
-        self.input(d, now, now);
-        self.process_saved(now);
-        self.streams.cleanup_closed_streams();
+        self.process_multiple_input(iter::once(d), now);
     }
 
     /// Process new input datagrams on the connection.
     pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = &'a Datagram>,
-        I::IntoIter: ExactSizeIterator,
     {
-        let dgrams = dgrams.into_iter();
-        if dgrams.len() == 0 {
+        let mut dgrams = dgrams.into_iter().peekable();
+        if dgrams.peek().is_none() {
             return;
         }
 
