@@ -426,8 +426,13 @@ impl<'a> Frame<'a> {
             d(dec.decode_varint())
         }
 
-        // TODO(ekr@rtfm.com): check for minimal encoding
+        // Check for minimal encoding of frame type.
+        let pos = dec.offset();
         let t = dv(dec)?;
+        if Decoder::minimal_varint_len(t).ok_or(Error::ProtocolViolation)? != dec.offset() - pos {
+            return Err(Error::ProtocolViolation);
+        }
+
         match t {
             FRAME_TYPE_PADDING => {
                 let mut length: u16 = 1;
@@ -989,14 +994,14 @@ mod tests {
             fill: true,
         };
 
-        just_dec(&f, "4030010203");
+        just_dec(&f, "30010203");
 
         // With the length bit.
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: false,
         };
-        just_dec(&f, "403103010203");
+        just_dec(&f, "3103010203");
     }
 
     #[test]

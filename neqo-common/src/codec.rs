@@ -15,6 +15,22 @@ pub struct Decoder<'a> {
 }
 
 impl<'a> Decoder<'a> {
+    /// Return the minimal encoded length of a varint with value `v`.
+    #[must_use]
+    pub const fn minimal_varint_len(v: u64) -> Option<usize> {
+        if v < (1 << 6) {
+            Some(1)
+        } else if v < (1 << 14) {
+            Some(2)
+        } else if v < (1 << 30) {
+            Some(4)
+        } else if v < (1 << 62) {
+            Some(8)
+        } else {
+            None
+        }
+    }
+
     /// Make a new view of the provided slice.
     #[must_use]
     pub fn new(buf: &[u8]) -> Decoder {
@@ -841,5 +857,18 @@ mod tests {
         assert_eq!(enc, Encoder::from_hex("0102340000"));
         enc.pad_to(7, 0xc2);
         assert_eq!(enc, Encoder::from_hex("0102340000c2c2"));
+    }
+
+    #[test]
+    fn minimal_varint_len() {
+        assert_eq!(Decoder::minimal_varint_len(0), Some(1));
+        assert_eq!(Decoder::minimal_varint_len(0x3f), Some(1));
+        assert_eq!(Decoder::minimal_varint_len(0x40), Some(2));
+        assert_eq!(Decoder::minimal_varint_len(0x3fff), Some(2));
+        assert_eq!(Decoder::minimal_varint_len(0x4000), Some(4));
+        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff), Some(4));
+        assert_eq!(Decoder::minimal_varint_len(0x4000_0000), Some(8));
+        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff_ffff_ffff), Some(8));
+        assert_eq!(Decoder::minimal_varint_len(0x4000_0000_0000_0000), None);
     }
 }
