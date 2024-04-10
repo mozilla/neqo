@@ -273,7 +273,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 pkt.size
             );
             // BIF is set to 0 on a path change, but in case that was because of a simple rebinding
-            // event, we may still get ACKs for packets sent before the rebinding.
+            // event, we may still declare packets lost that were sent before the rebinding.
             self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.size);
         }
         qlog::metrics_updated(
@@ -518,7 +518,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         true
     }
 
-    #[allow(clippy::unused_self)]
     fn app_limited(&self) -> bool {
         if self.bytes_in_flight >= self.congestion_window {
             false
