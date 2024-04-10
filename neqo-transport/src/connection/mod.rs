@@ -610,8 +610,8 @@ impl Connection {
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
-        self.paths.primary_fallible().map_or(
-            RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
+        self.paths.primary_fallible().map_or_else(
+            || RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
             |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
         )
     }
