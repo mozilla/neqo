@@ -46,7 +46,7 @@ use crate::{
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile},
     recv_stream::RecvStreamStats,
-    rtt::GRANULARITY,
+    rtt::{GRANULARITY, INITIAL_RTT},
     send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -610,11 +610,11 @@ impl Connection {
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
-        self.paths
-            .primary()
-            .borrow()
-            .rtt()
-            .pto(PacketNumberSpace::ApplicationData)
+        if let Some(path) = self.paths.primary_fallible() {
+            path.borrow().rtt().pto(PacketNumberSpace::ApplicationData)
+        } else {
+            3 * INITIAL_RTT
+        }
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
@@ -962,9 +962,11 @@ impl Connection {
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
-        let lost = self.loss_recovery.timeout(&self.paths.primary(), now);
-        self.handle_lost_packets(&lost);
-        qlog::packets_lost(&mut self.qlog, &lost);
+        if let Some(path) = self.paths.primary_fallible() {
+            let lost = self.loss_recovery.timeout(&path, now);
+            self.handle_lost_packets(&lost);
+            qlog::packets_lost(&mut self.qlog, &lost);
+        }
 
         if self.release_resumption_token_timer.is_some() {
             self.create_resumption_token(now);
