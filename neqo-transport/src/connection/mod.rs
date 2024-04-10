@@ -46,7 +46,7 @@ use crate::{
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile},
     recv_stream::RecvStreamStats,
-    rtt::{GRANULARITY, INITIAL_RTT},
+    rtt::{RttEstimate, GRANULARITY},
     send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -610,11 +610,10 @@ impl Connection {
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
-        if let Some(path) = self.paths.primary_fallible() {
-            path.borrow().rtt().pto(PacketNumberSpace::ApplicationData)
-        } else {
-            3 * INITIAL_RTT
-        }
+        self.paths.primary_fallible().map_or(
+            RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
+            |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
+        )
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
