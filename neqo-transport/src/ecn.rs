@@ -199,7 +199,7 @@ impl EcnInfo {
             self.state = EcnValidationState::Capable;
         }
         self.baseline = ack_ecn;
-        self.largest_acked = max(self.largest_acked, largest_acked);
+        self.largest_acked = largest_acked;
     }
 
     /// The ECN mark to use for packets sent on this path.
