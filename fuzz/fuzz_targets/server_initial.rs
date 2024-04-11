@@ -21,7 +21,9 @@ fuzz_target!(|data: &[u8]| {
         .dgram()
         .expect("a datagram");
 
-    let (header, d_cid, s_cid, payload) = decode_initial_header(&si, Role::Server);
+    let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&si, Role::Server) else {
+        return;
+    };
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Server);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 

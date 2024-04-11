@@ -15,7 +15,9 @@ fuzz_target!(|data: &[u8]| {
 
     let mut client = default_client();
     let ci = client.process(None, now()).dgram().expect("a datagram");
-    let (header, d_cid, s_cid, payload) = decode_initial_header(&ci, Role::Client);
+    let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&ci, Role::Client) else {
+        return;
+    };
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 

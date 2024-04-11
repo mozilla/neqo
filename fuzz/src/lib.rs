@@ -25,13 +25,22 @@ use neqo_crypto::{
 // Any token is thrown away.
 #[must_use]
 #[allow(clippy::missing_panics_doc)]
-pub fn decode_initial_header(dgram: &Datagram, role: Role) -> (&[u8], &[u8], &[u8], &[u8]) {
+#[allow(clippy::type_complexity)]
+pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u8], &[u8], &[u8])> {
     let mut dec = Decoder::new(&dgram[..]);
     let type_and_ver = dec.decode(5).unwrap().to_vec();
     // The client sets the QUIC bit, the server might not.
     match role {
-        Role::Client => assert_eq!(type_and_ver[0] & 0xf0, 0xc0),
-        Role::Server => assert_eq!(type_and_ver[0] & 0xb0, 0x80),
+        Role::Client => {
+            if type_and_ver[0] & 0xf0 != 0xc0 {
+                return None;
+            }
+        }
+        Role::Server => {
+            if type_and_ver[0] & 0xb0 != 0x80 {
+                return None;
+            }
+        }
     }
     let dest_cid = dec.decode_vec(1).unwrap();
     let src_cid = dec.decode_vec(1).unwrap();
@@ -40,12 +49,12 @@ pub fn decode_initial_header(dgram: &Datagram, role: Role) -> (&[u8], &[u8], &[u
     // Need to read of the length separately so that we can find the packet number.
     let payload_len = usize::try_from(dec.decode_varint().unwrap()).unwrap();
     let pn_offset = dgram.len() - dec.remaining();
-    (
+    Some((
         &dgram[..pn_offset],
         dest_cid,
         src_cid,
         dec.decode(payload_len).unwrap(),
-    )
+    ))
 }
 
 /// Generate an AEAD and header protection object for a client Initial.
