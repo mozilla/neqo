@@ -158,7 +158,7 @@ impl PacketBuilder {
         }
         Self {
             encoder,
-            pn: u64::max_value(),
+            pn: u64::MAX,
             header: header_start..header_start,
             offsets: PacketBuilderOffsets {
                 first_byte_mask: PACKET_HP_MASK_SHORT,
@@ -201,7 +201,7 @@ impl PacketBuilder {
 
         Self {
             encoder,
-            pn: u64::max_value(),
+            pn: u64::MAX,
             header: header_start..header_start,
             offsets: PacketBuilderOffsets {
                 first_byte_mask: PACKET_HP_MASK_LONG,

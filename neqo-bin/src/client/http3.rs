@@ -22,11 +22,12 @@ use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
-    AppError, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output, StreamId,
+    AppError, Connection, ConnectionError, EmptyConnectionIdGenerator, Error as TransportError,
+    Output, StreamId,
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
+use super::{get_output_file, qlog_new, Args, Res};
 
 pub(crate) struct Handler<'a> {
     #[allow(
@@ -35,17 +36,12 @@ pub(crate) struct Handler<'a> {
         clippy::redundant_field_names
     )]
     url_handler: UrlHandler<'a>,
-    key_update: KeyUpdateState,
     token: Option<ResumptionToken>,
     output_read_data: bool,
 }
 
 impl<'a> Handler<'a> {
-    pub(crate) fn new(
-        url_queue: VecDeque<Url>,
-        args: &'a Args,
-        key_update: KeyUpdateState,
-    ) -> Self {
+    pub(crate) fn new(url_queue: VecDeque<Url>, args: &'a Args) -> Self {
         let url_handler = UrlHandler {
             url_queue,
             stream_handlers: HashMap::new(),
@@ -60,7 +56,6 @@ impl<'a> Handler<'a> {
 
         Self {
             url_handler,
-            key_update,
             token: None,
             output_read_data: args.output_read_data,
         }
@@ -111,12 +106,22 @@ pub(crate) fn create_client(
 }
 
 impl super::Client for Http3Client {
-    fn is_closed(&self) -> bool {
-        matches!(self.state(), Http3State::Closed(..))
+    fn is_closed(&self) -> Option<ConnectionError> {
+        if let Http3State::Closed(err) = self.state() {
+            return Some(err);
+        }
+        None
     }
 
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        self.process(dgram, now)
+    fn process_output(&mut self, now: Instant) -> Output {
+        self.process_output(now)
+    }
+
+    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = &'a Datagram>,
+    {
+        self.process_multiple_input(dgrams, now);
     }
 
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
@@ -212,12 +217,6 @@ impl<'a> super::Handler for Handler<'a> {
         }
 
         Ok(self.url_handler.done())
-    }
-
-    fn maybe_key_update(&mut self, c: &mut Http3Client) -> Res<()> {
-        self.key_update.maybe_update(|| c.initiate_key_update())?;
-        self.url_handler.process_urls(c);
-        Ok(())
     }
 
     fn take_token(&mut self) -> Option<ResumptionToken> {

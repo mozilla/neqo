@@ -5,6 +5,9 @@ inputs:
   name:
     description: 'Artifact name to import comment data from.'
     required: true
+  mode:
+    description: 'Mode of operation (upsert/recreate/delete).'
+    default: 'upsert'
   token:
     description: 'A Github PAT'
     required: true
@@ -29,5 +32,6 @@ runs:
     - uses: thollander/actions-comment-pull-request@v2
       with:
         filePath: contents
+        mode: ${{ inputs.mode }}
         pr_number: ${{ steps.pr-number.outputs.number }}
         comment_tag: ${{ inputs.name }}-comment

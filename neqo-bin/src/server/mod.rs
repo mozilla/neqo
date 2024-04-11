@@ -10,8 +10,7 @@ use std::{
     cmp::min,
     collections::HashMap,
     fmt::{self, Display},
-    fs::OpenOptions,
-    io::{self, Read},
+    fs, io,
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     pin::Pin,
@@ -188,28 +187,11 @@ impl Args {
     }
 }
 
-fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
-    let mut file_path = PathBuf::from("/www");
-    file_path.push(filename.trim_matches(|p| p == '/'));
-
-    OpenOptions::new()
-        .read(true)
-        .open(&file_path)
-        .map_err(|_e| qerror!("Could not open {}", file_path.display()))
-        .ok()
-        .and_then(|mut f| {
-            let mut data = Vec::new();
-            match f.read_to_end(&mut data) {
-                Ok(sz) => {
-                    qinfo!("{} bytes read from {}", sz, file_path.display());
-                    Some(data)
-                }
-                Err(e) => {
-                    qerror!("Error reading data: {e:?}");
-                    None
-                }
-            }
-        })
+fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
+    let path: PathBuf = ["/www", filename.trim_matches(|p| p == '/')]
+        .iter()
+        .collect();
+    fs::read(path)
 }
 
 trait HttpServer: Display {
@@ -344,27 +326,32 @@ impl HttpServer for SimpleServer {
                         continue;
                     }
 
-                    let mut response =
-                        if let Some(path) = headers.iter().find(|&h| h.name() == ":path") {
-                            if args.shared.qns_test.is_some() {
-                                if let Some(data) = qns_read_response(path.value()) {
-                                    ResponseData::from(data)
-                                } else {
-                                    ResponseData::from(Self::MESSAGE)
-                                }
-                            } else if let Ok(count) =
-                                path.value().trim_matches(|p| p == '/').parse::<usize>()
-                            {
-                                ResponseData::repeat(Self::MESSAGE, count)
-                            } else {
-                                ResponseData::from(Self::MESSAGE)
+                    let Some(path) = headers.iter().find(|&h| h.name() == ":path") else {
+                        stream
+                            .cancel_fetch(neqo_http3::Error::HttpRequestIncomplete.code())
+                            .unwrap();
+                        continue;
+                    };
+
+                    let mut response = if args.shared.qns_test.is_some() {
+                        match qns_read_response(path.value()) {
+                            Ok(data) => ResponseData::from(data),
+                            Err(e) => {
+                                qerror!("Failed to read {}: {e}", path.value());
+                                stream
+                                    .send_headers(&[Header::new(":status", "404")])
+                                    .unwrap();
+                                stream.stream_close_send().unwrap();
+                                continue;
                             }
-                        } else {
-                            stream
-                                .cancel_fetch(neqo_http3::Error::HttpRequestIncomplete.code())
-                                .unwrap();
-                            continue;
-                        };
+                        }
+                    } else if let Ok(count) =
+                        path.value().trim_matches(|p| p == '/').parse::<usize>()
+                    {
+                        ResponseData::repeat(Self::MESSAGE, count)
+                    } else {
+                        ResponseData::from(Self::MESSAGE)
+                    };
 
                     stream
                         .send_headers(&[
