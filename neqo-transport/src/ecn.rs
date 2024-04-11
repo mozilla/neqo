@@ -156,12 +156,11 @@ impl EcnInfo {
         // > If an ACK frame newly acknowledges a packet that the endpoint sent with
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
         // > corresponding ECN counts are not present in the ACK frame.
-        if ack_ecn.is_none() {
+        let Some(ack_ecn) = ack_ecn else {
             qwarn!("ECN validation failed, no ECN counts in ACK frame");
             self.state = EcnValidationState::Failed;
             return;
-        }
-        let ack_ecn = ack_ecn.unwrap();
+        };
 
         // We always mark with ECT(0) - if at all - so we only need to check for that.
         //
