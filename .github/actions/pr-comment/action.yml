@@ -1,0 +1,37 @@
+name: 'Comment on PR'
+description: 'Post a PR comment securely.'
+
+inputs:
+  name:
+    description: 'Artifact name to import comment data from.'
+    required: true
+  mode:
+    description: 'Mode of operation (upsert/recreate/delete).'
+    default: 'upsert'
+  token:
+    description: 'A Github PAT'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        run-id: ${{ github.event.workflow_run.id }}
+        name: ${{ inputs.name }}
+        github-token: ${{ inputs.token }}
+
+    - id: pr-number
+      shell: bash
+      run: echo "number=$(cat pr-number)" >> "$GITHUB_OUTPUT"
+
+    - shell: bash
+      run: |
+        [ -s log-url ] && echo "" >> contents && echo "[:arrow_down: Download logs]($(cat log-url))" >> contents
+
+    - uses: thollander/actions-comment-pull-request@v2
+      with:
+        filePath: contents
+        mode: ${{ inputs.mode }}
+        pr_number: ${{ steps.pr-number.outputs.number }}
+        comment_tag: ${{ inputs.name }}-comment

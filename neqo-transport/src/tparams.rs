@@ -6,10 +6,11 @@
 
 // Transport parameters. See -transport section 7.3.
 
-use crate::{
-    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
-    version::{Version, VersionConfig, WireVersion},
-    Error, Res,
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    rc::Rc,
 };
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
@@ -19,12 +20,10 @@ use neqo_crypto::{
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
 
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    convert::TryFrom,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    rc::Rc,
+use crate::{
+    cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    version::{Version, VersionConfig, WireVersion},
+    Error, Res,
 };
 
 pub type TransportParameterId = u64;
@@ -55,51 +54,67 @@ tpids! {
     ACTIVE_CONNECTION_ID_LIMIT = 0x0e,
     INITIAL_SOURCE_CONNECTION_ID = 0x0f,
     RETRY_SOURCE_CONNECTION_ID = 0x10,
+    VERSION_INFORMATION = 0x11,
     GREASE_QUIC_BIT = 0x2ab2,
     MIN_ACK_DELAY = 0xff02_de1a,
     MAX_DATAGRAM_FRAME_SIZE = 0x0020,
-    VERSION_NEGOTIATION = 0xff73db,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug)]
 pub struct PreferredAddress {
-    v4: Option<SocketAddr>,
-    v6: Option<SocketAddr>,
+    v4: Option<SocketAddrV4>,
+    v6: Option<SocketAddrV6>,
 }
 
 impl PreferredAddress {
     /// Make a new preferred address configuration.
     ///
     /// # Panics
+    ///
     /// If neither address is provided, or if either address is of the wrong type.
     #[must_use]
-    pub fn new(v4: Option<SocketAddr>, v6: Option<SocketAddr>) -> Self {
+    pub fn new(v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>) -> Self {
         assert!(v4.is_some() || v6.is_some());
         if let Some(a) = v4 {
-            if let IpAddr::V4(addr) = a.ip() {
-                assert!(!addr.is_unspecified());
-            } else {
-                panic!("invalid address type for v4 address");
-            }
+            assert!(!a.ip().is_unspecified());
             assert_ne!(a.port(), 0);
         }
         if let Some(a) = v6 {
-            if let IpAddr::V6(addr) = a.ip() {
-                assert!(!addr.is_unspecified());
-            } else {
-                panic!("invalid address type for v6 address");
-            }
+            assert!(!a.ip().is_unspecified());
             assert_ne!(a.port(), 0);
         }
         Self { v4, v6 }
     }
 
+    /// A generic version of `new()` for testing.
+    /// # Panics
+    /// When the addresses are the wrong type.
     #[must_use]
-    pub fn ipv4(&self) -> Option<SocketAddr> {
+    #[cfg(test)]
+    pub fn new_any(v4: Option<std::net::SocketAddr>, v6: Option<std::net::SocketAddr>) -> Self {
+        use std::net::SocketAddr;
+
+        let v4 = v4.map(|v4| {
+            let SocketAddr::V4(v4) = v4 else {
+                panic!("not v4");
+            };
+            v4
+        });
+        let v6 = v6.map(|v6| {
+            let SocketAddr::V6(v6) = v6 else {
+                panic!("not v6");
+            };
+            v6
+        });
+        Self::new(v4, v6)
+    }
+
+    #[must_use]
+    pub fn ipv4(&self) -> Option<SocketAddrV4> {
         self.v4
     }
     #[must_use]
-    pub fn ipv6(&self) -> Option<SocketAddr> {
+    pub fn ipv6(&self) -> Option<SocketAddrV6> {
         self.v6
     }
 }
@@ -110,8 +125,8 @@ pub enum TransportParameter {
     Integer(u64),
     Empty,
     PreferredAddress {
-        v4: Option<SocketAddr>,
-        v6: Option<SocketAddr>,
+        v4: Option<SocketAddrV4>,
+        v6: Option<SocketAddrV6>,
         cid: ConnectionId,
         srt: [u8; 16],
     },
@@ -140,23 +155,13 @@ impl TransportParameter {
             Self::PreferredAddress { v4, v6, cid, srt } => {
                 enc.encode_vvec_with(|enc_inner| {
                     if let Some(v4) = v4 {
-                        debug_assert!(v4.is_ipv4());
-                        if let IpAddr::V4(a) = v4.ip() {
-                            enc_inner.encode(&a.octets()[..]);
-                        } else {
-                            unreachable!();
-                        }
+                        enc_inner.encode(&v4.ip().octets()[..]);
                         enc_inner.encode_uint(2, v4.port());
                     } else {
                         enc_inner.encode(&[0; 6]);
                     }
                     if let Some(v6) = v6 {
-                        debug_assert!(v6.is_ipv6());
-                        if let IpAddr::V6(a) = v6.ip() {
-                            enc_inner.encode(&a.octets()[..]);
-                        } else {
-                            unreachable!();
-                        }
+                        enc_inner.encode(&v6.ip().octets()[..]);
                         enc_inner.encode_uint(2, v6.port());
                     } else {
                         enc_inner.encode(&[0; 18]);
@@ -188,7 +193,7 @@ impl TransportParameter {
         let v4 = if v4port == 0 {
             None
         } else {
-            Some(SocketAddr::new(IpAddr::V4(v4ip), v4port))
+            Some(SocketAddrV4::new(v4ip, v4port))
         };
 
         // IPv6 address (mostly the same as v4)
@@ -201,7 +206,7 @@ impl TransportParameter {
         let v6 = if v6port == 0 {
             None
         } else {
-            Some(SocketAddr::new(IpAddr::V6(v6ip), v6port))
+            Some(SocketAddrV6::new(v6ip, v6port, 0, 0))
         };
         // Need either v4 or v6 to be present.
         if v4.is_none() && v6.is_none() {
@@ -227,7 +232,7 @@ impl TransportParameter {
             if v == 0 {
                 Err(Error::TransportParameterError)
             } else {
-                Ok(v as WireVersion)
+                Ok(WireVersion::try_from(v)?)
             }
         }
 
@@ -295,7 +300,7 @@ impl TransportParameter {
                 _ => return Err(Error::TransportParameterError),
             },
 
-            VERSION_NEGOTIATION => Self::decode_versions(&mut d)?,
+            VERSION_INFORMATION => Self::decode_versions(&mut d)?,
 
             // Skip.
             _ => return Ok(None),
@@ -349,6 +354,9 @@ impl TransportParameters {
     }
 
     // Get an integer type or a default.
+    /// # Panics
+    /// When the transport parameter isn't recognized as being an integer.
+    #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
         let default = match tp {
             IDLE_TIMEOUT
@@ -374,6 +382,8 @@ impl TransportParameters {
     }
 
     // Set an integer type or a default.
+    /// # Panics
+    /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
         match tp {
             IDLE_TIMEOUT
@@ -395,6 +405,9 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the transport parameter isn't recognized as containing bytes.
+    #[must_use]
     pub fn get_bytes(&self, tp: TransportParameterId) -> Option<&[u8]> {
         match tp {
             ORIGINAL_DESTINATION_CONNECTION_ID
@@ -411,6 +424,8 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the transport parameter isn't recognized as containing bytes.
     pub fn set_bytes(&mut self, tp: TransportParameterId, value: Vec<u8>) {
         match tp {
             ORIGINAL_DESTINATION_CONNECTION_ID
@@ -423,6 +438,8 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the transport parameter isn't recognized as being empty.
     pub fn set_empty(&mut self, tp: TransportParameterId) {
         match tp {
             DISABLE_MIGRATION | GREASE_QUIC_BIT => {
@@ -433,11 +450,14 @@ impl TransportParameters {
     }
 
     /// Set version information.
+    /// # Panics
+    /// Never.  But rust doesn't know that.
     pub fn set_versions(&mut self, role: Role, versions: &VersionConfig) {
-        let rbuf = random(4);
+        let rbuf = random::<4>();
         let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
-        let grease = (dec.decode_uint(4).unwrap() as u32) & 0xf0f0_f0f0 | 0x0a0a0a0a;
+        let grease =
+            (u32::try_from(dec.decode_uint(4).unwrap()).unwrap()) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
         for &v in versions.all() {
             if role == Role::Client && !versions.initial().is_compatible(v) {
@@ -447,7 +467,7 @@ impl TransportParameters {
         }
         let current = versions.initial().wire_version();
         self.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions { current, other },
         );
     }
@@ -455,7 +475,7 @@ impl TransportParameters {
     fn compatible_upgrade(&mut self, v: Version) {
         if let Some(TransportParameter::Versions {
             ref mut current, ..
-        }) = self.params.get_mut(&VERSION_NEGOTIATION)
+        }) = self.params.get_mut(&VERSION_INFORMATION)
         {
             *current = v.wire_version();
         } else {
@@ -463,6 +483,10 @@ impl TransportParameters {
         }
     }
 
+    /// # Panics
+    /// When the indicated transport parameter is present but NOT empty.
+    /// This should not happen if the parsing code in `TransportParameter::decode` is correct.
+    #[must_use]
     pub fn get_empty(&self, tipe: TransportParameterId) -> bool {
         match self.params.get(&tipe) {
             None => false,
@@ -540,7 +564,7 @@ impl TransportParameters {
     #[must_use]
     pub fn get_versions(&self) -> Option<(WireVersion, &[WireVersion])> {
         if let Some(TransportParameter::Versions { current, other }) =
-            self.params.get(&VERSION_NEGOTIATION)
+            self.params.get(&VERSION_INFORMATION)
         {
             Some((*current, other))
         } else {
@@ -564,6 +588,7 @@ pub struct TransportParametersHandler {
 }
 
 impl TransportParametersHandler {
+    #[must_use]
     pub fn new(role: Role, versions: VersionConfig) -> Self {
         let mut local = TransportParameters::default();
         local.set_versions(role, &versions);
@@ -581,9 +606,13 @@ impl TransportParametersHandler {
     pub fn set_version(&mut self, version: Version) {
         debug_assert_eq!(self.role, Role::Client);
         self.versions.set_initial(version);
-        self.local.set_versions(self.role, &self.versions)
+        self.local.set_versions(self.role, &self.versions);
     }
 
+    /// # Panics
+    /// When this function is called before the peer has provided transport parameters.
+    /// Do not call this function if you are not also able to send data.
+    #[must_use]
     pub fn remote(&self) -> &TransportParameters {
         match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
             (Some(tp), _) | (_, Some(tp)) => tp,
@@ -592,6 +621,7 @@ impl TransportParametersHandler {
     }
 
     /// Get the version as set (or as determined by a compatible upgrade).
+    #[must_use]
     pub fn version(&self) -> Version {
         self.versions.initial()
     }
@@ -723,16 +753,12 @@ where
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
-        let tpslice = if let Some(v) = dec.decode_vvec() {
-            v
-        } else {
+        let Some(tpslice) = dec.decode_vvec() else {
             qinfo!("0-RTT: token code error");
             return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
-        let remembered = if let Ok(v) = TransportParameters::decode(&mut dec_tp) {
-            v
-        } else {
+        let Ok(remembered) = TransportParameters::decode(&mut dec_tp) else {
             qinfo!("0-RTT: transport parameter decode error");
             return ZeroRttCheckResult::Fail;
         };
@@ -749,8 +775,24 @@ where
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
-    use super::*;
-    use std::mem;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+
+    use neqo_common::{Decoder, Encoder};
+
+    use super::PreferredAddress;
+    use crate::{
+        tparams::{
+            TransportParameter, TransportParameterId, TransportParameters,
+            ACTIVE_CONNECTION_ID_LIMIT, IDLE_TIMEOUT, INITIAL_MAX_DATA, INITIAL_MAX_STREAMS_BIDI,
+            INITIAL_MAX_STREAMS_UNI, INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, INITIAL_MAX_STREAM_DATA_UNI,
+            INITIAL_SOURCE_CONNECTION_ID, MAX_ACK_DELAY, MAX_DATAGRAM_FRAME_SIZE,
+            MAX_UDP_PAYLOAD_SIZE, MIN_ACK_DELAY, ORIGINAL_DESTINATION_CONNECTION_ID,
+            PREFERRED_ADDRESS, RETRY_SOURCE_CONNECTION_ID, STATELESS_RESET_TOKEN,
+            VERSION_INFORMATION,
+        },
+        ConnectionId, Error, Version,
+    };
 
     #[test]
     fn basic_tps() {
@@ -769,7 +811,7 @@ mod tests {
         let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
         assert_eq!(tps, tps2);
 
-        println!("TPS = {:?}", tps);
+        println!("TPS = {tps:?}");
         assert_eq!(tps2.get_integer(IDLE_TIMEOUT), 0); // Default
         assert_eq!(tps2.get_integer(MAX_ACK_DELAY), 25); // Default
         assert_eq!(tps2.get_integer(ACTIVE_CONNECTION_ID_LIMIT), 2); // Default
@@ -791,13 +833,12 @@ mod tests {
 
     fn make_spa() -> TransportParameter {
         TransportParameter::PreferredAddress {
-            v4: Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::from(0xc000_0201)),
+            v4: Some(SocketAddrV4::new(Ipv4Addr::from(0xc000_0201), 443)),
+            v6: Some(SocketAddrV6::new(
+                Ipv6Addr::from(0xfe80_0000_0000_0000_0000_0000_0000_0001),
                 443,
-            )),
-            v6: Some(SocketAddr::new(
-                IpAddr::V6(Ipv6Addr::from(0xfe80_0000_0000_0000_0000_0000_0000_0001)),
-                443,
+                0,
+                0,
             )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
             srt: [3; 16],
@@ -825,7 +866,7 @@ mod tests {
 
     fn mutate_spa<F>(wrecker: F) -> TransportParameter
     where
-        F: FnOnce(&mut Option<SocketAddr>, &mut Option<SocketAddr>, &mut ConnectionId),
+        F: FnOnce(&mut Option<SocketAddrV4>, &mut Option<SocketAddrV6>, &mut ConnectionId),
     {
         let mut spa = make_spa();
         if let TransportParameter::PreferredAddress {
@@ -845,7 +886,7 @@ mod tests {
     /// This takes a `TransportParameter::PreferredAddress` that has been mutilated.
     /// It then encodes it, working from the knowledge that the `encode` function
     /// doesn't care about validity, and decodes it.  The result should be failure.
-    fn assert_invalid_spa(spa: TransportParameter) {
+    fn assert_invalid_spa(spa: &TransportParameter) {
         let mut enc = Encoder::new();
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         assert_eq!(
@@ -855,40 +896,40 @@ mod tests {
     }
 
     /// This is for those rare mutations that are acceptable.
-    fn assert_valid_spa(spa: TransportParameter) {
+    fn assert_valid_spa(spa: &TransportParameter) {
         let mut enc = Encoder::new();
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
         assert_eq!(id, PREFERRED_ADDRESS);
-        assert_eq!(decoded, spa);
+        assert_eq!(&decoded, spa);
     }
 
     #[test]
     fn preferred_address_zero_address() {
         // Either port being zero is bad.
-        assert_invalid_spa(mutate_spa(|v4, _, _| {
+        assert_invalid_spa(&mutate_spa(|v4, _, _| {
             v4.as_mut().unwrap().set_port(0);
         }));
-        assert_invalid_spa(mutate_spa(|_, v6, _| {
+        assert_invalid_spa(&mutate_spa(|_, v6, _| {
             v6.as_mut().unwrap().set_port(0);
         }));
         // Either IP being zero is bad.
-        assert_invalid_spa(mutate_spa(|v4, _, _| {
-            v4.as_mut().unwrap().set_ip(IpAddr::V4(Ipv4Addr::from(0)));
+        assert_invalid_spa(&mutate_spa(|v4, _, _| {
+            v4.as_mut().unwrap().set_ip(Ipv4Addr::from(0));
         }));
-        assert_invalid_spa(mutate_spa(|_, v6, _| {
-            v6.as_mut().unwrap().set_ip(IpAddr::V6(Ipv6Addr::from(0)));
+        assert_invalid_spa(&mutate_spa(|_, v6, _| {
+            v6.as_mut().unwrap().set_ip(Ipv6Addr::from(0));
         }));
         // Either address being absent is OK.
-        assert_valid_spa(mutate_spa(|v4, _, _| {
+        assert_valid_spa(&mutate_spa(|v4, _, _| {
             *v4 = None;
         }));
-        assert_valid_spa(mutate_spa(|_, v6, _| {
+        assert_valid_spa(&mutate_spa(|_, v6, _| {
             *v6 = None;
         }));
         // Both addresses being absent is bad.
-        assert_invalid_spa(mutate_spa(|v4, v6, _| {
+        assert_invalid_spa(&mutate_spa(|v4, v6, _| {
             *v4 = None;
             *v6 = None;
         }));
@@ -896,10 +937,10 @@ mod tests {
 
     #[test]
     fn preferred_address_bad_cid() {
-        assert_invalid_spa(mutate_spa(|_, _, cid| {
+        assert_invalid_spa(&mutate_spa(|_, _, cid| {
             *cid = ConnectionId::from(&[]);
         }));
-        assert_invalid_spa(mutate_spa(|_, _, cid| {
+        assert_invalid_spa(&mutate_spa(|_, _, cid| {
             *cid = ConnectionId::from(&[0x0c; 21]);
         }));
     }
@@ -917,85 +958,36 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn preferred_address_wrong_family_v4() {
-        mutate_spa(|v4, _, _| {
-            v4.as_mut().unwrap().set_ip(IpAddr::V6(Ipv6Addr::from(0)));
-        })
-        .encode(&mut Encoder::new(), PREFERRED_ADDRESS);
-    }
-
-    #[test]
-    #[should_panic]
-    fn preferred_address_wrong_family_v6() {
-        mutate_spa(|_, v6, _| {
-            v6.as_mut().unwrap().set_ip(IpAddr::V4(Ipv4Addr::from(0)));
-        })
-        .encode(&mut Encoder::new(), PREFERRED_ADDRESS);
-    }
-
-    #[test]
-    #[should_panic]
+    #[should_panic(expected = "v4.is_some() || v6.is_some()")]
     fn preferred_address_neither() {
-        #[allow(clippy::drop_copy)]
-        mem::drop(PreferredAddress::new(None, None));
+        _ = PreferredAddress::new(None, None);
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = ".is_unspecified")]
     fn preferred_address_v4_unspecified() {
-        _ = PreferredAddress::new(
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0)), 443)),
-            None,
-        );
+        _ = PreferredAddress::new(Some(SocketAddrV4::new(Ipv4Addr::from(0), 443)), None);
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "left != right")]
     fn preferred_address_v4_zero_port() {
         _ = PreferredAddress::new(
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0xc000_0201)), 0)),
+            Some(SocketAddrV4::new(Ipv4Addr::from(0xc000_0201), 0)),
             None,
         );
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = ".is_unspecified")]
     fn preferred_address_v6_unspecified() {
-        _ = PreferredAddress::new(
-            None,
-            Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(0)), 443)),
-        );
+        _ = PreferredAddress::new(None, Some(SocketAddrV6::new(Ipv6Addr::from(0), 443, 0, 0)));
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "left != right")]
     fn preferred_address_v6_zero_port() {
-        _ = PreferredAddress::new(
-            None,
-            Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 0)),
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn preferred_address_v4_is_v6() {
-        _ = PreferredAddress::new(
-            Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)),
-            None,
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn preferred_address_v6_is_v4() {
-        _ = PreferredAddress::new(
-            None,
-            Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::from(0xc000_0201)),
-                443,
-            )),
-        );
+        _ = PreferredAddress::new(None, Some(SocketAddrV6::new(Ipv6Addr::from(1), 0, 0, 0)));
     }
 
     #[test]
@@ -1026,7 +1018,6 @@ mod tests {
 
     #[test]
     fn compatible_0rtt_integers() {
-        let mut tps_a = TransportParameters::default();
         const INTEGER_KEYS: &[TransportParameterId] = &[
             INITIAL_MAX_DATA,
             INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
@@ -1038,6 +1029,8 @@ mod tests {
             MIN_ACK_DELAY,
             MAX_DATAGRAM_FRAME_SIZE,
         ];
+
+        let mut tps_a = TransportParameters::default();
         for i in INTEGER_KEYS {
             tps_a.set(*i, TransportParameter::Integer(12));
         }
@@ -1075,7 +1068,8 @@ mod tests {
     fn active_connection_id_limit_min_2() {
         let mut tps = TransportParameters::default();
 
-        // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport parameter.
+        // Intentionally set an invalid value for the ACTIVE_CONNECTION_ID_LIMIT transport
+        // parameter.
         tps.params
             .insert(ACTIVE_CONNECTION_ID_LIMIT, TransportParameter::Integer(1));
 
@@ -1091,8 +1085,7 @@ mod tests {
     #[test]
     fn versions_encode_decode() {
         const ENCODED: &[u8] = &[
-            0x80, 0xff, 0x73, 0xdb, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x1a, 0x2a, 0x3a, 0x4a, 0x5a,
-            0x6a, 0x7a, 0x8a,
+            0x11, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x1a, 0x2a, 0x3a, 0x4a, 0x5a, 0x6a, 0x7a, 0x8a,
         ];
         let vn = TransportParameter::Versions {
             current: Version::Version1.wire_version(),
@@ -1100,12 +1093,12 @@ mod tests {
         };
 
         let mut enc = Encoder::new();
-        vn.encode(&mut enc, VERSION_NEGOTIATION);
+        vn.encode(&mut enc, VERSION_INFORMATION);
         assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
-        assert_eq!(id, VERSION_NEGOTIATION);
+        assert_eq!(id, VERSION_INFORMATION);
         assert_eq!(decoded, vn);
     }
 
@@ -1124,10 +1117,8 @@ mod tests {
 
     #[test]
     fn versions_zero() {
-        const ZERO1: &[u8] = &[0x80, 0xff, 0x73, 0xdb, 0x04, 0x00, 0x00, 0x00, 0x00];
-        const ZERO2: &[u8] = &[
-            0x80, 0xff, 0x73, 0xdb, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-        ];
+        const ZERO1: &[u8] = &[0x11, 0x04, 0x00, 0x00, 0x00, 0x00];
+        const ZERO2: &[u8] = &[0x11, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
 
         let mut dec = Decoder::from(&ZERO1);
         assert_eq!(
@@ -1145,7 +1136,7 @@ mod tests {
     fn versions_equal_0rtt() {
         let mut current = TransportParameters::default();
         current.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version(),
                 other: vec![0x1a2a_3a4a],
@@ -1160,7 +1151,7 @@ mod tests {
 
         // If the version matches, it's OK to use 0-RTT.
         remembered.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version(),
                 other: vec![0x5a6a_7a8a, 0x9aaa_baca],
@@ -1171,7 +1162,7 @@ mod tests {
 
         // An apparent "upgrade" is still cause to reject 0-RTT.
         remembered.set(
-            VERSION_NEGOTIATION,
+            VERSION_INFORMATION,
             TransportParameter::Versions {
                 current: Version::Version1.wire_version() + 1,
                 other: vec![],

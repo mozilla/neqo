@@ -4,26 +4,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::huffman::decode_huffman;
-use crate::prefix::Prefix;
-use crate::{Error, Res};
+use std::{mem, str};
+
 use neqo_common::{qdebug, qerror};
 use neqo_transport::{Connection, StreamId};
-use std::convert::TryInto;
-use std::mem;
-use std::str;
+
+use crate::{huffman::decode_huffman, prefix::Prefix, Error, Res};
 
 pub trait ReadByte {
     /// # Errors
-    ///    Return error occurred while reading a byte.
-    ///    The exact error depends on trait implementation.
+    ///
+    /// Return error occurred while reading a byte.
+    /// The exact error depends on trait implementation.
     fn read_byte(&mut self) -> Res<u8>;
 }
 
 pub trait Reader {
     /// # Errors
-    ///    Return error occurred while reading date into a buffer.
-    ///    The exact error depends on trait implementation.
+    ///
+    /// Return error occurred while reading date into a buffer.
+    /// The exact error depends on trait implementation.
     fn read(&mut self, buf: &mut [u8]) -> Res<usize>;
 }
 
@@ -130,9 +130,9 @@ impl<'a> ReceiverBufferWrapper<'a> {
             .try_into()
             .or(Err(Error::DecompressionFailed))?;
         if use_huffman {
-            Ok(to_string(&decode_huffman(self.slice(length)?)?)?)
+            Ok(parse_utf8(&decode_huffman(self.slice(length)?)?)?.to_string())
         } else {
-            Ok(to_string(self.slice(length)?)?)
+            Ok(parse_utf8(self.slice(length)?)?.to_string())
         }
     }
 
@@ -158,7 +158,9 @@ pub struct IntReader {
 impl IntReader {
     /// `IntReader` is created by suppling the first byte anf prefix length.
     /// A varint may take only one byte, In that case already the first by has set state to done.
+    ///
     /// # Panics
+    ///
     /// When `prefix_len` is 8 or larger.
     #[must_use]
     pub fn new(first_byte: u8, prefix_len: u8) -> Self {
@@ -178,6 +180,7 @@ impl IntReader {
     }
 
     /// # Panics
+    ///
     /// Never, but rust doesn't know that.
     #[must_use]
     pub fn make(first_byte: u8, prefixes: &[Prefix]) -> Self {
@@ -191,7 +194,9 @@ impl IntReader {
 
     /// This function reads bytes until the varint is decoded or until stream/buffer does not
     /// have any more date.
+    ///
     /// # Errors
+    ///
     /// Possible errors are:
     ///  1) `NeedMoreData` if the reader needs more data,
     ///  2) `IntegerOverflow`,
@@ -218,18 +223,17 @@ impl IntReader {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum LiteralReaderState {
+    #[default]
     ReadHuffman,
-    ReadLength { reader: IntReader },
-    ReadLiteral { offset: usize },
+    ReadLength {
+        reader: IntReader,
+    },
+    ReadLiteral {
+        offset: usize,
+    },
     Done,
-}
-
-impl Default for LiteralReaderState {
-    fn default() -> Self {
-        Self::ReadHuffman
-    }
 }
 
 /// This is decoder of a literal with a prefix:
@@ -249,7 +253,9 @@ impl LiteralReader {
     /// Creates `LiteralReader` with the first byte. This constructor is always used
     /// when a litreral has a prefix.
     /// For literals without a prefix please use the default constructor.
+    ///
     /// # Panics
+    ///
     /// If `prefix_len` is 8 or more.
     #[must_use]
     pub fn new_with_first_byte(first_byte: u8, prefix_len: u8) -> Self {
@@ -265,13 +271,17 @@ impl LiteralReader {
 
     /// This function reads bytes until the literal is decoded or until stream/buffer does not
     /// have any more date ready.
+    ///
     /// # Errors
+    ///
     /// Possible errors are:
     ///  1) `NeedMoreData` if the reader needs more data,
     ///  2) `IntegerOverflow`
     ///  3) Any `ReadByte`'s error
     /// It returns value if reading the literal is done or None if it needs more data.
+    ///
     /// # Panics
+    ///
     /// When this object is complete.
     pub fn read<T: ReadByte + Reader>(&mut self, s: &mut T) -> Res<Vec<u8>> {
         loop {
@@ -313,20 +323,20 @@ impl LiteralReader {
 
 /// This is a helper function used only by `ReceiverBufferWrapper`, therefore it returns
 /// `DecompressionFailed` if any error happens.
+///
 /// # Errors
-/// If an parsing error occurred, the function returns `ToStringFailed`.
-pub fn to_string(v: &[u8]) -> Res<String> {
-    match str::from_utf8(v) {
-        Ok(s) => Ok(s.to_string()),
-        Err(_) => Err(Error::ToStringFailed),
-    }
+///
+/// If an parsing error occurred, the function returns `BadUtf8`.
+pub fn parse_utf8(v: &[u8]) -> Res<&str> {
+    str::from_utf8(v).map_err(|_| Error::BadUtf8)
 }
 
 #[cfg(test)]
 pub(crate) mod test_receiver {
 
-    use super::{Error, ReadByte, Reader, Res};
     use std::collections::VecDeque;
+
+    use super::{Error, ReadByte, Reader, Res};
 
     #[derive(Default)]
     pub struct TestReceiver {
@@ -365,11 +375,12 @@ pub(crate) mod test_receiver {
 #[cfg(test)]
 mod tests {
 
+    use test_receiver::TestReceiver;
+
     use super::{
-        str, test_receiver, to_string, Error, IntReader, LiteralReader, ReadByte,
+        parse_utf8, str, test_receiver, Error, IntReader, LiteralReader, ReadByte,
         ReceiverBufferWrapper, Res,
     };
-    use test_receiver::TestReceiver;
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
         (&[0xEA], 3, 10),
@@ -531,7 +542,7 @@ mod tests {
             let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
             assert_eq!(
-                to_string(&reader.read(&mut test_receiver).unwrap()).unwrap(),
+                parse_utf8(&reader.read(&mut test_receiver).unwrap()).unwrap(),
                 *value
             );
         }

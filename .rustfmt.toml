@@ -1,0 +1,14 @@
+# Keep in sync with `Cargo.toml` `edition`.
+#
+# `rustfmt` envoked not through `cargo fmt` but directly does not pick up Rust
+# edition in `Cargo.toml`. Thus duplicate here. See
+# https://github.com/mozilla/neqo/pull/1722 for details.
+edition = "2021"
+
+comment_width=100
+wrap_comments=true
+
+imports_granularity="Crate"
+group_imports="StdExternalCrate"
+
+format_code_in_doc_comments=true

@@ -4,9 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    cmp::{max, min},
+    time::{Duration, Instant},
+};
+
+use neqo_common::qtrace;
+
 use crate::recovery::RecoveryToken;
-use std::cmp::{max, min};
-use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
@@ -53,6 +58,10 @@ impl IdleTimeout {
         } else {
             max(self.timeout, pto * 3)
         };
+        qtrace!(
+            "IdleTimeout::expiry@{now:?} pto={pto:?}, ka={keep_alive} => {t:?}",
+            t = start + delay
+        );
         start + delay
     }
 

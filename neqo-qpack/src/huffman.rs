@@ -4,10 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::huffman_decode_helper::{HuffmanDecoderNode, HUFFMAN_DECODE_ROOT};
-use crate::huffman_table::HUFFMAN_TABLE;
-use crate::{Error, Res};
-use std::convert::TryFrom;
+use crate::{
+    huffman_decode_helper::{huffman_decoder_root, HuffmanDecoderNode},
+    huffman_table::HUFFMAN_TABLE,
+    Error, Res,
+};
 
 struct BitReader<'a> {
     input: &'a [u8],
@@ -65,9 +66,14 @@ impl<'a> BitReader<'a> {
 }
 
 /// Decodes huffman encoded input.
+///
 /// # Errors
-/// This function may return `HuffmanDecompressionFailed` if `input` is not a correct huffman-encoded array of bits.
+///
+/// This function may return `HuffmanDecompressionFailed` if `input` is not a correct
+/// huffman-encoded array of bits.
+///
 /// # Panics
+///
 /// Never, but rust can't know that.
 pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
     let mut reader = BitReader::new(input);
@@ -85,7 +91,7 @@ pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
 }
 
 fn decode_character(reader: &mut BitReader) -> Res<Option<u16>> {
-    let mut node: &HuffmanDecoderNode = &HUFFMAN_DECODE_ROOT;
+    let mut node: &HuffmanDecoderNode = huffman_decoder_root();
     let mut i = 0;
     while node.value.is_none() {
         match reader.read_bit() {
@@ -109,6 +115,7 @@ fn decode_character(reader: &mut BitReader) -> Res<Option<u16>> {
 }
 
 /// # Panics
+///
 /// Never, but rust doesn't know that.
 #[must_use]
 pub fn encode_huffman(input: &[u8]) -> Vec<u8> {

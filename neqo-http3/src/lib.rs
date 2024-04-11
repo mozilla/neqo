@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 /*!
 
@@ -35,7 +34,7 @@ supported and can be enabled using [`Http3Parameters`](struct.Http3Parameters.ht
 
 The crate does not create an OS level UDP socket, it produces, i.e. encodes, data that should be
 sent as a payload in a UDP packet and consumes data received on the UDP socket. For example,
-[`std::net::UdpSocket`](std::net::UdpSocket) or [`mio::net::UdpSocket`](https://crates.io/crates/mio)
+[`std::net::UdpSocket`] or [`mio::net::UdpSocket`](https://crates.io/crates/mio)
 could be used for creating UDP sockets.
 
 The application is responsible for creating a socket, polling the socket, and sending and receiving
@@ -160,14 +159,8 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use neqo_qpack::Error as QpackError;
-pub use neqo_transport::{streams::SendOrder, Output, StreamId};
-use neqo_transport::{
-    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
-};
-use std::fmt::Debug;
+use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
-use crate::priority::PriorityHandler;
 use buffered_send_stream::BufferedStream;
 pub use client_events::{Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
@@ -177,15 +170,19 @@ use features::extended_connect::WebTransportSession;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
+use neqo_qpack::Error as QpackError;
+pub use neqo_transport::{streams::SendOrder, Output, StreamId};
+use neqo_transport::{
+    AppError, Connection, Error as TransportError, RecvStreamStats, SendStreamStats,
+};
 pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{
     Http3OrWebTransportStream, Http3ServerEvent, WebTransportRequest, WebTransportServerEvent,
 };
-use std::any::Any;
-use std::cell::RefCell;
-use std::rc::Rc;
 use stream_type_reader::NewStreamType;
+
+use crate::priority::PriorityHandler;
 
 type Res<T> = Result<T, Error>;
 
@@ -193,7 +190,8 @@ type Res<T> = Result<T, Error>;
 pub enum Error {
     HttpNoError,
     HttpGeneralProtocol,
-    HttpGeneralProtocolStream, //this is the same as the above but it should only close a stream not a connection.
+    HttpGeneralProtocolStream, /* this is the same as the above but it should only close a
+                                * stream not a connection. */
     // When using this error, you need to provide a value that is unique, which
     // will allow the specific error to be identified.  This will be validated in CI.
     HttpInternal(u16),
@@ -288,6 +286,7 @@ impl Error {
     }
 
     /// # Panics
+    ///
     /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_send_errors(err: &Error) -> Self {
@@ -304,6 +303,7 @@ impl Error {
     }
 
     /// # Panics
+    ///
     /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_create_errors(err: &TransportError) -> Self {
@@ -318,6 +318,7 @@ impl Error {
     }
 
     /// # Panics
+    ///
     /// On unexpected errors, in debug mode.
     #[must_use]
     pub fn map_stream_recv_errors(err: &Error) -> Self {
@@ -345,8 +346,11 @@ impl Error {
     }
 
     /// # Errors
-    ///   Any error is mapped to the indicated type.
+    ///
+    /// Any error is mapped to the indicated type.
+    ///
     /// # Panics
+    ///
     /// On internal errors, in debug mode.
     fn map_error<R>(r: Result<R, impl Into<Self>>, err: Self) -> Result<R, Self> {
         r.map_err(|e| {
@@ -428,18 +432,13 @@ pub enum Http3StreamType {
 }
 
 #[must_use]
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Default, PartialEq, Eq, Debug)]
 enum ReceiveOutput {
+    #[default]
     NoOutput,
     ControlFrames(Vec<HFrame>),
     UnblockedStreams(Vec<StreamId>),
     NewStream(NewStreamType),
-}
-
-impl Default for ReceiveOutput {
-    fn default() -> Self {
-        Self::NoOutput
-    }
 }
 
 trait Stream: Debug {
@@ -450,16 +449,23 @@ trait RecvStream: Stream {
     /// The stream reads data from the corresponding quic stream and returns `ReceiveOutput`.
     /// The function also returns true as the second parameter if the stream is done and
     /// could be forgotten, i.e. removed from all records.
+    ///
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
+
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, etc.
     fn reset(&mut self, close_type: CloseType) -> Res<()>;
+
     /// The function allows an app to read directly from the quic stream. The function
     /// returns the number of bytes written into `buf` and true/false if the stream is
     /// completely done and can be forgotten, i.e. removed from all records.
+    ///
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, _conn: &mut Connection, _buf: &mut [u8]) -> Res<(usize, bool)> {
         Err(Error::InvalidStreamId)
@@ -483,7 +489,9 @@ trait HttpRecvStream: RecvStream {
     /// This function is similar to the receive function and has the same output, i.e.
     /// a `ReceiveOutput` enum and bool. The bool is true if the stream is completely done
     /// and can be forgotten, i.e. removed from all records.
+    ///
     /// # Errors
+    ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)>;
 
@@ -495,8 +503,6 @@ trait HttpRecvStream: RecvStream {
     fn extended_connect_wait_for_response(&self) -> bool {
         false
     }
-
-    fn any(&self) -> &dyn Any;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -552,22 +558,26 @@ trait HttpRecvStreamEvents: RecvStreamEvents {
 
 trait SendStream: Stream {
     /// # Errors
-    /// Error my occur during sending data, e.g. protocol error, etc.
+    ///
+    /// Error may occur during sending data, e.g. protocol error, etc.
     fn send(&mut self, conn: &mut Connection) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
-    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<SendOrder>) -> Res<()>;
-    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) -> Res<()>;
+
     /// # Errors
-    /// Error my occur during sending data, e.g. protocol error, etc.
+    ///
+    /// Error may occur during sending data, e.g. protocol error, etc.
     fn send_data(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<usize>;
 
     /// # Errors
-    /// It may happen that the transport stream is already close. This is unlikely.
+    ///
+    /// It may happen that the transport stream is already closed. This is unlikely.
     fn close(&mut self, conn: &mut Connection) -> Res<()>;
+
     /// # Errors
-    /// It may happen that the transport stream is already close. This is unlikely.
+    ///
+    /// It may happen that the transport stream is already closed. This is unlikely.
     fn close_with_message(
         &mut self,
         _conn: &mut Connection,
@@ -576,6 +586,7 @@ trait SendStream: Stream {
     ) -> Res<()> {
         Err(Error::InvalidStreamId)
     }
+
     /// This function is called when sending side is closed abruptly by the peer or
     /// the application.
     fn handle_stop_sending(&mut self, close_type: CloseType);
@@ -584,7 +595,8 @@ trait SendStream: Stream {
     }
 
     /// # Errors
-    /// It may happen that the transport stream is already close. This is unlikely.
+    ///
+    /// It may happen that the transport stream is already closed. This is unlikely.
     fn send_data_atomic(&mut self, _conn: &mut Connection, _buf: &[u8]) -> Res<()> {
         Err(Error::InvalidStreamId)
     }
@@ -599,11 +611,12 @@ trait HttpSendStream: SendStream {
     /// This function is used to supply headers to a http message. The
     /// function is used for request headers, response headers, 1xx response and
     /// trailers.
+    ///
     /// # Errors
+    ///
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()>;
     fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}
-    fn any(&self) -> &dyn Any;
 }
 
 trait SendStreamEvents: Debug {

@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::{frames::reader::FrameDecoder, Error, Res};
 use neqo_common::{Decoder, Encoder};
-use std::convert::TryFrom;
+
+use crate::{frames::reader::FrameDecoder, Error, Res};
 
 pub(crate) type WebTransportFrameType = u64;
 
@@ -42,7 +42,9 @@ impl FrameDecoder<WebTransportFrame> for WebTransportFrame {
                 }
                 let error =
                     u32::try_from(dec.decode_uint(4).ok_or(Error::HttpMessageError)?).unwrap();
-                let Ok(message) = String::from_utf8(dec.decode_remainder().to_vec()) else { return Err(Error::HttpMessageError) };
+                let Ok(message) = String::from_utf8(dec.decode_remainder().to_vec()) else {
+                    return Err(Error::HttpMessageError);
+                };
                 Ok(Some(WebTransportFrame::CloseSession { error, message }))
             } else {
                 Ok(None)

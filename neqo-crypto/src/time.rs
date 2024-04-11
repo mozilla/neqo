@@ -6,20 +6,18 @@
 
 #![allow(clippy::upper_case_acronyms)]
 
-use crate::{
-    agentio::as_c_void,
-    err::{Error, Res},
-    once::OnceResult,
-    ssl::{PRFileDesc, SSLTimeFunc},
-};
-
 use std::{
-    boxed::Box,
-    convert::{TryFrom, TryInto},
     ops::Deref,
     os::raw::c_void,
     pin::Pin,
+    sync::OnceLock,
     time::{Duration, Instant},
+};
+
+use crate::{
+    agentio::as_c_void,
+    err::{Error, Res},
+    ssl::{PRFileDesc, SSLTimeFunc},
 };
 
 include!(concat!(env!("OUT_DIR"), "/nspr_time.rs"));
@@ -67,14 +65,13 @@ impl TimeZero {
     }
 }
 
-static mut BASE_TIME: OnceResult<TimeZero> = OnceResult::new();
+static BASE_TIME: OnceLock<TimeZero> = OnceLock::new();
 
 fn get_base() -> &'static TimeZero {
-    let f = || TimeZero {
+    BASE_TIME.get_or_init(|| TimeZero {
         instant: Instant::now(),
         prtime: unsafe { PR_Now() },
-    };
-    unsafe { BASE_TIME.call_once(f) }
+    })
 }
 
 pub(crate) fn init() {
@@ -97,9 +94,8 @@ impl Deref for Time {
 impl From<Instant> for Time {
     /// Convert from an Instant into a Time.
     fn from(t: Instant) -> Self {
-        // Call `TimeZero::baseline(t)` so that time zero can be set.
-        let f = || TimeZero::baseline(t);
-        _ = unsafe { BASE_TIME.call_once(f) };
+        // Initialize `BASE_TIME` using `TimeZero::baseline(t)`.
+        BASE_TIME.get_or_init(|| TimeZero::baseline(t));
         Self { t }
     }
 }
@@ -108,14 +104,17 @@ impl TryFrom<PRTime> for Time {
     type Error = Error;
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
-        if let Some(delta) = prtime.checked_sub(base.prtime) {
-            let d = Duration::from_micros(delta.try_into()?);
-            base.instant
-                .checked_add(d)
-                .map_or(Err(Error::TimeTravelError), |t| Ok(Self { t }))
+        let delta = prtime
+            .checked_sub(base.prtime)
+            .ok_or(Error::TimeTravelError)?;
+        let d = Duration::from_micros(u64::try_from(delta.abs())?);
+        let t = if delta >= 0 {
+            base.instant.checked_add(d)
         } else {
-            Err(Error::TimeTravelError)
-        }
+            base.instant.checked_sub(d)
+        };
+        let t = t.ok_or(Error::TimeTravelError)?;
+        Ok(Self { t })
     }
 }
 
@@ -123,14 +122,21 @@ impl TryInto<PRTime> for Time {
     type Error = Error;
     fn try_into(self) -> Res<PRTime> {
         let base = get_base();
-        let delta = self
-            .t
-            .checked_duration_since(base.instant)
-            .ok_or(Error::TimeTravelError)?;
-        if let Ok(d) = PRTime::try_from(delta.as_micros()) {
-            d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
+
+        if let Some(delta) = self.t.checked_duration_since(base.instant) {
+            if let Ok(d) = PRTime::try_from(delta.as_micros()) {
+                d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
+            } else {
+                Err(Error::TimeTravelError)
+            }
         } else {
-            Err(Error::TimeTravelError)
+            // Try to go backwards from the base time.
+            let backwards = base.instant - self.t; // infallible
+            if let Ok(d) = PRTime::try_from(backwards.as_micros()) {
+                base.prtime.checked_sub(d).ok_or(Error::TimeTravelError)
+            } else {
+                Err(Error::TimeTravelError)
+            }
         }
     }
 }
@@ -207,12 +213,10 @@ impl Default for TimeHolder {
 
 #[cfg(test)]
 mod test {
+    use std::time::{Duration, Instant};
+
     use super::{get_base, init, Interval, PRTime, Time};
     use crate::err::Res;
-    use std::{
-        convert::{TryFrom, TryInto},
-        time::{Duration, Instant},
-    };
 
     #[test]
     fn convert_stable() {
@@ -227,16 +231,23 @@ mod test {
     }
 
     #[test]
-    fn past_time() {
+    fn past_prtime() {
+        const DELTA: Duration = Duration::from_secs(1);
         init();
         let base = get_base();
-        assert!(Time::try_from(base.prtime - 1).is_err());
+        let delta_micros = PRTime::try_from(DELTA.as_micros()).unwrap();
+        println!("{} - {}", base.prtime, delta_micros);
+        let t = Time::try_from(base.prtime - delta_micros).unwrap();
+        assert_eq!(Instant::from(t) + DELTA, base.instant);
     }
 
     #[test]
-    fn negative_time() {
+    fn past_instant() {
+        const DELTA: Duration = Duration::from_secs(1);
         init();
-        assert!(Time::try_from(-1).is_err());
+        let base = get_base();
+        let t = Time::from(base.instant.checked_sub(DELTA).unwrap());
+        assert_eq!(Instant::from(t) + DELTA, base.instant);
     }
 
     #[test]
@@ -247,11 +258,11 @@ mod test {
 
     #[test]
     // We allow replace_consts here because
-    // std::u64::max_value() isn't available
+    // std::u64::MAX isn't available
     // in all of our targets
     fn overflow_interval() {
         init();
-        let interval = Interval::from(Duration::from_micros(u64::max_value()));
+        let interval = Interval::from(Duration::from_micros(u64::MAX));
         let res: Res<PRTime> = interval.try_into();
         assert!(res.is_err());
     }

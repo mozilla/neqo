@@ -1,12 +1,20 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 #![allow(dead_code)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc)]
+
+use std::{mem, time::Instant};
 
 use neqo_common::qinfo;
 use neqo_crypto::{
     AntiReplay, AuthenticationStatus, Client, HandshakeState, RecordList, Res, ResumptionToken,
     SecretAgent, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
-use std::mem;
-use std::time::Instant;
 use test_fixture::{anti_replay, fixture_init, now};
 
 /// Consume records until the handshake state changes.
@@ -127,6 +135,7 @@ fn zero_rtt_setup(
     }
 }
 
+#[must_use]
 pub fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, ResumptionToken) {
     fixture_init();
 

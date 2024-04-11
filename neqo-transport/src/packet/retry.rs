@@ -4,15 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![deny(clippy::pedantic)]
-
-use crate::version::Version;
-use crate::{Error, Res};
+use std::cell::RefCell;
 
 use neqo_common::qerror;
 use neqo_crypto::{hkdf, Aead, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
-use std::cell::RefCell;
+use crate::{version::Version, Error, Res};
 
 /// The AEAD used for Retry is fixed, so use thread local storage.
 fn make_aead(version: Version) -> Aead {
@@ -21,7 +18,6 @@ fn make_aead(version: Version) -> Aead {
 
     let secret = hkdf::import_key(TLS_VERSION_1_3, version.retry_secret()).unwrap();
     Aead::new(
-        false,
         TLS_VERSION_1_3,
         TLS_AES_128_GCM_SHA256,
         &secret,
@@ -46,7 +42,7 @@ where
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {
         qerror!("Unable to access Retry AEAD: {:?}", e);
-        Error::InternalError(6)
+        Error::InternalError
     })?
 }
 

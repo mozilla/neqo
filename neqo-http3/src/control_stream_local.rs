@@ -4,12 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::HFrame;
-use crate::{BufferedStream, Http3StreamType, RecvStream, Res};
+use std::collections::{HashMap, VecDeque};
+
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};
-use std::collections::{HashMap, VecDeque};
-use std::convert::TryFrom;
+
+use crate::{frames::HFrame, BufferedStream, Http3StreamType, RecvStream, Res};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
@@ -63,7 +63,9 @@ impl ControlStreamLocal {
     ) -> Res<()> {
         // send all necessary priority updates
         while let Some(update_id) = self.outstanding_priority_update.pop_front() {
-            let Some(update_stream) = recv_conn.get_mut(&update_id) else { continue };
+            let Some(update_stream) = recv_conn.get_mut(&update_id) else {
+                continue;
+            };
 
             // can assert and unwrap here, because priority updates can only be added to
             // HttpStreams in [Http3Connection::queue_update_priority}

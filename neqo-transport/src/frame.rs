@@ -6,20 +6,21 @@
 
 // Directly relating to QUIC frames.
 
+use std::ops::RangeInclusive;
+
 use neqo_common::{qtrace, Decoder};
 
-use crate::cid::MAX_CONNECTION_ID_LEN;
-use crate::packet::PacketType;
-use crate::stream_id::{StreamId, StreamType};
-use crate::{AppError, ConnectionError, Error, Res, TransportError};
-
-use std::convert::TryFrom;
-use std::ops::RangeInclusive;
+use crate::{
+    cid::MAX_CONNECTION_ID_LEN,
+    packet::PacketType,
+    stream_id::{StreamId, StreamType},
+    AppError, ConnectionError, Error, Res, TransportError,
+};
 
 #[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
 
-const FRAME_TYPE_PADDING: FrameType = 0x0;
+pub const FRAME_TYPE_PADDING: FrameType = 0x0;
 pub const FRAME_TYPE_PING: FrameType = 0x1;
 pub const FRAME_TYPE_ACK: FrameType = 0x2;
 const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
@@ -77,6 +78,7 @@ impl CloseError {
         }
     }
 
+    #[must_use]
     pub fn code(&self) -> u64 {
         match self {
             Self::Transport(c) | Self::Application(c) => *c,
@@ -93,6 +95,12 @@ impl From<ConnectionError> for CloseError {
     }
 }
 
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(_err: std::array::TryFromSliceError) -> Self {
+        Self::FrameEncodingError
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Default, Clone)]
 pub struct AckRange {
     pub(crate) gap: u64,
@@ -101,7 +109,7 @@ pub struct AckRange {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Frame<'a> {
-    Padding,
+    Padding(u16),
     Ping,
     Ack {
         largest_acknowledged: u64,
@@ -211,9 +219,10 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[must_use]
     pub fn get_type(&self) -> FrameType {
         match self {
-            Self::Padding => FRAME_TYPE_PADDING,
+            Self::Padding { .. } => FRAME_TYPE_PADDING,
             Self::Ping => FRAME_TYPE_PING,
             Self::Ack { .. } => FRAME_TYPE_ACK, // We don't do ACK ECN.
             Self::ResetStream { .. } => FRAME_TYPE_RESET_STREAM,
@@ -252,6 +261,7 @@ impl<'a> Frame<'a> {
         }
     }
 
+    #[must_use]
     pub fn is_stream(&self) -> bool {
         matches!(
             self,
@@ -267,6 +277,7 @@ impl<'a> Frame<'a> {
         )
     }
 
+    #[must_use]
     pub fn stream_type(fin: bool, nonzero_offset: bool, fill: bool) -> u64 {
         let mut t = FRAME_TYPE_STREAM;
         if fin {
@@ -283,28 +294,34 @@ impl<'a> Frame<'a> {
 
     /// If the frame causes a recipient to generate an ACK within its
     /// advertised maximum acknowledgement delay.
+    #[must_use]
     pub fn ack_eliciting(&self) -> bool {
         !matches!(
             self,
-            Self::Ack { .. } | Self::Padding | Self::ConnectionClose { .. }
+            Self::Ack { .. } | Self::Padding { .. } | Self::ConnectionClose { .. }
         )
     }
 
     /// If the frame can be sent in a path probe
     /// without initiating migration to that path.
+    #[must_use]
     pub fn path_probing(&self) -> bool {
         matches!(
             self,
-            Self::Padding
+            Self::Padding { .. }
                 | Self::NewConnectionId { .. }
                 | Self::PathChallenge { .. }
                 | Self::PathResponse { .. }
         )
     }
 
-    /// Converts AckRanges as encoded in a ACK frame (see -transport
+    /// Converts `AckRanges` as encoded in a ACK frame (see -transport
     /// 19.3.1) into ranges of acked packets (end, start), inclusive of
     /// start and end values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the ranges are invalid.
     pub fn decode_ack_frame(
         largest_acked: u64,
         first_ack_range: u64,
@@ -345,36 +362,36 @@ impl<'a> Frame<'a> {
         Ok(acked_ranges)
     }
 
-    pub fn dump(&self) -> Option<String> {
+    #[must_use]
+    pub fn dump(&self) -> String {
         match self {
-            Self::Crypto { offset, data } => Some(format!(
-                "Crypto {{ offset: {}, len: {} }}",
-                offset,
-                data.len()
-            )),
+            Self::Crypto { offset, data } => {
+                format!("Crypto {{ offset: {}, len: {} }}", offset, data.len())
+            }
             Self::Stream {
                 stream_id,
                 offset,
                 fill,
                 data,
                 fin,
-            } => Some(format!(
+            } => format!(
                 "Stream {{ stream_id: {}, offset: {}, len: {}{}, fin: {} }}",
                 stream_id.as_u64(),
                 offset,
                 if *fill { ">>" } else { "" },
                 data.len(),
                 fin,
-            )),
-            Self::Padding => None,
-            Self::Datagram { data, .. } => Some(format!("Datagram {{ len: {} }}", data.len())),
-            _ => Some(format!("{:?}", self)),
+            ),
+            Self::Padding(length) => format!("Padding {{ len: {length} }}"),
+            Self::Datagram { data, .. } => format!("Datagram {{ len: {} }}", data.len()),
+            _ => format!("{self:?}"),
         }
     }
 
+    #[must_use]
     pub fn is_allowed(&self, pt: PacketType) -> bool {
         match self {
-            Self::Padding | Self::Ping => true,
+            Self::Padding { .. } | Self::Ping => true,
             Self::Crypto { .. }
             | Self::Ack { .. }
             | Self::ConnectionClose {
@@ -386,7 +403,22 @@ impl<'a> Frame<'a> {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the frame cannot be decoded.
+    #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
+        /// Maximum ACK Range Count in ACK Frame
+        ///
+        /// Given a max UDP datagram size of 64k bytes and a minimum ACK Range size of 2
+        /// bytes (2 QUIC varints), a single datagram can at most contain 32k ACK
+        /// Ranges.
+        ///
+        /// Note that the maximum (jumbogram) Ethernet MTU of 9216 or on the
+        /// Internet the regular Ethernet MTU of 1518 are more realistically to
+        /// be the limiting factor. Though for simplicity the higher limit is chosen.
+        const MAX_ACK_RANGE_COUNT: u64 = 32 * 1024;
+
         fn d<T>(v: Option<T>) -> Res<T> {
             v.ok_or(Error::NoMoreData)
         }
@@ -395,13 +427,23 @@ impl<'a> Frame<'a> {
         }
 
         // TODO(ekr@rtfm.com): check for minimal encoding
-        let t = d(dec.decode_varint())?;
+        let t = dv(dec)?;
         match t {
-            FRAME_TYPE_PADDING => Ok(Self::Padding),
+            FRAME_TYPE_PADDING => {
+                let mut length: u16 = 1;
+                while let Some(b) = dec.peek_byte() {
+                    if u64::from(b) != FRAME_TYPE_PADDING {
+                        break;
+                    }
+                    length += 1;
+                    dec.skip(1);
+                }
+                Ok(Self::Padding(length))
+            }
             FRAME_TYPE_PING => Ok(Self::Ping),
             FRAME_TYPE_RESET_STREAM => Ok(Self::ResetStream {
                 stream_id: StreamId::from(dv(dec)?),
-                application_error_code: d(dec.decode_varint())?,
+                application_error_code: dv(dec)?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
                     _ => return Err(Error::NoMoreData),
@@ -410,9 +452,15 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
                 let la = dv(dec)?;
                 let ad = dv(dec)?;
-                let nr = dv(dec)?;
+                let nr = dv(dec).and_then(|nr| {
+                    if nr < MAX_ACK_RANGE_COUNT {
+                        Ok(nr)
+                    } else {
+                        Err(Error::TooMuchData)
+                    }
+                })?;
                 let fa = dv(dec)?;
-                let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
+                let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
                 for _ in 0..nr {
                     let ar = AckRange {
                         gap: dv(dec)?,
@@ -437,12 +485,12 @@ impl<'a> Frame<'a> {
             }
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
                 stream_id: StreamId::from(dv(dec)?),
-                application_error_code: d(dec.decode_varint())?,
+                application_error_code: dv(dec)?,
             }),
             FRAME_TYPE_CRYPTO => {
                 let offset = dv(dec)?;
                 let data = d(dec.decode_vvec())?;
-                if offset + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                if offset + u64::try_from(data.len())? > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
                 Ok(Self::Crypto { offset, data })
@@ -469,7 +517,7 @@ impl<'a> Frame<'a> {
                     qtrace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
-                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                if o + u64::try_from(data.len())? > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
                 Ok(Self::Stream {
@@ -518,7 +566,7 @@ impl<'a> Frame<'a> {
                     return Err(Error::DecodingFrame);
                 }
                 let srt = d(dec.decode(16))?;
-                let stateless_reset_token = <&[_; 16]>::try_from(srt).unwrap();
+                let stateless_reset_token = <&[_; 16]>::try_from(srt)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,
@@ -543,7 +591,7 @@ impl<'a> Frame<'a> {
                 Ok(Self::PathResponse { data: datav })
             }
             FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT | FRAME_TYPE_CONNECTION_CLOSE_APPLICATION => {
-                let error_code = CloseError::from_type_bit(t, d(dec.decode_varint())?);
+                let error_code = CloseError::from_type_bit(t, dv(dec)?);
                 let frame_type = if t == FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT {
                     dv(dec)?
                 } else {
@@ -595,8 +643,13 @@ impl<'a> Frame<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neqo_common::{Decoder, Encoder};
+
+    use crate::{
+        cid::MAX_CONNECTION_ID_LEN,
+        frame::{AckRange, Frame, FRAME_TYPE_ACK},
+        CloseError, Error, StreamId, StreamType,
+    };
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);
@@ -606,8 +659,10 @@ mod tests {
 
     #[test]
     fn padding() {
-        let f = Frame::Padding;
+        let f = Frame::Padding(1);
         just_dec(&f, "00");
+        let f = Frame::Padding(2);
+        just_dec(&f, "0000");
     }
 
     #[test]
@@ -658,7 +713,7 @@ mod tests {
             application_error_code: 0x77,
         };
 
-        just_dec(&f, "053F4077")
+        just_dec(&f, "053F4077");
     }
 
     #[test]
@@ -863,8 +918,8 @@ mod tests {
 
     #[test]
     fn test_compare() {
-        let f1 = Frame::Padding;
-        let f2 = Frame::Padding;
+        let f1 = Frame::Padding(1);
+        let f2 = Frame::Padding(1);
         let f3 = Frame::Crypto {
             offset: 0,
             data: &[1, 2, 3],
@@ -942,5 +997,17 @@ mod tests {
             fill: false,
         };
         just_dec(&f, "403103010203");
+    }
+
+    #[test]
+    fn frame_decode_enforces_bound_on_ack_range() {
+        let mut e = Encoder::new();
+
+        e.encode_varint(FRAME_TYPE_ACK);
+        e.encode_varint(0u64); // largest acknowledged
+        e.encode_varint(0u64); // ACK delay
+        e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
+
+        assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
     }
 }

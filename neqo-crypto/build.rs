@@ -4,16 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+use std::{
+    collections::HashMap,
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use bindgen::Builder;
+use semver::{Version, VersionReq};
 use serde_derive::Deserialize;
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+
+#[path = "src/min_version.rs"]
+mod min_version;
+use min_version::MINIMUM_NSS_VERSION;
 
 const BINDINGS_DIR: &str = "bindings";
 const BINDINGS_CONFIG: &str = "bindings.toml";
@@ -35,7 +39,7 @@ struct Bindings {
     opaque: Vec<String>,
     /// enumerations that are turned into a module (without this, the enum is
     /// mapped using the default, which means that the individual values are
-    /// formed with an underscore as <enum_type>_<enum_value_name>).
+    /// formed with an underscore as <`enum_type`>_<`enum_value_name`>).
     #[serde(default)]
     enums: Vec<String>,
 
@@ -51,16 +55,18 @@ struct Bindings {
 }
 
 fn is_debug() -> bool {
-    env::var("DEBUG")
-        .map(|d| d.parse::<bool>().unwrap_or(false))
-        .unwrap_or(false)
+    // Check the build profile and not whether debug symbols are enabled (i.e.,
+    // `env::var("DEBUG")`), because we enable those for benchmarking/profiling and still want
+    // to build NSS in release mode.
+    env::var("PROFILE").unwrap_or_default() == "debug"
 }
 
 // bindgen needs access to libclang.
 // On windows, this doesn't just work, you have to set LIBCLANG_PATH.
 // Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
 fn setup_clang() {
-    if env::consts::OS != "windows" {
+    // If this isn't Windows, or we're in CI, then we don't need to do anything.
+    if env::consts::OS != "windows" || env::var("GITHUB_WORKFLOW").unwrap() == "CI" {
         return;
     }
     println!("rerun-if-env-changed=LIBCLANG_PATH");
@@ -89,47 +95,12 @@ fn setup_clang() {
     }
 }
 
-fn nss_dir() -> PathBuf {
-    let dir = if let Ok(dir) = env::var("NSS_DIR") {
-        let path = PathBuf::from(dir.trim());
-        assert!(
-            !path.is_relative(),
-            "The NSS_DIR environment variable is expected to be an absolute path."
-        );
-        path
-    } else {
-        let out_dir = env::var("OUT_DIR").unwrap();
-        let dir = Path::new(&out_dir).join("nss");
-        if !dir.exists() {
-            Command::new("hg")
-                .args([
-                    "clone",
-                    "https://hg.mozilla.org/projects/nss",
-                    dir.to_str().unwrap(),
-                ])
-                .status()
-                .expect("can't clone nss");
-        }
-        let nspr_dir = Path::new(&out_dir).join("nspr");
-        if !nspr_dir.exists() {
-            Command::new("hg")
-                .args([
-                    "clone",
-                    "https://hg.mozilla.org/projects/nspr",
-                    nspr_dir.to_str().unwrap(),
-                ])
-                .status()
-                .expect("can't clone nspr");
-        }
-        dir
-    };
-    assert!(dir.is_dir(), "NSS_DIR {:?} doesn't exist", dir);
-    // Note that this returns a relative path because UNC
-    // paths on windows cause certain tools to explode.
-    dir
-}
-
 fn get_bash() -> PathBuf {
+    // If BASH is set, use that.
+    if let Ok(bash) = env::var("BASH") {
+        return PathBuf::from(bash);
+    }
+
     // When running under MOZILLABUILD, we need to make sure not to invoke
     // another instance of bash that might be sitting around (like WSL).
     match env::var("MOZILLABUILD") {
@@ -142,10 +113,10 @@ fn build_nss(dir: PathBuf) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
+        // Generate static libraries in addition to shared libraries.
+        String::from("--static"),
     ];
-    if is_debug() {
-        build_nss.push(String::from("--static"));
-    } else {
+    if !is_debug() {
         build_nss.push(String::from("-o"));
     }
     if let Ok(d) = env::var("NSS_JOBS") {
@@ -257,7 +228,7 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
             builder = builder.clang_arg("-DANDROID");
         }
         if bindings.cplusplus {
-            builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
+            builder = builder.clang_args(&["-x", "c++", "-std=c++14"]);
         }
     }
 
@@ -289,11 +260,63 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
         .expect("couldn't write bindings");
 }
 
-fn setup_standalone() -> Vec<String> {
+fn pkg_config() -> Vec<String> {
+    let modversion = Command::new("pkg-config")
+        .args(["--modversion", "nss"])
+        .output()
+        .expect("pkg-config reports NSS as absent")
+        .stdout;
+    let modversion = String::from_utf8(modversion).expect("non-UTF8 from pkg-config");
+    let modversion = modversion.trim();
+    // The NSS version number does not follow semver numbering, because it omits the patch version
+    // when that's 0. Deal with that.
+    let modversion_for_cmp = if modversion.chars().filter(|c| *c == '.').count() == 1 {
+        modversion.to_owned() + ".0"
+    } else {
+        modversion.to_owned()
+    };
+    let modversion_for_cmp =
+        Version::parse(&modversion_for_cmp).expect("NSS version not in semver format");
+    let version_req = VersionReq::parse(&format!(">={}", MINIMUM_NSS_VERSION.trim())).unwrap();
+    assert!(
+        version_req.matches(&modversion_for_cmp),
+        "neqo has NSS version requirement {version_req}, found {modversion}"
+    );
+
+    let cfg = Command::new("pkg-config")
+        .args(["--cflags", "--libs", "nss"])
+        .output()
+        .expect("NSS flags not returned by pkg-config")
+        .stdout;
+    let cfg_str = String::from_utf8(cfg).expect("non-UTF8 from pkg-config");
+
+    let mut flags: Vec<String> = Vec::new();
+    for f in cfg_str.split(' ') {
+        if let Some(include) = f.strip_prefix("-I") {
+            flags.push(String::from(f));
+            println!("cargo:include={include}");
+        } else if let Some(path) = f.strip_prefix("-L") {
+            println!("cargo:rustc-link-search=native={path}");
+        } else if let Some(lib) = f.strip_prefix("-l") {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+        } else {
+            println!("Warning: Unknown flag from pkg-config: {f}");
+        }
+    }
+
+    flags
+}
+
+fn setup_standalone(nss: &str) -> Vec<String> {
     setup_clang();
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
-    let nss = nss_dir();
+    let nss = PathBuf::from(nss);
+    assert!(
+        !nss.is_relative(),
+        "The NSS_DIR environment variable is expected to be an absolute path."
+    );
+
     build_nss(nss.clone());
 
     // $NSS_DIR/../dist/
@@ -310,7 +333,7 @@ fn setup_standalone() -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    if is_debug() {
+    if is_debug() || env::consts::OS == "windows" {
         static_link();
     } else {
         dynamic_link();
@@ -400,8 +423,10 @@ fn setup_for_gecko() -> Vec<String> {
 fn main() {
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
+    } else if let Ok(nss_dir) = env::var("NSS_DIR") {
+        setup_standalone(nss_dir.trim())
     } else {
-        setup_standalone()
+        pkg_config()
     };
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);

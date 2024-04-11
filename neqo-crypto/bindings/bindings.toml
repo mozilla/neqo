@@ -49,6 +49,7 @@ functions = [
     "SSL_PeerSignedCertTimestamps",
     "SSL_PeerStapledOCSPResponses",
     "SSL_ResetHandshake",
+    "SSL_SendAdditionalKeyShares",
     "SSL_SetNextProtoNego",
     "SSL_SetURL",
     "SSL_VersionRangeSet",
@@ -264,8 +265,3 @@ enums = [
 [nspr_time]
 types = ["PRTime"]
 functions = ["PR_Now"]
-
-[mozpkix]
-cplusplus = true
-types = ["mozilla::pkix::ErrorCode"]
-enums = ["mozilla::pkix::ErrorCode"]

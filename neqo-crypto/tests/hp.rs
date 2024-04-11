@@ -1,5 +1,10 @@
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::mem;
 
 use neqo_crypto::{
     constants::{
@@ -9,7 +14,6 @@ use neqo_crypto::{
     hkdf,
     hp::HpKey,
 };
-use std::mem;
 use test_fixture::fixture_init;
 
 fn make_hp(cipher: Cipher) -> HpKey {
@@ -67,14 +71,14 @@ fn chacha20_ctr() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "out of range")]
 fn aes_short() {
     let hp = make_hp(TLS_AES_128_GCM_SHA256);
     mem::drop(hp.mask(&[0; 15]));
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "out of range")]
 fn chacha20_short() {
     let hp = make_hp(TLS_CHACHA20_POLY1305_SHA256);
     mem::drop(hp.mask(&[0; 15]));

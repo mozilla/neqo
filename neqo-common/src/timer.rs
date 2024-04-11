@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom;
-use std::mem;
-use std::time::{Duration, Instant};
+use std::{
+    collections::VecDeque,
+    mem,
+    time::{Duration, Instant},
+};
 
 /// Internal structure for a timer item.
 struct TimerItem<T> {
@@ -21,12 +23,12 @@ impl<T> TimerItem<T> {
 }
 
 /// A timer queue.
-/// This uses a classic timer wheel arrangement, with some characteristics that might be considered peculiar.
-/// Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut points).
-/// Time is relative, the wheel has an origin time and it is unable to represent times that are more than
-/// `granularity * capacity` past that time.
+/// This uses a classic timer wheel arrangement, with some characteristics that might be considered
+/// peculiar. Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut
+/// points). Time is relative, the wheel has an origin time and it is unable to represent times that
+/// are more than `granularity * capacity` past that time.
 pub struct Timer<T> {
-    items: Vec<Vec<TimerItem<T>>>,
+    items: Vec<VecDeque<TimerItem<T>>>,
     now: Instant,
     granularity: Duration,
     cursor: usize,
@@ -34,7 +36,9 @@ pub struct Timer<T> {
 
 impl<T> Timer<T> {
     /// Construct a new wheel at the given granularity, starting at the given time.
+    ///
     /// # Panics
+    ///
     /// When `capacity` is too large to fit in `u32` or `granularity` is zero.
     pub fn new(now: Instant, granularity: Duration, capacity: usize) -> Self {
         assert!(u32::try_from(capacity).is_ok());
@@ -52,9 +56,14 @@ impl<T> Timer<T> {
     /// Return a reference to the time of the next entry.
     #[must_use]
     pub fn next_time(&self) -> Option<Instant> {
-        for i in 0..self.items.len() {
-            let idx = self.bucket(i);
-            if let Some(t) = self.items[idx].first() {
+        let idx = self.bucket(0);
+        for i in idx..self.items.len() {
+            if let Some(t) = self.items[i].front() {
+                return Some(t.time);
+            }
+        }
+        for i in 0..idx {
+            if let Some(t) = self.items[i].front() {
                 return Some(t.time);
             }
         }
@@ -75,7 +84,7 @@ impl<T> Timer<T> {
     #[inline]
     #[allow(clippy::cast_possible_truncation)] // guarded by assertion
     fn delta(&self, time: Instant) -> usize {
-        // This really should use Instant::div_duration(), but it can't yet.
+        // This really should use Duration::div_duration_f??(), but it can't yet.
         ((time - self.now).as_nanos() / self.granularity.as_nanos()) as usize
     }
 
@@ -109,7 +118,9 @@ impl<T> Timer<T> {
     }
 
     /// Asserts if the time given is in the past or too far in the future.
+    ///
     /// # Panics
+    ///
     /// When `time` is in the past relative to previous calls.
     pub fn add(&mut self, time: Instant, item: T) {
         assert!(time >= self.now);
@@ -140,6 +151,9 @@ impl<T> Timer<T> {
 
     /// Given knowledge of the time an item was added, remove it.
     /// This requires use of a predicate that identifies matching items.
+    ///
+    /// # Panics
+    /// Impossible, I think.
     pub fn remove<F>(&mut self, time: Instant, mut selector: F) -> Option<T>
     where
         F: FnMut(&T) -> bool,
@@ -151,7 +165,10 @@ impl<T> Timer<T> {
             return None;
         }
         let bucket = self.time_bucket(time);
-        let Ok(start_index) = self.items[bucket].binary_search_by_key(&time, TimerItem::time) else { return None };
+        let Ok(start_index) = self.items[bucket].binary_search_by_key(&time, TimerItem::time)
+        else {
+            return None;
+        };
         // start_index is just one of potentially many items with the same time.
         // Search backwards for a match, ...
         for i in (0..=start_index).rev() {
@@ -159,7 +176,7 @@ impl<T> Timer<T> {
                 break;
             }
             if selector(&self.items[bucket][i].item) {
-                return Some(self.items[bucket].remove(i).item);
+                return Some(self.items[bucket].remove(i).unwrap().item);
             }
         }
         // ... then forwards.
@@ -168,7 +185,7 @@ impl<T> Timer<T> {
                 break;
             }
             if selector(&self.items[bucket][i].item) {
-                return Some(self.items[bucket].remove(i).item);
+                return Some(self.items[bucket].remove(i).unwrap().item);
             }
         }
         None
@@ -177,10 +194,25 @@ impl<T> Timer<T> {
     /// Take the next item, unless there are no items with
     /// a timeout in the past relative to `until`.
     pub fn take_next(&mut self, until: Instant) -> Option<T> {
-        for i in 0..self.items.len() {
-            let idx = self.bucket(i);
-            if !self.items[idx].is_empty() && self.items[idx][0].time <= until {
-                return Some(self.items[idx].remove(0).item);
+        fn maybe_take<T>(v: &mut VecDeque<TimerItem<T>>, until: Instant) -> Option<T> {
+            if !v.is_empty() && v[0].time <= until {
+                Some(v.pop_front().unwrap().item)
+            } else {
+                None
+            }
+        }
+
+        let idx = self.bucket(0);
+        for i in idx..self.items.len() {
+            let res = maybe_take(&mut self.items[i], until);
+            if res.is_some() {
+                return res;
+            }
+        }
+        for i in 0..idx {
+            let res = maybe_take(&mut self.items[i], until);
+            if res.is_some() {
+                return res;
             }
         }
         None
@@ -193,7 +225,7 @@ impl<T> Timer<T> {
         if until >= self.now + self.span() {
             // Drain everything, so a clean sweep.
             let mut empty_items = Vec::with_capacity(self.items.len());
-            empty_items.resize_with(self.items.len(), Vec::default);
+            empty_items.resize_with(self.items.len(), VecDeque::default);
             let mut items = mem::replace(&mut self.items, empty_items);
             self.now = until;
             self.cursor = 0;
@@ -238,48 +270,50 @@ impl<T> Timer<T> {
 
 #[cfg(test)]
 mod test {
-    use super::{Duration, Instant, Timer};
-    use lazy_static::lazy_static;
+    use std::sync::OnceLock;
 
-    lazy_static! {
-        static ref NOW: Instant = Instant::now();
+    use super::{Duration, Instant, Timer};
+
+    fn now() -> Instant {
+        static NOW: OnceLock<Instant> = OnceLock::new();
+        *NOW.get_or_init(Instant::now)
     }
 
     const GRANULARITY: Duration = Duration::from_millis(10);
     const CAPACITY: usize = 10;
     #[test]
     fn create() {
-        let t: Timer<()> = Timer::new(*NOW, GRANULARITY, CAPACITY);
+        let t: Timer<()> = Timer::new(now(), GRANULARITY, CAPACITY);
         assert_eq!(t.span(), Duration::from_millis(100));
         assert_eq!(None, t.next_time());
     }
 
     #[test]
     fn immediate_entry() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        t.add(*NOW, 12);
-        assert_eq!(*NOW, t.next_time().expect("should have an entry"));
-        let values: Vec<_> = t.take_until(*NOW).collect();
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        t.add(now(), 12);
+        assert_eq!(now(), t.next_time().expect("should have an entry"));
+        let values: Vec<_> = t.take_until(now()).collect();
         assert_eq!(vec![12], values);
     }
 
     #[test]
     fn same_time() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
         let v1 = 12;
         let v2 = 13;
-        t.add(*NOW, v1);
-        t.add(*NOW, v2);
-        assert_eq!(*NOW, t.next_time().expect("should have an entry"));
-        let values: Vec<_> = t.take_until(*NOW).collect();
+        t.add(now(), v1);
+        t.add(now(), v2);
+        assert_eq!(now(), t.next_time().expect("should have an entry"));
+        let values: Vec<_> = t.take_until(now()).collect();
         assert!(values.contains(&v1));
         assert!(values.contains(&v2));
     }
 
     #[test]
     fn add() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let near_future = *NOW + Duration::from_millis(17);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let near_future = now() + Duration::from_millis(17);
         let v = 9;
         t.add(near_future, v);
         assert_eq!(near_future, t.next_time().expect("should return a value"));
@@ -295,8 +329,8 @@ mod test {
 
     #[test]
     fn add_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let future = *NOW + Duration::from_millis(117);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let future = now() + Duration::from_millis(117);
         let v = 9;
         t.add(future, v);
         assert_eq!(future, t.next_time().expect("should return a value"));
@@ -305,8 +339,8 @@ mod test {
 
     #[test]
     fn add_far_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let far_future = *NOW + Duration::from_millis(892);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let far_future = now() + Duration::from_millis(892);
         let v = 9;
         t.add(far_future, v);
         assert_eq!(far_future, t.next_time().expect("should return a value"));
@@ -323,12 +357,12 @@ mod test {
     ];
 
     fn with_times() -> Timer<usize> {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
         for (i, time) in TIMES.iter().enumerate() {
-            t.add(*NOW + *time, i);
+            t.add(now() + *time, i);
         }
         assert_eq!(
-            *NOW + *TIMES.iter().min().unwrap(),
+            now() + *TIMES.iter().min().unwrap(),
             t.next_time().expect("should have a time")
         );
         t
@@ -338,7 +372,7 @@ mod test {
     #[allow(clippy::needless_collect)] // false positive
     fn multiple_values() {
         let mut t = with_times();
-        let values: Vec<_> = t.take_until(*NOW + *TIMES.iter().max().unwrap()).collect();
+        let values: Vec<_> = t.take_until(now() + *TIMES.iter().max().unwrap()).collect();
         for i in 0..TIMES.len() {
             assert!(values.contains(&i));
         }
@@ -348,7 +382,7 @@ mod test {
     #[allow(clippy::needless_collect)] // false positive
     fn take_far_future() {
         let mut t = with_times();
-        let values: Vec<_> = t.take_until(*NOW + Duration::from_secs(100)).collect();
+        let values: Vec<_> = t.take_until(now() + Duration::from_secs(100)).collect();
         for i in 0..TIMES.len() {
             assert!(values.contains(&i));
         }
@@ -358,15 +392,15 @@ mod test {
     fn remove_each() {
         let mut t = with_times();
         for (i, time) in TIMES.iter().enumerate() {
-            assert_eq!(Some(i), t.remove(*NOW + *time, |&x| x == i));
+            assert_eq!(Some(i), t.remove(now() + *time, |&x| x == i));
         }
         assert_eq!(None, t.next_time());
     }
 
     #[test]
     fn remove_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let future = *NOW + Duration::from_millis(117);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let future = now() + Duration::from_millis(117);
         let v = 9;
         t.add(future, v);
 
@@ -375,9 +409,9 @@ mod test {
 
     #[test]
     fn remove_too_far_future() {
-        let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        let future = *NOW + Duration::from_millis(117);
-        let too_far_future = *NOW + t.span() + Duration::from_millis(117);
+        let mut t = Timer::new(now(), GRANULARITY, CAPACITY);
+        let future = now() + Duration::from_millis(117);
+        let too_far_future = now() + t.span() + Duration::from_millis(117);
         let v = 9;
         t.add(future, v);
 

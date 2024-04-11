@@ -1,24 +1,49 @@
 [package]
 name = "neqo-transport"
-version = "0.6.4"
-authors = ["EKR <ekr@rtfm.com>", "Andy Grover <agrover@mozilla.com>"]
-edition = "2018"
-rust-version = "1.65.0"
-license = "MIT/Apache-2.0"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-neqo-crypto = { path = "../neqo-crypto" }
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+indexmap = { version = "1.9", default-features = false }
+log = { version = "0.4", default-features = false }
 neqo-common = { path = "../neqo-common" }
-lazy_static = "1.3.0"
-log = {version = "0.4.0", default-features = false}
-smallvec = "1.0.0"
-qlog = "0.4.0"
-indexmap = "1.0"
+neqo-crypto = { path = "../neqo-crypto" }
+qlog = { version = "0.12", default-features = false }
+smallvec = { version = "1.11", default-features = false }
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+enum-map = { version = "2.7", default-features = false }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-default = ["deny-warnings"]
-deny-warnings = []
-fuzzing = ["neqo-crypto/fuzzing"]
+bench = []
+disable-encryption = ["neqo-crypto/disable-encryption"]
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
+
+[[bench]]
+name = "transfer"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "rx_stream_orderer"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "range_tracker"
+harness = false
+required-features = ["bench"]

@@ -4,23 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    ffi::CString,
+    os::raw::{c_char, c_uint},
+    ptr::{addr_of_mut, null_mut},
+};
+
+use neqo_common::qtrace;
+
 use crate::{
     err::{ssl::SSL_ERROR_ECH_RETRY_WITH_ECH, Error, Res},
-    experimental_api,
+    experimental_api, null_safe_slice,
     p11::{
         self, Item, PrivateKey, PublicKey, SECITEM_FreeItem, SECItem, SECKEYPrivateKey,
         SECKEYPublicKey, Slot,
     },
     ssl::{PRBool, PRFileDesc},
 };
-use neqo_common::qtrace;
-use std::{
-    convert::TryFrom,
-    ffi::CString,
-    os::raw::{c_char, c_uint},
-    ptr::{addr_of_mut, null_mut},
-};
-
 pub use crate::{
     p11::{HpkeAeadId as AeadId, HpkeKdfId as KdfId, HpkeKemId as KemId},
     ssl::HpkeSymmetricSuite as SymmetricSuite,
@@ -75,7 +75,7 @@ pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
             return Error::InternalError;
         }
         let buf = unsafe {
-            let slc = std::slice::from_raw_parts(item.data, usize::try_from(item.len).unwrap());
+            let slc = null_safe_slice(item.data, item.len);
             let buf = Vec::from(slc);
             SECITEM_FreeItem(&mut item, PRBool::from(false));
             buf
@@ -89,16 +89,18 @@ pub fn convert_ech_error(fd: *mut PRFileDesc, err: Error) -> Error {
 /// Generate a key pair for encrypted client hello (ECH).
 ///
 /// # Errors
+///
 /// When NSS fails to generate a key pair or when the KEM is not supported.
+///
 /// # Panics
+///
 /// When underlying types aren't large enough to hold keys.  So never.
 pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     let slot = Slot::internal()?;
 
     let oid_data = unsafe { p11::SECOID_FindOIDByTag(p11::SECOidTag::SEC_OID_CURVE25519) };
     let oid = unsafe { oid_data.as_ref() }.ok_or(Error::InternalError)?;
-    let oid_slc =
-        unsafe { std::slice::from_raw_parts(oid.oid.data, usize::try_from(oid.oid.len).unwrap()) };
+    let oid_slc = unsafe { null_safe_slice(oid.oid.data, oid.oid.len) };
     let mut params: Vec<u8> = Vec::with_capacity(oid_slc.len() + 2);
     params.push(u8::try_from(p11::SEC_ASN1_OBJECT_ID).unwrap());
     params.push(u8::try_from(oid.oid.len).unwrap());
@@ -151,6 +153,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
 /// Encode a configuration for encrypted client hello (ECH).
 ///
 /// # Errors
+///
 /// When NSS fails to generate a valid configuration encoding (i.e., unlikely).
 pub fn encode_config(config: u8, public_name: &str, pk: &PublicKey) -> Res<Vec<u8>> {
     // A sensible fixed value for the maximum length of a name.

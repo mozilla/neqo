@@ -6,23 +6,31 @@
 
 // Functions that handle capturing QLOG traces.
 
-use neqo_common::hex;
-use neqo_common::qlog::NeqoQlog;
-use qlog::{event::Event, QPackInstruction, QpackInstructionTypeName};
+use neqo_common::{hex, qlog::NeqoQlog};
+use qlog::events::{
+    qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
+    EventData, RawInfo,
+};
 
 pub fn qpack_read_insert_count_increment_instruction(
     qlog: &mut NeqoQlog,
     increment: u64,
     data: &[u8],
 ) {
-    qlog.add_event(|| {
-        Some(Event::qpack_instruction_received(
-            QPackInstruction::InsertCountIncrementInstruction {
+    qlog.add_event_data(|| {
+        let raw = RawInfo {
+            length: Some(8),
+            payload_length: None,
+            data: Some(hex(data)),
+        };
+        let ev_data = EventData::QpackInstructionParsed(QpackInstructionParsed {
+            instruction: QPackInstruction::InsertCountIncrementInstruction {
                 instruction_type: QpackInstructionTypeName::InsertCountIncrementInstruction,
                 increment,
             },
-            Some(8.to_string()),
-            Some(hex(data)),
-        ))
+            raw: Some(raw),
+        });
+
+        Some(ev_data)
     });
 }

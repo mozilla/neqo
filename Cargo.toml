@@ -1,12 +1,34 @@
 [workspace]
 members = [
-  "neqo-client",
+  "neqo-bin",
   "neqo-common",
   "neqo-crypto",
   "neqo-http3",
-  "neqo-server",
   "neqo-qpack",
   "neqo-transport",
-  "neqo-interop",
   "test-fixture",
 ]
+resolver = "2"
+
+[workspace.package]
+homepage = "https://github.com/mozilla/neqo/"
+repository = "https://github.com/mozilla/neqo/"
+authors = ["The Neqo Authors <necko@mozilla.com>"]
+version = "0.7.5"
+# Keep in sync with `.rustfmt.toml` `edition`.
+edition = "2021"
+license = "MIT OR Apache-2.0"
+# Don't increase beyond what Firefox is currently using:
+# https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
+rust-version = "1.74.0"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "fat"
+
+[profile.bench]
+# Inherits from the "release" profile, so just provide overrides here:
+# https://doc.rust-lang.org/cargo/reference/profiles.html#release
+debug = true

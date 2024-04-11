@@ -4,6 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    cell::RefCell,
+    fmt::{self, Debug},
+    os::raw::{c_char, c_int, c_uint},
+    ptr::{addr_of_mut, null, null_mut},
+    rc::Rc,
+};
+
 use crate::{
     constants::{
         Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
@@ -15,14 +23,6 @@ use crate::{
         PK11_GetBlockSize, SymKey, CKA_ENCRYPT, CKM_AES_ECB, CKM_CHACHA20, CK_ATTRIBUTE_TYPE,
         CK_CHACHA20_PARAMS, CK_MECHANISM_TYPE,
     },
-};
-use std::{
-    cell::RefCell,
-    convert::TryFrom,
-    fmt::{self, Debug},
-    os::raw::{c_char, c_int, c_uint},
-    ptr::{addr_of_mut, null, null_mut},
-    rc::Rc,
 };
 
 experimental_api!(SSL_HkdfExpandLabelWithMech(
@@ -45,7 +45,7 @@ pub enum HpKey {
     /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
     /// as that is not supported for these contexts.
     Aes(Rc<RefCell<Context>>),
-    /// The ChaCha20 mask has to invoke a new PK11_Encrypt every time as it needs to
+    /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
     /// change the counter and nonce on each invocation.
     Chacha(SymKey),
 }
@@ -62,8 +62,11 @@ impl HpKey {
     /// QUIC-specific API for extracting a header-protection key.
     ///
     /// # Errors
+    ///
     /// Errors if HKDF fails or if the label is too long to fit in a `c_uint`.
+    ///
     /// # Panics
+    ///
     /// When `cipher` is not known to this code.
     #[allow(clippy::cast_sign_loss)] // Cast for PK11_GetBlockSize is safe.
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
@@ -138,9 +141,12 @@ impl HpKey {
     /// Generate a header protection mask for QUIC.
     ///
     /// # Errors
+    ///
     /// An error is returned if the NSS functions fail; a sample of the
     /// wrong size is the obvious cause.
+    ///
     /// # Panics
+    ///
     /// When the mechanism for our key is not supported.
     pub fn mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let mut output = vec![0_u8; self.block_size()];
@@ -164,9 +170,9 @@ impl HpKey {
 
             Self::Chacha(key) => {
                 let params: CK_CHACHA20_PARAMS = CK_CHACHA20_PARAMS {
-                    pBlockCounter: sample.as_ptr() as *mut u8,
+                    pBlockCounter: sample.as_ptr().cast_mut(),
                     blockCounterBits: 32,
-                    pNonce: sample[4..Self::SAMPLE_SIZE].as_ptr() as *mut _,
+                    pNonce: sample[4..Self::SAMPLE_SIZE].as_ptr().cast_mut(),
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;

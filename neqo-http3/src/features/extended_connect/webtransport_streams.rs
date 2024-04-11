@@ -4,15 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{cell::RefCell, rc::Rc};
+
+use neqo_common::Encoder;
+use neqo_transport::{Connection, RecvStreamStats, SendStreamStats, StreamId};
+
 use super::WebTransportSession;
 use crate::{
     CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, RecvStreamEvents, Res,
     SendStream, SendStreamEvents, Stream,
 };
-use neqo_common::Encoder;
-use neqo_transport::{Connection, RecvStreamStats, SendStreamStats, StreamId};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
@@ -212,16 +213,6 @@ impl SendStream for WebTransportSendStream {
         } else {
             Ok(0)
         }
-    }
-
-    fn set_sendorder(&mut self, conn: &mut Connection, sendorder: Option<i64>) -> Res<()> {
-        conn.stream_sendorder(self.stream_id, sendorder)
-            .map_err(|_| crate::Error::InvalidStreamId)
-    }
-
-    fn set_fairness(&mut self, conn: &mut Connection, fairness: bool) -> Res<()> {
-        conn.stream_fairness(self.stream_id, fairness)
-            .map_err(|_| crate::Error::InvalidStreamId)
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {

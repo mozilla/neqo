@@ -1,20 +1,22 @@
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
 use neqo_crypto::{
     generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, SecretAgentPreInfo,
     Server, ZeroRttCheckResult, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
-    TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_VERSION_1_3,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519, TLS_VERSION_1_3,
 };
 
-use std::boxed::Box;
-
 mod handshake;
+use test_fixture::{fixture_init, now};
+
 use crate::handshake::{
     connect, connect_fail, forward_records, resumption_setup, PermissiveZeroRttChecker, Resumption,
     ZERO_RTT_TOKEN_DATA,
 };
-use test_fixture::{fixture_init, now};
 
 #[test]
 fn make_client() {
@@ -156,6 +158,48 @@ fn chacha_client() {
 }
 
 #[test]
+fn server_prefers_first_client_share() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_groups(&[TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+    client
+        .set_groups(&[TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+    client
+        .send_additional_key_shares(1)
+        .expect("should set additional key share count");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(client.info().unwrap().key_exchange(), TLS_GRP_EC_X25519);
+    assert_eq!(server.info().unwrap().key_exchange(), TLS_GRP_EC_X25519);
+}
+
+#[test]
+fn server_prefers_second_client_share() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_groups(&[TLS_GRP_EC_SECP256R1, TLS_GRP_EC_X25519])
+        .expect("groups set");
+    client
+        .set_groups(&[TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+    client
+        .send_additional_key_shares(1)
+        .expect("should set additional key share count");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(client.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+    assert_eq!(server.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+}
+
+#[test]
 fn p256_server() {
     fixture_init();
     let mut client = Client::new("server.example", true).expect("should create client");
@@ -163,6 +207,27 @@ fn p256_server() {
     server
         .set_groups(&[TLS_GRP_EC_SECP256R1])
         .expect("groups set");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(client.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+    assert_eq!(server.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+}
+
+#[test]
+fn p256_server_hrr() {
+    fixture_init();
+    let mut client = Client::new("server.example", true).expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_groups(&[TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+    client
+        .set_groups(&[TLS_GRP_EC_X25519, TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+    client
+        .send_additional_key_shares(0)
+        .expect("should set additional key share count");
 
     connect(&mut client, &mut server);
 
@@ -439,7 +504,7 @@ fn ech_retry() {
         HandshakeState::EchFallbackAuthenticationPending(String::from(PUBLIC_NAME))
     );
     client.authenticated(AuthenticationStatus::Ok);
-    let Err(Error::EchRetry(updated_config)) = client.handshake_raw(now(), None)  else {
+    let Err(Error::EchRetry(updated_config)) = client.handshake_raw(now(), None) else {
         panic!(
             "Handshake should fail with EchRetry, state is instead {:?}",
             client.state()

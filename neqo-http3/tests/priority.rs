@@ -4,22 +4,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::event::Provider;
+use std::time::Instant;
 
+use neqo_common::event::Provider;
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State, Priority,
 };
-
-use std::time::Instant;
 use test_fixture::*;
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
     loop {
-        out = client.process(out, now()).dgram();
+        out = client.process(out.as_ref(), now()).dgram();
         let client_done = out.is_none();
-        out = server.process(out, now()).dgram();
+        out = server.process(out.as_ref(), now()).dgram();
         if out.is_none() && client_done {
             break;
         }
@@ -32,26 +31,26 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     let out = client.process(None, now());
     assert_eq!(client.state(), Http3State::Initializing);
 
-    let out = server.process(out.dgram(), now());
-    let out = client.process(out.dgram(), now());
-    let out = server.process(out.dgram(), now());
+    let out = server.process(out.as_dgram_ref(), now());
+    let out = client.process(out.as_dgram_ref(), now());
+    let out = server.process(out.as_dgram_ref(), now());
     assert!(out.as_dgram_ref().is_none());
 
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
     client.authenticated(AuthenticationStatus::Ok, now());
 
-    let out = client.process(out.dgram(), now());
+    let out = client.process(out.as_dgram_ref(), now());
     let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
     assert!(client.events().any(connected));
 
     assert_eq!(client.state(), Http3State::Connected);
     // Exchange H3 setttings
-    let out = server.process(out.dgram(), now());
-    let out = client.process(out.dgram(), now());
-    let out = server.process(out.dgram(), now());
-    let out = client.process(out.dgram(), now());
-    _ = server.process(out.dgram(), now());
+    let out = server.process(out.as_dgram_ref(), now());
+    let out = client.process(out.as_dgram_ref(), now());
+    let out = server.process(out.as_dgram_ref(), now());
+    let out = client.process(out.as_dgram_ref(), now());
+    _ = server.process(out.as_dgram_ref(), now());
 }
 
 fn connect() -> (Http3Client, Http3Server) {
@@ -69,7 +68,7 @@ fn priority_update() {
             Instant::now(),
             "GET",
             &("https", "something.com", "/"),
-            &[],
+            &[Header::new("priority", "u=4,i")],
             Priority::new(4, true),
         )
         .unwrap();
@@ -99,7 +98,7 @@ fn priority_update() {
             assert_eq!(&headers, expected_headers);
             assert!(!fin);
         }
-        other => panic!("unexpected server event: {:?}", other),
+        other => panic!("unexpected server event: {other:?}"),
     }
 
     let update_priority = Priority::new(3, false);
@@ -130,7 +129,7 @@ fn priority_update_dont_send_for_cancelled_stream() {
             Instant::now(),
             "GET",
             &("https", "something.com", "/"),
-            &[],
+            &[Header::new("priority", "u=5")],
             Priority::new(5, false),
         )
         .unwrap();

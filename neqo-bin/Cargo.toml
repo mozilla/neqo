@@ -1,0 +1,57 @@
+[package]
+name = "neqo-bin"
+description = "A basic QUIC HTTP/0.9 and HTTP/3 client and server."
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "neqo-client"
+path = "src/bin/client.rs"
+bench = false
+
+[[bin]]
+name = "neqo-server"
+path = "src/bin/server.rs"
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# neqo-bin is not used in Firefox, so we can be liberal with dependency versions
+clap = { version = "4.4", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive"] }
+clap-verbosity-flag = { version = "2.2", default-features = false }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hex = { version = "0.4", default-features = false, features = ["std"] }
+log = { version = "0.4", default-features = false }
+neqo-common = { path = "./../neqo-common" }
+neqo-crypto = { path = "./../neqo-crypto" }
+neqo-http3 = { path = "./../neqo-http3" }
+neqo-qpack = { path = "./../neqo-qpack" }
+neqo-transport = { path = "./../neqo-transport" }
+qlog = { version = "0.12", default-features = false }
+quinn-udp = { git = "https://github.com/quinn-rs/quinn/", rev = "a947962131aba8a6521253d03cc948b20098a2d6" }
+regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
+tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
+url = { version = "2.5", default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports", "async_tokio"] }
+tokio = { version = "1", default-features = false, features = ["sync"] }
+
+[features]
+bench = []
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
+
+[[bench]]
+name = "main"
+harness = false
+required-features = ["bench"]

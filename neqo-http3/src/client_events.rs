@@ -6,19 +6,18 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::connection::Http3State;
-use crate::settings::HSettingType;
-use crate::{
-    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason},
-    CloseType, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
-};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+
 use neqo_common::{event::Provider as EventProvider, Header};
 use neqo_crypto::ResumptionToken;
 use neqo_transport::{AppError, StreamId, StreamType};
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::rc::Rc;
+use crate::{
+    connection::Http3State,
+    features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason},
+    settings::HSettingType,
+    CloseType, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, SendStreamEvents,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WebTransportEvent {
@@ -62,7 +61,7 @@ pub enum Http3ClientEvent {
         error: AppError,
         local: bool,
     },
-    /// Peer has sent a STOP_SENDING.
+    /// Peer has sent a `STOP_SENDING`.
     StopSending {
         stream_id: StreamId,
         error: AppError,
@@ -84,7 +83,7 @@ pub enum Http3ClientEvent {
     PushDataReadable { push_id: u64 },
     /// A push has been canceled.
     PushCanceled { push_id: u64 },
-    /// A push stream was been reset due to a HttpGeneralProtocol error.
+    /// A push stream was been reset due to a `HttpGeneralProtocol` error.
     /// Most common case are malformed response headers.
     PushReset { push_id: u64, error: AppError },
     /// New stream can be created
@@ -103,7 +102,7 @@ pub enum Http3ClientEvent {
     GoawayReceived,
     /// Connection state change.
     StateChange(Http3State),
-    /// WebTransport events
+    /// `WebTransport` events
     WebTransport(WebTransportEvent),
 }
 
@@ -338,7 +337,7 @@ impl Http3ClientEvents {
     }
 
     pub fn has_push(&self, push_id: u64) -> bool {
-        for iter in self.events.borrow().iter() {
+        for iter in &*self.events.borrow() {
             if matches!(iter, Http3ClientEvent::PushPromise{push_id:x, ..} if *x == push_id) {
                 return true;
             }

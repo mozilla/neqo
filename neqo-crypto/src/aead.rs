@@ -4,6 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+    os::raw::{c_char, c_uint},
+    ptr::null_mut,
+};
+
 use crate::{
     constants::{Cipher, Version},
     err::Res,
@@ -11,14 +18,6 @@ use crate::{
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
     ssl::{self, PRUint16, PRUint64, PRUint8, SSLAeadContext},
-};
-
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt,
-    ops::{Deref, DerefMut},
-    os::raw::{c_char, c_uint},
-    ptr::null_mut,
 };
 
 experimental_api!(SSL_MakeAead(
@@ -62,14 +61,9 @@ impl RealAead {
     /// Create a new AEAD based on the indicated TLS version and cipher suite.
     ///
     /// # Errors
+    ///
     /// Returns `Error` when the supporting NSS functions fail.
-    pub fn new(
-        _fuzzing: bool,
-        version: Version,
-        cipher: Cipher,
-        secret: &SymKey,
-        prefix: &str,
-    ) -> Res<Self> {
+    pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
         let s: *mut PK11SymKey = **secret;
         unsafe { Self::from_raw(version, cipher, s, prefix) }
     }
@@ -107,6 +101,7 @@ impl RealAead {
     /// the value provided in `Aead::expansion`.
     ///
     /// # Errors
+    ///
     /// If the input can't be protected or any input is too large for NSS.
     pub fn encrypt<'a>(
         &self,
@@ -118,7 +113,7 @@ impl RealAead {
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadEncrypt(
-                *self.ctx.deref(),
+                *self.ctx,
                 count,
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,
@@ -139,6 +134,7 @@ impl RealAead {
     /// the final result will be shorter.
     ///
     /// # Errors
+    ///
     /// If the input isn't authenticated or any input is too large for NSS.
     pub fn decrypt<'a>(
         &self,
@@ -150,7 +146,7 @@ impl RealAead {
         let mut l: c_uint = 0;
         unsafe {
             SSL_AeadDecrypt(
-                *self.ctx.deref(),
+                *self.ctx,
                 count,
                 aad.as_ptr(),
                 c_uint::try_from(aad.len())?,

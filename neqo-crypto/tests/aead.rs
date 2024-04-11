@@ -1,10 +1,16 @@
-#![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
-#![cfg(not(feature = "fuzzing"))]
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
-use neqo_crypto::constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
-use neqo_crypto::hkdf;
-use neqo_crypto::Aead;
+#![warn(clippy::pedantic)]
+#![cfg(not(feature = "disable-encryption"))]
+
+use neqo_crypto::{
+    constants::{Cipher, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
+    hkdf, Aead,
+};
 use test_fixture::fixture_init;
 
 const AAD: &[u8] = &[
@@ -34,7 +40,6 @@ fn make_aead(cipher: Cipher) -> Aead {
     )
     .expect("make a secret");
     Aead::new(
-        false,
         TLS_VERSION_1_3,
         cipher,
         &secret,

@@ -1,0 +1,28 @@
+# Post test results as pull request comment.
+#
+# This is done as a separate workflow as it requires write permissions. The
+# tests itself might run off of a fork, i.e., an untrusted environment and should
+# thus not be granted write permissions.
+
+name: QUIC Network Simulator Comment
+
+on:
+  workflow_run:
+    workflows: ["QUIC Network Simulator"]
+    types:
+      - completed
+
+jobs:
+  comment:
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.event == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/pr-comment
+        with:
+          name: qns
+          mode: ${{ github.event.workflow_run.conclusion == 'success' && 'delete' || 'upsert' }}
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -4,18 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT};
+use std::{cmp::max, time::Duration};
+
 pub use crate::recovery::FAST_PTO_SCALE;
-use crate::recv_stream::RECV_BUFFER_SIZE;
-use crate::rtt::GRANULARITY;
-use crate::stream_id::StreamType;
-use crate::tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler};
-use crate::tracking::DEFAULT_ACK_DELAY;
-use crate::version::{Version, VersionConfig};
-use crate::{CongestionControlAlgorithm, Res};
-use std::cmp::max;
-use std::convert::TryFrom;
-use std::time::Duration;
+use crate::{
+    connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
+    recv_stream::RECV_BUFFER_SIZE,
+    rtt::GRANULARITY,
+    stream_id::StreamType,
+    tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
+    tracking::DEFAULT_ACK_DELAY,
+    version::{Version, VersionConfig},
+    CongestionControlAlgorithm, Res,
+};
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
@@ -30,7 +31,7 @@ const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum PreferredAddressConfig {
     /// Disabled, whether for client or server.
     Disabled,
@@ -40,7 +41,7 @@ pub enum PreferredAddressConfig {
     Address(PreferredAddress),
 }
 
-/// ConnectionParameters use for setting intitial value for QUIC parameters.
+/// `ConnectionParameters` use for setting intitial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
 #[derive(Debug, Clone)]
@@ -49,11 +50,14 @@ pub struct ConnectionParameters {
     cc_algorithm: CongestionControlAlgorithm,
     /// Initial connection-level flow control limit.
     max_data: u64,
-    /// Initial flow control limit for receiving data on bidirectional streams that the peer creates.
+    /// Initial flow control limit for receiving data on bidirectional streams that the peer
+    /// creates.
     max_stream_data_bidi_remote: u64,
-    /// Initial flow control limit for receiving data on bidirectional streams that this endpoint creates.
+    /// Initial flow control limit for receiving data on bidirectional streams that this endpoint
+    /// creates.
     max_stream_data_bidi_local: u64,
-    /// Initial flow control limit for receiving data on unidirectional streams that the peer creates.
+    /// Initial flow control limit for receiving data on unidirectional streams that the peer
+    /// creates.
     max_stream_data_uni: u64,
     /// Initial limit on bidirectional streams that the peer creates.
     max_streams_bidi: u64,
@@ -73,8 +77,8 @@ pub struct ConnectionParameters {
     outgoing_datagram_queue: usize,
     incoming_datagram_queue: usize,
     fast_pto: u8,
-    fuzzing: bool,
     grease: bool,
+    pacing: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -95,13 +99,14 @@ impl Default for ConnectionParameters {
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             fast_pto: FAST_PTO_SCALE,
-            fuzzing: false,
             grease: true,
+            pacing: true,
         }
     }
 }
 
 impl ConnectionParameters {
+    #[must_use]
     pub fn get_versions(&self) -> &VersionConfig {
         &self.versions
     }
@@ -114,29 +119,35 @@ impl ConnectionParameters {
     /// versions that should be enabled.  This list should contain the initial
     /// version and be in order of preference, with more preferred versions
     /// before less preferred.
+    #[must_use]
     pub fn versions(mut self, initial: Version, all: Vec<Version>) -> Self {
         self.versions = VersionConfig::new(initial, all);
         self
     }
 
+    #[must_use]
     pub fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
         self.cc_algorithm
     }
 
+    #[must_use]
     pub fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
         self.cc_algorithm = v;
         self
     }
 
+    #[must_use]
     pub fn get_max_data(&self) -> u64 {
         self.max_data
     }
 
+    #[must_use]
     pub fn max_data(mut self, v: u64) -> Self {
         self.max_data = v;
         self
     }
 
+    #[must_use]
     pub fn get_max_streams(&self, stream_type: StreamType) -> u64 {
         match stream_type {
             StreamType::BiDi => self.max_streams_bidi,
@@ -145,7 +156,9 @@ impl ConnectionParameters {
     }
 
     /// # Panics
+    ///
     /// If v > 2^60 (the maximum allowed by the protocol).
+    #[must_use]
     pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
         assert!(v <= (1 << 60), "max_streams is too large");
         match stream_type {
@@ -160,8 +173,11 @@ impl ConnectionParameters {
     }
 
     /// Get the maximum stream data that we will accept on different types of streams.
+    ///
     /// # Panics
+    ///
     /// If `StreamType::UniDi` and `false` are passed as that is not a valid combination.
+    #[must_use]
     pub fn get_max_stream_data(&self, stream_type: StreamType, remote: bool) -> u64 {
         match (stream_type, remote) {
             (StreamType::BiDi, false) => self.max_stream_data_bidi_local,
@@ -174,9 +190,12 @@ impl ConnectionParameters {
     }
 
     /// Set the maximum stream data that we will accept on different types of streams.
+    ///
     /// # Panics
+    ///
     /// If `StreamType::UniDi` and `false` are passed as that is not a valid combination
     /// or if v >= 62 (the maximum allowed by the protocol).
+    #[must_use]
     pub fn max_stream_data(mut self, stream_type: StreamType, remote: bool, v: u64) -> Self {
         assert!(v < (1 << 62), "max stream data is too large");
         match (stream_type, remote) {
@@ -197,71 +216,86 @@ impl ConnectionParameters {
     }
 
     /// Set a preferred address (which only has an effect for a server).
+    #[must_use]
     pub fn preferred_address(mut self, preferred: PreferredAddress) -> Self {
         self.preferred_address = PreferredAddressConfig::Address(preferred);
         self
     }
 
     /// Disable the use of preferred addresses.
+    #[must_use]
     pub fn disable_preferred_address(mut self) -> Self {
         self.preferred_address = PreferredAddressConfig::Disabled;
         self
     }
 
+    #[must_use]
     pub fn get_preferred_address(&self) -> &PreferredAddressConfig {
         &self.preferred_address
     }
 
+    #[must_use]
     pub fn ack_ratio(mut self, ack_ratio: u8) -> Self {
         self.ack_ratio = ack_ratio;
         self
     }
 
+    #[must_use]
     pub fn get_ack_ratio(&self) -> u8 {
         self.ack_ratio
     }
 
     /// # Panics
+    ///
     /// If `timeout` is 2^62 milliseconds or more.
+    #[must_use]
     pub fn idle_timeout(mut self, timeout: Duration) -> Self {
         assert!(timeout.as_millis() < (1 << 62), "idle timeout is too long");
         self.idle_timeout = timeout;
         self
     }
 
+    #[must_use]
     pub fn get_idle_timeout(&self) -> Duration {
         self.idle_timeout
     }
 
+    #[must_use]
     pub fn get_datagram_size(&self) -> u64 {
         self.datagram_size
     }
 
+    #[must_use]
     pub fn datagram_size(mut self, v: u64) -> Self {
         self.datagram_size = v;
         self
     }
 
+    #[must_use]
     pub fn get_outgoing_datagram_queue(&self) -> usize {
         self.outgoing_datagram_queue
     }
 
+    #[must_use]
     pub fn outgoing_datagram_queue(mut self, v: usize) -> Self {
         // The max queue length must be at least 1.
         self.outgoing_datagram_queue = max(v, 1);
         self
     }
 
+    #[must_use]
     pub fn get_incoming_datagram_queue(&self) -> usize {
         self.incoming_datagram_queue
     }
 
+    #[must_use]
     pub fn incoming_datagram_queue(mut self, v: usize) -> Self {
         // The max queue length must be at least 1.
         self.incoming_datagram_queue = max(v, 1);
         self
     }
 
+    #[must_use]
     pub fn get_fast_pto(&self) -> u8 {
         self.fast_pto
     }
@@ -279,31 +313,41 @@ impl ConnectionParameters {
     /// congestion.
     ///
     /// # Panics
+    ///
     /// A value of 0 is invalid and will cause a panic.
+    #[must_use]
     pub fn fast_pto(mut self, scale: u8) -> Self {
         assert_ne!(scale, 0);
         self.fast_pto = scale;
         self
     }
 
-    pub fn is_fuzzing(&self) -> bool {
-        self.fuzzing
-    }
-
-    pub fn fuzzing(mut self, enable: bool) -> Self {
-        self.fuzzing = enable;
-        self
-    }
-
+    #[must_use]
     pub fn is_greasing(&self) -> bool {
         self.grease
     }
 
+    #[must_use]
     pub fn grease(mut self, grease: bool) -> Self {
         self.grease = grease;
         self
     }
 
+    #[must_use]
+    pub fn pacing_enabled(&self) -> bool {
+        self.pacing
+    }
+
+    #[must_use]
+    pub fn pacing(mut self, pacing: bool) -> Self {
+        self.pacing = pacing;
+        self
+    }
+
+    /// # Errors
+    /// When a connection ID cannot be obtained.
+    /// # Panics
+    /// Only when this code includes a transport parameter that is invalid.
     pub fn create_transport_parameter(
         &self,
         role: Role,

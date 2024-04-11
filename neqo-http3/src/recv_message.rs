@@ -4,24 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, H3_FRAME_TYPE_HEADERS};
-use crate::push_controller::PushController;
-use crate::{
-    headers_checks::{headers_valid, is_interim},
-    priority::PriorityHandler,
-    qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
-};
+use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
+
 use neqo_common::{qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
-use std::any::Any;
-use std::cell::RefCell;
-use std::cmp::min;
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::fmt::Debug;
-use std::rc::Rc;
+
+use crate::{
+    frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, H3_FRAME_TYPE_HEADERS},
+    headers_checks::{headers_valid, is_interim},
+    priority::PriorityHandler,
+    push_controller::PushController,
+    qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
+    MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
+};
 
 #[allow(clippy::module_name_repetitions)]
 pub(crate) struct RecvMessageInfo {
@@ -275,7 +271,7 @@ impl RecvMessage {
                         }
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
-                            qinfo!(
+                            qdebug!(
                                 [self],
                                 "A new frame has been received: {:?}; state={:?} fin={}",
                                 frame,
@@ -348,7 +344,8 @@ impl RecvMessage {
                     panic!("Stream readable after being closed!");
                 }
                 RecvMessageState::ExtendedConnect => {
-                    // Ignore read event, this request is waiting to be picked up by a new WebTransportSession
+                    // Ignore read event, this request is waiting to be picked up by a new
+                    // WebTransportSession
                     break Ok(());
                 }
             };
@@ -494,9 +491,5 @@ impl HttpRecvStream for RecvMessage {
 
     fn extended_connect_wait_for_response(&self) -> bool {
         matches!(self.state, RecvMessageState::ExtendedConnect)
-    }
-
-    fn any(&self) -> &dyn Any {
-        self
     }
 }

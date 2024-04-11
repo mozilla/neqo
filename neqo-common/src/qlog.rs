@@ -4,14 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cell::RefCell;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    fmt,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use qlog::{
-    self, CommonFields, Configuration, QlogStreamer, TimeUnits, Trace, VantagePoint,
-    VantagePointType,
+    streamer::QlogStreamer, CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType,
 };
 
 use crate::Role;
@@ -29,6 +30,7 @@ pub struct NeqoQlogShared {
 
 impl NeqoQlog {
     /// Create an enabled `NeqoQlog` configuration.
+    ///
     /// # Errors
     ///
     /// Will return `qlog::Error` if cannot write to the new log.
@@ -46,6 +48,11 @@ impl NeqoQlog {
         })
     }
 
+    #[must_use]
+    pub fn inner(&self) -> Rc<RefCell<Option<NeqoQlogShared>>> {
+        Rc::clone(&self.inner)
+    }
+
     /// Create a disabled `NeqoQlog` configuration.
     #[must_use]
     pub fn disabled() -> Self {
@@ -55,11 +62,24 @@ impl NeqoQlog {
     /// If logging enabled, closure may generate an event to be logged.
     pub fn add_event<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Option<qlog::event::Event>,
+        F: FnOnce() -> Option<qlog::events::Event>,
     {
         self.add_event_with_stream(|s| {
             if let Some(evt) = f() {
                 s.add_event(evt)?;
+            }
+            Ok(())
+        });
+    }
+
+    /// If logging enabled, closure may generate an event to be logged.
+    pub fn add_event_data<F>(&mut self, f: F)
+    where
+        F: FnOnce() -> Option<qlog::events::EventData>,
+    {
+        self.add_event_with_stream(|s| {
+            if let Some(ev_data) = f() {
+                s.add_event_data_now(ev_data)?;
             }
             Ok(())
         });
@@ -99,8 +119,8 @@ impl Drop for NeqoQlogShared {
 }
 
 #[must_use]
-pub fn new_trace(role: Role) -> qlog::Trace {
-    Trace {
+pub fn new_trace(role: Role) -> qlog::TraceSeq {
+    TraceSeq {
         vantage_point: VantagePoint {
             name: Some(format!("neqo-{role}")),
             ty: match role {
@@ -112,26 +132,56 @@ pub fn new_trace(role: Role) -> qlog::Trace {
         title: Some(format!("neqo-{role} trace")),
         description: Some("Example qlog trace description".to_string()),
         configuration: Some(Configuration {
-            time_offset: Some("0".into()),
-            time_units: Some(TimeUnits::Us),
+            time_offset: Some(0.0),
             original_uris: None,
         }),
         common_fields: Some(CommonFields {
             group_id: None,
             protocol_type: None,
             reference_time: {
-                let datetime = time::OffsetDateTime::now_utc();
-                datetime
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .ok() // This is expected to never fail.
+                // It is better to allow this than deal with a conversion from i64 to f64.
+                // We can't do the obvious two-step conversion with f64::from(i32::try_from(...)),
+                // because that overflows earlier than is ideal.  This should be fine for a while.
+                #[allow(clippy::cast_precision_loss)]
+                Some(time::OffsetDateTime::now_utc().unix_timestamp() as f64)
             },
+            time_format: Some("relative".to_string()),
         }),
-        event_fields: vec![
-            "relative_time".to_string(),
-            "category".to_string(),
-            "event".to_string(),
-            "data".to_string(),
-        ],
-        events: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use qlog::events::Event;
+    use test_fixture::EXPECTED_LOG_HEADER;
+
+    const EV_DATA: qlog::events::EventData =
+        qlog::events::EventData::SpinBitUpdated(qlog::events::connectivity::SpinBitUpdated {
+            state: true,
+        });
+
+    const EXPECTED_LOG_EVENT: &str = concat!(
+        "\u{1e}",
+        r#"{"time":0.0,"name":"connectivity:spin_bit_updated","data":{"state":true}}"#,
+        "\n"
+    );
+
+    #[test]
+    fn new_neqo_qlog() {
+        let (_log, contents) = test_fixture::new_neqo_qlog();
+        assert_eq!(contents.to_string(), EXPECTED_LOG_HEADER);
+    }
+
+    #[test]
+    fn add_event() {
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
+        log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
+        assert_eq!(
+            contents.to_string(),
+            format!(
+                "{EXPECTED_LOG_HEADER}{e}",
+                e = EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
+            )
+        );
     }
 }

@@ -5,15 +5,18 @@
 // except according to those terms.
 
 // Tracking of some useful statistics.
-#![deny(clippy::pedantic)]
+
+use std::{
+    cell::RefCell,
+    fmt::{self, Debug},
+    ops::Deref,
+    rc::Rc,
+    time::Duration,
+};
+
+use neqo_common::qwarn;
 
 use crate::packet::PacketNumber;
-use neqo_common::qinfo;
-use std::cell::RefCell;
-use std::fmt::{self, Debug};
-use std::ops::Deref;
-use std::rc::Rc;
-use std::time::Duration;
 
 pub(crate) const MAX_PTO_COUNTS: usize = 16;
 
@@ -81,6 +84,7 @@ impl Debug for FrameStats {
             "    blocked: stream {} data {} stream_data {}",
             self.streams_blocked, self.data_blocked, self.stream_data_blocked,
         )?;
+        writeln!(f, "    datagram {}", self.datagram)?;
         writeln!(
             f,
             "    ncid {} rcid {} pchallenge {} presponse {}",
@@ -89,7 +93,7 @@ impl Debug for FrameStats {
             self.path_challenge,
             self.path_response,
         )?;
-        writeln!(f, "    ack_frequency {} ", self.ack_frequency)
+        writeln!(f, "    ack_frequency {}", self.ack_frequency)
     }
 }
 
@@ -138,6 +142,8 @@ pub struct Stats {
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
     pub rttvar: Duration,
+    /// Whether the first RTT sample was guessed from a discarded packet.
+    pub rtt_init_guess: bool,
 
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.
@@ -162,7 +168,7 @@ impl Stats {
 
     pub fn pkt_dropped(&mut self, reason: impl AsRef<str>) {
         self.dropped_rx += 1;
-        qinfo!(
+        qwarn!(
             [self.info],
             "Dropped received packet: {}; Total: {}",
             reason.as_ref(),
@@ -171,6 +177,7 @@ impl Stats {
     }
 
     /// # Panics
+    ///
     /// When preconditions are violated.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);
@@ -199,7 +206,7 @@ impl Debug for Stats {
             "  tx: {} lost {} lateack {} ptoack {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack
         )?;
-        writeln!(f, "  resumed: {} ", self.resumed)?;
+        writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
         self.frame_rx.fmt(f)?;
         writeln!(f, "  frames tx:")?;

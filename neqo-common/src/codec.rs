@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{convert::TryFrom, fmt::Debug};
+use std::fmt::Debug;
 
 use crate::hex_with_len;
 
@@ -34,16 +34,18 @@ impl<'a> Decoder<'a> {
     }
 
     /// Skip n bytes.
+    ///
     /// # Panics
+    ///
     /// If the remaining quantity is less than `n`.
     pub fn skip(&mut self, n: usize) {
-        assert!(self.remaining() >= n);
+        assert!(self.remaining() >= n, "insufficient data");
         self.offset += n;
     }
 
     /// Skip helper that panics if `n` is `None` or not able to fit in `usize`.
     fn skip_inner(&mut self, n: Option<u64>) {
-        self.skip(usize::try_from(n.unwrap()).unwrap());
+        self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
 
     /// Skip a vector.  Panics if there isn't enough space.
@@ -90,7 +92,9 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes an unsigned integer of length 1..=8.
+    ///
     /// # Panics
+    ///
     /// This panics if `n` is not in the range `1..=8`.
     pub fn decode_uint(&mut self, n: usize) -> Option<u64> {
         assert!(n > 0 && n <= 8);
@@ -107,9 +111,8 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes a QUIC varint.
-    #[allow(clippy::missing_panics_doc)] // See https://github.com/rust-lang/rust-clippy/issues/6699
     pub fn decode_varint(&mut self) -> Option<u64> {
-        let Some(b1) = self.decode_byte() else { return None };
+        let b1 = self.decode_byte()?;
         match b1 >> 6 {
             0 => Some(u64::from(b1 & 0x3f)),
             1 => Some((u64::from(b1 & 0x3f) << 8) | self.decode_uint(1)?),
@@ -127,8 +130,7 @@ impl<'a> Decoder<'a> {
     }
 
     fn decode_checked(&mut self, n: Option<u64>) -> Option<&'a [u8]> {
-        let Some(len) = n else { return None };
-        if let Ok(l) = usize::try_from(len) {
+        if let Ok(l) = usize::try_from(n?) {
             self.decode(l)
         } else {
             // sizeof(usize) < sizeof(u64) and the value is greater than
@@ -198,21 +200,25 @@ pub struct Encoder {
 
 impl Encoder {
     /// Static helper function for previewing the results of encoding without doing it.
+    ///
     /// # Panics
+    ///
     /// When `v` is too large.
     #[must_use]
     pub const fn varint_len(v: u64) -> usize {
         match () {
-            _ if v < (1 << 6) => 1,
-            _ if v < (1 << 14) => 2,
-            _ if v < (1 << 30) => 4,
-            _ if v < (1 << 62) => 8,
-            _ => panic!("Varint value too large"),
+            () if v < (1 << 6) => 1,
+            () if v < (1 << 14) => 2,
+            () if v < (1 << 30) => 4,
+            () if v < (1 << 62) => 8,
+            () => panic!("Varint value too large"),
         }
     }
 
     /// Static helper to determine how long a varint-prefixed array encodes to.
+    ///
     /// # Panics
+    ///
     /// When `len` doesn't fit in a `u64`.
     #[must_use]
     pub fn vvec_len(len: usize) -> usize {
@@ -261,7 +267,9 @@ impl Encoder {
     }
 
     /// Don't use this except in testing.
+    ///
     /// # Panics
+    ///
     /// When `s` contains non-hex values or an odd number of values.
     #[must_use]
     pub fn from_hex(s: impl AsRef<str>) -> Self {
@@ -291,7 +299,9 @@ impl Encoder {
     }
 
     /// Encode an integer of any size up to u64.
+    ///
     /// # Panics
+    ///
     /// When `n` is outside the range `1..=8`.
     #[allow(clippy::cast_possible_truncation)]
     pub fn encode_uint<T: Into<u64>>(&mut self, n: usize, v: T) -> &mut Self {
@@ -304,22 +314,26 @@ impl Encoder {
     }
 
     /// Encode a QUIC varint.
+    ///
     /// # Panics
+    ///
     /// When `v >= 1<<62`.
     pub fn encode_varint<T: Into<u64>>(&mut self, v: T) -> &mut Self {
         let v = v.into();
         match () {
-            _ if v < (1 << 6) => self.encode_uint(1, v),
-            _ if v < (1 << 14) => self.encode_uint(2, v | (1 << 14)),
-            _ if v < (1 << 30) => self.encode_uint(4, v | (2 << 30)),
-            _ if v < (1 << 62) => self.encode_uint(8, v | (3 << 62)),
-            _ => panic!("Varint value too large"),
+            () if v < (1 << 6) => self.encode_uint(1, v),
+            () if v < (1 << 14) => self.encode_uint(2, v | (1 << 14)),
+            () if v < (1 << 30) => self.encode_uint(4, v | (2 << 30)),
+            () if v < (1 << 62) => self.encode_uint(8, v | (3 << 62)),
+            () => panic!("Varint value too large"),
         };
         self
     }
 
     /// Encode a vector in TLS style.
+    ///
     /// # Panics
+    ///
     /// When `v` is longer than 2^64.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
         self.encode_uint(n, u64::try_from(v.as_ref().len()).unwrap())
@@ -327,7 +341,9 @@ impl Encoder {
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
+    ///
     /// # Panics
+    ///
     /// When `f()` returns a length larger than `2^8n`.
     #[allow(clippy::cast_possible_truncation)]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
@@ -343,7 +359,9 @@ impl Encoder {
     }
 
     /// Encode a vector with a varint length.
+    ///
     /// # Panics
+    ///
     /// When `v` is longer than 2^64.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
         self.encode_varint(u64::try_from(v.as_ref().len()).unwrap())
@@ -351,7 +369,9 @@ impl Encoder {
     }
 
     /// Encode a vector with a varint length using a closure.
+    ///
     /// # Panics
+    ///
     /// When `f()` writes more than 2^62 bytes.
     #[allow(clippy::cast_possible_truncation)]
     pub fn encode_vvec_with<F: FnOnce(&mut Self)>(&mut self, f: F) -> &mut Self {
@@ -378,11 +398,11 @@ impl Encoder {
         self.buf[start] = (v & 0xff) as u8;
         let (count, bits) = match () {
             // Great.  The byte we have is enough.
-            _ if v < (1 << 6) => return self,
-            _ if v < (1 << 14) => (1, 1 << 6),
-            _ if v < (1 << 30) => (3, 2 << 22),
-            _ if v < (1 << 62) => (7, 3 << 54),
-            _ => panic!("Varint value too large"),
+            () if v < (1 << 6) => return self,
+            () if v < (1 << 14) => (1, 1 << 6),
+            () if v < (1 << 30) => (3, 2 << 22),
+            () if v < (1 << 62) => (7, 3 << 54),
+            () => panic!("Varint value too large"),
         };
         // Now, we need to encode the high bits after the main block, ...
         self.encode_uint(count, (v >> 8) | bits);
@@ -545,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "insufficient data")]
     fn skip_too_much() {
         let enc = Encoder::from_hex("ff");
         let mut dec = enc.as_decoder();
@@ -561,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "insufficient data")]
     fn skip_vec_too_much() {
         let enc = Encoder::from_hex("ff1234");
         let mut dec = enc.as_decoder();
@@ -569,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "invalid length")]
     fn skip_vec_short_length() {
         let enc = Encoder::from_hex("ff");
         let mut dec = enc.as_decoder();
@@ -584,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "insufficient data")]
     fn skip_vvec_too_much() {
         let enc = Encoder::from_hex("0f1234");
         let mut dec = enc.as_decoder();
@@ -592,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "invalid length")]
     fn skip_vvec_short_length() {
         let enc = Encoder::from_hex("ff");
         let mut dec = enc.as_decoder();
@@ -611,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Varint value too large")]
     fn encoded_length_oob() {
         _ = Encoder::varint_len(1 << 62);
     }
@@ -628,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Varint value too large")]
     fn encoded_vvec_length_oob() {
         _ = Encoder::vvec_len(1 << 62);
     }
@@ -752,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "assertion failed")]
     fn encode_vec_with_overflow() {
         let mut enc = Encoder::default();
         enc.encode_vec_with(1, |enc_inner| {

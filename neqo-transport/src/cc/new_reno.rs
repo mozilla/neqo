@@ -5,12 +5,13 @@
 // except according to those terms.
 
 // Congestion control
-#![deny(clippy::pedantic)]
 
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    time::{Duration, Instant},
+};
 
 use crate::cc::classic_cc::WindowAdjustment;
-use std::time::{Duration, Instant};
 
 #[derive(Debug, Default)]
 pub struct NewReno {}

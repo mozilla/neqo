@@ -4,22 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::frames::HFrame;
+use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
+
+use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
+use neqo_qpack::encoder::QPackEncoder;
+use neqo_transport::{Connection, StreamId};
+
 use crate::{
+    frames::HFrame,
     headers_checks::{headers_valid, is_interim, trailers_valid},
     qlog, BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
     SendStream, SendStreamEvents, Stream,
 };
-
-use neqo_common::{qdebug, qinfo, qtrace, Encoder, Header, MessageType};
-use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::{streams::SendOrder, Connection, StreamId};
-use std::any::Any;
-use std::cell::RefCell;
-use std::cmp::min;
-use std::fmt::Debug;
-use std::mem;
-use std::rc::Rc;
 
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
 const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
@@ -123,7 +119,7 @@ impl SendMessage {
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
-        qinfo!("Create a request stream_id={}", stream_id);
+        qdebug!("Create a request stream_id={}", stream_id);
         Self {
             state: MessageState::WaitingForHeaders,
             message_type,
@@ -135,6 +131,7 @@ impl SendMessage {
     }
 
     /// # Errors
+    ///
     /// `ClosedCriticalStream` if the encoder stream is closed.
     /// `InternalError` if an unexpected error occurred.
     fn encode(
@@ -196,7 +193,7 @@ impl SendStream for SendMessage {
             min(buf.len(), available - 9)
         };
 
-        qinfo!(
+        qdebug!(
             [self],
             "send_request_body: available={} to_send={}.",
             available,
@@ -237,11 +234,13 @@ impl SendStream for SendMessage {
     }
 
     /// # Errors
+    ///
     /// `InternalError` if an unexpected error occurred.
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
-    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
+    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let sent = Error::map_error(self.stream.send_buffer(conn), Error::HttpInternal(5))?;
         qlog::h3_data_moved_down(conn.qlog_mut(), self.stream_id(), sent);
@@ -271,16 +270,6 @@ impl SendStream for SendMessage {
         self.stream.has_buffered_data()
     }
 
-    fn set_sendorder(&mut self, _conn: &mut Connection, _sendorder: Option<SendOrder>) -> Res<()> {
-        // Not relevant for SendMessage
-        Ok(())
-    }
-
-    fn set_fairness(&mut self, _conn: &mut Connection, _fairness: bool) -> Res<()> {
-        // Not relevant for SendMessage
-        Ok(())
-    }
-
     fn close(&mut self, conn: &mut Connection) -> Res<()> {
         self.state.fin()?;
         if !self.stream.has_buffered_data() {
@@ -303,7 +292,6 @@ impl SendStream for SendMessage {
         Some(self)
     }
 
-    #[allow(clippy::drop_copy)]
     fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<()> {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
@@ -312,7 +300,7 @@ impl SendStream for SendMessage {
         data_frame.encode(&mut enc);
         self.stream.buffer(enc.as_ref());
         self.stream.buffer(buf);
-        mem::drop(self.stream.send_buffer(conn)?);
+        _ = self.stream.send_buffer(conn)?;
         Ok(())
     }
 }
@@ -333,10 +321,6 @@ impl HttpSendStream for SendMessage {
     fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
         self.stream_type = Http3StreamType::ExtendedConnect;
         self.conn_events = conn_events;
-    }
-
-    fn any(&self) -> &dyn Any {
-        self
     }
 }
 
