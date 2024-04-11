@@ -15,6 +15,7 @@ cargo-fuzz = true
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-transport = { path = "../neqo-transport" }
+test-fixture = { path = "../test-fixture" }
 
 [target.'cfg(not(windows))'.dependencies]
 libfuzzer-sys = { version = "0.4" }
@@ -32,6 +33,20 @@ bench = false
 [[bin]]
 name = "frame"
 path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "client_initial"
+path = "fuzz_targets/client_initial.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "server_initial"
+path = "fuzz_targets/server_initial.rs"
 test = false
 doc = false
 bench = false
