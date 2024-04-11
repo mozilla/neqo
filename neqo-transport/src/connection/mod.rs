@@ -2862,8 +2862,11 @@ impl Connection {
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
+        let Some(path) = self.paths.primary_fallible() else {
+            return;
+        };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
-            &self.paths.primary(),
+            &path,
             space,
             largest_acknowledged,
             ack_ranges,
