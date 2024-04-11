@@ -192,7 +192,7 @@ impl EcnInfo {
             self.state = EcnValidationState::Failed;
         } else {
             qinfo!(
-                "ECN validation succeeded XXX {} {}, path is capable",
+                "ECN validation succeeded {} {}, path is capable",
                 sum_inc,
                 newly_acked_sent_with_ect0
             );
