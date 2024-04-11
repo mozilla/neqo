@@ -555,7 +555,10 @@ impl<'a> PublicPacket<'a> {
         if packet_type == PacketType::Retry {
             let header_len = decoder.offset();
             let expansion = retry::expansion(version);
-            let token = Self::opt(decoder.decode(decoder.remaining() - expansion))?;
+            let token = decoder
+                .remaining()
+                .checked_sub(expansion)
+                .map_or(Err(Error::InvalidPacket), |v| Self::opt(decoder.decode(v)))?;
             if token.is_empty() {
                 return Err(Error::InvalidPacket);
             }

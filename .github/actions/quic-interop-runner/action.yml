@@ -91,12 +91,9 @@ runs:
     - name: Format GitHub comment
       if: always()
       run: |
-        if [ -s quic-interop-runner/summary ]; then
-          exit 0
-        fi
         echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
         echo '' >> comment
-        # Ignore all, but table, which starts with "|".
+        # Ignore all, but table, which starts with "|". Also reformat it to GitHub Markdown.
         grep -E '^\|' quic-interop-runner/summary |\
           awk '(!/^\| *:-/ || (d++ && d < 3))' |\
           sed -E -e 's/✓/:white_check_mark:/gi' -e 's/✕/:x:/gi' -e 's/\?/:grey_question:/gi' \
@@ -106,7 +103,7 @@ runs:
       shell: bash
 
     - name: Export PR comment data
-      if: env.EXPORT_COMMENT == '1'
+      if: always()
       uses: ./.github/actions/pr-comment-data-export
       with:
         name: qns
