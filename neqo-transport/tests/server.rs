@@ -774,3 +774,16 @@ fn ech() {
         .ech_accepted()
         .unwrap());
 }
+
+#[test]
+fn has_active_connections() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    assert!(!server.has_active_connections());
+
+    let initial = client.process(None, now());
+    let _ = server.process(initial.as_dgram_ref(), now()).dgram();
+
+    assert!(server.has_active_connections());
+}
