@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cmp::max,
-    ops::{AddAssign, Deref, DerefMut, Sub},
-};
+use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::EnumMap;
 use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
@@ -191,11 +188,7 @@ impl EcnInfo {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.state = EcnValidationState::Failed;
         } else {
-            qinfo!(
-                "ECN validation succeeded {} {}, path is capable",
-                sum_inc,
-                newly_acked_sent_with_ect0
-            );
+            qinfo!("ECN validation succeeded, path is capable",);
             self.state = EcnValidationState::Capable;
         }
         self.baseline = ack_ecn;
