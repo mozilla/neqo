@@ -429,7 +429,7 @@ impl<'a> Frame<'a> {
         // Check for minimal encoding of frame type.
         let pos = dec.offset();
         let t = dv(dec)?;
-        if Decoder::minimal_varint_len(t).ok_or(Error::ProtocolViolation)? != dec.offset() - pos {
+        if Decoder::minimal_varint_len(t).unwrap() != dec.offset() - pos {
             return Err(Error::ProtocolViolation);
         }
 
