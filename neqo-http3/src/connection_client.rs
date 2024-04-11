@@ -880,11 +880,10 @@ impl Http3Client {
     pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = &'a Datagram>,
-        I::IntoIter: ExactSizeIterator,
     {
-        let dgrams = dgrams.into_iter();
-        qtrace!([self], "Process multiple datagrams, len={}", dgrams.len());
-        if dgrams.len() == 0 {
+        let mut dgrams = dgrams.into_iter().peekable();
+        qtrace!([self], "Process multiple datagrams");
+        if dgrams.peek().is_none() {
             return;
         }
         self.conn.process_multiple_input(dgrams, now);
