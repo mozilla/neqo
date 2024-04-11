@@ -1967,7 +1967,7 @@ impl Connection {
             }
         }
 
-        // Check if there is a Datagram to be written
+        // Datagrams are best-effort and unreliable.  Let streams starve them for now.
         self.quic_datagrams.write_frames(builder, tokens, stats);
         if builder.is_full() {
             return;
@@ -1996,6 +1996,7 @@ impl Connection {
 
         #[cfg(test)]
         {
+            // Need to check if the previous `write_frames` call filled the packet.
             if builder.is_full() {
                 return;
             }
