@@ -429,6 +429,11 @@ impl<'a> Frame<'a> {
         // Check for minimal encoding of frame type.
         let pos = dec.offset();
         let t = dv(dec)?;
+        // RFC 9000, Section 12.4:
+        //
+        // The Frame Type field uses a variable-length integer encoding [...],
+        // with one exception. To ensure simple and efficient implementations of
+        // frame parsing, a frame type MUST use the shortest possible encoding.
         if Decoder::minimal_varint_len(t).unwrap() != dec.offset() - pos {
             return Err(Error::ProtocolViolation);
         }
