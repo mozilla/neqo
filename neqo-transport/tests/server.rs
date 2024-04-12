@@ -487,7 +487,6 @@ fn bad_client_initial_connection_close() {
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 
-    // let mut payload_enc = Encoder::from(plaintext);
     let mut payload_enc = Encoder::with_capacity(1200);
     payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
 
