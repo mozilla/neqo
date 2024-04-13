@@ -1128,8 +1128,9 @@ impl SendStream {
             SendStreamState::Send {
                 ref mut send_buf, ..
             } => {
+                let stream_was_blocked = send_buf.avail() == 0;
                 send_buf.mark_as_acked(offset, len);
-                if self.avail() > 0 {
+                if stream_was_blocked && self.avail() > 0 {
                     self.conn_events.send_stream_writable(self.stream_id);
                 }
             }
@@ -1777,6 +1778,8 @@ mod tests {
         stats::FrameStats,
         ConnectionEvents, StreamId, SEND_BUFFER_SIZE,
     };
+
+    const MAX_VARINT: u64 = (1 << 62) - 1;
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
         Rc::new(RefCell::new(SenderFlowControl::new((), limit)))
@@ -2497,6 +2500,46 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn send_stream_writable_event_mark_as_acked() {
+        let conn_fc = connection_fc(MAX_VARINT);
+        let mut conn_events = ConnectionEvents::default();
+        let mut s = SendStream::new(
+            0.into(),
+            MAX_VARINT,
+            Rc::clone(&conn_fc),
+            conn_events.clone(),
+        );
+        // Drop SendStreamWritable event from stream creation.
+        conn_events.events().next().unwrap();
+
+        // Fill the tx buffer.
+        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        assert_eq!(res, SEND_BUFFER_SIZE);
+        assert!(conn_events.events().next().is_none());
+        // The stream is now constrained by the tx buffer.
+        assert_eq!(s.avail(), 0);
+
+        // Send and ack a portion of the tx buffer.
+        s.mark_as_sent(0, 50, false);
+        s.mark_as_acked(0, 50, false);
+        // Thus the stream is no longer constrained by the tx buffer.
+        assert_eq!(s.avail(), 50,);
+        // And it thereby generates a SendStreamWritable event.
+        assert!(matches!(
+            conn_events.events().next().unwrap(),
+            ConnectionEvent::SendStreamWritable { .. }
+        ));
+        assert!(conn_events.events().next().is_none());
+
+        // Given that the stream is still no longer constrained by the tx
+        // buffer, sending and acking of yet another portion of the tx buffer
+        // does not result in another SendStreamWritable event.
+        s.mark_as_sent(0, 50, false);
+        s.mark_as_acked(0, 50, false);
+        assert!(conn_events.events().next().is_none());
+    }
+
     fn as_stream_token(t: &RecoveryToken) -> &SendStreamRecoveryToken {
         if let RecoveryToken::Stream(StreamRecoveryToken::Stream(rt)) = &t {
             rt
@@ -2841,8 +2884,6 @@ mod tests {
     /// Create a `SendStream` and force it into a state where it believes that
     /// `offset` bytes have already been sent and acknowledged.
     fn stream_with_sent(stream: u64, offset: usize) -> SendStream {
-        const MAX_VARINT: u64 = (1 << 62) - 1;
-
         let conn_fc = connection_fc(MAX_VARINT);
         let mut s = SendStream::new(
             StreamId::from(stream),
