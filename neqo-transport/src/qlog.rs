@@ -390,8 +390,6 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 impl From<&Frame<'_>> for QuicFrame {
     fn from(frame: &Frame) -> Self {
         match frame {
-            // TODO: Add payload length to `QuicFrame::Padding` once
-            // https://github.com/cloudflare/quiche/pull/1745 is available via the qlog crate.
             Frame::Padding(len) => QuicFrame::Padding {
                 length: None,
                 payload_length: u32::from(*len),
