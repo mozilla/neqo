@@ -20,6 +20,7 @@ use super::{
 };
 use crate::{
     packet::PacketBuilder,
+    recovery::RecoveryTokenVec,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{self, TransportParameter},
@@ -309,7 +310,7 @@ fn idle_caching() {
     let ping_before_s = server.stats().frame_rx.ping;
     server.process_input(&dgram.unwrap(), middle);
     assert_eq!(server.stats().frame_rx.ping, ping_before_s + 1);
-    let mut tokens = Vec::new();
+    let mut tokens = RecoveryTokenVec::new();
     server.crypto.streams.write_frame(
         PacketNumberSpace::Initial,
         &mut builder,

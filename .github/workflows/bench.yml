@@ -21,6 +21,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/dist/Release/lib
 
     steps:
       - name: Checkout neqo

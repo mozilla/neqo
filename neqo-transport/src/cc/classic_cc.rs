@@ -552,6 +552,7 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
         },
         packet::{PacketNumber, PacketType},
+        recovery::RecoveryTokenVec,
         rtt::RttEstimate,
         tracking::SentPacket,
     };
@@ -584,7 +585,7 @@ mod tests {
             pn,
             now() + t,
             ack_eliciting,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             100,
         )
     }
@@ -797,7 +798,7 @@ mod tests {
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
-                    Vec::new(),
+                    RecoveryTokenVec::new(),
                     1000,
                 )
             })
@@ -917,7 +918,7 @@ mod tests {
             lost[0].pn,
             lost[0].time_sent,
             false,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             lost[0].size,
         );
         assert!(!persistent_congestion_by_pto(
@@ -1015,11 +1016,11 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,           // pn
-                    now,               // time sent
-                    true,              // ack eliciting
-                    Vec::new(),        // tokens
-                    MAX_DATAGRAM_SIZE, // size
+                    next_pn,                 // pn
+                    now,                     // time sent
+                    true,                    // ack eliciting
+                    RecoveryTokenVec::new(), // tokens
+                    MAX_DATAGRAM_SIZE,       // size
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1039,11 +1040,11 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,           // pn
-                now,               // time sent
-                true,              // ack eliciting
-                Vec::new(),        // tokens
-                MAX_DATAGRAM_SIZE, // size
+                next_pn,                 // pn
+                now,                     // time sent
+                true,                    // ack eliciting
+                RecoveryTokenVec::new(), // tokens
+                MAX_DATAGRAM_SIZE,       // size
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1082,11 +1083,11 @@ mod tests {
 
         let p_lost = SentPacket::new(
             PacketType::Short,
-            1,                 // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            1,                       // pn
+            now,                     // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         );
         cc.on_packet_sent(&p_lost);
         cwnd_is_default(&cc);
@@ -1095,11 +1096,11 @@ mod tests {
         cwnd_is_halved(&cc);
         let p_not_lost = SentPacket::new(
             PacketType::Short,
-            2,                 // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            2,                       // pn
+            now,                     // time sent
+            true,                    // ack eliciting
+            RecoveryTokenVec::new(), // tokens
+            MAX_DATAGRAM_SIZE,       // size
         );
         cc.on_packet_sent(&p_not_lost);
         now += RTT;
@@ -1118,11 +1119,11 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,           // pn
-                    now,               // time sent
-                    true,              // ack eliciting
-                    Vec::new(),        // tokens
-                    MAX_DATAGRAM_SIZE, // size
+                    next_pn,                 // pn
+                    now,                     // time sent
+                    true,                    // ack eliciting
+                    RecoveryTokenVec::new(), // tokens
+                    MAX_DATAGRAM_SIZE,       // size
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1148,11 +1149,11 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,           // pn
-                now,               // time sent
-                true,              // ack eliciting
-                Vec::new(),        // tokens
-                MAX_DATAGRAM_SIZE, // size
+                next_pn,                 // pn
+                now,                     // time sent
+                true,                    // ack eliciting
+                RecoveryTokenVec::new(), // tokens
+                MAX_DATAGRAM_SIZE,       // size
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
