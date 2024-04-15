@@ -2514,7 +2514,7 @@ mod tests {
         conn_events.events().next().unwrap();
 
         // Fill the tx buffer.
-        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
+        let res = s.send(&vec![4; SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, SEND_BUFFER_SIZE);
         assert!(conn_events.events().next().is_none());
         // The stream is now constrained by the tx buffer.
