@@ -1269,7 +1269,7 @@ impl SendStream {
             return Err(Error::FinalSizeError);
         }
 
-        let buf = if buf.is_empty() || (self.avail() == 0) {
+        let buf = if self.avail() == 0 {
             return Ok(0);
         } else if self.avail() < buf.len() {
             if atomic {
