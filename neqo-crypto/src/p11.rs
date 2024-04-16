@@ -298,13 +298,12 @@ impl Item {
 /// When `size` is too large or NSS fails.
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
-    #[cfg(not(feature = "disable-random"))]
-    {
+    if cfg!(feature = "disable-random") {
+        m_buf.fill(0);
+    } else }
         let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
         secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
     }
-    #[cfg(feature = "disable-random")]
-    m_buf.fill(0);
     buf
 }
 
