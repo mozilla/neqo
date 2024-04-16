@@ -109,9 +109,10 @@ impl EcnInfo {
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
     pub fn on_packet_sent(&mut self) {
-        if self.state != EcnValidationState::Testing {
+        if let EcnValidationState::Testing(probes_sent) = &mut self.state else {
             return;
         }
+        *probes_sent += 1;
 
         self.probes_sent += 1;
         if self.probes_sent == ECN_TEST_COUNT {
