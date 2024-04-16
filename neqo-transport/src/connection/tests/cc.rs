@@ -36,7 +36,7 @@ fn cc_slow_start() {
     assert!(cwnd_avail(&client) < ACK_ONLY_SIZE_LIMIT);
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum CongestionSignal {
     PacketLoss,
     EcnCe,
@@ -90,9 +90,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
             c_tx_dgrams.remove(0);
         }
         CongestionSignal::EcnCe => {
-            c_tx_dgrams
-                .last_mut()
-                .map(|p| p.set_tos(IpTosEcn::Ce.into()));
+            c_tx_dgrams.last_mut().unwrap().set_tos(IpTosEcn::Ce.into());
         }
     }
     let s_ack = ack_bytes(&mut server, stream_id, c_tx_dgrams, now);

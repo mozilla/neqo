@@ -100,39 +100,6 @@ impl std::error::Error for Error {}
 
 type Res<T> = Result<T, Error>;
 
-/// Track whether a key update is needed.
-#[derive(Debug, PartialEq, Eq)]
-struct KeyUpdateState(bool);
-
-impl KeyUpdateState {
-    pub fn maybe_update<F, E>(&mut self, update_fn: F) -> Res<()>
-    where
-        F: FnOnce() -> Result<(), E>,
-        E: Into<Error>,
-    {
-        if self.0 {
-            if let Err(e) = update_fn() {
-                let e = e.into();
-                match e {
-                    Error::TransportError(TransportError::KeyUpdateBlocked)
-                    | Error::Http3Error(neqo_http3::Error::TransportError(
-                        TransportError::KeyUpdateBlocked,
-                    )) => (),
-                    _ => return Err(e),
-                }
-            } else {
-                qerror!("Keys updated");
-                self.0 = false;
-            }
-        }
-        Ok(())
-    }
-
-    fn needed(&self) -> bool {
-        self.0
-    }
-}
-
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 #[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
@@ -176,7 +143,7 @@ pub struct Args {
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
     resume: bool,
 
-    #[arg(name = "key-update", long)]
+    #[arg(name = "key-update", long, hide = true)]
     /// Attempt to initiate a key update immediately after confirming the connection.
     key_update: bool,
 
@@ -254,6 +221,11 @@ impl Args {
         let Some(testcase) = self.shared.qns_test.as_ref() else {
             return;
         };
+
+        if self.key_update {
+            qerror!("internal option key_update set by user");
+            exit(127)
+        }
 
         // Only use v1 for most QNS tests.
         self.shared.quic_parameters.quic_version = vec![Version::Version1];
@@ -369,7 +341,6 @@ trait Handler {
     type Client: Client;
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
-    fn maybe_key_update(&mut self, c: &mut Self::Client) -> Res<()>;
     fn take_token(&mut self) -> Option<ResumptionToken>;
     fn has_token(&self) -> bool;
 }
@@ -380,6 +351,7 @@ trait Client {
     fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = &'a Datagram>;
+    fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
@@ -433,6 +405,10 @@ impl<'a, H: Handler> Runner<'a, H> {
                 };
             }
 
+            if self.client.has_events() {
+                continue;
+            }
+
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => self.process_multiple_input().await?,
                 Ready::Timeout => {
@@ -473,7 +449,6 @@ impl<'a, H: Handler> Runner<'a, H> {
             self.client
                 .process_multiple_input(dgrams.iter(), Instant::now());
             self.process_output().await?;
-            self.handler.maybe_key_update(&mut self.client)?;
         }
 
         Ok(())
@@ -577,14 +552,12 @@ pub async fn client(mut args: Args) -> Res<()> {
 
             first = false;
 
-            let key_update = KeyUpdateState(args.key_update);
-
             token = if args.shared.use_old_http {
                 let client =
                     http09::create_client(&args, real_local, remote_addr, &hostname, token)
                         .expect("failed to create client");
 
-                let handler = http09::Handler::new(to_request, &args, key_update);
+                let handler = http09::Handler::new(to_request, &args);
 
                 Runner {
                     args: &args,
@@ -600,7 +573,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                 let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
                     .expect("failed to create client");
 
-                let handler = http3::Handler::new(to_request, &args, key_update);
+                let handler = http3::Handler::new(to_request, &args);
 
                 Runner {
                     args: &args,
