@@ -1107,7 +1107,7 @@ impl Connection {
         #[warn(clippy::let_and_return)]
         let output = self.process_output(now);
         #[cfg(feature = "build-fuzzing-corpus")]
-        if let Output::Datagram(ref d) = output {
+        if let Some(d) = output.dgram().as_ref() {
             neqo_common::write_item_to_fuzzing_corpus("packet", d);
         }
         output
