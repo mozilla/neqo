@@ -19,12 +19,12 @@ use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{server::ValidateAddress, ConnectionError, Error, State, StreamType};
 use test_fixture::{
-    assertions,
-    common::{
+    assertions, datagram, default_client,
+    header_protection::{
         apply_header_protection, decode_initial_header, initial_aead_and_hp,
         remove_header_protection,
     },
-    datagram, default_client, now, split_datagram,
+    now, split_datagram,
 };
 
 #[test]

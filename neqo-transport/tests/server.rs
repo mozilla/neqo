@@ -18,12 +18,12 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
-    assertions,
-    common::{
+    assertions, datagram, default_client,
+    header_protection::{
         apply_header_protection, decode_initial_header, initial_aead_and_hp,
         remove_header_protection,
     },
-    datagram, default_client, new_client, now, split_datagram, CountingConnectionIdGenerator,
+    new_client, now, split_datagram, CountingConnectionIdGenerator,
 };
 
 /// Take a pair of connections in any state and complete the handshake.
