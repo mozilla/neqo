@@ -46,7 +46,7 @@ use crate::{
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile},
     recv_stream::RecvStreamStats,
-    rtt::GRANULARITY,
+    rtt::{RttEstimate, GRANULARITY},
     send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -610,11 +610,10 @@ impl Connection {
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
-        self.paths
-            .primary()
-            .borrow()
-            .rtt()
-            .pto(PacketNumberSpace::ApplicationData)
+        self.paths.primary_fallible().map_or_else(
+            || RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
+            |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
+        )
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
@@ -962,9 +961,11 @@ impl Connection {
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
-        let lost = self.loss_recovery.timeout(&self.paths.primary(), now);
-        self.handle_lost_packets(&lost);
-        qlog::packets_lost(&mut self.qlog, &lost);
+        if let Some(path) = self.paths.primary_fallible() {
+            let lost = self.loss_recovery.timeout(&path, now);
+            self.handle_lost_packets(&lost);
+            qlog::packets_lost(&mut self.qlog, &lost);
+        }
 
         if self.release_resumption_token_timer.is_some() {
             self.create_resumption_token(now);
@@ -1949,20 +1950,15 @@ impl Connection {
             }
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
-        }
-
-        self.streams.write_frames(
+        for prio in [
+            TransmissionPriority::Critical,
             TransmissionPriority::Important,
-            builder,
-            tokens,
-            frame_stats,
-        );
-        if builder.is_full() {
-            return;
+        ] {
+            self.streams
+                .write_frames(prio, builder, tokens, frame_stats);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
@@ -1970,21 +1966,18 @@ impl Connection {
         if builder.is_full() {
             return;
         }
+
         self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::High, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
-        }
-
-        self.streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
+        for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
+            self.streams
+                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
@@ -1993,9 +1986,9 @@ impl Connection {
             return;
         }
 
-        let frame_stats = &mut stats.frame_tx;
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
         // Both of these are only used for resumption and so can be relatively low priority.
+        let frame_stats = &mut stats.frame_tx;
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
             builder,
@@ -2005,6 +1998,7 @@ impl Connection {
         if builder.is_full() {
             return;
         }
+
         self.new_token.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
@@ -2014,10 +2008,8 @@ impl Connection {
             .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
 
         #[cfg(test)]
-        {
-            if let Some(w) = &mut self.test_frame_writer {
-                w.write_frames(builder);
-            }
+        if let Some(w) = &mut self.test_frame_writer {
+            w.write_frames(builder);
         }
     }
 
@@ -2873,8 +2865,11 @@ impl Connection {
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
+        let Some(path) = self.paths.primary_fallible() else {
+            return;
+        };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
-            &self.paths.primary(),
+            &path,
             space,
             largest_acknowledged,
             ack_ranges,
