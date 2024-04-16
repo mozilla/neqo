@@ -53,7 +53,8 @@ jobs:
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
           sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
-          ./mach --no-interactive vendor rust --ignore-modified
+          ./mach --no-interactive vendor rust --ignore-modified || true
+          ./mach cargo vet
 
       - name: Build Firefox
         run: |
