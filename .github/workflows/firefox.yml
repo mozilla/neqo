@@ -48,18 +48,14 @@ jobs:
             echo "neqo-qpack = { path = \"$GITHUB_WORKSPACE/neqo-qpack\" }"
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
-          git diff
           {
             echo '[[audits.qlog]]'
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$QLOG_VERSION\""
           } >> supply-chain/audits.toml
-          git diff
           sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
-          git diff
           ./mach vendor rust --ignore-modified
-          git diff
 
       - name: Build Firefox
         run: |
