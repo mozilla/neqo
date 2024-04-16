@@ -49,7 +49,7 @@ jobs:
             echo '[[audits.qlog]]'
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
-            echo 'version = "$QLOG_VERSION"'
+            echo "version = \"$QLOG_VERSION\""
           } >> supply-chain/audits.toml
           sed -i'' -e "s/qlog = .*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
           ./mach vendor rust --ignore-modified
