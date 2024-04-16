@@ -411,10 +411,6 @@ impl<'a, H: Handler> Runner<'a, H> {
                 continue;
             }
 
-            if self.client.has_events() {
-                continue;
-            }
-
             match ready(self.socket, self.timeout.as_mut()).await? {
                 Ready::Socket => self.process_multiple_input().await?,
                 Ready::Timeout => {
@@ -457,7 +453,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn process_multiple_input(&mut self) -> Res<()> {
         loop {
             let mut dgrams = self.socket.recv(&self.local_addr)?.peekable();
-            if dgrams.peek().is_some() {
+            if dgrams.peek().is_none() {
                 break;
             }
             self.client.process_multiple_input(dgrams, Instant::now());
