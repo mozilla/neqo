@@ -451,7 +451,8 @@ impl<'a> Frame<'a> {
             // Now check for the values for ACK_ECN.
             let ecn_count: Option<EcnCount> = match t {
                 FRAME_TYPE_ACK_ECN => Some(EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?)),
-                _ => None,
+                FRAME_TYPE_ACK => None,
+                _ => unreachable!("Not a valid ACK frame type"),
             };
 
             Ok(Frame::Ack {
