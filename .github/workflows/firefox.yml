@@ -15,18 +15,10 @@ concurrency:
 jobs:
   firefox:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
 
     steps:
-      - name: Install dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: sudo apt-get install -y --no-install-recommends curl python3 python3-pip mercurial
-
       - name: Checkout Neqo
         uses: actions/checkout@v4
 
@@ -39,7 +31,7 @@ jobs:
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          ./mach --no-interactive bootstrap --application-choice browser
+          ./mach bootstrap --application-choice browser
 
       - name: Plumb in Neqo
         run: |
@@ -53,9 +45,10 @@ jobs:
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
           sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
+          echo vet
           ./mach cargo vet add-exemption qlog 0.13.0
-          ./mach --no-interactive vendor rust --ignore-modified || true
-          ./mach cargo vet
+          echo vendor
+          ./mach vendor rust --ignore-modified || true
 
       - name: Build Firefox
         run: |
