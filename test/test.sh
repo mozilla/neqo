@@ -9,10 +9,11 @@
 # the qlog output and the packet capture.
 
 set -e
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 
 cargo build --bin neqo-client --bin neqo-server
 
-tmp=$(mktemp -d)
 addr=127.0.0.1
 port=4433
 path=/20000
@@ -37,5 +38,3 @@ tmux -CC \
                 until [ -e $tmp/done ]; do sleep 1; done && \
                 tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
         set remain-on-exit on
-
-# rm -rf "$tmp"
