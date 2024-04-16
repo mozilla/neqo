@@ -13,11 +13,11 @@ workspace = true
 
 [dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-log = { version = "0.4", default-features = false }
+log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = { version = "0.13", default-features = false }
+qlog = { workspace = true }
 static_assertions = { version = "1.1", default-features = false }
 
 [dev-dependencies]
