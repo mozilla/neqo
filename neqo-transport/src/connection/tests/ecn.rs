@@ -23,11 +23,11 @@ use crate::{
 };
 
 fn assert_ecn_enabled(tos: IpTos) {
-    assert_eq!(IpTosEcn::from(tos), IpTosEcn::Ect0);
+    assert!(tos.is_ecn_marked());
 }
 
 fn assert_ecn_disabled(tos: IpTos) {
-    assert_eq!(IpTosEcn::from(tos), IpTosEcn::NotEct);
+    assert!(!tos.is_ecn_marked());
 }
 
 fn set_tos(mut d: Datagram, ecn: IpTosEcn) -> Datagram {
