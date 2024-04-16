@@ -236,7 +236,10 @@ impl Paths {
     /// Returns `true` if the path was migrated.
     pub fn migrate(&mut self, path: &PathRef, force: bool, now: Instant) -> bool {
         debug_assert!(!self.is_temporary(path));
-        let baseline = self.primary().borrow().ecn_info.baseline();
+        let baseline = self.primary().map_or_else(
+            || EcnInfo::default().baseline(),
+            |p| p.borrow().ecn_info.baseline(),
+        );
         path.borrow_mut().set_ecn_baseline(baseline);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
