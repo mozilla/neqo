@@ -428,7 +428,7 @@ impl<'a> Frame<'a> {
             d(dec.decode_varint())
         }
 
-        fn decode_ack<'a>(dec: &mut Decoder<'a>, t: u64) -> Res<Frame<'a>> {
+        fn decode_ack<'a>(dec: &mut Decoder<'a>, ecn: bool) -> Res<Frame<'a>> {
             let la = dv(dec)?;
             let ad = dv(dec)?;
             let nr = dv(dec).and_then(|nr| {
