@@ -37,7 +37,7 @@ jobs:
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          ./mach bootstrap --application-choice browser
+          ./mach bootstrap --application-choice browser --no-interactive
 
       - name: Plumb in Neqo
         run: |
@@ -51,7 +51,7 @@ jobs:
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
           sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
-          ./mach vendor rust
+          ./mach vendor rust --ignore-modified --no-interactive
 
       - name: Build Firefox
         run: |
