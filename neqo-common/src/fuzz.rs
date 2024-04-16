@@ -20,7 +20,7 @@ use std::{
 /// Panics if the corpus directory does not exist or if the corpus item cannot be written.
 pub fn write_item_to_fuzzing_corpus(target: &str, data: &[u8]) {
     // This bakes in the assumption that we're executing in the root of the neqo workspace.
-    // Unfortuntely, `cargo fuzz` doesn't provide a way to learn the location of the corpus
+    // Unfortunately, `cargo fuzz` doesn't provide a way to learn the location of the corpus
     // directory. As a safety measure, panic if the directory does not exist.
     let corpus = Path::new("../fuzz/corpus").join(target);
     assert!(
