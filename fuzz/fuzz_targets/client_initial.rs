@@ -5,13 +5,16 @@ use libfuzzer_sys::fuzz_target;
 
 #[cfg(all(fuzzing, not(windows)))]
 fuzz_target!(|data: &[u8]| {
-    use fuzz::{
-        apply_header_protection, decode_initial_header, initial_aead_and_hp,
-        remove_header_protection,
-    };
     use neqo_common::{Datagram, Encoder, Role};
     use neqo_transport::Version;
-    use test_fixture::{default_client, default_server, now};
+    use test_fixture::{
+        default_client, default_server,
+        header_protection::{
+            apply_header_protection, decode_initial_header, initial_aead_and_hp,
+            remove_header_protection,
+        },
+        now,
+    };
 
     let mut client = default_client();
     let ci = client.process(None, now()).dgram().expect("a datagram");
