@@ -8,10 +8,7 @@ mod common;
 
 use std::{cell::RefCell, mem, net::SocketAddr, rc::Rc, time::Duration};
 
-use common::{
-    apply_header_protection, connect, connected_server, decode_initial_header, default_server,
-    find_ticket, generate_ticket, initial_aead_and_hp, new_server, remove_header_protection,
-};
+use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
     generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
@@ -21,8 +18,12 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
-    assertions, datagram, default_client, new_client, now, split_datagram,
-    CountingConnectionIdGenerator,
+    assertions,
+    common::{
+        apply_header_protection, decode_initial_header, initial_aead_and_hp,
+        remove_header_protection,
+    },
+    datagram, default_client, new_client, now, split_datagram, CountingConnectionIdGenerator,
 };
 
 /// Take a pair of connections in any state and complete the handshake.

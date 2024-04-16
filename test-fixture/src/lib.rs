@@ -33,6 +33,7 @@ use neqo_transport::{
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
+pub mod common;
 pub mod sim;
 
 /// The path for the database used in tests.

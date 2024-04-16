@@ -14,14 +14,18 @@ use std::{
     time::Duration,
 };
 
-use common::{
-    apply_header_protection, connected_server, decode_initial_header, default_server,
-    generate_ticket, initial_aead_and_hp, remove_header_protection,
-};
+use common::{connected_server, default_server, generate_ticket};
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{server::ValidateAddress, ConnectionError, Error, State, StreamType};
-use test_fixture::{assertions, datagram, default_client, now, split_datagram};
+use test_fixture::{
+    assertions,
+    common::{
+        apply_header_protection, decode_initial_header, initial_aead_and_hp,
+        remove_header_protection,
+    },
+    datagram, default_client, now, split_datagram,
+};
 
 #[test]
 fn retry_basic() {
