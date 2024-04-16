@@ -20,12 +20,12 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State, StreamId,
-    StreamType,
+    Connection, ConnectionError, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
+    StreamId, StreamType,
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, KeyUpdateState, Res};
+use super::{get_output_file, qlog_new, Args, Res};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -33,7 +33,7 @@ pub struct Handler<'a> {
     all_paths: Vec<PathBuf>,
     args: &'a Args,
     token: Option<ResumptionToken>,
-    key_update: KeyUpdateState,
+    needs_key_update: bool,
 }
 
 impl<'a> super::Handler for Handler<'a> {
@@ -41,6 +41,18 @@ impl<'a> super::Handler for Handler<'a> {
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool> {
         while let Some(event) = client.next_event() {
+            if self.needs_key_update {
+                match client.initiate_key_update() {
+                    Ok(()) => {
+                        qdebug!("Keys updated");
+                        self.needs_key_update = false;
+                        self.download_urls(client);
+                    }
+                    Err(neqo_transport::Error::KeyUpdateBlocked) => (),
+                    Err(e) => return Err(e.into()),
+                }
+            }
+
             match event {
                 ConnectionEvent::AuthenticationNeeded => {
                     client.authenticated(AuthenticationStatus::Ok, Instant::now());
@@ -66,9 +78,6 @@ impl<'a> super::Handler for Handler<'a> {
                     qdebug!("{event:?}");
                     self.download_urls(client);
                 }
-                ConnectionEvent::StateChange(State::Confirmed) => {
-                    self.maybe_key_update(client)?;
-                }
                 ConnectionEvent::ResumptionToken(token) => {
                     self.token = Some(token);
                 }
@@ -84,12 +93,6 @@ impl<'a> super::Handler for Handler<'a> {
         }
 
         Ok(false)
-    }
-
-    fn maybe_key_update(&mut self, c: &mut Self::Client) -> Res<()> {
-        self.key_update.maybe_update(|| c.initiate_key_update())?;
-        self.download_urls(c);
-        Ok(())
     }
 
     fn take_token(&mut self) -> Option<ResumptionToken> {
@@ -142,19 +145,27 @@ impl super::Client for Connection {
         self.process_output(now)
     }
 
-    fn process_input(&mut self, dgram: &Datagram, now: Instant) {
-        self.process_input(dgram, now);
+    fn process_multiple_input<I>(&mut self, dgrams: I, now: Instant)
+    where
+        I: IntoIterator<Item = Datagram>,
+    {
+        self.process_multiple_input(dgrams, now);
     }
 
     fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)
     where
         S: AsRef<str> + std::fmt::Display,
     {
-        self.close(now, app_error, msg);
+        if !self.state().closed() {
+            self.close(now, app_error, msg);
+        }
     }
 
-    fn is_closed(&self) -> bool {
-        matches!(self.state(), State::Closed(..))
+    fn is_closed(&self) -> Option<ConnectionError> {
+        if let State::Closed(err) = self.state() {
+            return Some(err.clone());
+        }
+        None
     }
 
     fn stats(&self) -> neqo_transport::Stats {
@@ -167,14 +178,14 @@ impl super::Client for Connection {
 }
 
 impl<'b> Handler<'b> {
-    pub fn new(url_queue: VecDeque<Url>, args: &'b Args, key_update: KeyUpdateState) -> Self {
+    pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
             streams: HashMap::new(),
             url_queue,
             all_paths: Vec::new(),
             args,
             token: None,
-            key_update,
+            needs_key_update: args.key_update,
         }
     }
 
@@ -193,7 +204,7 @@ impl<'b> Handler<'b> {
     }
 
     fn download_next(&mut self, client: &mut Connection) -> bool {
-        if self.key_update.needed() {
+        if self.needs_key_update {
             qdebug!("Deferring requests until after first key update");
             return false;
         }

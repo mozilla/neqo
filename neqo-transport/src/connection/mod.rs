@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min},
     fmt::{self, Debug},
-    mem,
+    iter, mem,
     net::{IpAddr, SocketAddr},
     ops::RangeInclusive,
     rc::{Rc, Weak},
@@ -19,7 +19,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, IpTos, Role,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -35,6 +35,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
+    ecn::EcnCount,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -46,7 +47,7 @@ use crate::{
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile},
     recv_stream::RecvStreamStats,
-    rtt::GRANULARITY,
+    rtt::{RttEstimate, GRANULARITY},
     send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -610,11 +611,10 @@ impl Connection {
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
-        self.paths
-            .primary()
-            .borrow()
-            .rtt()
-            .pto(PacketNumberSpace::ApplicationData)
+        self.paths.primary_fallible().map_or_else(
+            || RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
+            |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
+        )
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
@@ -962,9 +962,11 @@ impl Connection {
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
-        let lost = self.loss_recovery.timeout(&self.paths.primary(), now);
-        self.handle_lost_packets(&lost);
-        qlog::packets_lost(&mut self.qlog, &lost);
+        if let Some(path) = self.paths.primary_fallible() {
+            let lost = self.loss_recovery.timeout(&path, now);
+            self.handle_lost_packets(&lost);
+            qlog::packets_lost(&mut self.qlog, &lost);
+        }
 
         if self.release_resumption_token_timer.is_some() {
             self.create_resumption_token(now);
@@ -978,24 +980,22 @@ impl Connection {
 
     /// Process new input datagrams on the connection.
     pub fn process_input(&mut self, d: &Datagram, now: Instant) {
-        self.input(d, now, now);
-        self.process_saved(now);
-        self.streams.cleanup_closed_streams();
+        // TODO
+        self.process_multiple_input(iter::once(d.clone()), now);
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    pub fn process_multiple_input<I>(&mut self, dgrams: I, now: Instant)
     where
-        I: IntoIterator<Item = &'a Datagram>,
-        I::IntoIter: ExactSizeIterator,
+        I: IntoIterator<Item = Datagram>,
     {
-        let dgrams = dgrams.into_iter();
-        if dgrams.len() == 0 {
+        let mut dgrams = dgrams.into_iter().peekable();
+        if dgrams.peek().is_none() {
             return;
         }
 
         for d in dgrams {
-            self.input(d, now, now);
+            self.input(&d, now, now);
         }
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
@@ -1420,6 +1420,13 @@ impl Connection {
         migrate: bool,
         now: Instant,
     ) {
+        let space = PacketNumberSpace::from(packet.packet_type());
+        if let Some(space) = self.acks.get_mut(space) {
+            *space.ecn_marks() += d.tos().into();
+        } else {
+            qtrace!("Not tracking ECN for dropped packet number space");
+        }
+
         if self.state == State::WaitInitial {
             self.start_handshake(path, packet, now);
         }
@@ -1829,7 +1836,7 @@ impl Connection {
             | State::Connected
             | State::Confirmed => {
                 if let Some(path) = self.paths.select_path() {
-                    let res = self.output_path(&path, now);
+                    let res = self.output_path(&path, now, &None);
                     self.capture_error(Some(path), now, 0, res)
                 } else {
                     Ok(SendOption::default())
@@ -1838,7 +1845,16 @@ impl Connection {
             State::Closing { .. } | State::Draining { .. } | State::Closed(_) => {
                 if let Some(details) = self.state_signaling.close_frame() {
                     let path = Rc::clone(details.path());
-                    let res = self.output_close(&details);
+                    // In some error cases, we will not be able to make a new, permanent path.
+                    // For example, if we run out of connection IDs and the error results from
+                    // a packet on a new path, we avoid sending (and the privacy risk) rather
+                    // than reuse a connection ID.
+                    let res = if path.borrow().is_temporary() {
+                        assert!(!cfg!(test), "attempting to close with a temporary path");
+                        Err(Error::InternalError)
+                    } else {
+                        self.output_path(&path, now, &Some(details))
+                    };
                     self.capture_error(Some(path), now, 0, res)
                 } else {
                     Ok(SendOption::default())
@@ -1915,62 +1931,6 @@ impl Connection {
         }
     }
 
-    fn output_close(&mut self, close: &ClosingFrame) -> Res<SendOption> {
-        let mut encoder = Encoder::with_capacity(256);
-        let grease_quic_bit = self.can_grease_quic_bit();
-        let version = self.version();
-        for space in PacketNumberSpace::iter() {
-            let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
-                continue;
-            };
-
-            let path = close.path().borrow();
-            // In some error cases, we will not be able to make a new, permanent path.
-            // For example, if we run out of connection IDs and the error results from
-            // a packet on a new path, we avoid sending (and the privacy risk) rather
-            // than reuse a connection ID.
-            if path.is_temporary() {
-                assert!(!cfg!(test), "attempting to close with a temporary path");
-                return Err(Error::InternalError);
-            }
-            let (_, mut builder) = Self::build_packet_header(
-                &path,
-                cspace,
-                encoder,
-                tx,
-                &AddressValidationInfo::None,
-                version,
-                grease_quic_bit,
-            );
-            _ = Self::add_packet_number(
-                &mut builder,
-                tx,
-                self.loss_recovery.largest_acknowledged_pn(*space),
-            );
-            // The builder will set the limit to 0 if there isn't enough space for the header.
-            if builder.is_full() {
-                encoder = builder.abort();
-                break;
-            }
-            builder.set_limit(min(path.amplification_limit(), path.mtu()) - tx.expansion());
-            debug_assert!(builder.limit() <= 2048);
-
-            // ConnectionError::Application is only allowed at 1RTT.
-            let sanitized = if *space == PacketNumberSpace::ApplicationData {
-                None
-            } else {
-                close.sanitize()
-            };
-            sanitized
-                .as_ref()
-                .unwrap_or(close)
-                .write_frame(&mut builder);
-            encoder = builder.build(tx)?;
-        }
-
-        Ok(SendOption::Yes(close.path().borrow().datagram(encoder)))
-    }
-
     /// Write the frames that are exchanged in the application data space.
     /// The order of calls here determines the relative priority of frames.
     fn write_appdata_frames(
@@ -1987,20 +1947,15 @@ impl Connection {
             }
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
-        }
-
-        self.streams.write_frames(
+        for prio in [
+            TransmissionPriority::Critical,
             TransmissionPriority::Important,
-            builder,
-            tokens,
-            frame_stats,
-        );
-        if builder.is_full() {
-            return;
+        ] {
+            self.streams
+                .write_frames(prio, builder, tokens, frame_stats);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
@@ -2008,21 +1963,18 @@ impl Connection {
         if builder.is_full() {
             return;
         }
+
         self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::High, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
-        }
-
-        self.streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
+        for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
+            self.streams
+                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
@@ -2031,9 +1983,9 @@ impl Connection {
             return;
         }
 
-        let frame_stats = &mut stats.frame_tx;
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
         // Both of these are only used for resumption and so can be relatively low priority.
+        let frame_stats = &mut stats.frame_tx;
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
             builder,
@@ -2043,6 +1995,7 @@ impl Connection {
         if builder.is_full() {
             return;
         }
+
         self.new_token.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
@@ -2052,10 +2005,8 @@ impl Connection {
             .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
 
         #[cfg(test)]
-        {
-            if let Some(w) = &mut self.test_frame_writer {
-                w.write_frames(builder);
-            }
+        if let Some(w) = &mut self.test_frame_writer {
+            w.write_frames(builder);
         }
     }
 
@@ -2191,7 +2142,12 @@ impl Connection {
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
-    fn output_path(&mut self, path: &PathRef, now: Instant) -> Res<SendOption> {
+    fn output_path(
+        &mut self,
+        path: &PathRef,
+        now: Instant,
+        closing_frame: &Option<ClosingFrame>,
+    ) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
@@ -2244,8 +2200,23 @@ impl Connection {
 
             // Add frames to the packet.
             let payload_start = builder.len();
-            let (tokens, ack_eliciting, padded) =
-                self.write_frames(path, *space, &profile, &mut builder, now);
+            let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
+            if let Some(ref close) = closing_frame {
+                // ConnectionError::Application is only allowed at 1RTT.
+                let sanitized = if *space == PacketNumberSpace::ApplicationData {
+                    None
+                } else {
+                    close.sanitize()
+                };
+                sanitized
+                    .as_ref()
+                    .unwrap_or(close)
+                    .write_frame(&mut builder);
+                self.stats.borrow_mut().frame_tx.connection_close += 1;
+            } else {
+                (tokens, ack_eliciting, padded) =
+                    self.write_frames(path, *space, &profile, &mut builder, now);
+            }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
@@ -2259,7 +2230,7 @@ impl Connection {
                 pt,
                 pn,
                 &builder.as_ref()[payload_start..],
-                IpTos::default(), // TODO: set from path
+                path.borrow().tos(),
             );
             qlog::packet_sent(
                 &mut self.qlog,
@@ -2281,6 +2252,7 @@ impl Connection {
             let sent = SentPacket::new(
                 pt,
                 pn,
+                path.borrow().tos().into(),
                 now,
                 ack_eliciting,
                 tokens,
@@ -2326,12 +2298,14 @@ impl Connection {
                         mtu
                     );
                     initial.size += mtu - packets.len();
+                    // These zeros aren't padding frames, they are an invalid all-zero coalesced
+                    // packet, which is why we don't increase `frame_tx.padding` count here.
                     packets.resize(mtu, 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
             }
             path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(path.borrow().datagram(packets)))
+            Ok(SendOption::Yes(path.borrow_mut().datagram(packets)))
         }
     }
 
@@ -2701,10 +2675,18 @@ impl Connection {
                 ack_delay,
                 first_ack_range,
                 ack_ranges,
+                ecn_count,
             } => {
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, largest_acknowledged, ranges, ack_delay, now);
+                self.handle_ack(
+                    space,
+                    largest_acknowledged,
+                    ranges,
+                    ecn_count,
+                    ack_delay,
+                    now,
+                );
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -2881,6 +2863,7 @@ impl Connection {
         space: PacketNumberSpace,
         largest_acknowledged: u64,
         ack_ranges: R,
+        ack_ecn: Option<EcnCount>,
         ack_delay: u64,
         now: Instant,
     ) where
@@ -2889,11 +2872,15 @@ impl Connection {
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
+        let Some(path) = self.paths.primary_fallible() else {
+            return;
+        };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
-            &self.paths.primary(),
+            &path,
             space,
             largest_acknowledged,
             ack_ranges,
+            ack_ecn,
             self.decode_ack_delay(ack_delay),
             now,
         );

@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     fmt::{Debug, Display},
-    mem,
+    iter, mem,
     net::SocketAddr,
     rc::Rc,
     time::Instant,
@@ -874,19 +874,18 @@ impl Http3Client {
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
     pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
-        qtrace!([self], "Process input.");
-        self.conn.process_input(dgram, now);
-        self.process_http3(now);
+        // TODO
+        self.process_multiple_input(iter::once(dgram.clone()), now);
     }
 
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
+    // TODO: Take &'a Datagram
+    pub fn process_multiple_input<I>(&mut self, dgrams: I, now: Instant)
     where
-        I: IntoIterator<Item = &'a Datagram>,
-        I::IntoIter: ExactSizeIterator,
+        I: IntoIterator<Item = Datagram>,
     {
-        let dgrams = dgrams.into_iter();
-        qtrace!([self], "Process multiple datagrams, len={}", dgrams.len());
-        if dgrams.len() == 0 {
+        let mut dgrams = dgrams.into_iter().peekable();
+        qtrace!([self], "Process multiple datagrams");
+        if dgrams.peek().is_none() {
             return;
         }
         self.conn.process_multiple_input(dgrams, now);

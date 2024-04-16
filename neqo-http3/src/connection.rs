@@ -386,16 +386,10 @@ impl Http3Connection {
         Ok(())
     }
 
-    /// Inform a [`Http3Connection`] that a stream might have data to send in
-    /// case `send` should be called for the stream.
-    pub fn stream_might_have_pending_data(&mut self, stream_id: StreamId) {
-        if self
-            .send_streams
-            .get(&stream_id)
-            .map_or(false, |s| s.has_data_to_send())
-        {
-            self.streams_with_pending_data.insert(stream_id);
-        }
+    /// Inform an [`Http3Connection`] that a stream has data to send and that
+    /// [`SendStream::send`] should be called for the stream.
+    pub fn stream_has_pending_data(&mut self, stream_id: StreamId) {
+        self.streams_with_pending_data.insert(stream_id);
     }
 
     /// Return true if there is a stream that needs to send data.
