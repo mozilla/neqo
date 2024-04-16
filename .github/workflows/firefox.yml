@@ -46,10 +46,11 @@ jobs:
           } >> Cargo.toml
           sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
           {
-            echo '[[exemptions.qlog]]'
-            echo 'version = "0.13.0"'
+            echo '[[audits.qlog]]'
+            echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
-          } >> supply-chain/config.toml
+            echo 'version = "0.13.0"'
+          } >> supply-chain/audits.toml
           ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
