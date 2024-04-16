@@ -1938,20 +1938,15 @@ impl Connection {
             }
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
-        }
-
-        self.streams.write_frames(
+        for prio in [
+            TransmissionPriority::Critical,
             TransmissionPriority::Important,
-            builder,
-            tokens,
-            frame_stats,
-        );
-        if builder.is_full() {
-            return;
+        ] {
+            self.streams
+                .write_frames(prio, builder, tokens, frame_stats);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
@@ -1959,21 +1954,18 @@ impl Connection {
         if builder.is_full() {
             return;
         }
+
         self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::High, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
-        }
-
-        self.streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, frame_stats);
-        if builder.is_full() {
-            return;
+        for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
+            self.streams
+                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
@@ -1982,9 +1974,9 @@ impl Connection {
             return;
         }
 
-        let frame_stats = &mut stats.frame_tx;
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
         // Both of these are only used for resumption and so can be relatively low priority.
+        let frame_stats = &mut stats.frame_tx;
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
             builder,
@@ -1994,6 +1986,7 @@ impl Connection {
         if builder.is_full() {
             return;
         }
+
         self.new_token.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
@@ -2003,10 +1996,8 @@ impl Connection {
             .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
 
         #[cfg(test)]
-        {
-            if let Some(w) = &mut self.test_frame_writer {
-                w.write_frames(builder);
-            }
+        if let Some(w) = &mut self.test_frame_writer {
+            w.write_frames(builder);
         }
     }
 
