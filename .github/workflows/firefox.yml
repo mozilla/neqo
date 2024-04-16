@@ -45,10 +45,12 @@ jobs:
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
           sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
-          echo vet
-          ./mach cargo vet add-exemption qlog 0.13.0
-          echo vendor
-          ./mach vendor rust --ignore-modified || true
+          {
+            echo '[[exemptions.qlog]]'
+            echo 'version = "0.13.0"'
+            echo 'criteria = "safe-to-deploy"'
+          } >> supply-chain/config.toml
+          ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
         run: |
