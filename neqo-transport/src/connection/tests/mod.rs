@@ -171,17 +171,13 @@ impl crate::connection::test_internal::FrameWriter for PingWriter {
     }
 }
 
-trait DatagramModifier: FnMut(Datagram) -> Option<Datagram> {}
-
-impl<T> DatagramModifier for T where T: FnMut(Datagram) -> Option<Datagram> {}
-
 /// Drive the handshake between the client and server.
 fn handshake_with_modifier(
     client: &mut Connection,
     server: &mut Connection,
     now: Instant,
     rtt: Duration,
-    mut modifier: impl DatagramModifier,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
     let mut a = client;
     let mut b = server;
@@ -258,7 +254,7 @@ fn connect_with_rtt_and_modifier(
     server: &mut Connection,
     now: Instant,
     rtt: Duration,
-    modifier: impl DatagramModifier,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
     fn check_rtt(stats: &Stats, rtt: Duration) {
         assert_eq!(stats.rtt, rtt);
@@ -334,7 +330,7 @@ fn connect_rtt_idle_with_modifier(
     client: &mut Connection,
     server: &mut Connection,
     rtt: Duration,
-    modifier: impl DatagramModifier,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
     let now = connect_with_rtt_and_modifier(client, server, now(), rtt, modifier);
     assert_idle(client, server, rtt, now);
@@ -352,7 +348,7 @@ fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Durat
 fn connect_force_idle_with_modifier(
     client: &mut Connection,
     server: &mut Connection,
-    modifier: impl DatagramModifier,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) {
     connect_rtt_idle_with_modifier(client, server, Duration::new(0, 0), modifier);
 }
@@ -577,7 +573,7 @@ fn send_something_paced_with_modifier(
     sender: &mut Connection,
     mut now: Instant,
     allow_pacing: bool,
-    mut modifier: impl DatagramModifier,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> (Datagram, Instant) {
     let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
     assert!(sender.stream_send(stream_id, DEFAULT_STREAM_DATA).is_ok());
@@ -609,7 +605,7 @@ fn send_something_paced(
 fn send_something_with_modifier(
     sender: &mut Connection,
     now: Instant,
-    modifier: impl DatagramModifier,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Datagram {
     send_something_paced_with_modifier(sender, now, false, modifier).0
 }

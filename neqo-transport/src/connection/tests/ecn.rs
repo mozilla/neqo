@@ -12,7 +12,7 @@ use test_fixture::{
     fixture_init, now, DEFAULT_ADDR_V4,
 };
 
-use super::{send_something_with_modifier, DatagramModifier};
+use super::send_something_with_modifier;
 use crate::{
     connection::tests::{
         connect_force_idle, connect_force_idle_with_modifier, default_client, default_server,
@@ -35,15 +35,15 @@ fn set_tos(mut d: Datagram, ecn: IpTosEcn) -> Datagram {
     d
 }
 
-fn noop() -> impl DatagramModifier {
+fn noop() -> fn(Datagram) -> Option<Datagram> {
     Some
 }
 
-fn bleach() -> impl DatagramModifier {
+fn bleach() -> fn(Datagram) -> Option<Datagram> {
     |d| Some(set_tos(d, IpTosEcn::NotEct))
 }
 
-fn remark() -> impl DatagramModifier {
+fn remark() -> fn(Datagram) -> Option<Datagram> {
     |d| {
         if d.tos().is_ecn_marked() {
             Some(set_tos(d, IpTosEcn::Ect1))
@@ -53,7 +53,7 @@ fn remark() -> impl DatagramModifier {
     }
 }
 
-fn ce() -> impl DatagramModifier {
+fn ce() -> fn(Datagram) -> Option<Datagram> {
     |d| {
         if d.tos().is_ecn_marked() {
             Some(set_tos(d, IpTosEcn::Ce))
@@ -63,7 +63,7 @@ fn ce() -> impl DatagramModifier {
     }
 }
 
-fn drop() -> impl DatagramModifier {
+fn drop() -> fn(Datagram) -> Option<Datagram> {
     |_| None
 }
 
@@ -93,15 +93,15 @@ fn disables_on_loss() {
 /// The function returns the TOS value of the last packet sent on the old path and the TOS value
 /// of the last packet sent on the new path to allow for verification of correct behavior.
 pub fn migration_with_modifiers(
-    mut orig_path_modifier: impl DatagramModifier,
-    mut new_path_modifier: impl DatagramModifier,
+    orig_path_modifier: fn(Datagram) -> Option<Datagram>,
+    new_path_modifier: fn(Datagram) -> Option<Datagram>,
     burst: usize,
 ) -> (IpTos, IpTos, bool) {
     fixture_init();
     let mut client = new_client(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
     let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
 
-    connect_force_idle_with_modifier(&mut client, &mut server, &mut orig_path_modifier);
+    connect_force_idle_with_modifier(&mut client, &mut server, orig_path_modifier);
     let mut now = now();
 
     // Right after the handshake, the ECN validation should still be in progress.
@@ -111,7 +111,7 @@ pub fn migration_with_modifiers(
 
     // Send some data on the current path.
     for _ in 0..burst {
-        let client_pkt = send_something_with_modifier(&mut client, now, &mut orig_path_modifier);
+        let client_pkt = send_something_with_modifier(&mut client, now, orig_path_modifier);
         server.process_input(&client_pkt, now);
     }
 
@@ -140,11 +140,11 @@ pub fn migration_with_modifiers(
         assert_eq!(server.stats().frame_tx.path_challenge, 1);
 
         // Data continues to be exchanged on the old path.
-        let client_data = send_something_with_modifier(&mut client, now, &mut orig_path_modifier);
+        let client_data = send_something_with_modifier(&mut client, now, orig_path_modifier);
         assert_ne!(get_cid(&client_data), probe_cid);
         assert_v6_path(&client_data, false);
         server.process_input(&client_data, now);
-        let server_data = send_something_with_modifier(&mut server, now, &mut orig_path_modifier);
+        let server_data = send_something_with_modifier(&mut server, now, orig_path_modifier);
         assert_v6_path(&server_data, false);
         client.process_input(&server_data, now);
 
@@ -153,7 +153,7 @@ pub fn migration_with_modifiers(
         assert_eq!(client.stats().frame_rx.path_challenge, 1);
         migrated = true;
 
-        let migrate_client = send_something_with_modifier(&mut client, now, &mut new_path_modifier);
+        let migrate_client = send_something_with_modifier(&mut client, now, new_path_modifier);
         assert_v4_path(&migrate_client, true); // Responds to server probe.
 
         // The server now sees the migration and will switch over.
@@ -164,7 +164,7 @@ pub fn migration_with_modifiers(
     }
 
     let stream_before = server.stats().frame_tx.stream;
-    let probe_old_server = send_something_with_modifier(&mut server, now, &mut orig_path_modifier);
+    let probe_old_server = send_something_with_modifier(&mut server, now, orig_path_modifier);
     // This is just the double-check probe; no STREAM frames.
     assert_v6_path(&probe_old_server, migrated);
     assert_eq!(
@@ -187,7 +187,7 @@ pub fn migration_with_modifiers(
         // The client receives these checks and responds to the probe, but uses the new path.
         client.process_input(&migrate_server, now);
         client.process_input(&probe_old_server, now);
-        let old_probe_resp = send_something_with_modifier(&mut client, now, &mut new_path_modifier);
+        let old_probe_resp = send_something_with_modifier(&mut client, now, new_path_modifier);
         assert_v6_path(&old_probe_resp, true);
         let client_confirmation = client.process_output(now).dgram().unwrap();
         assert_v4_path(&client_confirmation, false);
@@ -197,14 +197,14 @@ pub fn migration_with_modifiers(
         assert_ne!(server_pacing, Duration::new(0, 0));
         // ... then confirm that the server sends on the new path still.
         let server_confirmation =
-            send_something_with_modifier(&mut server, now + server_pacing, &mut new_path_modifier);
+            send_something_with_modifier(&mut server, now + server_pacing, new_path_modifier);
         assert_v4_path(&server_confirmation, false);
         client.process_input(&server_confirmation, now);
 
         // Send some data on the new path.
         for _ in 0..burst {
             now += client.process_output(now).callback();
-            let client_pkt = send_something_with_modifier(&mut client, now, &mut new_path_modifier);
+            let client_pkt = send_something_with_modifier(&mut client, now, new_path_modifier);
             server.process_input(&client_pkt, now);
         }
 
@@ -223,52 +223,18 @@ pub fn migration_with_modifiers(
 }
 
 #[test]
-fn ecn_migration_noop_noop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(noop(), noop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_noop_bleach_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(noop(), bleach(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_noop_remark_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(noop(), remark(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_noop_ce_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(noop(), ce(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_noop_drop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(noop(), drop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration attempt to conclude ECN validation.
-                                // Migration failed, still too few packets to conclude ECN validation.
-    assert_ecn_enabled(after);
-    assert!(!migrated);
-}
-
-#[test]
-fn ecn_migration_noop_noop_data() {
-    let (before, after, migrated) = migration_with_modifiers(noop(), noop(), ECN_TEST_COUNT);
-    assert_ecn_enabled(before); // ECN validation concludes before migration.
-    assert_ecn_enabled(after); // ECN validation concludes after migration.
-    assert!(migrated);
+fn ecn_migration_zero_burst_all_cases() {
+    for orig_path_mod in &[noop(), bleach(), remark(), ce()] {
+        for new_path_mod in &[noop(), bleach(), remark(), ce(), drop()] {
+            let (before, after, migrated) =
+                migration_with_modifiers(*orig_path_mod, *new_path_mod, 0);
+            // Too few packets sent before and after migration to conclude ECN validation.
+            assert_ecn_enabled(before);
+            assert_ecn_enabled(after);
+            // Migration succeeds except if the new path drops ECN.
+            assert!(*new_path_mod == drop() || migrated);
+        }
+    }
 }
 
 #[test]
@@ -300,47 +266,6 @@ fn ecn_migration_noop_drop_data() {
     let (before, after, migrated) = migration_with_modifiers(noop(), drop(), ECN_TEST_COUNT);
     assert_ecn_enabled(before); // ECN validation concludes before migration.
     assert_ecn_enabled(after); // Migration failed, ECN on original path is still validated.
-    assert!(!migrated);
-}
-
-#[test]
-fn ecn_migration_bleach_noop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(bleach(), noop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_bleach_bleach_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(bleach(), bleach(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_bleach_remark_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(bleach(), remark(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_bleach_ce_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(bleach(), ce(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_bleach_drop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(bleach(), drop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-                                // Migration failed, still too few packets to conclude ECN validation.
-    assert_ecn_enabled(after);
     assert!(!migrated);
 }
 
@@ -386,47 +311,6 @@ fn ecn_migration_bleach_drop_data() {
 }
 
 #[test]
-fn ecn_migration_remark_noop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(remark(), noop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_remark_bleach_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(remark(), bleach(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_remark_remark_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(remark(), remark(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_remark_ce_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(remark(), ce(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_remark_drop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(remark(), drop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-                                // Migration failed, still too few packets to conclude ECN validation.
-    assert_ecn_enabled(after);
-    assert!(!migrated);
-}
-
-#[test]
 fn ecn_migration_remark_noop_data() {
     let (before, after, migrated) = migration_with_modifiers(remark(), noop(), ECN_TEST_COUNT);
     assert_ecn_disabled(before); // ECN validation fails before migration due to remarking.
@@ -463,47 +347,6 @@ fn ecn_migration_remark_drop_data() {
     let (before, after, migrated) = migration_with_modifiers(remark(), drop(), ECN_TEST_COUNT);
     assert_ecn_disabled(before); // ECN validation fails before migration due to remarking.
     assert_ecn_disabled(after); // Migration failed, ECN on original path is still disabled.
-    assert!(!migrated);
-}
-
-#[test]
-fn ecn_migration_ce_noop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(ce(), noop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_ce_bleach_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(ce(), bleach(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_ce_remark_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(ce(), remark(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_ce_ce_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(ce(), ce(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration to conclude ECN validation.
-    assert_ecn_enabled(after); // Too few packets sent after migration to conclude ECN validation.
-    assert!(migrated);
-}
-
-#[test]
-fn ecn_migration_ce_drop_nodata() {
-    let (before, after, migrated) = migration_with_modifiers(ce(), drop(), 0);
-    assert_ecn_enabled(before); // Too few packets sent before migration attempt to conclude ECN validation.
-                                // Migration failed, still too few packets to conclude ECN validation.
-    assert_ecn_enabled(after);
     assert!(!migrated);
 }
 
