@@ -18,6 +18,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      MOZBUILD_STATE_PATH: ${{ runner.workspace }}/mozbuild
 
     steps:
       - name: Install dependencies
@@ -37,7 +39,7 @@ jobs:
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          ./mach bootstrap --application-choice browser
+          ./mach --no-interactive bootstrap --application-choice browser
 
       - name: Plumb in Neqo
         run: |
@@ -51,7 +53,7 @@ jobs:
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
           sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
-          ./mach vendor rust --ignore-modified --no-interactive
+          ./mach --no-interactive vendor rust --ignore-modified
 
       - name: Build Firefox
         run: |
