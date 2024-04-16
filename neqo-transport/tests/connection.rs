@@ -6,12 +6,16 @@
 
 mod common;
 
-use common::{
-    apply_header_protection, decode_initial_header, initial_aead_and_hp, remove_header_protection,
-};
 use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_transport::{ConnectionError, ConnectionParameters, Error, State, Version};
-use test_fixture::{default_client, default_server, new_client, now, split_datagram};
+use test_fixture::{
+    default_client, default_server,
+    header_protection::{
+        apply_header_protection, decode_initial_header, initial_aead_and_hp,
+        remove_header_protection,
+    },
+    new_client, now, split_datagram,
+};
 
 #[test]
 fn connect() {
@@ -58,8 +62,8 @@ fn truncate_long_packet() {
 /// Test that reordering parts of the server Initial doesn't change things.
 #[test]
 fn reorder_server_initial() {
-    // A simple ACK frame for a single packet with packet number 0.
-    const ACK_FRAME: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
+    // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
+    const ACK_FRAME: &[u8] = &[0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00];
 
     let mut client = new_client(
         ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
