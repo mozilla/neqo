@@ -434,7 +434,7 @@ impl<'a> Frame<'a> {
         // The Frame Type field uses a variable-length integer encoding [...],
         // with one exception. To ensure simple and efficient implementations of
         // frame parsing, a frame type MUST use the shortest possible encoding.
-        if Decoder::minimal_varint_len(t).unwrap() != dec.offset() - pos {
+        if Decoder::minimal_varint_len(t) != dec.offset() - pos {
             return Err(Error::ProtocolViolation);
         }
 
@@ -663,8 +663,11 @@ mod tests {
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);
-        let decoded = Frame::decode(&mut encoded.as_decoder()).unwrap();
-        assert_eq!(*f, decoded);
+        if let Ok(decoded) = Frame::decode(&mut encoded.as_decoder()) {
+            assert_eq!(*f, decoded);
+        } else {
+            panic!("Failed to decode frame");
+        }
     }
 
     #[test]
@@ -1019,5 +1022,16 @@ mod tests {
         e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
 
         assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to decode frame")]
+    fn invalid_frame_type_len() {
+        let f = Frame::Datagram {
+            data: &[1, 2, 3],
+            fill: true,
+        };
+
+        just_dec(&f, "4030010203");
     }
 }

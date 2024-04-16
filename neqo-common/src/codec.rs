@@ -16,18 +16,18 @@ pub struct Decoder<'a> {
 
 impl<'a> Decoder<'a> {
     /// Return the minimal encoded length of a varint with value `v`.
+    ///
+    /// # Panics
+    ///
+    /// When `v` is too large.
     #[must_use]
-    pub const fn minimal_varint_len(v: u64) -> Option<usize> {
-        if v < (1 << 6) {
-            Some(1)
-        } else if v < (1 << 14) {
-            Some(2)
-        } else if v < (1 << 30) {
-            Some(4)
-        } else if v < (1 << 62) {
-            Some(8)
-        } else {
-            None
+    pub const fn minimal_varint_len(v: u64) -> usize {
+        match () {
+            () if v < (1 << 6) => 1,
+            () if v < (1 << 14) => 2,
+            () if v < (1 << 30) => 4,
+            () if v < (1 << 62) => 8,
+            () => panic!("Varint value too large"),
         }
     }
 
@@ -861,14 +861,19 @@ mod tests {
 
     #[test]
     fn minimal_varint_len() {
-        assert_eq!(Decoder::minimal_varint_len(0), Some(1));
-        assert_eq!(Decoder::minimal_varint_len(0x3f), Some(1));
-        assert_eq!(Decoder::minimal_varint_len(0x40), Some(2));
-        assert_eq!(Decoder::minimal_varint_len(0x3fff), Some(2));
-        assert_eq!(Decoder::minimal_varint_len(0x4000), Some(4));
-        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff), Some(4));
-        assert_eq!(Decoder::minimal_varint_len(0x4000_0000), Some(8));
-        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff_ffff_ffff), Some(8));
-        assert_eq!(Decoder::minimal_varint_len(0x4000_0000_0000_0000), None);
+        assert_eq!(Decoder::minimal_varint_len(0), 1);
+        assert_eq!(Decoder::minimal_varint_len(0x3f), 1);
+        assert_eq!(Decoder::minimal_varint_len(0x40), 2);
+        assert_eq!(Decoder::minimal_varint_len(0x3fff), 2);
+        assert_eq!(Decoder::minimal_varint_len(0x4000), 4);
+        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff), 4);
+        assert_eq!(Decoder::minimal_varint_len(0x4000_0000), 8);
+        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff_ffff_ffff), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "Varint value too large")]
+    fn invalid_varint_len() {
+        let _ = Decoder::minimal_varint_len(0x4000_0000_0000_0000);
     }
 }
