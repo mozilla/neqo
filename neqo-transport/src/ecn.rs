@@ -16,17 +16,23 @@ pub const ECN_TEST_COUNT: usize = 10;
 
 /// The state information related to testing a path for ECN capability.
 /// See RFC9000, Appendix A.4.
-#[derive(Debug, PartialEq, Default, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 enum EcnValidationState {
-    /// The path is currently being tested for ECN capability.
-    #[default]
-    Testing,
+    /// The path is currently being tested for ECN capability, with the number of probes sent so
+    /// far on the path during the ECN validation.
+    Testing(usize),
     /// The validation test has concluded but the path's ECN capability is not yet known.
     Unknown,
     /// The path is known to **not** be ECN capable.
     Failed,
     /// The path is known to be ECN capable.
     Capable,
+}
+
+impl Default for EcnValidationState {
+    fn default() -> Self {
+        EcnValidationState::Testing(0)
+    }
 }
 
 /// The counts for different ECN marks.
@@ -83,9 +89,6 @@ pub struct EcnInfo {
     /// The current state of ECN validation on this path.
     state: EcnValidationState,
 
-    /// The number of probes sent so far on the path during the ECN validation.
-    probes_sent: usize,
-
     /// The largest ACK seen so far.
     largest_acked: PacketNumber,
 
@@ -109,18 +112,13 @@ impl EcnInfo {
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
     pub fn on_packet_sent(&mut self) {
-        if let EcnValidationState::Testing(probes_sent) = &mut self.state else {
-            return;
-        }
-        *probes_sent += 1;
-
-        self.probes_sent += 1;
-        if self.probes_sent == ECN_TEST_COUNT {
-            qdebug!(
-                "ECN probing concluded with {} packet sent",
-                self.probes_sent
-            );
-            self.state = EcnValidationState::Unknown;
+        if let EcnValidationState::Testing(ref mut probes_sent) = &mut self.state {
+            *probes_sent += 1;
+            qdebug!("ECN probing: sent {} probes", probes_sent);
+            if *probes_sent == ECN_TEST_COUNT {
+                qdebug!("ECN probing concluded with {} probes sent", probes_sent);
+                self.state = EcnValidationState::Unknown;
+            }
         }
     }
 
@@ -199,7 +197,7 @@ impl EcnInfo {
     /// The ECN mark to use for packets sent on this path.
     pub fn ecn_mark(&self) -> IpTosEcn {
         match self.state {
-            EcnValidationState::Testing | EcnValidationState::Capable => IpTosEcn::Ect0,
+            EcnValidationState::Testing { .. } | EcnValidationState::Capable => IpTosEcn::Ect0,
             EcnValidationState::Failed | EcnValidationState::Unknown => IpTosEcn::NotEct,
         }
     }

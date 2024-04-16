@@ -88,8 +88,8 @@ fn disables_on_loss() {
 }
 
 /// This function performs a handshake over a path that modifies packets via `orig_path_modifier`.
-/// It then sends `path_packets` packets on that path, and then migrates to a new path that
-/// modifies packets via `new_path_modifier`.  It sends `path_packets` packets on the new path.
+/// It then sends `burst` packets on that path, and then migrates to a new path that
+/// modifies packets via `new_path_modifier`.  It sends `burst` packets on the new path.
 /// The function returns the TOS value of the last packet sent on the old path and the TOS value
 /// of the last packet sent on the new path to allow for verification of correct behavior.
 pub fn migration_with_modifiers(
@@ -98,12 +98,8 @@ pub fn migration_with_modifiers(
     burst: usize,
 ) -> (IpTos, IpTos) {
     fixture_init();
-    let mut client = new_client(
-        ConnectionParameters::default().max_streams(StreamType::UniDi, 64),
-    );
-    let mut server = new_server(
-        ConnectionParameters::default().max_streams(StreamType::UniDi, 64), /* .idle_timeout(Duration::from_millis((1 << 62) - 1)), */
-    );
+    let mut client = new_client(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
+    let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
 
     connect_force_idle_with_modifier(&mut client, &mut server, &mut orig_path_modifier);
     let mut now = now();

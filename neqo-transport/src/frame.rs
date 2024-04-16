@@ -449,10 +449,10 @@ impl<'a> Frame<'a> {
             }
 
             // Now check for the values for ACK_ECN.
-            let ecn_count: Option<EcnCount> = match t {
-                FRAME_TYPE_ACK_ECN => Some(EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?)),
-                FRAME_TYPE_ACK => None,
-                _ => unreachable!("Not a valid ACK frame type"),
+            let ecn_count = if ecn {
+                Some(EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
+            } else {
+                None
             };
 
             Ok(Frame::Ack {
@@ -487,7 +487,8 @@ impl<'a> Frame<'a> {
                     _ => return Err(Error::NoMoreData),
                 },
             }),
-            FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => decode_ack(dec, t),
+            FRAME_TYPE_ACK => decode_ack(dec, false),
+            FRAME_TYPE_ACK_ECN => decode_ack(dec, true),
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
                 stream_id: StreamId::from(dv(dec)?),
                 application_error_code: dv(dec)?,
