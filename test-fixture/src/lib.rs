@@ -22,7 +22,7 @@ use neqo_common::{
     event::Provider,
     hex,
     qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTos, Role,
+    qtrace, Datagram, Decoder, IpTosEcn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
@@ -99,7 +99,7 @@ pub fn datagram(data: Vec<u8>) -> Datagram {
     Datagram::new(
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        IpTos::default(),
+        IpTosEcn::Ect0.into(),
         Some(128),
         data,
     )
