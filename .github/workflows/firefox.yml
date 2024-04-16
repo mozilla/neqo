@@ -36,7 +36,9 @@ jobs:
       - name: Plumb in Neqo
         run: |
           # Get qlog version used by neqo
+          cargo generate-lockfile
           QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
+          rm Cargo.lock
           cd mozilla-unified
           {
             echo '[patch."https://github.com/mozilla/neqo"]'
