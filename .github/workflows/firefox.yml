@@ -37,7 +37,7 @@ jobs:
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          ./mach bootstrap --no-interactive --application-choice browser
+          ./mach bootstrap --application-choice browser
 
       - name: Plumb in Neqo
         run: |
