@@ -12,6 +12,7 @@ use neqo_common::{qtrace, Decoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
+    ecn::EcnCount,
     packet::PacketType,
     stream_id::{StreamId, StreamType},
     AppError, ConnectionError, Error, Res, TransportError,
@@ -23,7 +24,7 @@ pub type FrameType = u64;
 pub const FRAME_TYPE_PADDING: FrameType = 0x0;
 pub const FRAME_TYPE_PING: FrameType = 0x1;
 pub const FRAME_TYPE_ACK: FrameType = 0x2;
-const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
+pub const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
 pub const FRAME_TYPE_RESET_STREAM: FrameType = 0x4;
 pub const FRAME_TYPE_STOP_SENDING: FrameType = 0x5;
 pub const FRAME_TYPE_CRYPTO: FrameType = 0x6;
@@ -116,6 +117,7 @@ pub enum Frame<'a> {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: Vec<AckRange>,
+        ecn_count: Option<EcnCount>,
     },
     ResetStream {
         stream_id: StreamId,
@@ -224,7 +226,7 @@ impl<'a> Frame<'a> {
         match self {
             Self::Padding { .. } => FRAME_TYPE_PADDING,
             Self::Ping => FRAME_TYPE_PING,
-            Self::Ack { .. } => FRAME_TYPE_ACK, // We don't do ACK ECN.
+            Self::Ack { .. } => FRAME_TYPE_ACK,
             Self::ResetStream { .. } => FRAME_TYPE_RESET_STREAM,
             Self::StopSending { .. } => FRAME_TYPE_STOP_SENDING,
             Self::Crypto { .. } => FRAME_TYPE_CRYPTO,
@@ -426,6 +428,42 @@ impl<'a> Frame<'a> {
             d(dec.decode_varint())
         }
 
+        fn decode_ack<'a>(dec: &mut Decoder<'a>, ecn: bool) -> Res<Frame<'a>> {
+            let la = dv(dec)?;
+            let ad = dv(dec)?;
+            let nr = dv(dec).and_then(|nr| {
+                if nr < MAX_ACK_RANGE_COUNT {
+                    Ok(nr)
+                } else {
+                    Err(Error::TooMuchData)
+                }
+            })?;
+            let fa = dv(dec)?;
+            let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
+            for _ in 0..nr {
+                let ar = AckRange {
+                    gap: dv(dec)?,
+                    range: dv(dec)?,
+                };
+                arr.push(ar);
+            }
+
+            // Now check for the values for ACK_ECN.
+            let ecn_count = if ecn {
+                Some(EcnCount::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
+            } else {
+                None
+            };
+
+            Ok(Frame::Ack {
+                largest_acknowledged: la,
+                ack_delay: ad,
+                first_ack_range: fa,
+                ack_ranges: arr,
+                ecn_count,
+            })
+        }
+
         // TODO(ekr@rtfm.com): check for minimal encoding
         let t = dv(dec)?;
         match t {
@@ -449,40 +487,8 @@ impl<'a> Frame<'a> {
                     _ => return Err(Error::NoMoreData),
                 },
             }),
-            FRAME_TYPE_ACK | FRAME_TYPE_ACK_ECN => {
-                let la = dv(dec)?;
-                let ad = dv(dec)?;
-                let nr = dv(dec).and_then(|nr| {
-                    if nr < MAX_ACK_RANGE_COUNT {
-                        Ok(nr)
-                    } else {
-                        Err(Error::TooMuchData)
-                    }
-                })?;
-                let fa = dv(dec)?;
-                let mut arr: Vec<AckRange> = Vec::with_capacity(usize::try_from(nr)?);
-                for _ in 0..nr {
-                    let ar = AckRange {
-                        gap: dv(dec)?,
-                        range: dv(dec)?,
-                    };
-                    arr.push(ar);
-                }
-
-                // Now check for the values for ACK_ECN.
-                if t == FRAME_TYPE_ACK_ECN {
-                    dv(dec)?;
-                    dv(dec)?;
-                    dv(dec)?;
-                }
-
-                Ok(Self::Ack {
-                    largest_acknowledged: la,
-                    ack_delay: ad,
-                    first_ack_range: fa,
-                    ack_ranges: arr,
-                })
-            }
+            FRAME_TYPE_ACK => decode_ack(dec, false),
+            FRAME_TYPE_ACK_ECN => decode_ack(dec, true),
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
                 stream_id: StreamId::from(dv(dec)?),
                 application_error_code: dv(dec)?,
@@ -647,6 +653,7 @@ mod tests {
 
     use crate::{
         cid::MAX_CONNECTION_ID_LEN,
+        ecn::EcnCount,
         frame::{AckRange, Frame, FRAME_TYPE_ACK},
         CloseError, Error, StreamId, StreamType,
     };
@@ -679,7 +686,8 @@ mod tests {
             largest_acknowledged: 0x1234,
             ack_delay: 0x1235,
             first_ack_range: 0x1236,
-            ack_ranges: ar,
+            ack_ranges: ar.clone(),
+            ecn_count: None,
         };
 
         just_dec(&f, "025234523502523601020304");
@@ -689,10 +697,18 @@ mod tests {
         let mut dec = enc.as_decoder();
         assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
 
-        // Try to parse ACK_ECN without ECN values
+        // Try to parse ACK_ECN with ECN values
+        let ecn_count = Some(EcnCount::new(0, 1, 2, 3));
+        let fe = Frame::Ack {
+            largest_acknowledged: 0x1234,
+            ack_delay: 0x1235,
+            first_ack_range: 0x1236,
+            ack_ranges: ar,
+            ecn_count,
+        };
         let enc = Encoder::from_hex("035234523502523601020304010203");
         let mut dec = enc.as_decoder();
-        assert_eq!(Frame::decode(&mut dec).unwrap(), f);
+        assert_eq!(Frame::decode(&mut dec).unwrap(), fe);
     }
 
     #[test]
