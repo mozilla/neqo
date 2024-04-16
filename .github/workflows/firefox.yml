@@ -19,7 +19,7 @@ jobs:
       run:
         shell: bash
     env:
-      MOZBUILD_STATE_PATH: ${{ runner.workspace }}/mozbuild
+      MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
 
     steps:
       - name: Install dependencies
