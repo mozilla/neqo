@@ -44,6 +44,7 @@ jobs:
             echo "neqo-qpack = { path = \"$GITHUB_WORKSPACE/neqo-qpack\" }"
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
+          sed -i'' -e '/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
           ./mach vendor rust
 
       - name: Build Firefox
