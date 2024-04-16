@@ -99,7 +99,7 @@ pub fn migration_with_modifiers(
 ) -> (IpTos, IpTos) {
     fixture_init();
     let mut client = new_client(
-        ConnectionParameters::default().max_streams(StreamType::UniDi, 64), /* .idle_timeout(Duration::from_millis((1 << 62) - 1)), */
+        ConnectionParameters::default().max_streams(StreamType::UniDi, 64),
     );
     let mut server = new_server(
         ConnectionParameters::default().max_streams(StreamType::UniDi, 64), /* .idle_timeout(Duration::from_millis((1 << 62) - 1)), */
