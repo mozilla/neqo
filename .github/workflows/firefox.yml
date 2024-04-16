@@ -44,14 +44,14 @@ jobs:
             echo "neqo-qpack = { path = \"$GITHUB_WORKSPACE/neqo-qpack\" }"
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
-          sed -i'' -e 's/TOLERATED_DUPES = {/TOLERATED_DUPES = { "qlog":2,/' python/mozbuild/mozbuild/vendor/vendor_rust.py
           {
             echo '[[audits.qlog]]'
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
             echo 'version = "0.13.0"'
           } >> supply-chain/audits.toml
-          ./mach vendor rust --ignore-modified || true
+          sed -i'' -e 's/qlog = "0.12"/qlog = "0.13"/' netwerk/socket/neqo_glue/Cargo.toml
+          ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
         run: |
