@@ -380,7 +380,7 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
 fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Datagram>, Instant) {
     // Train wreck function to get the remaining congestion window on the primary path.
     fn cwnd(c: &Connection) -> usize {
-        c.paths.primary().borrow().sender().cwnd_avail()
+        c.paths.primary().unwrap().borrow().sender().cwnd_avail()
     }
 
     qtrace!("fill_cwnd starting cwnd: {}", cwnd(c));
@@ -478,10 +478,10 @@ where
 
 // Get the current congestion window for the connection.
 fn cwnd(c: &Connection) -> usize {
-    c.paths.primary().borrow().sender().cwnd()
+    c.paths.primary().unwrap().borrow().sender().cwnd()
 }
 fn cwnd_avail(c: &Connection) -> usize {
-    c.paths.primary().borrow().sender().cwnd_avail()
+    c.paths.primary().unwrap().borrow().sender().cwnd_avail()
 }
 
 fn induce_persistent_congestion(

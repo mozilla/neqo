@@ -145,15 +145,8 @@ impl Paths {
             })
     }
 
-    /// Get a reference to the primary path.  This will assert if there is no primary
-    /// path, which happens at a server prior to receiving a valid Initial packet
-    /// from a client.  So be careful using this method.
-    pub fn primary(&self) -> PathRef {
-        self.primary_fallible().unwrap()
-    }
-
-    /// Get a reference to the primary path.  Use this prior to handshake completion.
-    pub fn primary_fallible(&self) -> Option<PathRef> {
+    /// Get a reference to the primary path, if one exists.
+    pub fn primary(&self) -> Option<PathRef> {
         self.primary.clone()
     }
 
@@ -307,7 +300,6 @@ impl Paths {
     /// Set the identified path to be primary.
     /// This panics if `make_permanent` hasn't been called.
     pub fn handle_migration(&mut self, path: &PathRef, remote: SocketAddr, now: Instant) {
-        qtrace!([self.primary().borrow()], "handle_migration");
         // The update here needs to match the checks in `Path::received_on`.
         // Here, we update the remote port number to match the source port on the
         // datagram that was received.  This ensures that we send subsequent
@@ -425,10 +417,10 @@ impl Paths {
             stats.retire_connection_id += 1;
         }
 
-        // Write out any ACK_FREQUENCY frames.
-        self.primary()
-            .borrow_mut()
-            .write_cc_frames(builder, tokens, stats);
+        if let Some(path) = self.primary() {
+            // Write out any ACK_FREQUENCY frames.
+            path.borrow_mut().write_cc_frames(builder, tokens, stats);
+        }
     }
 
     pub fn lost_retire_cid(&mut self, lost: u64) {
@@ -440,11 +432,15 @@ impl Paths {
     }
 
     pub fn lost_ack_frequency(&mut self, lost: &AckRate) {
-        self.primary().borrow_mut().lost_ack_frequency(lost);
+        if let Some(path) = self.primary() {
+            path.borrow_mut().lost_ack_frequency(lost);
+        }
     }
 
     pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
-        self.primary().borrow_mut().acked_ack_frequency(acked);
+        if let Some(path) = self.primary() {
+            path.borrow_mut().acked_ack_frequency(acked);
+        }
     }
 
     /// Get an estimate of the RTT on the primary path.
@@ -454,7 +450,7 @@ impl Paths {
         // make a new RTT esimate and interrogate that.
         // That is more expensive, but it should be rare and breaking encapsulation
         // is worse, especially as this is only used in tests.
-        self.primary_fallible()
+        self.primary()
             .map_or(RttEstimate::default().estimate(), |p| {
                 p.borrow().rtt().estimate()
             })
