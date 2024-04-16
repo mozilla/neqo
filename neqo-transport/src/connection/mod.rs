@@ -1422,7 +1422,7 @@ impl Connection {
         if let Some(space) = self.acks.get_mut(space) {
             *space.ecn_marks() += d.tos().into();
         } else {
-            qdebug!("Not tracking ECN for dropped packet number space");
+            qtrace!("Not tracking ECN for dropped packet number space");
         }
 
         if self.state == State::WaitInitial {
