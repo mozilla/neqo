@@ -23,6 +23,10 @@ license = "MIT OR Apache-2.0"
 # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
 rust-version = "1.74.0"
 
+[workspace.dependencies]
+log = { version = "0.4", default-features = false }
+qlog = { version = "0.13", default-features = false }
+
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 
