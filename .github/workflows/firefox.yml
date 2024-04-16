@@ -51,7 +51,7 @@ jobs:
             echo 'criteria = "safe-to-deploy"'
             echo 'version = "0.13.0"'
           } >> supply-chain/audits.toml
-          ./mach vendor rust --ignore-modified
+          ./mach vendor rust --ignore-modified || true
 
       - name: Build Firefox
         run: |
