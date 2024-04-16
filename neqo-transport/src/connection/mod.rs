@@ -1104,7 +1104,7 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        #[warn(clippy::let_and_return)]
+        #allow(clippy::let_and_return)]
         let output = self.process_output(now);
         #[cfg(feature = "build-fuzzing-corpus")]
         if let Some(d) = output.dgram().as_ref() {
