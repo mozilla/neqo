@@ -133,8 +133,7 @@ pub fn migration_with_modifiers(
 
     let mut migrated = false;
     let probe = new_path_modifier(client.process_output(now).dgram().unwrap());
-    if probe.is_some() {
-        let probe = probe.unwrap();
+    if let Some(probe) = probe {
         assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
         assert_eq!(client.stats().frame_tx.path_challenge, 1);
         let probe_cid = ConnectionId::from(get_cid(&probe));
