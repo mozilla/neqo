@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
+use neqo_common::{qdebug, qerror, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -166,7 +166,12 @@ impl Stream for SendMessage {
 }
 impl SendStream for SendMessage {
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        qtrace!([self], "send_body: len={}", buf.len());
+        qtrace!([self], "send_data: len={}", buf.len());
+
+        if buf.is_empty() {
+            qerror!([self], "zero-length send_data");
+            return Err(Error::InvalidInput);
+        }
 
         self.state.new_data()?;
 
@@ -177,8 +182,20 @@ impl SendStream for SendMessage {
         let available = conn
             .stream_avail_send_space(self.stream_id())
             .map_err(|e| Error::map_stream_send_errors(&e.into()))?;
-        if available <= 2 {
+        if available == 0 {
             return Ok(0);
+        } else if available <= 2 {
+            // Rare case, where available send space at most fits the data frame
+            // header (min 2 bytes), but no data. Don't return `Ok(0)`, but
+            // instead use up `available` anyways, with a small but non-zero
+            // data frame, buffering the remainder, thereby signaling to the
+            // QUIC layer that more is needed, and thus ensure to receive
+            // [`neqo_transport::ConnectionEvent::SendStreamWritable`] when more
+            // send space is available.
+            const MIN_DATA: usize = 1; // arbitrary small value, larger zero
+            return self
+                .send_data_atomic(conn, &buf[..MIN_DATA])
+                .map(|()| MIN_DATA);
         }
         let to_send = if available <= MAX_DATA_HEADER_SIZE_2_LIMIT {
             // 63 + 3
