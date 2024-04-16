@@ -37,13 +37,14 @@ jobs:
         run: |
           cd mozilla-unified
           {
-            echo "[patch.\"https://github.com/mozilla/neqo\"]"
+            echo '[patch."https://github.com/mozilla/neqo"]'
             echo "neqo-http3 = { path = \"$GITHUB_WORKSPACE/neqo-http3\" }"
             echo "neqo-transport = { path = \"$GITHUB_WORKSPACE/neqo-transport\" }"
             echo "neqo-common = { path = \"$GITHUB_WORKSPACE/neqo-common\" }"
             echo "neqo-qpack = { path = \"$GITHUB_WORKSPACE/neqo-qpack\" }"
             echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
           } >> Cargo.toml
+          git diff
           QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
           {
             echo '[[audits.qlog]]'
@@ -51,8 +52,11 @@ jobs:
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$QLOG_VERSION\""
           } >> supply-chain/audits.toml
-          sed -i'' -e "s/qlog = .*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
+          git diff
+          sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
+          git diff
           ./mach vendor rust --ignore-modified
+          git diff
 
       - name: Build Firefox
         run: |
