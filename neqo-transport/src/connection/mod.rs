@@ -1995,14 +1995,8 @@ impl Connection {
             .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
 
         #[cfg(test)]
-        {
-            // Need to check if the previous `write_frames` call filled the packet.
-            if builder.is_full() {
-                return;
-            }
-            if let Some(w) = &mut self.test_frame_writer {
-                w.write_frames(builder);
-            }
+        if let Some(w) = &mut self.test_frame_writer {
+            w.write_frames(builder);
         }
     }
 
