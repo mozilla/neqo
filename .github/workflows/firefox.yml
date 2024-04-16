@@ -1,0 +1,54 @@
+name: Firefox
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  firefox:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout Neqo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo apt-get install -y --no-install-recommends curl python3 python3-pip mercurial
+
+      - name: Checkout Firefox
+        run: |
+          curl https://hg.mozilla.org/mozilla-central/raw-file/default/python/mozboot/bin/bootstrap.py -O
+          python3 bootstrap.py --no-interactive
+
+      - name: Plumb in Neqo
+        run: |
+          cd mozilla-unified
+          {
+            echo "[patch.\"https://github.com/mozilla/neqo\"]"
+            echo "neqo-http3 = { path = \"$GITHUB_WORKSPACE/neqo-http3\" }"
+            echo "neqo-transport = { path = \"$GITHUB_WORKSPACE/neqo-transport\" }"
+            echo "neqo-common = { path = \"$GITHUB_WORKSPACE/neqo-common\" }"
+            echo "neqo-qpack = { path = \"$GITHUB_WORKSPACE/neqo-qpack\" }"
+            echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
+          } >> Cargo.toml
+          ./mach vendor rust
+
+      - name: Build Firefox
+        run: |
+          cd mozilla-unified
+          hg up -C central
+          ./mach build
+
