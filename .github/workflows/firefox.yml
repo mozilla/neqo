@@ -20,18 +20,24 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout Neqo
-        uses: actions/checkout@v4
-
       - name: Install dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: sudo apt-get install -y --no-install-recommends curl python3 python3-pip mercurial
 
+      - name: Checkout Neqo
+        uses: actions/checkout@v4
+
       - name: Checkout Firefox
+        uses: actions/checkout@v4
+        with:
+          repository: mozilla/gecko-dev
+          path: mozilla-unified
+
+      - name: Bootstrap Firefox
         run: |
-          curl https://hg.mozilla.org/mozilla-central/raw-file/default/python/mozboot/bin/bootstrap.py -O
-          python3 bootstrap.py --no-interactive --application-choice browser
+          cd mozilla-unified
+          ./mach bootstrap --no-interactive --application-choice browser
 
       - name: Plumb in Neqo
         run: |
@@ -50,6 +56,5 @@ jobs:
       - name: Build Firefox
         run: |
           cd mozilla-unified
-          hg up -C central
           ./mach build
 
