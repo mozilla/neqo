@@ -21,13 +21,11 @@ use std::{
 pub fn write_item_to_fuzzing_corpus(target: &str, data: &[u8]) {
     // This bakes in the assumption that we're executing in the root of the neqo workspace.
     // Unfortunately, `cargo fuzz` doesn't provide a way to learn the location of the corpus
-    // directory. As a safety measure, panic if the directory does not exist.
+    // directory.
     let corpus = Path::new("../fuzz/corpus").join(target);
-    assert!(
-        corpus.is_dir(),
-        "corpus directory {} does not exist",
-        corpus.display()
-    );
+    if !corpus.exists() {
+        std::fs::create_dir_all(&corpus).expect("failed to create corpus directory");
+    }
 
     // Hash the data to get a unique name for the corpus item.
     let mut hasher = DefaultHasher::new();
