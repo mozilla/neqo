@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   firefox:
@@ -27,6 +27,7 @@ jobs:
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
       CARGO_HOME: ${{ github.workspace }}/cargo
+      FIREFOX: Firefox
 
     steps:
       # We need to check out Neqo first, because the maximize-build-space action
@@ -63,6 +64,7 @@ jobs:
         run: |
           cd mozilla-unified
           {
+            echo "mk_add_options MOZ_OBJDIR=../$FIREFOX"
             echo "ac_add_options --with-ccache=sccache"
             echo "ac_add_options --enable-application=browser"
             echo "ac_add_options --disable-tests"
@@ -78,6 +80,13 @@ jobs:
           rm Cargo.lock
           cd mozilla-unified
           {
+            echo '[[audits.qlog]]'
+            echo 'who = "CI"'
+            echo 'criteria = "safe-to-deploy"'
+            echo "version = \"$QLOG_VERSION\""
+          } >> supply-chain/audits.toml
+          sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
+          {
             echo '[patch."https://github.com/mozilla/neqo"]'
             echo 'neqo-http3 = { path = "../neqo-http3" }'
             echo 'neqo-transport = { path = "../neqo-transport" }'
@@ -85,13 +94,6 @@ jobs:
             echo 'neqo-qpack = { path = "../neqo-qpack" }'
             echo 'neqo-crypto = { path = "../neqo-crypto" }'
           } >> Cargo.toml
-          {
-            echo '[[audits.qlog]]'
-            echo 'who = "CI"'
-            echo 'criteria = "safe-to-deploy"'
-            echo "version = \"$QLOG_VERSION\""
-          } >> supply-chain/audits.toml
-          sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
           ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
@@ -99,3 +101,9 @@ jobs:
           cd mozilla-unified
           ./mach build
 
+      - name: Export binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FIREFOX }}-${{ matrix.os }}-${{ matrix.type }}
+          path: ${{ env.FIREFOX }}
+          compression-level: 9
