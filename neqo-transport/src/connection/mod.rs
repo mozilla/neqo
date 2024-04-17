@@ -2445,9 +2445,7 @@ impl Connection {
                 // That's OK, they can try guessing this.
                 ConnectionIdEntry::random_srt()
             };
-            let Some(path) = self.paths.primary() else {
-                return Err(Error::NoAvailablePath);
-            };
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
             let max_ad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
