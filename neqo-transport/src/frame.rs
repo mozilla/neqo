@@ -8,7 +8,7 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{qtrace, Decoder};
+use neqo_common::{qtrace, Decoder, Encoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
