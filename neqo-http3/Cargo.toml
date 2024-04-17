@@ -14,12 +14,12 @@ workspace = true
 [dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enumset = { version = "1.1", default-features = false }
-log = { version = "0.4", default-features = false }
+log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
-qlog = { version = "0.12", default-features = false }
+qlog = { workspace = true }
 sfv = { version = "0.9", default-features = false }
 smallvec = { version = "1.11", default-features = false }
 url = { version = "2.5", default-features = false }

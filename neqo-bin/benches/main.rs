@@ -13,8 +13,6 @@ use tokio::runtime::Runtime;
 struct Benchmark {
     name: String,
     requests: Vec<u64>,
-    /// Download resources in series using separate connections.
-    download_in_series: bool,
     sample_size: Option<usize>,
 }
 
@@ -27,25 +25,21 @@ fn transfer(c: &mut Criterion) {
     for Benchmark {
         name,
         requests,
-        download_in_series,
         sample_size,
     } in [
         Benchmark {
             name: "1-conn/1-100mb-resp (aka. Download)".to_string(),
             requests: vec![100 * 1024 * 1024],
-            download_in_series: false,
             sample_size: Some(10),
         },
         Benchmark {
-            name: "1-conn/10_000-1b-seq-resp (aka. RPS)".to_string(),
+            name: "1-conn/10_000-parallel-1b-resp (aka. RPS)".to_string(),
             requests: vec![1; 10_000],
-            download_in_series: false,
             sample_size: None,
         },
         Benchmark {
-            name: "100-seq-conn/1-1b-resp (aka. HPS)".to_string(),
-            requests: vec![1; 100],
-            download_in_series: true,
+            name: "1-conn/1-1b-resp (aka. HPS)".to_string(),
+            requests: vec![1; 1],
             sample_size: None,
         },
     ] {
@@ -61,7 +55,7 @@ fn transfer(c: &mut Criterion) {
         }
         group.bench_function("client", |b| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || client::client(client::Args::new(&requests, download_in_series)),
+                || client::client(client::Args::new(&requests)),
                 |client| async move {
                     client.await.unwrap();
                 },
@@ -81,7 +75,7 @@ fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
             let mut server = Box::pin(server::server(server::Args::default()));
             tokio::select! {
                 _ = &mut done_receiver => {}
-                _ = &mut server  => {}
+                res = &mut server  => panic!("expect server not to terminate: {res:?}"),
             }
         });
     });

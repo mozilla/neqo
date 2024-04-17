@@ -179,8 +179,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             if pkt.pn() < self.first_app_limited {
                 is_app_limited = false;
             }
-            assert!(self.bytes_in_flight >= pkt.len());
-            self.bytes_in_flight -= pkt.len();
+            // BIF is set to 0 on a path change, but in case that was because of a simple rebinding
+            // event, we may still get ACKs for packets sent before the rebinding.
+            self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
 
             if !self.after_recovery_start(pkt) {
                 // Do not increase congestion window for packets sent before
@@ -271,8 +272,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 pkt.pn(),
                 pkt.len()
             );
-            assert!(self.bytes_in_flight >= pkt.len());
-            self.bytes_in_flight -= pkt.len();
+            // BIF is set to 0 on a path change, but in case that was because of a simple rebinding
+            // event, we may still declare packets lost that were sent before the rebinding.
+            self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
         }
         qlog::metrics_updated(
             &mut self.qlog,
@@ -516,7 +518,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         true
     }
 
-    #[allow(clippy::unused_self)]
     fn app_limited(&self) -> bool {
         if self.bytes_in_flight >= self.congestion_window {
             false
@@ -537,7 +538,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use neqo_common::qinfo;
+    use neqo_common::{qinfo, IpTosEcn};
     use test_fixture::now;
 
     use super::{
@@ -581,6 +582,7 @@ mod tests {
         SentPacket::new(
             PacketType::Short,
             pn,
+            IpTosEcn::default(),
             now() + t,
             ack_eliciting,
             Vec::new(),
@@ -794,6 +796,7 @@ mod tests {
                 SentPacket::new(
                     PacketType::Short,
                     u64::try_from(i).unwrap(),
+                    IpTosEcn::default(),
                     by_pto(t),
                     true,
                     Vec::new(),
@@ -914,6 +917,7 @@ mod tests {
         lost[0] = SentPacket::new(
             lost[0].packet_type(),
             lost[0].pn(),
+            lost[0].ecn_mark(),
             lost[0].time_sent(),
             false,
             Vec::new(),
@@ -1014,11 +1018,12 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,           // pn
-                    now,               // time sent
-                    true,              // ack eliciting
-                    Vec::new(),        // tokens
-                    MAX_DATAGRAM_SIZE, // size
+                    next_pn,
+                    IpTosEcn::default(),
+                    now,
+                    true,
+                    Vec::new(),
+                    MAX_DATAGRAM_SIZE,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1038,11 +1043,12 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,           // pn
-                now,               // time sent
-                true,              // ack eliciting
-                Vec::new(),        // tokens
-                MAX_DATAGRAM_SIZE, // size
+                next_pn,
+                IpTosEcn::default(),
+                now,
+                true,
+                Vec::new(),
+                MAX_DATAGRAM_SIZE,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1081,11 +1087,12 @@ mod tests {
 
         let p_lost = SentPacket::new(
             PacketType::Short,
-            1,                 // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            1,
+            IpTosEcn::default(),
+            now,
+            true,
+            Vec::new(),
+            MAX_DATAGRAM_SIZE,
         );
         cc.on_packet_sent(&p_lost);
         cwnd_is_default(&cc);
@@ -1094,11 +1101,12 @@ mod tests {
         cwnd_is_halved(&cc);
         let p_not_lost = SentPacket::new(
             PacketType::Short,
-            2,                 // pn
-            now,               // time sent
-            true,              // ack eliciting
-            Vec::new(),        // tokens
-            MAX_DATAGRAM_SIZE, // size
+            2,
+            IpTosEcn::default(),
+            now,
+            true,
+            Vec::new(),
+            MAX_DATAGRAM_SIZE,
         );
         cc.on_packet_sent(&p_not_lost);
         now += RTT;
@@ -1117,11 +1125,12 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,           // pn
-                    now,               // time sent
-                    true,              // ack eliciting
-                    Vec::new(),        // tokens
-                    MAX_DATAGRAM_SIZE, // size
+                    next_pn,
+                    IpTosEcn::default(),
+                    now,
+                    true,
+                    Vec::new(),
+                    MAX_DATAGRAM_SIZE,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1147,11 +1156,12 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,           // pn
-                now,               // time sent
-                true,              // ack eliciting
-                Vec::new(),        // tokens
-                MAX_DATAGRAM_SIZE, // size
+                next_pn,
+                IpTosEcn::default(),
+                now,
+                true,
+                Vec::new(),
+                MAX_DATAGRAM_SIZE,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
