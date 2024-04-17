@@ -79,11 +79,11 @@ jobs:
           cd mozilla-unified
           {
             echo '[patch."https://github.com/mozilla/neqo"]'
-            echo "neqo-http3 = { path = \"$GITHUB_WORKSPACE/neqo-http3\" }"
-            echo "neqo-transport = { path = \"$GITHUB_WORKSPACE/neqo-transport\" }"
-            echo "neqo-common = { path = \"$GITHUB_WORKSPACE/neqo-common\" }"
-            echo "neqo-qpack = { path = \"$GITHUB_WORKSPACE/neqo-qpack\" }"
-            echo "neqo-crypto = { path = \"$GITHUB_WORKSPACE/neqo-crypto\" }"
+            echo 'neqo-http3 = { path = "../neqo-http3" }'
+            echo 'neqo-transport = { path = "../neqo-transport" }'
+            echo 'neqo-common = { path = "../neqo-common" }'
+            echo 'neqo-qpack = { path = "../neqo-qpack" }'
+            echo 'neqo-crypto = { path = "../neqo-crypto" }'
           } >> Cargo.toml
           {
             echo '[[audits.qlog]]'
