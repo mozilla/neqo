@@ -19,13 +19,17 @@ jobs:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
 
     steps:
-      - name: Checkout Neqo
+      - name: Check out Neqo
         uses: actions/checkout@v4
 
       - name: Maximize build space
         uses: ./.github/actions/maximize-build-space
 
-      - name: Checkout Firefox
+      # The previous step blew it away, so we need to check it out again.
+      - name: Check out Neqo again
+        uses: actions/checkout@v4
+
+      - name: Check out Firefox
         uses: actions/checkout@v4
         with:
           repository: mozilla/gecko-dev
