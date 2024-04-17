@@ -14,7 +14,16 @@ concurrency:
 
 jobs:
   firefox:
-    runs-on: ubuntu-latest
+    name: Build Firefox
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        type: [debug, release]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
       CARGO_HOME: ${{ github.workspace }}/cargo
@@ -26,10 +35,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Maximize build space
+        if: runner.os == 'Linux'
         uses: ./.github/actions/maximize-build-space
 
       # The previous step blew it away, so we need to check it out again.
       - name: Check out Neqo again
+        if: runner.os == 'Linux'
         uses: actions/checkout@v4
 
       - name: Check out Firefox
@@ -42,19 +53,18 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Enable sscache
-        run: |
-          {
-            echo "CC=sccache cc"
-            echo "CXX=sccache c++"
-            echo "SCCACHE_GHA_ENABLED=true"
-            echo "RUSTC_WRAPPER=sccache"
-            echo "CARGO_INCREMENTAL=0"
-          } >> "$GITHUB_ENV"
+        run: echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          ./mach bootstrap --application-choice browser
+          {
+            echo "ac_add_options --with-ccache=sccache"
+            echo "ac_add_options --enable-application=browser"
+            echo "ac_add_options --disable-tests"
+            echo "ac_add_options --enable-${{ matrix.type }}"
+          } >> mozconfig
+          ./mach bootstrap
 
       - name: Plumb in Neqo
         run: |
