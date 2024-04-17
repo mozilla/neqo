@@ -1244,9 +1244,7 @@ impl Connection {
             assert_ne!(self.version, version);
 
             qinfo!([self], "Version negotiation: trying {:?}", version);
-            let Some(path) = self.paths.primary() else {
-                return Err(Error::NoAvailablePath);
-            };
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             let local_addr = path.borrow().local_address();
             let remote_addr = path.borrow().remote_address();
             let conn_params = self
