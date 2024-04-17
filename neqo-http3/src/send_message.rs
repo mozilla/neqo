@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, cmp::min, fmt::Debug, num::NonZeroUsize, rc::Rc};
 
 use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
@@ -166,6 +166,8 @@ impl Stream for SendMessage {
 }
 impl SendStream for SendMessage {
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
+        const MIN_MSG_SIZE: usize = 3; // smallest header (2 bytes) + smallest goodput (1 byte)
+
         qtrace!([self], "send_body: len={}", buf.len());
 
         self.state.new_data()?;
@@ -177,7 +179,11 @@ impl SendStream for SendMessage {
         let available = conn
             .stream_avail_send_space(self.stream_id())
             .map_err(|e| Error::map_stream_send_errors(&e.into()))?;
-        if available <= 2 {
+        if available < MIN_MSG_SIZE {
+            conn.stream_set_writable_event_low_watermark(
+                self.stream_id(),
+                NonZeroUsize::new(MIN_MSG_SIZE).expect("MIN_MSG_SIZE greater than 0"),
+            )?;
             return Ok(0);
         }
         let to_send = if available <= MAX_DATA_HEADER_SIZE_2_LIMIT {

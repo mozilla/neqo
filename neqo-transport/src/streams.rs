@@ -476,16 +476,13 @@ impl Streams {
     }
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {
-        let conn_was_blocked = self.sender_fc.borrow().available() == 0;
+        let previous_limit = self.sender_fc.borrow().available();
         let conn_credit_increased = self.sender_fc.borrow_mut().update(maximum_data);
+        let current_limit = self.sender_fc.borrow().available();
 
-        if conn_was_blocked && conn_credit_increased {
-            for (id, ss) in &mut self.send {
-                if ss.avail() > 0 {
-                    // These may not actually all be writable if one
-                    // uses up all the conn credit. Not our fault.
-                    self.events.send_stream_writable(*id);
-                }
+        if conn_credit_increased {
+            for (_id, ss) in &mut self.send {
+                ss.emit_writable_event(previous_limit, current_limit);
             }
         }
     }

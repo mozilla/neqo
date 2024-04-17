@@ -12,6 +12,7 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, VecDeque},
     hash::{Hash, Hasher},
     mem,
+    num::NonZeroUsize,
     ops::Add,
     rc::Rc,
 };
@@ -710,6 +711,7 @@ pub struct SendStream {
     sendorder: Option<SendOrder>,
     bytes_sent: u64,
     fair: bool,
+    writable_event_low_watermark: NonZeroUsize,
 }
 
 impl Hash for SendStream {
@@ -745,6 +747,7 @@ impl SendStream {
             sendorder: None,
             bytes_sent: 0,
             fair: false,
+            writable_event_low_watermark: 1.try_into().expect("1 greater 0"),
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -1128,10 +1131,10 @@ impl SendStream {
             SendStreamState::Send {
                 ref mut send_buf, ..
             } => {
+                let previous_limit = send_buf.avail();
                 send_buf.mark_as_acked(offset, len);
-                if self.avail() > 0 {
-                    self.conn_events.send_stream_writable(self.stream_id);
-                }
+                let current_limit = send_buf.avail();
+                self.emit_writable_event(previous_limit, current_limit);
             }
             SendStreamState::DataSent {
                 ref mut send_buf,
@@ -1203,15 +1206,18 @@ impl SendStream {
         }
     }
 
+    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+        self.writable_event_low_watermark = watermark;
+    }
+
     pub fn set_max_stream_data(&mut self, limit: u64) {
         if let SendStreamState::Ready { fc, .. } | SendStreamState::Send { fc, .. } =
             &mut self.state
         {
-            let stream_was_blocked = fc.available() == 0;
+            let previous_limit = fc.available();
             fc.update(limit);
-            if stream_was_blocked && self.avail() > 0 {
-                self.conn_events.send_stream_writable(self.stream_id);
-            }
+            let current_limit = fc.available();
+            self.emit_writable_event(previous_limit, current_limit);
         }
     }
 
@@ -1368,6 +1374,27 @@ impl SendStream {
     #[cfg(test)]
     pub(crate) fn state(&mut self) -> &mut SendStreamState {
         &mut self.state
+    }
+
+    pub(crate) fn emit_writable_event(&mut self, previous_limit: usize, current_limit: usize) {
+        let low_watermark = self.writable_event_low_watermark.into();
+
+        if low_watermark < previous_limit {
+            // Stream was not constrained by limit before.
+            return;
+        }
+
+        if current_limit < low_watermark {
+            // Stream is still constrained by limit.
+            return;
+        }
+
+        if self.avail() < low_watermark {
+            // Stream is constrained by different limit.
+            return;
+        }
+
+        self.conn_events.send_stream_writable(self.stream_id);
     }
 }
 

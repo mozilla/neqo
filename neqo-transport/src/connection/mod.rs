@@ -12,6 +12,7 @@ use std::{
     fmt::{self, Debug},
     iter, mem,
     net::{IpAddr, SocketAddr},
+    num::NonZeroUsize,
     ops::RangeInclusive,
     rc::{Rc, Weak},
     time::{Duration, Instant},
@@ -3139,6 +3140,17 @@ impl Connection {
     /// When the stream ID is invalid.
     pub fn stream_avail_send_space(&self, stream_id: StreamId) -> Res<usize> {
         Ok(self.streams.get_send_stream(stream_id)?.avail())
+    }
+
+    pub fn stream_set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        Ok(self
+            .streams
+            .get_send_stream_mut(stream_id)?
+            .set_writable_event_low_watermark(watermark))
     }
 
     /// Close the stream. Enqueued data will be sent.
