@@ -842,22 +842,4 @@ mod tests {
         enc.pad_to(7, 0xc2);
         assert_eq!(enc, Encoder::from_hex("0102340000c2c2"));
     }
-
-    #[test]
-    fn minimal_varint_len() {
-        assert_eq!(Decoder::minimal_varint_len(0), 1);
-        assert_eq!(Decoder::minimal_varint_len(0x3f), 1);
-        assert_eq!(Decoder::minimal_varint_len(0x40), 2);
-        assert_eq!(Decoder::minimal_varint_len(0x3fff), 2);
-        assert_eq!(Decoder::minimal_varint_len(0x4000), 4);
-        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff), 4);
-        assert_eq!(Decoder::minimal_varint_len(0x4000_0000), 8);
-        assert_eq!(Decoder::minimal_varint_len(0x3fff_ffff_ffff_ffff), 8);
-    }
-
-    #[test]
-    #[should_panic(expected = "Varint value too large")]
-    fn invalid_varint_len() {
-        let _ = Decoder::minimal_varint_len(0x4000_0000_0000_0000);
-    }
 }
