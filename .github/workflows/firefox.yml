@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   firefox:
@@ -100,7 +100,7 @@ jobs:
         run: |
           cd mozilla-unified
           ./mach build
-          find ../$FIREFOX/dist -ls
+          find "../$FIREFOX/dist" -ls
 
       - name: Export binary
         uses: actions/upload-artifact@v4
