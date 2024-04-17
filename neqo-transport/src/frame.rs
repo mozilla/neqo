@@ -670,11 +670,8 @@ mod tests {
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);
-        if let Ok(decoded) = Frame::decode(&mut encoded.as_decoder()) {
-            assert_eq!(*f, decoded);
-        } else {
-            panic!("Failed to decode frame");
-        }
+        let decoded = Frame::decode(&mut encoded.as_decoder()).expect("Failed to decode frame");
+        assert_eq!(*f, decoded);
     }
 
     #[test]
