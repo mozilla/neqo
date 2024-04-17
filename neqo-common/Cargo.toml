@@ -17,6 +17,8 @@ workspace = true
 enum-map = { version = "2.7", default-features = false }
 env_logger = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
+log = { workspace = true }
+qlog = { workspace = true }
 time = { version = "0.3", default-features = false, features = ["formatting"] }
 
 [dev-dependencies]
