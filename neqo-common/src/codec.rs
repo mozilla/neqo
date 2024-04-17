@@ -15,22 +15,6 @@ pub struct Decoder<'a> {
 }
 
 impl<'a> Decoder<'a> {
-    /// Return the minimal encoded length of a varint with value `v`.
-    ///
-    /// # Panics
-    ///
-    /// When `v` is too large.
-    #[must_use]
-    pub const fn minimal_varint_len(v: u64) -> usize {
-        match () {
-            () if v < (1 << 6) => 1,
-            () if v < (1 << 14) => 2,
-            () if v < (1 << 30) => 4,
-            () if v < (1 << 62) => 8,
-            () => panic!("Varint value too large"),
-        }
-    }
-
     /// Make a new view of the provided slice.
     #[must_use]
     pub fn new(buf: &[u8]) -> Decoder {
