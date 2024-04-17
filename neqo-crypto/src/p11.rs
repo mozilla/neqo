@@ -291,7 +291,7 @@ impl Item {
 }
 
 /// Fill a buffer with randomness. (Unless compiled with the `disable-random` feature, in which case
-/// it fills the buffer with zeros.)
+/// it fills the buffer with a predictable sequence of bytes.)
 ///
 /// # Panics
 ///
@@ -299,7 +299,13 @@ impl Item {
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
     if cfg!(feature = "disable-random") {
-        m_buf.fill(0);
+        use std::sync::atomic::{AtomicU8, Ordering};
+        static CURRENT_VALUE: AtomicU8 = AtomicU8::new(0);
+        for v in m_buf.iter_mut() {
+            *v = CURRENT_VALUE.load(Ordering::SeqCst);
+            // This wraps around at 255, which is intended.
+            CURRENT_VALUE.fetch_add(1, Ordering::SeqCst);
+        }
     } else {
         let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
         secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
