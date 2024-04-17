@@ -750,11 +750,7 @@ impl Connection {
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
-        if let Some(path) = self.paths.primary() {
-            path.borrow_mut().rtt_mut().set_initial(rtt);
-        } else {
-            return Err(Error::InternalError);
-        }
+        self.paths.primary().ok_or(Error::InternalError)?.borrow_mut().rtt_mut().set_initial(rtt);
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
