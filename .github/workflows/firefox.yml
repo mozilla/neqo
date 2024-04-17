@@ -61,6 +61,10 @@ jobs:
         run: choco install -y mozillabuild
 
       - name: Bootstrap Firefox
+        env:
+          NAME: ${{ runner.os == 'Mac' && 'Nightly' || 'bin' }}
+          TYPE: ${{ runner.os == 'Mac' && matrix.type == 'debug' && 'Debug' || '' }}
+          EXT: ${{ runner.os == 'Mac' && '.app' || '' }}
         run: |
           cd mozilla-unified
           {
@@ -97,14 +101,22 @@ jobs:
           ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
+        env:
+          NAME: ${{ runner.os == 'Mac' && 'Nightly' || 'bin' }}
+          TYPE: ${{ runner.os == 'Mac' && matrix.type == 'debug' && 'Debug' || '' }}
+          EXT: ${{ runner.os == 'Mac' && '.app' || '' }}
         run: |
           cd mozilla-unified
           ./mach build
-          find "../$FIREFOX/dist" -ls
+          ls -l "../$FIREFOX/dist"
+          BINARY="$NAME$TYPE$EXT"
+          echo "BINARY=$BINARY" >> "$GITHUB_ENV"
+          tar -cf "../$FIREFOX/$BINARY.tar" -C "../$FIREFOX/dist" "$BINARY"
+
 
       - name: Export binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.FIREFOX }}-${{ matrix.os }}-${{ matrix.type }}
-          path: ${{ env.FIREFOX }}/dist
+          name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
+          path: ${{ env.FIREFOX }}/dist/*.tar
           compression-level: 9
