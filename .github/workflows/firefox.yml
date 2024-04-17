@@ -55,6 +55,10 @@ jobs:
       - name: Enable sscache
         run: echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install -y mozillabuild
+
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
@@ -64,7 +68,7 @@ jobs:
             echo "ac_add_options --disable-tests"
             echo "ac_add_options --enable-${{ matrix.type }}"
           } >> mozconfig
-          ./mach bootstrap
+          ./mach bootstrap --application-choice browser
 
       - name: Plumb in Neqo
         run: |
