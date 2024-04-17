@@ -1810,9 +1810,7 @@ impl Connection {
             // has to use the existing address.  So only pay attention to a preferred
             // address from the same family as is currently in use. More thought will
             // be needed to work out how to get addresses from a different family.
-            let Some(path) = self.paths.primary() else {
-                return Err(Error::NoAvailablePath);
-            };
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             let prev = path.borrow().remote_address();
             let remote = match prev.ip() {
                 IpAddr::V4(_) => addr.ipv4().map(SocketAddr::V4),
