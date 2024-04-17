@@ -472,7 +472,7 @@ impl<'a> Frame<'a> {
         // The Frame Type field uses a variable-length integer encoding [...],
         // with one exception. To ensure simple and efficient implementations of
         // frame parsing, a frame type MUST use the shortest possible encoding.
-        if Decoder::minimal_varint_len(t) != dec.offset() - pos {
+        if Encoder::varint_len(t) != dec.offset() - pos {
             return Err(Error::ProtocolViolation);
         }
 
