@@ -62,9 +62,9 @@ jobs:
 
       - name: Bootstrap Firefox
         env:
-          NAME: ${{ runner.os == 'Mac' && 'Nightly' || 'bin' }}
-          TYPE: ${{ runner.os == 'Mac' && matrix.type == 'debug' && 'Debug' || '' }}
-          EXT: ${{ runner.os == 'Mac' && '.app' || '' }}
+          NAME: ${{ runner.os == 'MacOS' && 'Nightly' || 'bin' }}
+          TYPE: ${{ runner.os == 'MacOS' && matrix.type == 'debug' && 'Debug' || '' }}
+          EXT: ${{ runner.os == 'MacOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
           {
@@ -102,9 +102,9 @@ jobs:
 
       - name: Build Firefox
         env:
-          NAME: ${{ runner.os == 'Mac' && 'Nightly' || 'bin' }}
-          TYPE: ${{ runner.os == 'Mac' && matrix.type == 'debug' && 'Debug' || '' }}
-          EXT: ${{ runner.os == 'Mac' && '.app' || '' }}
+          NAME: ${{ runner.os == 'MacOS' && 'Nightly' || 'bin' }}
+          TYPE: ${{ runner.os == 'MacOS' && matrix.type == 'debug' && 'Debug' || '' }}
+          EXT: ${{ runner.os == 'MacOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
           ./mach build
