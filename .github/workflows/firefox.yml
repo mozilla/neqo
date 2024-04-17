@@ -17,8 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
+      CARGO_HOME: ${{ github.workspace }}/cargo
 
     steps:
+      # We need to check out Neqo first, because the maximize-build-space action
+      # is vendored in.
       - name: Check out Neqo
         uses: actions/checkout@v4
 
@@ -34,6 +37,18 @@ jobs:
         with:
           repository: mozilla/gecko-dev
           path: mozilla-unified
+
+      - name: Use sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Enable sscache
+        shell: bash
+        run: |
+          echo "CC=sccache cc" >> "$GITHUB_ENV"
+          echo "CXX=sccache c++" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
 
       - name: Bootstrap Firefox
         run: |
