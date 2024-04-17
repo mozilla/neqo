@@ -1752,9 +1752,7 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
 
-        let Some(path) = self.paths.primary() else {
-            return Err(Error::InvalidMigration);
-        };
+        let path = self.paths.primary().ok_or(Error::InvalidMigration)?;
 
         let local = local.unwrap_or_else(|| path.borrow().local_address());
         let remote = remote.unwrap_or_else(|| path.borrow().remote_address());
