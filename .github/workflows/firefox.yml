@@ -100,10 +100,11 @@ jobs:
         run: |
           cd mozilla-unified
           ./mach build
+          find ../$FIREFOX/dist -ls
 
       - name: Export binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.FIREFOX }}-${{ matrix.os }}-${{ matrix.type }}
-          path: ${{ env.FIREFOX }}
+          path: ${{ env.FIREFOX }}/dist
           compression-level: 9
