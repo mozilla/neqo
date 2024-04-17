@@ -42,13 +42,14 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Enable sscache
-        shell: bash
         run: |
-          echo "CC=sccache cc" >> "$GITHUB_ENV"
-          echo "CXX=sccache c++" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+          {
+            echo "CC=sccache cc"
+            echo "CXX=sccache c++"
+            echo "SCCACHE_GHA_ENABLED=true"
+            echo "RUSTC_WRAPPER=sccache"
+            echo "CARGO_INCREMENTAL=0"
+          } >> "$GITHUB_ENV"
 
       - name: Bootstrap Firefox
         run: |
