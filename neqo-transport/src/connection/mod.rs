@@ -2969,9 +2969,7 @@ impl Connection {
             // Remove the randomized client CID from the list of acceptable CIDs.
             self.cid_manager.remove_odcid();
             // Mark the path as validated, if it isn't already.
-            let Some(path) = self.paths.primary() else {
-                return Err(Error::NoAvailablePath);
-            };
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
             qlog::server_connection_started(&mut self.qlog, &path);
