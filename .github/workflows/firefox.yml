@@ -19,11 +19,11 @@ jobs:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
 
     steps:
-      - name: Maximize buld space
-        uses: ./.github/actions/maximize-build-space
-
       - name: Checkout Neqo
         uses: actions/checkout@v4
+
+      - name: Maximize build space
+        uses: ./.github/actions/maximize-build-space
 
       - name: Checkout Firefox
         uses: actions/checkout@v4
