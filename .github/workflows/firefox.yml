@@ -35,9 +35,9 @@ jobs:
       - name: Check out Neqo
         uses: actions/checkout@v4
 
-      - name: Maximize build space
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/maximize-build-space
+      # - name: Maximize build space
+      #   if: runner.os == 'Linux'
+      #   uses: ./.github/actions/maximize-build-space
 
       # The previous step blew it away, so we need to check it out again.
       - name: Check out Neqo again
@@ -61,10 +61,6 @@ jobs:
         run: choco install -y mozillabuild
 
       - name: Bootstrap Firefox
-        env:
-          NAME: ${{ runner.os == 'MacOS' && 'Nightly' || 'bin' }}
-          TYPE: ${{ runner.os == 'MacOS' && matrix.type == 'debug' && 'Debug' || '' }}
-          EXT: ${{ runner.os == 'MacOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
           {
@@ -110,13 +106,12 @@ jobs:
           ./mach build
           ls -l "../$FIREFOX/dist"
           BINARY="$NAME$TYPE$EXT"
-          echo "BINARY=$BINARY" >> "$GITHUB_ENV"
-          tar -cf "../$FIREFOX/$BINARY.tar" -C "../$FIREFOX/dist" "$BINARY"
-
+          tar -cf "../$FIREFOX/$FIREFOX.tar" -C "../$FIREFOX/dist" "$BINARY"
+          ls -l "../$FIREFOX/"
 
       - name: Export binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
-          path: ${{ env.FIREFOX }}/dist/*.tar
+          path: ${{ env.FIREFOX }}/dist/${{ env.FIREFOX }}.tar
           compression-level: 9
