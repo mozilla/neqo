@@ -77,7 +77,14 @@ impl Random {
 }
 
 impl Default for Random {
+    #[cfg(not(feature = "disable-random"))]
     fn default() -> Self {
         Random::new(&neqo_crypto::random::<32>())
+    }
+
+    #[cfg(feature = "disable-random")]
+    // Use a fixed seed for a deterministic sequence of numbers.
+    fn default() -> Self {
+        Random::new(&[1; 32])
     }
 }

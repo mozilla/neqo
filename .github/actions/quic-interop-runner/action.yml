@@ -88,4 +88,3 @@ runs:
         with:
           name: logs-${{ matrix.client }}-x-${{ matrix.server }}
           path: quic-interop-runner/logs
-

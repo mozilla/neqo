@@ -158,7 +158,7 @@ impl PacketBuilder {
         }
         Self {
             encoder,
-            pn: u64::max_value(),
+            pn: u64::MAX,
             header: header_start..header_start,
             offsets: PacketBuilderOffsets {
                 first_byte_mask: PACKET_HP_MASK_SHORT,
@@ -201,7 +201,7 @@ impl PacketBuilder {
 
         Self {
             encoder,
-            pn: u64::max_value(),
+            pn: u64::MAX,
             header: header_start..header_start,
             offsets: PacketBuilderOffsets {
                 first_byte_mask: PACKET_HP_MASK_LONG,
@@ -555,7 +555,10 @@ impl<'a> PublicPacket<'a> {
         if packet_type == PacketType::Retry {
             let header_len = decoder.offset();
             let expansion = retry::expansion(version);
-            let token = Self::opt(decoder.decode(decoder.remaining() - expansion))?;
+            let token = decoder
+                .remaining()
+                .checked_sub(expansion)
+                .map_or(Err(Error::InvalidPacket), |v| Self::opt(decoder.decode(v)))?;
             if token.is_empty() {
                 return Err(Error::InvalidPacket);
             }
@@ -737,6 +740,7 @@ impl<'a> PublicPacket<'a> {
     }
 
     #[must_use]
+    #[allow(clippy::len_without_is_empty)] // is_empty() would always return false in this case
     pub fn len(&self) -> usize {
         self.data.len()
     }
@@ -1517,5 +1521,22 @@ mod tests {
         assert_eq!(decrypted.packet_type(), PacketType::Short);
         assert_eq!(decrypted.pn(), 654_360_564);
         assert_eq!(&decrypted[..], &[0x01]);
+    }
+
+    #[test]
+    fn decode_empty() {
+        neqo_crypto::init().unwrap();
+        let res = PublicPacket::decode(&[], &EmptyConnectionIdGenerator::default());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn decode_too_short() {
+        neqo_crypto::init().unwrap();
+        let res = PublicPacket::decode(
+            &[179, 255, 0, 0, 32, 0, 0],
+            &EmptyConnectionIdGenerator::default(),
+        );
+        assert!(res.is_err());
     }
 }

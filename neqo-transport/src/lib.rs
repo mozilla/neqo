@@ -15,10 +15,17 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
+mod ecn;
 mod events;
 mod fc;
+#[cfg(fuzzing)]
+pub mod frame;
+#[cfg(not(fuzzing))]
 mod frame;
 mod pace;
+#[cfg(fuzzing)]
+pub mod packet;
+#[cfg(not(fuzzing))]
 mod packet;
 mod path;
 mod qlog;
@@ -70,8 +77,8 @@ const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
     NoError,
-    // Each time tihe error is return a different parameter is supply.
-    // This will be use to distinguish each occurance of this error.
+    // Each time this error is returned a different parameter is supplied.
+    // This will be used to distinguish each occurance of this error.
     InternalError,
     ConnectionRefused,
     FlowControlError,

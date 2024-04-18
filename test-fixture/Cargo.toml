@@ -13,16 +13,17 @@ workspace = true
 
 [dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-log = { version = "0.4", default-features = false }
+log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3" }
 neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
-qlog = { version = "0.12", default-features = false }
+qlog = { workspace = true }
 
 [features]
 bench = []
+disable-random = []
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
