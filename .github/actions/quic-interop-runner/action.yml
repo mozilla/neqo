@@ -67,7 +67,6 @@ runs:
       run: |
         cd quic-interop-runner
         jq --arg key "${{ inputs.name }}" --argjson newEntry '{"image": "${{ inputs.image }}", "url": "${{ inputs.url }}", "role": "${{ inputs.role }}"}' '.[$key] = $newEntry' implementations.json > temp.$$ && mv temp.$$ implementations.json
-        cat implementations.json
         ARGS="--log-dir logs --markdown --must-include ${{ inputs.name }}"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
@@ -78,6 +77,7 @@ runs:
         if [ -n "${{ inputs.test }}" ]; then
           ARGS="$ARGS --test ${{ inputs.test }}"
         fi
+        echo $ARGS
         python run.py $ARGS 2>&1 | tee summary
       shell: bash
 

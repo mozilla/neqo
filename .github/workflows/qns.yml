@@ -17,7 +17,8 @@ env:
   DELIM: '%'
 
 jobs:
-  quic-network-simulator:
+  docker-image:
+    name: Build Docker image
     runs-on: ubuntu-latest
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
@@ -66,7 +67,8 @@ jobs:
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
           load: ${{ github.event_name == 'pull_request' }}
 
-  config-qns:
+  pairs:
+    name: Determine QUIC interop pairs
     runs-on: ubuntu-latest
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
@@ -84,25 +86,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   run-qns:
-    needs: [quic-network-simulator, config-qns]
+    name: Run QUIC Network Simulator
+    needs: [docker-image, pairs]
     strategy:
       fail-fast: false
       matrix:
-        pair: ${{ fromJson(needs.config-qns.outputs.pairs) }}
+        pair: ${{ fromJson(needs.pairs.outputs.pairs) }}
     runs-on: ubuntu-latest
     steps:
       - id: depair
         run: |
-          echo "client=$(echo ${{ matrix.pair }} | cut -d$DELIM -f1)" >> "$GITHUB_OUTPUT"
-          echo "server=$(echo ${{ matrix.pair }} | cut -d$DELIM -f2)" >> "$GITHUB_OUTPUT"
+          echo "client=$(echo ${{ matrix.pair }} | cut -d"$DELIM" -f1)" >> "$GITHUB_OUTPUT"
+          echo "server=$(echo ${{ matrix.pair }} | cut -d"$DELIM" -f2)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-      - name: Run QUIC Interop tests
+      - name: QNS ${{ steps.depair.outputs.client }} x  ${{ steps.depair.outputs.server }}
         if: ${{ github.event_name == 'pull_request' }}
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
         uses: ./.github/actions/quic-interop-runner
         with:
-          name: ${{ env.LATEST}}
-          image: ${{ needs.quic-network-simulator.outputs.imageID  }}
+          name: ${{ env.LATEST }}
+          image: ${{ needs.docker-image.outputs.imageID }}
           url: https://github.com/mozilla/neqo
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
