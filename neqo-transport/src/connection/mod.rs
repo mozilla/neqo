@@ -1113,7 +1113,15 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        self.process_output(now)
+        #[allow(clippy::let_and_return)]
+        let output = self.process_output(now);
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        if self.test_frame_writer.is_none() {
+            if let Some(d) = output.clone().dgram() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            }
+        }
+        output
     }
 
     fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) {
@@ -1517,6 +1525,16 @@ impl Connection {
                         d.tos(),
                     );
 
+                    #[cfg(feature = "build-fuzzing-corpus")]
+                    if packet.packet_type() == PacketType::Initial {
+                        let target = if self.role == Role::Client {
+                            "server_initial"
+                        } else {
+                            "client_initial"
+                        };
+                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
+                    }
+
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
@@ -1588,7 +1606,11 @@ impl Connection {
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
         while d.remaining() > 0 {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let pos = d.offset();
             let f = Frame::decode(&mut d)?;
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &packet[pos..d.offset()]);
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();

@@ -404,7 +404,7 @@ fn mitm_retry() {
     // rewriting the header to remove the token, and then re-encrypting.
     let client_initial2 = client_initial2.unwrap();
     let (protected_header, d_cid, s_cid, payload) =
-        decode_initial_header(&client_initial2, Role::Client);
+        decode_initial_header(&client_initial2, Role::Client).unwrap();
 
     // Now we have enough information to make keys.
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
