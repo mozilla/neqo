@@ -74,7 +74,7 @@ jobs:
           curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
             jq 'keys' | \
             jq ". + [\"$LATEST\"]" | \
-            jq "[.[] as \$a | .[] as \$b | \$a + "$DELIM" + \$b | select(contains(\"neqo\"))]" > implementations.json
+            jq "[.[] as \$a | .[] as \$b | \$a + \"$DELIM\" + \$b | select(contains(\"neqo\"))]" > implementations.json
           cat implementations.json
           {
             echo "implementations<<EOF"
