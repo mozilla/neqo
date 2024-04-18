@@ -223,12 +223,10 @@ impl<'a> super::Handler for Handler<'a> {
         Ok(self.url_handler.done())
     }
 
-    fn take_token(&mut self) -> Option<ResumptionToken> {
-        self.token.take()
-    }
-
-    fn has_token(&self) -> bool {
-        self.token.is_some()
+    fn take_token(&mut self, client: &mut Self::Client) -> Option<ResumptionToken> {
+        self.token
+            .take()
+            .or_else(|| client.take_resumption_token(Instant::now()))
     }
 }
 
