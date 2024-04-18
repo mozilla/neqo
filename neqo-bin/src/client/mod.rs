@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionError, ConnectionId, Error as TransportError, Version};
+use neqo_transport::{AppError, ConnectionError, ConnectionId, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -137,7 +137,7 @@ pub struct Args {
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
 
-    #[arg(short = 'r', long)]
+    #[arg(short = 'r', long, hide = true)]
     /// Client attempts to resume by making multiple connections to servers.
     /// Requires that 2 or more URLs are listed for each server.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
@@ -224,6 +224,11 @@ impl Args {
 
         if self.key_update {
             qerror!("internal option key_update set by user");
+            exit(127)
+        }
+
+        if self.resume {
+            qerror!("internal option resume set by user");
             exit(127)
         }
 
@@ -341,7 +346,7 @@ trait Handler {
     type Client: Client;
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
-    fn take_token(&mut self, client: &mut Self::Client) -> Option<ResumptionToken>;
+    fn take_token(&mut self) -> Option<ResumptionToken>;
 }
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
@@ -358,7 +363,7 @@ trait Client {
     ///
     /// Note that connection was closed without error on
     /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
-    fn is_closed(&self) -> Option<ConnectionError>;
+    fn is_closed(&self) -> Result<bool, ConnectionError>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -373,24 +378,23 @@ struct Runner<'a, H: Handler> {
 
 impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
-        let close_reason = loop {
+        loop {
             let handler_done = self.handler.handle(&mut self.client)?;
             self.process_output().await?;
+            if self.client.has_events() {
+                continue;
+            }
 
-            match (handler_done, self.client.is_closed()) {
+            match (handler_done, self.client.is_closed()?) {
                 // more work
                 (false, _) => {}
                 // no more work, closing connection
-                (true, None) => {
+                (true, false) => {
                     self.client.close(Instant::now(), 0, "kthxbye!");
                     continue;
                 }
                 // no more work, connection closed, terminating
-                (true, Some(reason)) => break reason,
-            }
-
-            if self.client.has_events() {
-                continue;
+                (true, true) => break,
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
@@ -399,17 +403,13 @@ impl<'a, H: Handler> Runner<'a, H> {
                     self.timeout = None;
                 }
             }
-        };
+        }
 
         if self.args.stats {
             qinfo!("{:?}", self.client.stats());
         }
 
-        match close_reason {
-            ConnectionError::Transport(TransportError::NoError)
-            | ConnectionError::Application(0) => Ok(self.handler.take_token(&mut self.client)),
-            _ => Err(close_reason.into()),
-        }
+        Ok(self.handler.take_token())
     }
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
