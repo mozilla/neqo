@@ -35,9 +35,9 @@ jobs:
       - name: Check out Neqo
         uses: actions/checkout@v4
 
-      # - name: Maximize build space
-      #   if: runner.os == 'Linux'
-      #   uses: ./.github/actions/maximize-build-space
+      - name: Maximize build space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/maximize-build-space
 
       # The previous step blew it away, so we need to check it out again.
       - name: Check out Neqo again
