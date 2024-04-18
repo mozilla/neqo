@@ -71,5 +71,3 @@ jobs:
           name: 'neqo-latest'
           image: ${{ steps.docker_build_and_push.outputs.imageID }}
           url: https://github.com/mozilla/neqo
-          client: neqo-latest,neqo,ngtcp2
-          server: neqo-latest,neqo,ngtcp2
