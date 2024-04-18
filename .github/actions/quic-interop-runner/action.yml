@@ -16,77 +16,96 @@ inputs:
     description: 'client/server/both'
     required: false
     default: 'both'
+  client:
+    description: 'client implementations (comma-separated)'
+    required: false
+    default: ''
+  server:
+    description: 'server implementations (comma-separated)'
+    required: false
+    default: ''
+  test:
+    description: 'test cases (comma-separatated)'
+    required: false
+    default: 'onlyTests'
 
 runs:
   using: "composite"
   steps:
-    - name: Install dependencies
-      shell: bash
-      run: sudo apt-get install -y --no-install-recommends jq curl
+    - name: Checkout quic-interop/quic-interop-runner repository
+      uses: actions/checkout@v4
+      with:
+        repository: 'quic-interop/quic-interop-runner'
+        path: 'quic-interop-runner'
 
-    - name: Configure matrix
-      id: config
+    - name: Enable IPv6 support
+      run: sudo modprobe ip6table_filter
       shell: bash
+
+    - name: Install dependencies
       run: |
-        curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | jq 'keys' > implementations.json
-        {
-          echo "IMPLEMENTATIONS<<EOF"
-          cat implementations.json
-          echo "EOF"
-        } >> $GITHUB_ENV
+        sudo add-apt-repository ppa:wireshark-dev/stable
+        sudo apt-get update
+        sudo apt-get install -y wireshark tshark jq
+      shell: bash
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.8
+        cache: 'pip'
+        cache-dependency-path: 'quic-interop-runner/requirements.txt'
+
+    - name: Install Python packages
+      run: |
+        cd quic-interop-runner
+        pip install -U pip
+        pip install -r requirements.txt
+      shell: bash
 
     - name: Run tests
-      strategy:
-        fail-fast: false
-        matrix:
-          client: ${{ fromJson(env.IMPLEMENTATIONS) }}
-          server: ${{ fromJson(env.IMPLEMENTATIONS) }}
-      runs-on: ubuntu-latest
-      name: ${{ matrix.client }} x ${{ matrix.server }}
-      steps:
+      id: test-run
+      run: |
+        cd quic-interop-runner
+        jq --arg key "${{ inputs.name }}" --argjson newEntry '{"image": "${{ inputs.image }}", "url": "${{ inputs.url }}", "role": "${{ inputs.role }}"}' '.[$key] = $newEntry' implementations.json > temp.$$ && mv temp.$$ implementations.json
+        cat implementations.json
+        ARGS="--log-dir logs --markdown --must-include ${{ inputs.name }}"
+        if [ -n "${{ inputs.client }}" ]; then
+          ARGS="$ARGS --client ${{ inputs.client }}"
+        fi
+        if [ -n "${{ inputs.server }}" ]; then
+          ARGS="$ARGS --server ${{ inputs.server }}"
+        fi
+        if [ -n "${{ inputs.test }}" ]; then
+          ARGS="$ARGS --test ${{ inputs.test }}"
+        fi
+        python run.py $ARGS 2>&1 | tee summary
+      shell: bash
 
-      # - name: Checkout quic-interop/quic-interop-runner repository
-      #   uses: actions/checkout@v4
-      #   with:
-      #     repository: 'quic-interop/quic-interop-runner'
-      #     path: 'quic-interop-runner'
+    # - uses: actions/upload-artifact@v4
+    #   id: artifact-upload-step
+    #   if: always()
+    #   with:
+    #     name: logs
+    #     path: quic-interop-runner/logs
 
-      # - name: Enable IPv6 support
-      #   shell: bash
-      #   run: sudo modprobe ip6table_filter
+    # - name: Format GitHub comment
+    #   if: always()
+    #   run: |
+    #     echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
+    #     echo '' >> comment
+    #     # Ignore all, but table, which starts with "|". Also reformat it to GitHub Markdown.
+    #     grep -E '^\|' quic-interop-runner/summary |\
+    #       awk '(!/^\| *:-/ || (d++ && d < 3))' |\
+    #       sed -E -e 's/✓/:white_check_mark:/gi' -e 's/✕/:x:/gi' -e 's/\?/:grey_question:/gi' \
+    #       >> comment
+    #     echo '' >> comment
+    #     echo "EXPORT_COMMENT=1" >> "$GITHUB_ENV"
+    #   shell: bash
 
-      # - name: Install dependencies
-      #   shell: bash
-      #   run: |
-      #     sudo add-apt-repository ppa:wireshark-dev/stable
-      #     sudo apt-get update
-      #     sudo apt-get install -y --no-install-recommends wireshark tshark jq
-
-      # - uses: actions/setup-python@v5
-      #   with:
-      #     python-version: 3.8
-      #     cache: 'pip'
-      #     cache-dependency-path: 'quic-interop-runner/requirements.txt'
-
-      # - name: Install Python packages
-      #   run: |
-      #     cd quic-interop-runner
-      #     pip install -U pip
-      #     pip install -r requirements.txt
-      #   shell: bash
-
-      # - name: Run tests
-      #   id: test-run
-      #   run: |
-      #     cd quic-interop-runner
-      #     jq --arg key "${{ inputs.name }}" --argjson newEntry '{"image": "${{ inputs.image }}", "url": "${{ inputs.url }}", "role": "${{ inputs.role }}"}' '.[$key] = $newEntry' implementations.json > temp.$$ && mv temp.$$ implementations.json
-      #     cat implementations.json
-      #     python run.py -t onlyTests -l logs -m -c ${{ matrix.client }} -s ${{ matrix.server }} | tee summary
-      #   shell: bash
-
-      # - uses: actions/upload-artifact@v4
-      #   id: artifact-upload-step
-      #   if: always()
-      #   with:
-      #     name: logs-${{ matrix.client }}-x-${{ matrix.server }}
-      #     path: quic-interop-runner/logs
+    # - name: Export PR comment data
+    #   if: always()
+    #   uses: ./.github/actions/pr-comment-data-export
+    #   with:
+    #     name: qns
+    #     contents: comment
+    #     log-url: ${{ steps.artifact-upload-step.outputs.artifact-url }}

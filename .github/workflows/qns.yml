@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+env:
+  NEQO_LATEST: neqo-latest
+
 jobs:
   # build:
   #   runs-on: ubuntu-latest
@@ -67,7 +70,9 @@ jobs:
     steps:
       - id: config
         run: |
-          curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | jq 'keys' > implementations.json
+          curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
+            jq 'keys' | \
+            jq ". + [\"$NEQO_LATEST\"]" > implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
@@ -80,9 +85,7 @@ jobs:
       fail-fast: false
       matrix:
         client: ${{ fromJson(needs.config-qns.outputs.implementations) }}
-        server: ${{ fromJson(needs.config-qns.outputs.implementations) }}
     runs-on: ubuntu-latest
-    name: ${{ matrix.client }} x ${{ matrix.server }}
     steps:
       - uses: actions/checkout@v4
       - name: Run QUIC Interop tests
@@ -90,7 +93,8 @@ jobs:
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
         uses: ./.github/actions/quic-interop-runner
         with:
-          name: 'neqo-latest'
+          name: ${{ env.NEQO_LATEST}}
           # image: ${{ steps.docker_build_and_push.outputs.imageID }}
           image: TBD
           url: https://github.com/mozilla/neqo
+          client: ${{ matrix.client }}
