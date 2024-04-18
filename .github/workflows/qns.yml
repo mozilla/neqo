@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NEQO_LATEST: neqo-latest
+  LATEST: neqo-latest
+  DELIM: ___
 
 jobs:
   # build:
@@ -72,8 +73,9 @@ jobs:
         run: |
           curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
             jq 'keys' | \
-            jq ". + [\"$NEQO_LATEST\"]" | \
-            jq '.[] as $a | .[] as $b | [$a,$b] | select((.[0] | contains("neqo")) or (.[1] | contains("neqo")))' > implementations.json
+            jq ". + [\"$LATEST\"]" | \
+            jq "[.[] as $a | .[] as $b | $a + "$DELIM" + $b | select(contains(\"neqo\"))]" > implementations.json
+          cat implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
@@ -88,15 +90,20 @@ jobs:
         pair: ${{ fromJson(needs.config-qns.outputs.implementations) }}
     runs-on: ubuntu-latest
     steps:
-      - run: echo ${{ matrix.pair }}
+      - run: |
+          echo ${{ matrix.pair }}
+          CLIENT=$(echo ${{ matrix.pair }} | cut -d$DELIM -f1)
+          SERVER=$(echo ${{ matrix.pair }} | cut -d$DELIM -f2)
+          echo $CLIENT
+          echo $SERVER
       # - uses: actions/checkout@v4
       # - name: Run QUIC Interop tests
       #   if: ${{ github.event_name == 'pull_request' }}
       #   # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       #   uses: ./.github/actions/quic-interop-runner
       #   with:
-      #     name: ${{ env.NEQO_LATEST}}
-      #     # image: ${{ steps.docker_build_and_push.outputs.imageID }}
+      #     name: ${{ env.LATEST}}
+      #     # image: ${{ steps.docker_build_and_push.outputs.imageID }}: ___
       #     image: TBD
       #     url: https://github.com/mozilla/neqo
       #     client: ${{ matrix.client }}
