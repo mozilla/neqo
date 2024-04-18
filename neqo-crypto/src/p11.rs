@@ -290,6 +290,11 @@ impl Item {
     }
 }
 
+#[cfg(feature = "disable-random")]
+thread_local! {
+    static CURRENT_VALUE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
 /// Fill a buffer with randomness. (Unless compiled with the `disable-random` feature, in which case
 /// it fills the buffer with a predictable sequence of bytes.)
 ///
@@ -299,12 +304,9 @@ impl Item {
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
     if cfg!(feature = "disable-random") {
-        use std::sync::atomic::{AtomicU8, Ordering};
-        static CURRENT_VALUE: AtomicU8 = AtomicU8::new(0);
         for v in m_buf.iter_mut() {
-            *v = CURRENT_VALUE.load(Ordering::SeqCst);
-            // This wraps around at 255, which is intended.
-            CURRENT_VALUE.fetch_add(1, Ordering::SeqCst);
+            *v = CURRENT_VALUE.get();
+            CURRENT_VALUE.set(v.wrapping_add(1));
         }
     } else {
         let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
