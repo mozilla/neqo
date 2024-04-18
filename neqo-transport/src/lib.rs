@@ -18,8 +18,14 @@ mod crypto;
 mod ecn;
 mod events;
 mod fc;
+#[cfg(fuzzing)]
+pub mod frame;
+#[cfg(not(fuzzing))]
 mod frame;
 mod pace;
+#[cfg(fuzzing)]
+pub mod packet;
+#[cfg(not(fuzzing))]
 mod packet;
 mod path;
 mod qlog;
