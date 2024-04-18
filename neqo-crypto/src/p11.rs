@@ -295,23 +295,27 @@ thread_local! {
     static CURRENT_VALUE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
 
-/// Fill a buffer with randomness. (Unless compiled with the `disable-random` feature, in which case
-/// it fills the buffer with a predictable sequence of bytes.)
+#[cfg(feature = "disable-random")]
+/// Fill a buffer with a predictable sequence of bytes.
+pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
+    let m_buf = buf.as_mut();
+    for v in m_buf.iter_mut() {
+        *v = CURRENT_VALUE.get();
+        CURRENT_VALUE.set(v.wrapping_add(1));
+    }
+    buf
+}
+
+/// Fill a buffer with randomness.
 ///
 /// # Panics
 ///
 /// When `size` is too large or NSS fails.
+#[cfg(not(feature = "disable-random"))]
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
-    if cfg!(feature = "disable-random") {
-        for v in m_buf.iter_mut() {
-            *v = CURRENT_VALUE.get();
-            CURRENT_VALUE.set(v.wrapping_add(1));
-        }
-    } else {
-        let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
-        secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
-    }
+    let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
+    secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
     buf
 }
 

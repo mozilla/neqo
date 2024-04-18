@@ -1515,7 +1515,7 @@ impl Connection {
                         } else {
                             "client_initial"
                         };
-                        neqo_common::write_item_to_fuzzing_corpus(target, &payload);
+                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
