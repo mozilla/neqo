@@ -341,8 +341,7 @@ trait Handler {
     type Client: Client;
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
-    fn take_token(&mut self) -> Option<ResumptionToken>;
-    fn has_token(&mut self, client: &mut Self::Client) -> bool;
+    fn take_token(&mut self, client: &mut Self::Client) -> Option<ResumptionToken>;
 }
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
@@ -374,35 +373,20 @@ struct Runner<'a, H: Handler> {
 
 impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
-        loop {
+        let close_reason = loop {
             let handler_done = self.handler.handle(&mut self.client)?;
-
-            match (handler_done, self.args.resume, self.handler.has_token(&mut self.client)) {
-                // Handler isn't done. Continue.
-                (false, _, _) => {},
-                // Handler done. Resumption token needed but not present. Continue.
-                (true, true, false) => {
-                    qdebug!("Handler done. Waiting for resumption token.");
-                }
-                // Handler is done, no resumption token needed. Close.
-                (true, false, _) |
-                // Handler is done, resumption token needed and present. Close.
-                (true, true, true) => {
-                    self.client.close(Instant::now(), 0, "kthxbye!");
-                }
-            }
-
             self.process_output().await?;
 
-            if let Some(reason) = self.client.is_closed() {
-                if self.args.stats {
-                    qinfo!("{:?}", self.client.stats());
+            match (handler_done, self.client.is_closed()) {
+                // more work
+                (false, _) => {}
+                // no more work, closing connection
+                (true, None) => {
+                    self.client.close(Instant::now(), 0, "kthxbye!");
+                    continue;
                 }
-                return match reason {
-                    ConnectionError::Transport(TransportError::NoError)
-                    | ConnectionError::Application(0) => Ok(self.handler.take_token()),
-                    _ => Err(reason.into()),
-                };
+                // no more work, connection closed, terminating
+                (true, Some(reason)) => break reason,
             }
 
             if self.client.has_events() {
@@ -415,6 +399,16 @@ impl<'a, H: Handler> Runner<'a, H> {
                     self.timeout = None;
                 }
             }
+        };
+
+        if self.args.stats {
+            qinfo!("{:?}", self.client.stats());
+        }
+
+        match close_reason {
+            ConnectionError::Transport(TransportError::NoError)
+            | ConnectionError::Application(0) => Ok(self.handler.take_token(&mut self.client)),
+            _ => Err(close_reason.into()),
         }
     }
 

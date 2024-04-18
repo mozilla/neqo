@@ -95,16 +95,10 @@ impl<'a> super::Handler for Handler<'a> {
         Ok(false)
     }
 
-    fn take_token(&mut self) -> Option<ResumptionToken> {
-        self.token.take()
-    }
-
-    fn has_token(&mut self, client: &mut Self::Client) -> bool {
-        if self.token.is_some() {
-            return true;
-        }
-        self.token = client.take_resumption_token(Instant::now());
-        self.token.is_some()
+    fn take_token(&mut self, client: &mut Self::Client) -> Option<ResumptionToken> {
+        self.token
+            .take()
+            .or_else(|| client.take_resumption_token(Instant::now()))
     }
 }
 
