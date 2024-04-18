@@ -14,96 +14,95 @@ concurrency:
 
 env:
   LATEST: neqo-latest
-  DELIM: ___
+  DELIM: '%'
 
 jobs:
-  # build:
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     packages: write
-  #   steps:
-      # - name: Set up QEMU
-      #   uses: docker/setup-qemu-action@v3
+  quic-network-simulator:
+    runs-on: ubuntu-latest
+    outputs:
+      imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
+    permissions:
+      packages: write
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      # - name: Set up Docker Buildx
-      #   uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      # - name: Login to GitHub Container Registry
-      #   uses: docker/login-action@v3
-      #   with:
-      #     registry: ghcr.io
-      #     username: ${{ github.actor }}
-      #     password: ${{ github.token }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
-      # - name: Docker meta
-      #   id: meta
-      #   uses: docker/metadata-action@v5
-      #   with:
-      #     images: ghcr.io/${{ github.repository }}-qns
-      #     tags: |
-      #       # default
-      #       type=schedule
-      #       type=ref,event=branch
-      #       type=ref,event=tag
-      #       type=ref,event=pr
-      #       # set latest tag for default branch
-      #       type=raw,value=latest,enable={{is_default_branch}}
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-qns
+          tags: |
+            # default
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            # set latest tag for default branch
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      # - name: Build and push
-      #   id: docker_build_and_push
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     push: ${{ github.event_name != 'pull_request' }}
-      #     tags: ${{ steps.meta.outputs.tags }}
-      #     file: qns/Dockerfile
-      #     build-args: |
-      #       RUST_VERSION=stable
-      #     cache-from: type=gha
-      #     cache-to: type=gha,mode=max
-      #     # On pull requests only build amd64 for the sake of CI time.
-      #     platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
-      #     load: ${{ github.event_name == 'pull_request' }}
+      - name: Build and push
+        id: docker_build_and_push
+        uses: docker/build-push-action@v5
+        with:
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          file: qns/Dockerfile
+          build-args: |
+            RUST_VERSION=stable
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # On pull requests only build amd64 for the sake of CI time.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
+          load: ${{ github.event_name == 'pull_request' }}
 
   config-qns:
     runs-on: ubuntu-latest
     outputs:
-      implementations: ${{ steps.config.outputs.implementations }}
+      pairs: ${{ steps.config.outputs.pairs }}
     steps:
       - id: config
         run: |
           curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
             jq 'keys' | \
             jq ". + [\"$LATEST\"]" | \
-            jq "[.[] as \$a | .[] as \$b | \$a + \"$DELIM\" + \$b | select(contains(\"neqo\"))]" > implementations.json
-          cat implementations.json
+            jq "[.[] as \$a | .[] as \$b | \$a + \"$DELIM\" + \$b | select(contains(\"neqo\"))]" > pairs.json
           {
-            echo "implementations<<EOF"
-            cat implementations.json
+            echo "pairs<<EOF"
+            cat pairs.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
   run-qns:
-    needs: [config-qns]
+    needs: [quic-network-simulator, config-qns]
     strategy:
       fail-fast: false
       matrix:
-        pair: ${{ fromJson(needs.config-qns.outputs.implementations) }}
+        pair: ${{ fromJson(needs.config-qns.outputs.pairs) }}
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo ${{ matrix.pair }}
-          CLIENT=$(echo ${{ matrix.pair }} | cut -d$DELIM -f1)
-          SERVER=$(echo ${{ matrix.pair }} | cut -d$DELIM -f2)
-          echo $CLIENT
-          echo $SERVER
-      # - uses: actions/checkout@v4
-      # - name: Run QUIC Interop tests
-      #   if: ${{ github.event_name == 'pull_request' }}
-      #   # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
-      #   uses: ./.github/actions/quic-interop-runner
-      #   with:
-      #     name: ${{ env.LATEST}}
-      #     # image: ${{ steps.docker_build_and_push.outputs.imageID }}: ___
-      #     image: TBD
-      #     url: https://github.com/mozilla/neqo
-      #     client: ${{ matrix.client }}
+      - id: depair
+        run: |
+          echo "client=$(echo ${{ matrix.pair }} | cut -d$DELIM -f1)" >> "$GITHUB_OUTPUT"
+          echo "server=$(echo ${{ matrix.pair }} | cut -d$DELIM -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - name: Run QUIC Interop tests
+        if: ${{ github.event_name == 'pull_request' }}
+        # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
+        uses: ./.github/actions/quic-interop-runner
+        with:
+          name: ${{ env.LATEST}}
+          image: ${{ needs.quic-network-simulator.outputs.imageID  }}
+          url: https://github.com/mozilla/neqo
+          client: ${{ steps.depair.outputs.client }}
+          server: ${{ steps.depair.outputs.server }}
