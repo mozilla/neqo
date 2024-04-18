@@ -10,7 +10,7 @@ mod codec;
 mod datagram;
 pub mod event;
 #[cfg(feature = "build-fuzzing-corpus")]
-pub mod fuzz;
+mod fuzz;
 pub mod header;
 pub mod hrtime;
 mod incrdecoder;
