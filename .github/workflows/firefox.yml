@@ -104,11 +104,11 @@ jobs:
         run: |
           cd mozilla-unified
           ./mach build
-          tar -cf "${{ github.workspace }}/$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
+          tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
 
       - name: Export binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
-          path: ${{ github.workspace }}/${{ env.FIREFOX }}.tar
+          name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
+          path: ${{ env.FIREFOX }}.tar
           compression-level: 9
