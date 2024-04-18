@@ -1101,16 +1101,16 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
-            #[cfg(feature = "build-fuzzing-corpus")]
-            neqo_common::write_item_to_fuzzing_corpus("packet", d);
             self.input(d, now, now);
             self.process_saved(now);
         }
         #[allow(clippy::let_and_return)]
         let output = self.process_output(now);
-        #[cfg(feature = "build-fuzzing-corpus")]
-        if let Some(d) = output.clone().dgram() {
-            neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        if self.test_frame_writer.is_none() {
+            if let Some(d) = output.clone().dgram() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            }
         }
         output
     }
