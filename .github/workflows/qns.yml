@@ -172,7 +172,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: *results
+          # pattern: *results
           path: results
 
       - name: Consolidate results
@@ -192,7 +192,7 @@ jobs:
               {
                 echo ""
                 echo "### $CLIENT$DELIM$SERVER"
-                jq -r < result.json ".results[][] | select(.result==\"$GROUP\") | .abbr" | fmt -w 1000
+                jq -r grouped.json '.'"$GROUP"'[]' | fmt -w 1000
               } >> "../../$GROUP.md"
             done
           done
