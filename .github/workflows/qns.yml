@@ -25,22 +25,16 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Docker meta
+      - uses: docker/metadata-action@v5
         id: meta
-        uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}-qns
           tags: |
@@ -52,9 +46,8 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      - uses: docker/build-push-action@v5
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -64,10 +57,9 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: 'linux/amd64, linux/arm64'
 
-      - name: Build
+      - uses: docker/build-push-action@v5
         if: github.event_name == 'pull_request'
         id: docker_build_and_push
-        uses: docker/build-push-action@v5
         with:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
@@ -77,9 +69,8 @@ jobs:
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
-      - name: Upload artifact
+      - uses: actions/upload-artifact@v4
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.LATEST }}
           path: /tmp/${{ env.LATEST }}.tar
@@ -141,13 +132,9 @@ jobs:
           name: ${{ env.LATEST }}
           path: /tmp
 
-      - name: Load Docker image
-        run: |
-          docker load --input /tmp/${{ env.LATEST }}.tar
-          docker image ls -a
+      - run: docker load --input /tmp/${{ env.LATEST }}.tar
 
-      - name: Extract client and server from interop pair
-        id: depair
+      - id: depair
         run: |
           PAIR=$(echo ${{ matrix.pair }} | sed "s/$DELIM/%/g")
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
@@ -155,9 +142,8 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Interop ${{ steps.depair.outputs.client }} ${{ env.DELIM }} ${{ steps.depair.outputs.server }}
-        # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
-        uses: ./.github/actions/quic-interop-runner
+      # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
+      - uses: ./.github/actions/quic-interop-runner
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
@@ -174,8 +160,7 @@ jobs:
         with:
           pattern: '*results'
 
-      - name: Consolidate results
-        run: |
+      - run: |
           ls -l
           for RUN in *; do
             [ -e "$RUN/result.json" ] || continue
@@ -183,13 +168,15 @@ jobs:
             SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
             jq < "$RUN/result.json" '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" 'keys[]'); do
-              echo "$CLIENT $SERVER $GROUP"
-              {
-                echo ""
-                echo "### $CLIENT$DELIM$SERVER"
-                jq -r "$RUN/grouped.json" '.'"$GROUP"'[]' | fmt -w 1000
-              } >> "$GROUP.md"
+              RESULT=$(jq < "$RUN/grouped.json" -r '.'"$GROUP"'[]' | fmt -w 1000)
+              echo "$CLIENT $SERVER $RESULT"
+              [ -n "$RESULT" ] || continue
+              echo "### $CLIENT$DELIM$SERVER" >> "$GROUP.md"
+              echo "$RESULT" >> "$GROUP.md"
             done
           done
           ls -lt
-          cat ./*.md
+          for GROUP in *.md; do
+            echo "$GROUP"
+            cat "$GROUP"
+          done
