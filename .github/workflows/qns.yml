@@ -177,15 +177,23 @@ jobs:
       - name: Consolidate results
         run: |
           cd results
+          ls -l
           for RUN in *; do
             echo "$RUN"
             cd "$RUN"
+            if [ ! -e result.json ]; then
+              cd ..
+              continue
+            fi
             CLIENT=$(jq < result.json '.clients[0]')
             SERVER=$(jq < result.json '.servers[0]')
             jq < result.json '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > grouped.json
             for GROUP in $(jq -r < grouped.json 'keys[]'); do
-              echo "## $CLIENT$DELIM$SERVER" >> "../$GROUP.md"
-              jq -r < result.json ".results[][] | select(.result==\"$GROUP\") | .abbr" >> "../../$GROUP.md"
+              {
+                echo ""
+                echo "## $CLIENT$DELIM$SERVER"
+                jq -r < result.json ".results[][] | select(.result==\"$GROUP\") | .abbr"
+              } >> "../../$GROUP.md"
             done
             cd ..
           done
