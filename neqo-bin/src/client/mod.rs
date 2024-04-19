@@ -105,7 +105,7 @@ type Res<T> = Result<T, Error>;
 #[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
     #[command(flatten)]
-    verbose: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
+    verbose: Option<clap_verbosity_flag::Verbosity>,
 
     #[command(flatten)]
     shared: SharedArgs,
@@ -180,7 +180,7 @@ impl Args {
     pub fn new(requests: &[u64]) -> Self {
         use std::str::FromStr;
         Self {
-            verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
+            verbose: None,
             shared: crate::SharedArgs::default(),
             urls: requests
                 .iter()
@@ -485,7 +485,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
 }
 
 pub async fn client(mut args: Args) -> Res<()> {
-    neqo_common::log::init(Some(args.verbose.log_level_filter()));
+    neqo_common::log::init(args.verbose.as_ref().map(|v| v.log_level_filter()));
     init()?;
 
     args.update_for_tests();
