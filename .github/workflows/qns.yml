@@ -164,6 +164,9 @@ jobs:
           implementations: ${{ needs.implementations.outputs.implementations }}
 
   report:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Report the results
+    needs: run-qns
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
