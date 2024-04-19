@@ -178,23 +178,18 @@ jobs:
         run: |
           ls -l
           for RUN in *; do
-            cd "$RUN"
-            if [ ! -e result.json ]; then
-              cd ..
-              continue
-            fi
-            CLIENT=$(jq -r < result.json '.clients[0]')
-            SERVER=$(jq -r < result.json '.servers[0]')
-            jq < result.json '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > grouped.json
-            for GROUP in $(jq -r < grouped.json 'keys[]'); do
+            [ -e "$RUN/result.json" ] || continue
+            CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
+            SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
+            jq < "$RUN/result.json" '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > "$RUN/grouped.json"
+            for GROUP in $(jq -r < "$RUN/grouped.json" 'keys[]'); do
               echo "$CLIENT $SERVER $GROUP"
               {
                 echo ""
                 echo "### $CLIENT$DELIM$SERVER"
-                jq -r grouped.json '.'"$GROUP"'[]' | fmt -w 1000
-              } >> "../../$GROUP.md"
+                jq -r "$RUN/grouped.json" '.'"$GROUP"'[]' | fmt -w 1000
+              } >> "$GROUP.md"
             done
-            cd ..
           done
           ls -lt
           cat ./*.md
