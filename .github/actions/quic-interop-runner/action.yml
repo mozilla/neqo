@@ -56,8 +56,9 @@ runs:
     - name: Run tests
       run: |
         cd quic-interop-runner
+        echo "${{ inputs.implementations }}"
         if [ -n "${{ inputs.implementations }}" ]; then
-          printf '%s' "${{ inputs.implementations }}" > implementations.json
+          echo "${{ inputs.implementations }}" > implementations.json
         fi
         cat implementations.json
         ARGS="--log-dir logs --markdown --json result.json"
