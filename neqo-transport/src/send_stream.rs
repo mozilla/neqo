@@ -1797,7 +1797,7 @@ pub struct SendStreamRecoveryToken {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+    use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
     use neqo_common::{event::Provider, hex_with_len, qtrace, Encoder};
 
@@ -2515,6 +2515,52 @@ mod tests {
         s.set_max_stream_data(2_000_000_000);
         assert_eq!(conn_events.events().count(), 0);
         assert_eq!(s.send(b"hello").unwrap(), 0);
+    }
+
+    #[test]
+    fn send_stream_writable_event_gen_with_watermark() {
+        let conn_fc = connection_fc(0);
+        let mut conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(4.into(), 0, Rc::clone(&conn_fc), conn_events.clone());
+        // Set watermark at 3.
+        s.set_writable_event_low_watermark(NonZeroUsize::new(3).unwrap());
+
+        // Stream is initially blocked (conn:0, stream:0, watermark: 3) and will
+        // not accept data.
+        assert_eq!(s.avail(), 0);
+        assert_eq!(s.send(b"hi!").unwrap(), 0);
+
+        // Increasing the connection limit (conn:10, stream:0, watermark: 3) will not generate
+        // event or allow sending anything. Stream is constrained by stream limit.
+        assert!(conn_fc.borrow_mut().update(10));
+        assert_eq!(s.avail(), 0);
+        assert_eq!(conn_events.events().count(), 0);
+
+        // Increasing the connection limit further (conn:11, stream:0, watermark: 3) will not generate
+        // event or allow sending anything. Stream wasn't constrained by connection limit before.
+        assert!(conn_fc.borrow_mut().update(11));
+        assert_eq!(s.avail(), 0);
+        assert_eq!(conn_events.events().count(), 0);
+
+        // Increasing to (conn:11, stream:2, watermark: 3) will allow 2 bytes
+        // but not generate a SendStreamWritable event as it is still below the
+        // configured watermark.
+        s.set_max_stream_data(2);
+        assert_eq!(conn_events.events().count(), 0);
+        assert_eq!(s.avail(), 2);
+
+        // Increasing to (conn:11, stream:3, watermark: 3) will generate an
+        // event as available sendable bytes are >= watermark.
+        s.set_max_stream_data(3);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(
+            evts[0],
+            ConnectionEvent::SendStreamWritable { .. }
+        ));
+
+        assert_eq!(s.send(b"hi!").unwrap(), 3);
     }
 
     #[test]
