@@ -59,7 +59,7 @@ runs:
         if [ -n "${{ inputs.implementations }}" ]; then
           echo '${{ inputs.implementations }}' > implementations.json
         fi
-        ARGS="--log-dir logs --markdown --json result.json --debug"
+        ARGS="--log-dir logs --markdown --json result.json"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
@@ -69,41 +69,14 @@ runs:
         if [ -n "${{ inputs.test }}" ]; then
           ARGS="$ARGS --test ${{ inputs.test }}"
         fi
-        echo $ARGS
-        python run.py $ARGS 2>&1 | tee summary
-        ls -lt
+        python run.py $ARGS 2>&1 | tee summary.md
       shell: bash
 
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: logs
-        path: quic-interop-runner/logs
-
-    - uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: results
-        path: quic-interop-runner/results.json
-
-    # - name: Format GitHub comment
-    #   if: always()
-    #   run: |
-    #     echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
-    #     echo '' >> comment
-    #     # Ignore all, but table, which starts with "|". Also reformat it to GitHub Markdown.
-    #     grep -E '^\|' quic-interop-runner/summary |\
-    #       awk '(!/^\| *:-/ || (d++ && d < 3))' |\
-    #       sed -E -e 's/✓/:white_check_mark:/gi' -e 's/✕/:x:/gi' -e 's/\?/:grey_question:/gi' \
-    #       >> comment
-    #     echo '' >> comment
-    #     echo "EXPORT_COMMENT=1" >> "$GITHUB_ENV"
-    #   shell: bash
-
-    # - name: Export PR comment data
-    #   if: always()
-    #   uses: ./.github/actions/pr-comment-data-export
-    #   with:
-    #     name: qns
-    #     contents: comment
-    #     log-url: ${{ steps.artifact-upload-step.outputs.artifact-url }}
+        name: ${{ inputs.client }}-${{ inputs.server }}-result
+        path: |
+          quic-interop-runner/logs
+          quic-interop-runner/result.json
+          quic-interop-runner/summary.md

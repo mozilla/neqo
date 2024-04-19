@@ -79,9 +79,9 @@ jobs:
 
       - name: Upload artifact
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: env.LATEST
+          name: ${{ env.LATEST }}
           path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
@@ -136,21 +136,25 @@ jobs:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          name: env.LATEST
+          name: ${{ env.LATEST }}
           path: /tmp
-      - name: Load image
+
+      - name: Load Docker image
         run: |
           docker load --input /tmp/${{ env.LATEST }}.tar
           docker image ls -a
+
       - name: Extract client and server from interop pair
         id: depair
         run: |
           PAIR=$(echo ${{ matrix.pair }} | sed "s/$DELIM/%/g")
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+
       - name: Interop ${{ steps.depair.outputs.client }} ${{ env.DELIM }} ${{ steps.depair.outputs.server }}
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
         uses: ./.github/actions/quic-interop-runner
@@ -158,3 +162,12 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+
+      - name: Download results
+        uses: actions/download-artifact@v4
+        with:
+          path: results
+
+      - name: Consoliat results
+        run: |
+          ls -lt results
