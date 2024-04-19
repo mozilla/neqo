@@ -161,7 +161,6 @@ jobs:
           pattern: '*results'
 
       - run: |
-          ls -l
           for RUN in *; do
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
@@ -169,14 +168,23 @@ jobs:
             jq < "$RUN/result.json" '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" 'keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.'"$GROUP"'[]' | fmt -w 1000)
-              echo "$CLIENT $SERVER $RESULT"
               [ -n "$RESULT" ] || continue
               echo "### $CLIENT$DELIM$SERVER" >> "$GROUP.md"
               echo "$RESULT" >> "$GROUP.md"
             done
           done
-          ls -lt
-          for GROUP in *.md; do
-            echo "$GROUP"
-            cat "$GROUP"
-          done
+          {
+            echo "## Failed Interop Tests"
+            cat failed.md
+            echo "<details><summary>Succeeded and unsupported tests</summary>"
+            for GROUP in succeeded unsupported; do
+              echo "### ${GROUP^} Interop Tests"
+              cat "$GROUP"
+            done
+            echo "</details>"
+          } >> comment.md
+
+      - uses: ./.github/actions/pr-comment-data-export
+        with:
+          name: qns
+          contents: comment.md
