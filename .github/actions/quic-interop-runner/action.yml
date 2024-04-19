@@ -54,13 +54,13 @@ runs:
       shell: bash
 
     - name: Run tests
-      id: test-run
       run: |
         cd quic-interop-runner
         if [ -n "${{ inputs.implementations }}" ]; then
-          echo "${{ inputs.implementations }}" > implementations.json
+          printf '%s' "${{ inputs.implementations }}" > implementations.json
         fi
-        ARGS="--log-dir logs --markdown"
+        cat implementations.json
+        ARGS="--log-dir logs --markdown --json result.json"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
@@ -74,12 +74,17 @@ runs:
         python run.py $ARGS 2>&1 | tee summary
       shell: bash
 
-    # - uses: actions/upload-artifact@v4
-    #   id: artifact-upload-step
-    #   if: always()
-    #   with:
-    #     name: logs
-    #     path: quic-interop-runner/logs
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: logs
+        path: quic-interop-runner/logs
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: results
+        path: quic-interop-runner/results.json
 
     # - name: Format GitHub comment
     #   if: always()
