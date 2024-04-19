@@ -13,8 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  LATEST: neqo-latest
-  DELIM: '%'
+  DELIM: ' vs. '
 
 jobs:
   docker-image:
@@ -67,18 +66,43 @@ jobs:
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
           load: ${{ github.event_name == 'pull_request' }}
 
-  pairs:
-    name: Determine QUIC interop pairs
+  implementations:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Determine interop pairs
+    needs: docker-image
     runs-on: ubuntu-latest
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
+      implementations: ${{ steps.config.outputs.implementations }}
+    env:
+      LATEST: neqo-latest
+      URL: https://github.com/mozilla/neqo
+      ROLE: both
     steps:
       - id: config
         run: |
+          # Add neqo-latest to implementations.json
           curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
-            jq 'keys' | \
-            jq ". + [\"$LATEST\"]" | \
-            jq "[.[] as \$a | .[] as \$b | \$a + \"$DELIM\" + \$b | select(contains(\"neqo\"))]" > pairs.json
+            jq --arg key "$LATEST" --argjson newEntry ' \
+              { \
+                "image": "${{ needs.docker-image.outputs.imageID }}", \
+                "url": "${{ env.URL }}", \
+                "role": "${{ env.ROLE }}" \
+              }' '.[$key] = $newEntry' > implementations.json
+          {
+            echo "implementations<<EOF"
+            cat implementations.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          cat implementations.json
+          # Determine interop pairs that contain neqo-latest
+          jq < implementations.json "
+              [to_entries[] | select(.value.role=='server' or .value.role=='both').key] as \$ss | \
+              [to_entries[] | select(.value.role=='client' or .value.role=='both').key] as \$cs | \
+              \$cs.[] as \$c | \$ss.[] as \$s | \
+              \$c + '\$DELIM' + \$s | select(contains('\$LATEST'))]
+            " > pairs.json
+          cat pairs.json
           {
             echo "pairs<<EOF"
             cat pairs.json
@@ -86,26 +110,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   run-qns:
-    name: Run QUIC Network Simulator
-    needs: [docker-image, pairs]
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Run QNS
+    needs: implementations
     strategy:
       fail-fast: false
       matrix:
-        pair: ${{ fromJson(needs.pairs.outputs.pairs) }}
+        pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
     runs-on: ubuntu-latest
     steps:
-      - id: depair
+      - name: Extract client and server from interop pair
+        id: depair
         run: |
-          echo "client=$(echo ${{ matrix.pair }} | cut -d"$DELIM" -f1)" >> "$GITHUB_OUTPUT"
-          echo "server=$(echo ${{ matrix.pair }} | cut -d"$DELIM" -f2)" >> "$GITHUB_OUTPUT"
+          PAIR=$(echo ${{ matrix.pair }} | sed "s/$DELIM/%/g")
+          echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
+          echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-      - name: QNS ${{ steps.depair.outputs.client }} x  ${{ steps.depair.outputs.server }}
-        if: ${{ github.event_name == 'pull_request' }}
+      - name: Interop ${{ steps.depair.outputs.client }} ${{ env.DELIM }} ${{ steps.depair.outputs.server }}
         # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
         uses: ./.github/actions/quic-interop-runner
         with:
-          name: ${{ env.LATEST }}
-          image: ${{ needs.docker-image.outputs.imageID }}
-          url: https://github.com/mozilla/neqo
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
+          implementations: ${{ needs.implementations.outputs.implementations }}

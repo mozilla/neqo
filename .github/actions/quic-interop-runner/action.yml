@@ -3,19 +3,6 @@ description: 'Run the QUIC Interop Runner tests.'
 author: 'mxinden'
 
 inputs:
-  name:
-    description: 'Name of the QUIC implementation'
-    required: true
-  image:
-    description: 'Docker image to be tested. Needs to reside either locally, or on some registry.'
-    required: true
-  url:
-    description: 'URL of the QUIC implementation'
-    required: true
-  role:
-    description: 'client/server/both'
-    required: false
-    default: 'both'
   client:
     description: 'client implementations (comma-separated)'
     required: false
@@ -28,6 +15,10 @@ inputs:
     description: 'test cases (comma-separatated)'
     required: false
     default: 'onlyTests'
+  implementaions:
+    description: 'Modified "implementations.json" data'
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -66,8 +57,10 @@ runs:
       id: test-run
       run: |
         cd quic-interop-runner
-        jq --arg key "${{ inputs.name }}" --argjson newEntry '{"image": "${{ inputs.image }}", "url": "${{ inputs.url }}", "role": "${{ inputs.role }}"}' '.[$key] = $newEntry' implementations.json > temp.$$ && mv temp.$$ implementations.json
-        ARGS="--log-dir logs --markdown --must-include ${{ inputs.name }}"
+        if [ -n "${{ inputs.implementations }}" ]; then
+          echo "${{ inputs.implementations }}" > implementations.json
+        fi
+        ARGS="--log-dir logs --markdown"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
