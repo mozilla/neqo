@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  LATEST: neqo-latest
   DELIM: ' vs. '
 
 jobs:
@@ -52,19 +53,36 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          file: qns/Dockerfile
+          build-args: RUST_VERSION=stable
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: 'linux/amd64, linux/arm64'
+
+      - name: Build
+        if: github.event_name == 'pull_request'
         id: docker_build_and_push
         uses: docker/build-push-action@v5
         with:
-          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
-          build-args: |
-            RUST_VERSION=stable
+          build-args: RUST_VERSION=stable
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # On pull requests only build amd64 for the sake of CI time.
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          platforms: 'linux/amd64'
+          outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
+
+      - name: Upload artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v3
+        with:
+          name: env.LATEST
+          path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
     if: ${{ github.event_name == 'pull_request' }}
@@ -75,7 +93,6 @@ jobs:
       pairs: ${{ steps.config.outputs.pairs }}
       implementations: ${{ steps.config.outputs.implementations }}
     env:
-      LATEST: neqo-latest
       URL: https://github.com/mozilla/neqo
       ROLE: both
     steps:
@@ -119,6 +136,14 @@ jobs:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: env.LATEST
+          path: /tmp
+      - name: Load image
+        run: |
+          docker load --input /tmp/${{ env.LATEST }}.tar
+          docker image ls -a
       - name: Extract client and server from interop pair
         id: depair
         run: |
