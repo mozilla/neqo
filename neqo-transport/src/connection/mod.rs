@@ -3166,7 +3166,18 @@ impl Connection {
 
     /// Set low watermark for [`ConnectionEvent::SendStreamWritable`] event.
     ///
-    /// See [`SendStream::set_writable_event_low_watermark`].
+    /// Stream emits a [`crate::ConnectionEvent::SendStreamWritable`] event
+    /// when:
+    /// - the available sendable bytes increased to or above the watermark
+    /// - and was previously below the watermark.
+    ///
+    /// Default value is `1`. In other words
+    /// [`crate::ConnectionEvent::SendStreamWritable`] is emitted whenever the
+    /// available sendable bytes was previously at `0` and now increased to `1`
+    /// or more.
+    ///
+    /// Use this when your protocol needs at least `watermark` amount of available
+    /// sendable bytes to make progress.
     ///
     /// # Errors
     /// When the stream ID is invalid.

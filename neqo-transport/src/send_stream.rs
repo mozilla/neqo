@@ -1207,19 +1207,10 @@ impl SendStream {
         }
     }
 
-    /// Set low watermark for [`ConnectionEvent::SendStreamWritable`] event.
+    /// Set low watermark for [`crate::ConnectionEvent::SendStreamWritable`]
+    /// event.
     ///
-    /// [`SendStream`] emits a [`ConnectionEvent::SendStreamWritable`] event when:
-    /// - the available sendable bytes increased to or above the watermark
-    /// - and was previously below the watermark.
-    ///
-    /// Default value is `1`. In other words
-    /// [`ConnectionEvent::SendStreamWritable`] is emitted whenever the
-    /// available sendable bytes was previously at `0` and now increased to `1`
-    /// or more.
-    ///
-    /// Use this when your protocol needs at least `watermark` amount of available
-    /// sendable bytes to make progress.
+    /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
     pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         self.writable_event_low_watermark = watermark;
     }
@@ -2537,8 +2528,9 @@ mod tests {
         assert_eq!(s.avail(), 0);
         assert_eq!(conn_events.events().count(), 0);
 
-        // Increasing the connection limit further (conn:11, stream:0, watermark: 3) will not generate
-        // event or allow sending anything. Stream wasn't constrained by connection limit before.
+        // Increasing the connection limit further (conn:11, stream:0, watermark: 3) will not
+        // generate event or allow sending anything. Stream wasn't constrained by connection
+        // limit before.
         assert!(conn_fc.borrow_mut().update(11));
         assert_eq!(s.avail(), 0);
         assert_eq!(conn_events.events().count(), 0);
