@@ -981,10 +981,12 @@ impl Path {
 
         let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn);
         if ecn_ce_received {
-            // TODO: Should congestion window reduction through CE marks result in
-            // an update to ACK delay? See on_packets_lost below.
-            self.sender
+            let cwnd_reduced = self
+                .sender
                 .on_ecn_ce_received(acked_pkts.first().expect("must be there"));
+            if cwnd_reduced {
+                self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
+            }
         }
 
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
