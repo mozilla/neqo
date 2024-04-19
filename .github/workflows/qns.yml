@@ -176,7 +176,6 @@ jobs:
 
       - name: Consolidate results
         run: |
-          find results
           cd results
           for run in *; do
             pushd "$run"
@@ -184,10 +183,11 @@ jobs:
             CLIENT=$(jq < result.json '.clients[0]')
             SERVER=$(jq < result.json '.servers[0]')
             jq < result.json '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > grouped.json
-            for group in $(jq < grouped.js 'keys[]'); do
+            for group in $(jq < grouped.json 'keys[]'); do
               RESULT=$(jq < result.json ".results[] | select(.result==\"$result\") | .abbr")
               echo "## $CLIENT$DELIM$SERVER" >> "../$RESULT.md"
               jq < grouped.json '.'"$group"'[]' >> "../$RESULT.md"
+              ls -l ..
             done
             popd
           done
