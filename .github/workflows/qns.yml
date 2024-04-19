@@ -163,11 +163,13 @@ jobs:
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
 
-      - name: Download results
-        uses: actions/download-artifact@v4
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
           path: results
 
-      - name: Consoliat results
+      - name: Consolidate results
         run: |
           ls -lt results
