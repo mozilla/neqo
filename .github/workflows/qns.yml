@@ -162,9 +162,10 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+          test: 'handshake, amplificationlimit'
 
   report:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ always() && github.event_name == 'pull_request' }}
     name: Report the results
     needs: run-qns
     runs-on: ubuntu-latest
