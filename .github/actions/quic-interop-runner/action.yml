@@ -57,7 +57,7 @@ runs:
       run: |
         cd quic-interop-runner
         if [ -n "${{ inputs.implementations }}" ]; then
-          echo \'${{ inputs.implementations }}\' > implementations.json
+          echo '${{ inputs.implementations }}' > implementations.json
         fi
         ARGS="--log-dir logs --markdown --json result.json --debug"
         if [ -n "${{ inputs.client }}" ]; then
