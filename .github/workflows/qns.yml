@@ -89,20 +89,19 @@ jobs:
                 "url": "${{ env.URL }}",
                 "role": "${{ env.ROLE }}"
               }' '.[$key] = $newEntry' > implementations.json
-          cat implementations.json
           {
             echo "implementations<<EOF"
             cat implementations.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           # Determine interop pairs that contain $LATEST
-          jq < implementations.json "\
-              [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers | \
-              [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients | \
-              \$clients.[] as \$client | \
-              \$servers.[] as \$server | \
-              \$client + \"$DELIM\" + \$server | \
-              select(contains(\"$LATEST\")) \
+          jq < implementations.json "
+              [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
+              [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
+              \$clients.[] as \$client |
+              \$servers.[] as \$server |
+              \$client + \"$DELIM\" + \$server |
+              select(contains(\"$LATEST\"))
             " > pairs.json
           cat pairs.json
           {
