@@ -75,8 +75,14 @@ runs:
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: '${{ inputs.client }} vs. ${{ inputs.server }}'
+        name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
         path: |
           quic-interop-runner/logs
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: '${{ inputs.client }} vs. ${{ inputs.server }}' results
+        path: |
           quic-interop-runner/result.json
           quic-interop-runner/summary.md
