@@ -94,16 +94,15 @@ jobs:
             cat implementations.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # Determine interop pairs that contain $LATEST
-          jq < implementations.json "
+          # Determine valid interop pairs that contain $LATEST
+          jq < implementations.json "[
               [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
               [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
               \$clients[] as \$client |
               \$servers[] as \$server |
               \$client + \"$DELIM\" + \$server |
               select(contains(\"$LATEST\"))
-            " > pairs.json
-          cat pairs.json
+            ]" > pairs.json
           {
             echo "pairs<<EOF"
             cat pairs.json
