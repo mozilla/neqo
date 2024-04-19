@@ -17,6 +17,7 @@ use crate::{
     SendStream, SendStreamEvents, Stream,
 };
 
+const MIN_DATA_FRAME_SIZE: usize = 3; // Minimal DATA frame size: 2 (header) + 1 (goodput)
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
 const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
 const MAX_DATA_HEADER_SIZE_3: usize = (1 << 14) - 1; // Maximal amount of data with DATA frame header size 3
@@ -166,8 +167,6 @@ impl Stream for SendMessage {
 }
 impl SendStream for SendMessage {
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        const MIN_MSG_SIZE: usize = 3; // smallest header (2 bytes) + smallest goodput (1 byte)
-
         qtrace!([self], "send_body: len={}", buf.len());
 
         self.state.new_data()?;
@@ -179,10 +178,10 @@ impl SendStream for SendMessage {
         let available = conn
             .stream_avail_send_space(self.stream_id())
             .map_err(|e| Error::map_stream_send_errors(&e.into()))?;
-        if available < MIN_MSG_SIZE {
+        if available < MIN_DATA_FRAME_SIZE {
             conn.stream_set_writable_event_low_watermark(
                 self.stream_id(),
-                NonZeroUsize::new(MIN_MSG_SIZE).expect("MIN_MSG_SIZE greater than 0"),
+                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).expect("MIN_DATA_FRAME_SIZE greater than 0"),
             )?;
             return Ok(0);
         }
