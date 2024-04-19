@@ -183,7 +183,7 @@ jobs:
             CLIENT=$(jq < result.json '.clients[0]')
             SERVER=$(jq < result.json '.servers[0]')
             jq < result.json '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > grouped.json
-            for group in $(jq < grouped.json 'keys[]'); do
+            for group in $(jq -r < grouped.json 'keys[]'); do
               echo $group
               RESULT=$(jq < result.json ".results[] | select(.result==\"$group\") | .abbr")
               echo "## $CLIENT$DELIM$SERVER" >> "../$RESULT.md"
