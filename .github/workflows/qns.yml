@@ -98,8 +98,8 @@ jobs:
           jq < implementations.json "
               [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
               [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
-              \$clients.[] as \$client |
-              \$servers.[] as \$server |
+              \$clients[] as \$client |
+              \$servers[] as \$server |
               \$client + \"$DELIM\" + \$server |
               select(contains(\"$LATEST\"))
             " > pairs.json
