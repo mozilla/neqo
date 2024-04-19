@@ -167,17 +167,15 @@ jobs:
   report:
     if: ${{ always() && github.event_name == 'pull_request' }}
     name: Report results
-    needs: [implementations, run-qns]
+    needs: run-qns
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: '*results'
-          path: results
 
       - name: Consolidate results
         run: |
-          cd results
           ls -l
           for RUN in *; do
             cd "$RUN"
@@ -198,6 +196,5 @@ jobs:
             done
             cd ..
           done
-          cd ..
           ls -lt
           cat ./*.md
