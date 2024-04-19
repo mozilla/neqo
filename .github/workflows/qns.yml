@@ -96,16 +96,14 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           # Determine interop pairs that contain $LATEST
-          QUERY<<EOF
+          jq < implementations.json "\
               [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers | \
               [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients | \
               \$clients.[] as \$client | \
               \$servers.[] as \$server | \
               \$client + \"$DELIM\" + \$server | \
-              select(contains(\"$LATEST\"))
-          EOF
-          echo $QUERY
-          jq < implementations.json "$QUERY" > pairs.json
+              select(contains(\"$LATEST\")) \
+            " > pairs.json
           cat pairs.json
           {
             echo "pairs<<EOF"
