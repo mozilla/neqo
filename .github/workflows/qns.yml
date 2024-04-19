@@ -179,7 +179,7 @@ jobs:
             echo "<details><summary>Succeeded and unsupported tests</summary>"
             for GROUP in succeeded unsupported; do
               echo "### ${GROUP^} Interop Tests"
-              cat "$GROUP"
+              cat "$GROUP.md"
             done
             echo "</details>"
           } >> comment.md
