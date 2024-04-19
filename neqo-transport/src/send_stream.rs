@@ -728,6 +728,7 @@ impl PartialEq for SendStream {
 impl Eq for SendStream {}
 
 impl SendStream {
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn new(
         stream_id: StreamId,
         max_stream_data: u64,
@@ -1206,6 +1207,19 @@ impl SendStream {
         }
     }
 
+    /// Set low watermark for [`ConnectionEvent::SendStreamWritable`] event.
+    ///
+    /// [`SendStream`] emits a [`ConnectionEvent::SendStreamWritable`] event when:
+    /// - the available sendable bytes increased to or above the watermark
+    /// - and was previously below the watermark.
+    ///
+    /// Default value is `1`. In other words
+    /// [`ConnectionEvent::SendStreamWritable`] is emitted whenever the
+    /// available sendable bytes was previously at `0` and now increased to `1`
+    /// or more.
+    ///
+    /// Use this when your protocol needs at least `watermark` amount of available
+    /// sendable bytes to make progress.
     pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         self.writable_event_low_watermark = watermark;
     }

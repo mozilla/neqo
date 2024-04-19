@@ -3142,15 +3142,21 @@ impl Connection {
         Ok(self.streams.get_send_stream(stream_id)?.avail())
     }
 
+    /// Set low watermark for [`ConnectionEvent::SendStreamWritable`] event.
+    ///
+    /// See [`SendStream::set_writable_event_low_watermark`].
+    ///
+    /// # Errors
+    /// When the stream ID is invalid.
     pub fn stream_set_writable_event_low_watermark(
         &mut self,
         stream_id: StreamId,
         watermark: NonZeroUsize,
     ) -> Res<()> {
-        Ok(self
-            .streams
+        self.streams
             .get_send_stream_mut(stream_id)?
-            .set_writable_event_low_watermark(watermark))
+            .set_writable_event_low_watermark(watermark);
+        Ok(())
     }
 
     /// Close the stream. Enqueued data will be sent.
