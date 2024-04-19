@@ -83,11 +83,11 @@ jobs:
         run: |
           # Add neqo-latest to implementations.json
           curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
-            jq --arg key "$LATEST" --argjson newEntry ' \
-              { \
-                "image": "${{ needs.docker-image.outputs.imageID }}", \
-                "url": "${{ env.URL }}", \
-                "role": "${{ env.ROLE }}" \
+            jq --arg key "$LATEST" --argjson newEntry '
+              {
+                "image": "${{ needs.docker-image.outputs.imageID }}",
+                "url": "${{ env.URL }}",
+                "role": "${{ env.ROLE }}"
               }' '.[$key] = $newEntry' > implementations.json
           {
             echo "implementations<<EOF"
@@ -95,12 +95,12 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           cat implementations.json
-          # Determine interop pairs that contain neqo-latest
+          # Determine interop pairs that contain $LATEST
           jq < implementations.json "
               [to_entries[] | select(.value.role=='server' or .value.role=='both').key] as \$ss | \
               [to_entries[] | select(.value.role=='client' or .value.role=='both').key] as \$cs | \
               \$cs.[] as \$c | \$ss.[] as \$s | \
-              \$c + '\$DELIM' + \$s | select(contains('\$LATEST'))]
+              \$c + '$DELIM' + \$s | select(contains('$LATEST'))]
             " > pairs.json
           cat pairs.json
           {
