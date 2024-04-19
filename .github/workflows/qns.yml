@@ -162,12 +162,12 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
-          test: 'handshake, amplificationlimit'
+          test: 'handshake,amplificationlimit,ecn,transfer,versionnegotiation,zero_rtt'
 
   report:
     if: ${{ always() && github.event_name == 'pull_request' }}
     name: Report the results
-    needs: run-qns
+    needs: [implementations, run-qns]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -177,3 +177,17 @@ jobs:
       - name: Consolidate results
         run: |
           ls -lt results
+          for run in results/*; do
+            pushd "$run"
+            CLIENT=$(jq < result.json '.clients[0]')
+            SERVER=$(jq < result.json '.servers[0]')
+            jq < result.json '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > grouped.json
+            for group in $(jq < grouped.js 'keys[]'); do
+              RESULT=$(jq < result.json ".results[] | select(.result==\"$result\") | .abbr")
+              echo "## $CLIENT$DELIM$SERVER" >> "../$RESULT.md"
+              jq < grouped.json '.'"$group"'[]' >> "../$RESULT.md"
+            done
+            popd
+          done
+          ls -lt
+          cat ./*.md
