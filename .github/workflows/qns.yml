@@ -179,18 +179,16 @@ jobs:
           cd results
           for RUN in *; do
             echo "$RUN"
-            pushd "$RUN"
-            ls -l
+            cd "$RUN"
             CLIENT=$(jq < result.json '.clients[0]')
             SERVER=$(jq < result.json '.servers[0]')
             jq < result.json '[.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] | add' > grouped.json
             for GROUP in $(jq -r < grouped.json 'keys[]'); do
-              echo "$GROUP"
               echo "## $CLIENT$DELIM$SERVER" >> "../$GROUP.md"
-              jq -r < result.json ".results[][] | select(.result==\"$GROUP\") | .abbr" >> "../$GROUP.md"
-              ls -l ..
+              jq -r < result.json ".results[][] | select(.result==\"$GROUP\") | .abbr" >> "../../$GROUP.md"
             done
-            popd
+            cd ..
           done
+          cd ..
           ls -lt
           cat ./*.md
