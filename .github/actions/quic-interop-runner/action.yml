@@ -56,12 +56,10 @@ runs:
     - name: Run tests
       run: |
         cd quic-interop-runner
-        echo '${{ inputs.implementations }}'
         if [ -n "${{ inputs.implementations }}" ]; then
-          echo '${{ inputs.implementations }}' > implementations.json
+          echo \'${{ inputs.implementations }}\' > implementations.json
         fi
-        cat implementations.json
-        ARGS="--log-dir logs --markdown --json result.json"
+        ARGS="--log-dir logs --markdown --json result.json --debug"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
@@ -73,6 +71,7 @@ runs:
         fi
         echo $ARGS
         python run.py $ARGS 2>&1 | tee summary
+        ls -lt
       shell: bash
 
     - uses: actions/upload-artifact@v4
