@@ -15,10 +15,10 @@ workspace = true
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = { version = "2.7", default-features = false }
 indexmap = { version = "1.9", default-features = false }
-log = { version = "0.4", default-features = false }
+log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-qlog = { version = "0.12", default-features = false }
+qlog = { workspace = true }
 smallvec = { version = "1.11", default-features = false }
 
 [dev-dependencies]
@@ -27,6 +27,12 @@ test-fixture = { path = "../test-fixture" }
 
 [features]
 bench = []
+build-fuzzing-corpus = [
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-crypto/disable-encryption",
+        "neqo-crypto/disable-random",
+        "test-fixture/disable-random",
+]
 disable-encryption = ["neqo-crypto/disable-encryption"]
 
 [lib]

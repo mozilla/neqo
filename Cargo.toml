@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "fuzz",
   "neqo-bin",
   "neqo-common",
   "neqo-crypto",
@@ -19,8 +20,12 @@ version = "0.7.5"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
-# https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
+# https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
 rust-version = "1.74.0"
+
+[workspace.dependencies]
+log = { version = "0.4", default-features = false }
+qlog = { version = "0.13", default-features = false }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -390,10 +390,14 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 impl From<&Frame<'_>> for QuicFrame {
     fn from(frame: &Frame) -> Self {
         match frame {
-            // TODO: Add payload length to `QuicFrame::Padding` once
-            // https://github.com/cloudflare/quiche/pull/1745 is available via the qlog crate.
-            Frame::Padding { .. } => QuicFrame::Padding,
-            Frame::Ping => QuicFrame::Ping,
+            Frame::Padding(len) => QuicFrame::Padding {
+                length: None,
+                payload_length: u32::from(*len),
+            },
+            Frame::Ping => QuicFrame::Ping {
+                length: None,
+                payload_length: None,
+            },
             Frame::Ack {
                 largest_acknowledged,
                 ack_delay,
@@ -419,6 +423,8 @@ impl From<&Frame<'_>> for QuicFrame {
                     ect1: ecn_count.map(|c| c[IpTosEcn::Ect1]),
                     ect0: ecn_count.map(|c| c[IpTosEcn::Ect0]),
                     ce: ecn_count.map(|c| c[IpTosEcn::Ce]),
+                    length: None,
+                    payload_length: None,
                 }
             }
             Frame::ResetStream {
@@ -429,6 +435,8 @@ impl From<&Frame<'_>> for QuicFrame {
                 stream_id: stream_id.as_u64(),
                 error_code: *application_error_code,
                 final_size: *final_size,
+                length: None,
+                payload_length: None,
             },
             Frame::StopSending {
                 stream_id,
@@ -436,6 +444,8 @@ impl From<&Frame<'_>> for QuicFrame {
             } => QuicFrame::StopSending {
                 stream_id: stream_id.as_u64(),
                 error_code: *application_error_code,
+                length: None,
+                payload_length: None,
             },
             Frame::Crypto { offset, data } => QuicFrame::Crypto {
                 offset: *offset,

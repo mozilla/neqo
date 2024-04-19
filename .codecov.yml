@@ -1,5 +1,6 @@
-# neqo has no test coverage for its example client and server
+# neqo has no test coverage for its example client and server, and for the fuzzing code.
 ignore:
+  - "fuzz"
   - "neqo-bin"
   - "test-fixture"
 
