@@ -148,7 +148,6 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
-          test: 'handshake,amplificationlimit,ecn,transfer,retry,zerortt'
 
   report:
     if: ${{ always() && github.event_name == 'pull_request' }}
