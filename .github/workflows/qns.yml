@@ -171,17 +171,18 @@ jobs:
             for GROUP in $(jq -r < "$RUN/grouped.json" 'keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.'"$GROUP"'[]' | fmt -w 1000)
               [ -n "$RESULT" ] || continue
-              echo "### $CLIENT$DELIM$SERVER" >> "$GROUP.md"
-              echo "$RESULT" >> "$GROUP.md"
+              echo "**$CLIENT$DELIM$SERVER:** $RESULT" >> "$GROUP.md"
             done
           done
           {
-            echo "## Failed Interop Tests"
+            echo "### Failed Interop Tests"
             cat failed.md
             echo "<details><summary>Succeeded and unsupported tests</summary>"
             for GROUP in succeeded unsupported; do
-              echo "## ${GROUP^} Interop Tests"
+              echo
+              echo "### ${GROUP^} Interop Tests"
               cat "$GROUP.md"
+              echo
             done
             echo "</details>"
           } >> comment.md
