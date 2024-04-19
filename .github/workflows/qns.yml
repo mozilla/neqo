@@ -72,7 +72,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'pull_request'
         with:
-          name: ${{ env.LATEST }}
+          name: '${{ env.LATEST }} Docker image'
           path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
@@ -129,7 +129,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.LATEST }}
+          name: '${{ env.LATEST }} Docker image'
           path: /tmp
 
       - run: docker load --input /tmp/${{ env.LATEST }}.tar
@@ -156,12 +156,14 @@ jobs:
     needs: run-qns
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: '*results'
+          path: results
 
       - run: |
-          for RUN in *; do
+          for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
             SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
@@ -178,7 +180,7 @@ jobs:
             cat failed.md
             echo "<details><summary>Succeeded and unsupported tests</summary>"
             for GROUP in succeeded unsupported; do
-              echo "### ${GROUP^} Interop Tests"
+              echo "## ${GROUP^} Interop Tests"
               cat "$GROUP.md"
             done
             echo "</details>"
