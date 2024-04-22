@@ -172,14 +172,16 @@ jobs:
                   results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
                   add
                 } |
-                . + {log_url: $d.log_url}
+                . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
-              LOG=$(jq < "$RUN/grouped.json" -r '.log_url')
               [ -n "$RESULT" ] || continue
+              LOG=$(jq < "$RUN/grouped.json" -r '.log_url')
+              echo "$RESULT"
+              echo "$LOG"
               {
-                echo -n "["
+                echo -n "* ["
                 [ "$CLIENT" == "$LATEST" ] || echo -n "*"
                 echo -n "$CLIENT"
                 [ "$CLIENT" == "$LATEST" ] || echo -n "*"

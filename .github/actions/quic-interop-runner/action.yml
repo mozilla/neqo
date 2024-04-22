@@ -59,7 +59,7 @@ runs:
         if [ -n "${{ inputs.implementations }}" ]; then
           echo '${{ inputs.implementations }}' > implementations.json
         fi
-        ARGS="--log-dir logs --markdown --json result.json"
+        ARGS="--log-dir logs --json result.json"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
@@ -71,7 +71,7 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python run.py $ARGS 2>&1 | tee summary.md || true
+        python run.py $ARGS 2>&1 | tee summary.txt || true
       shell: bash
 
     - uses: actions/upload-artifact@v4
@@ -92,4 +92,4 @@ runs:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
           quic-interop-runner/result.json
-          quic-interop-runner/summary.md
+          quic-interop-runner/summary.txt
