@@ -82,7 +82,7 @@ runs:
 
     - name: Store log URL
       run: |
-        jq '. + {log_url: "${{ steps.uload-logs.outputs.artifact_url }}"}' \
+        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact_url }}"}' \
           < quic-interop-runner/result.json  > result.json.tmp && \
           mv result.json.tmp quic-interop-runner/result.json
       shell: bash
