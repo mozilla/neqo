@@ -587,7 +587,11 @@ enum Ready {
 pub async fn server(mut args: Args) -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
-    neqo_common::log::init(args.verbose.as_ref().map(|v| v.log_level_filter()));
+    neqo_common::log::init(
+        args.verbose
+            .as_ref()
+            .map(clap_verbosity_flag::Verbosity::log_level_filter),
+    );
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone())?;

@@ -485,7 +485,11 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
 }
 
 pub async fn client(mut args: Args) -> Res<()> {
-    neqo_common::log::init(args.verbose.as_ref().map(|v| v.log_level_filter()));
+    neqo_common::log::init(
+        args.verbose
+            .as_ref()
+            .map(clap_verbosity_flag::Verbosity::log_level_filter),
+    );
     init()?;
 
     args.update_for_tests();
