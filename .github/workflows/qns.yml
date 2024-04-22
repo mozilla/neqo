@@ -194,6 +194,7 @@ jobs:
               } >> "$GROUP.md"
             done
           done
+          ls -l
           {
             echo "### Failed Interop Tests"
             cat failed.md
