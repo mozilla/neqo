@@ -175,28 +175,24 @@ jobs:
                 . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
-              echo "$GROUP"
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
-              echo "$RESULT"
-              echo "$LOG"
               [ -n "$RESULT" ] || continue
               {
+                echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
                 echo -n "* ["
-                [ "$CLIENT" == "$LATEST" ] || echo -n "*"
+                [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
                 echo -n "$CLIENT"
-                [ "$CLIENT" == "$LATEST" ] || echo -n "*"
+                [ "$CLIENT" == "$LATEST" ] || echo -n "</ins>"
                 echo -n "$DELIM"
-                [ "$SERVER" == "$LATEST" ] || echo -n "*"
+                [ "$SERVER" == "$LATEST" ] || echo -n "<ins>"
                 echo -n "$SERVER"
-                [ "$SERVER" == "$LATEST" ] || echo -n "*"
+                [ "$SERVER" == "$LATEST" ] || echo -n "</ins>"
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
           done
-          ls -l
-          ls -l results
           {
             echo "### Failed Interop Tests"
             cat failed.md
@@ -204,7 +200,6 @@ jobs:
             for GROUP in succeeded unsupported; do
               echo
               echo "### ${GROUP^} Interop Tests"
-              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
               echo
               cat "$GROUP.md"
               echo
