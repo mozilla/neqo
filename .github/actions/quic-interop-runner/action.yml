@@ -79,10 +79,11 @@ runs:
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
         path: quic-interop-runner/logs
+        compression-level: 9
 
     - name: Store log URL
       run: |
-        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact_url }}"}' \
+        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
           < quic-interop-runner/result.json  > result.json.tmp && \
           mv result.json.tmp quic-interop-runner/result.json
       shell: bash
@@ -93,3 +94,4 @@ runs:
         path: |
           quic-interop-runner/result.json
           quic-interop-runner/summary.txt
+          retention-days: 1

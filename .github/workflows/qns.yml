@@ -177,7 +177,7 @@ jobs:
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               [ -n "$RESULT" ] || continue
-              LOG=$(jq < "$RUN/grouped.json" -r '.log_url')
+              LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
               echo "$RESULT"
               echo "$LOG"
               {
@@ -203,7 +203,7 @@ jobs:
               echo "### ${GROUP^} Interop Tests"
               echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
               echo
-              cat "$x.md"
+              cat "$GROUP.md"
               echo
             done
             echo "</details>"
