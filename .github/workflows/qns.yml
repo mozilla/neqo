@@ -175,11 +175,12 @@ jobs:
                 . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
+              echo "$GROUP"
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
-              [ -n "$RESULT" ] || continue
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
               echo "$RESULT"
               echo "$LOG"
+              [ -n "$RESULT" ] || continue
               {
                 echo -n "* ["
                 [ "$CLIENT" == "$LATEST" ] || echo -n "*"
@@ -195,6 +196,7 @@ jobs:
             done
           done
           ls -l
+          ls -l results
           {
             echo "### Failed Interop Tests"
             cat failed.md

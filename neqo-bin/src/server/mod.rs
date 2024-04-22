@@ -612,7 +612,7 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.alpn = String::from(HQ_INTEROP);
                 args.shared.quic_parameters.max_streams_bidi = 100;
             }
-            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {
+            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" | "connectionmigration" => {
                 args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
             }
