@@ -59,7 +59,7 @@ runs:
         if [ -n "${{ inputs.implementations }}" ]; then
           echo '${{ inputs.implementations }}' > implementations.json
         fi
-        ARGS="--log-dir logs --json result.json"
+        ARGS="--log-dir ../logs --json ../result.json"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
@@ -71,27 +71,27 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python run.py $ARGS 2>&1 | tee summary.txt || true
+        python run.py $ARGS 2>&1 | tee ../summary.txt || true
       shell: bash
 
     - uses: actions/upload-artifact@v4
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
-        path: quic-interop-runner/logs
+        path: logs
         compression-level: 9
 
     - name: Store log URL
       run: |
         jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
-          < quic-interop-runner/result.json  > result.json.tmp && \
-          mv result.json.tmp quic-interop-runner/result.json
+          < result.json  > result.json.tmp && \
+          mv result.json.tmp result.json
       shell: bash
 
     - uses: actions/upload-artifact@v4
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
-          quic-interop-runner/result.json
-          quic-interop-runner/summary.txt
+          result.json
+          summary.txt
           retention-days: 1
