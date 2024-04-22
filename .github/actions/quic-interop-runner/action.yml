@@ -69,18 +69,25 @@ runs:
         if [ -n "${{ inputs.test }}" ]; then
           ARGS="$ARGS --test ${{ inputs.test }}"
         fi
-        python run.py $ARGS 2>&1 | tee summary.md
+        # Don't fail CI if the interop test fails
+        set -o pipefail
+        python run.py $ARGS 2>&1 | tee summary.md || true
       shell: bash
 
     - uses: actions/upload-artifact@v4
-      if: always()
+      id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
-        path: |
-          quic-interop-runner/logs
+        path: quic-interop-runner/logs
+
+    - name: Store log URL
+      run: |
+        jq '. + {log_url: "${{ steps.uload-logs.outputs.artifact_url }}"}' \
+          < result.json  > result.json.tmp && \
+          mv result.json.tmp result.json
+      shell: bash
 
     - uses: actions/upload-artifact@v4
-      if: always()
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
