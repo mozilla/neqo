@@ -26,7 +26,7 @@ runs:
         mkdir comment-data
         cp "${{ inputs.contents }}" comment-data/contents
         echo "${{ inputs.name }}" > comment-data/name
-        if [ -n "${{ inputs.log-url }}" ]; do
+        if [ -n "${{ inputs.log-url }}" ]; then
           echo "${{ inputs.log-url }}" > comment-data/log-url
           echo "${{ github.event.number }}" > comment-data/pr-number
         fi
