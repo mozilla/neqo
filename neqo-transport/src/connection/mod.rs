@@ -22,9 +22,9 @@ use neqo_common::{
     qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
-    agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
-    HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo,
-    Server, ZeroRttChecker,
+    agent::CertificateInfo, randomize, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
+    Group, HandshakeState, PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo,
+    SecretAgentPreInfo, Server, ZeroRttChecker,
 };
 use smallvec::SmallVec;
 
@@ -2347,10 +2347,10 @@ impl Connection {
                         packets.len(),
                         mtu
                     );
-                    initial.size += mtu - packets.len();
-                    // These zeros aren't padding frames, they are an invalid all-zero coalesced
-                    // packet, which is why we don't increase `frame_tx.padding` count here.
+                    let len = packets.len();
+                    initial.size += mtu - len;
                     packets.resize(mtu, 0);
+                    randomize(&mut packets[len..]);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
             }
