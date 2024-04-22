@@ -240,7 +240,7 @@ impl Args {
                     self.method = String::from("POST");
                 }
             }
-            "handshake" | "transfer" | "retry" | "ecn" | "connectionmigration" => {
+            "handshake" | "transfer" | "retry" | "ecn" => {
                 self.shared.use_old_http = true;
             }
             "zerortt" | "resumption" => {
