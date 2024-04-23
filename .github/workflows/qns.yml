@@ -12,28 +12,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+env:
+  LATEST: neqo-latest
+  DELIM: ' vs. '
+
 jobs:
-  quic-network-simulator:
+  docker-image:
+    name: Build Docker image
     runs-on: ubuntu-latest
+    outputs:
+      imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
     permissions:
       packages: write
     steps:
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Docker meta
+      - uses: docker/metadata-action@v5
         id: meta
-        uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}-qns
           tags: |
@@ -45,32 +46,168 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
-        id: docker_build_and_push
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
+        if: github.event_name != 'pull_request'
         with:
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
-          build-args: |
-            RUST_VERSION=stable
+          build-args: RUST_VERSION=stable
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # On pull requests only build amd64 for the sake of CI time.
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64, linux/arm64' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          platforms: 'linux/amd64, linux/arm64'
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run QUIC Interop tests
-        if: ${{ github.event_name == 'pull_request' }}
-        # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
-        uses: ./.github/actions/quic-interop-runner
+      - uses: docker/build-push-action@v5
+        if: github.event_name == 'pull_request'
+        id: docker_build_and_push
         with:
-          name: 'neqo-latest'
-          image: ${{ steps.docker_build_and_push.outputs.imageID }}
-          url: https://github.com/mozilla/neqo
-          test: handshake,ecn,keyupdate,resumption
-          client: neqo-latest,quic-go,ngtcp2,neqo,msquic
-          server: neqo-latest,quic-go,ngtcp2,neqo,msquic
+          tags: ${{ steps.meta.outputs.tags }}
+          file: qns/Dockerfile
+          build-args: RUST_VERSION=stable
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: 'linux/amd64'
+          outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: '${{ env.LATEST }} Docker image'
+          path: /tmp/${{ env.LATEST }}.tar
+
+  implementations:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Determine interop pairs
+    needs: docker-image
+    runs-on: ubuntu-latest
+    outputs:
+      pairs: ${{ steps.config.outputs.pairs }}
+      implementations: ${{ steps.config.outputs.implementations }}
+    env:
+      URL: https://github.com/mozilla/neqo
+      ROLE: both
+    steps:
+      - id: config
+        run: |
+          # Add neqo-latest to implementations.json
+          curl https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations.json | \
+            jq --arg key "$LATEST" --argjson newEntry '
+              {
+                "image": "${{ needs.docker-image.outputs.imageID }}",
+                "url": "${{ env.URL }}",
+                "role": "${{ env.ROLE }}"
+              }' '.[$key] = $newEntry' > implementations.json
+          {
+            echo "implementations<<EOF"
+            cat implementations.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          # Determine valid interop pairs that contain $LATEST
+          jq < implementations.json "[
+              [to_entries[] | select(.value.role==\"server\" or .value.role==\"both\").key] as \$servers |
+              [to_entries[] | select(.value.role==\"client\" or .value.role==\"both\").key] as \$clients |
+              \$clients[] as \$client |
+              \$servers[] as \$server |
+              \$client + \"$DELIM\" + \$server |
+              select(contains(\"$LATEST\"))
+            ]" > pairs.json
+          {
+            echo "pairs<<EOF"
+            cat pairs.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  run-qns:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Run QNS
+    needs: implementations
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: '${{ env.LATEST }} Docker image'
+          path: /tmp
+
+      - run: docker load --input /tmp/${{ env.LATEST }}.tar
+
+      - id: depair
+        run: |
+          PAIR=$(echo ${{ matrix.pair }} | sed "s/$DELIM/%/g")
+          echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
+          echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
+      - uses: ./.github/actions/quic-interop-runner
+        with:
+          client: ${{ steps.depair.outputs.client }}
+          server: ${{ steps.depair.outputs.server }}
+          implementations: ${{ needs.implementations.outputs.implementations }}
+
+  report:
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    name: Report results
+    needs: run-qns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*results'
+          path: results
+
+      - run: |
+          for RUN in results/*; do
+            [ -e "$RUN/result.json" ] || continue
+            CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
+            SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
+            jq < "$RUN/result.json" '
+                . as $data |
+                {
+                  results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
+                  add
+                } |
+                . + {log_url: $data.log_url}
+              ' > "$RUN/grouped.json"
+            for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
+              RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
+              LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
+              [ -n "$RESULT" ] || continue
+              {
+                echo -n "* ["
+                [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
+                echo -n "$CLIENT"
+                [ "$CLIENT" == "$LATEST" ] || echo -n "</ins>"
+                echo -n "$DELIM"
+                [ "$SERVER" == "$LATEST" ] || echo -n "<ins>"
+                echo -n "$SERVER"
+                [ "$SERVER" == "$LATEST" ] || echo -n "</ins>"
+                echo -n "]($LOG): "
+                echo "**$RESULT**"
+              } >> "$GROUP.md"
+            done
+          done
+          {
+            echo "### Failed Interop Tests"
+            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
+            cat failed.md
+            echo "<details><summary>Succeeded and unsupported tests</summary>"
+            for GROUP in succeeded unsupported; do
+              echo
+              echo "### ${GROUP^} Interop Tests"
+              echo
+              cat "$GROUP.md"
+              echo
+            done
+            echo "</details>"
+          } >> comment.md
+
+      - uses: ./.github/actions/pr-comment-data-export
+        with:
+          name: qns
+          contents: comment.md
