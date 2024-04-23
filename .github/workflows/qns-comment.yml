@@ -24,5 +24,5 @@ jobs:
       - uses: ./.github/actions/pr-comment
         with:
           name: qns
-          mode: ${{ github.event.workflow_run.conclusion == 'success' && 'delete' || 'upsert' }}
+          # mode: ${{ github.event.workflow_run.conclusion == 'success' && 'delete' || 'upsert' }}
           token: ${{ secrets.GITHUB_TOKEN }}
