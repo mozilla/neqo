@@ -14,6 +14,8 @@ env:
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
 
+permissions: read-all
+
 jobs:
   bench:
     name: Benchmark
