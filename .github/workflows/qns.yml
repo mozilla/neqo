@@ -178,8 +178,8 @@ jobs:
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
               [ -n "$RESULT" ] || continue
+              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
               {
-                echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
                 echo -n "* ["
                 [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
                 echo -n "$CLIENT"
