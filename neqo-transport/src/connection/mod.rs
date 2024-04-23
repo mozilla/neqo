@@ -2263,6 +2263,16 @@ impl Connection {
                     .unwrap_or(close)
                     .write_frame(&mut builder);
                 self.stats.borrow_mut().frame_tx.connection_close += 1;
+                // Include an ACK frame with the CONNECTION_CLOSE.
+                self.acks.immediate_ack(now);
+                self.acks.write_frame(
+                    *space,
+                    now,
+                    path.borrow().rtt().estimate(),
+                    &mut builder,
+                    &mut tokens,
+                    &mut self.stats.borrow_mut().frame_tx,
+                );
             } else {
                 (tokens, ack_eliciting, padded) =
                     self.write_frames(path, *space, &profile, &mut builder, now);
