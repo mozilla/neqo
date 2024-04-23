@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -65,13 +65,13 @@ jobs:
             echo C:/msys64/usr/bin
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
-          python3 -m pip install git+https://github.com/nodejs/gyp-next
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall gyp
+          # python3 -m pip install git+https://github.com/nodejs/gyp-next
+          # echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
@@ -146,7 +146,7 @@ jobs:
         if: success() || failure()
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@84508663e988701840491b86de86b666e8a86bed # v4.3.0
         with:
           file: lcov.info
           fail_ci_if_error: false
