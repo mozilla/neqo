@@ -106,11 +106,15 @@ pub(crate) fn create_client(
 }
 
 impl super::Client for Http3Client {
-    fn is_closed(&self) -> Option<ConnectionError> {
-        if let Http3State::Closed(err) = self.state() {
-            return Some(err);
+    fn is_closed(&self) -> Result<bool, ConnectionError> {
+        match self.state() {
+            Http3State::Closed(
+                ConnectionError::Transport(neqo_transport::Error::NoError)
+                | ConnectionError::Application(0),
+            ) => Ok(true),
+            Http3State::Closed(err) => Err(err.clone()),
+            _ => Ok(false),
         }
-        None
     }
 
     fn process_output(&mut self, now: Instant) -> Output {
@@ -225,10 +229,6 @@ impl<'a> super::Handler for Handler<'a> {
 
     fn take_token(&mut self) -> Option<ResumptionToken> {
         self.token.take()
-    }
-
-    fn has_token(&self) -> bool {
-        self.token.is_some()
     }
 }
 
