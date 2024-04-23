@@ -13,8 +13,11 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
-RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- -y -q --no-modify-path --profile minimal --default-toolchain $RUST_VERSION
+RUN curl -O https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init && \
+    SHA=$(sha256sum rustup-init | cut -d ' ' -f 1) && \
+    [ "$SHA" = "76cd420cb8a82e540025c5f97bda3c65ceb0b0661d5843e6ef177479813b0367" ] && \
+    chmod +x rustup-init && \
+    ./rustup-init -y -q --no-modify-path --profile minimal --default-toolchain $RUST_VERSION
 
 ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
