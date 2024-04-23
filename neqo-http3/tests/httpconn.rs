@@ -302,8 +302,7 @@ fn test_data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::E
     assert!(hconn_s.events().any(data_writable));
 
     // Sending more fails, given that each data frame needs to be preceeded by a
-    // header, i.e. needs more than 1 byte of send space to send 1 byte of
-    // goodput.
+    // header, i.e. needs more than 1 byte of send space to send 1 byte payload.
     assert_eq!(request.available()?, 1);
     assert_eq!(request.send_data(&buf)?, 0);
 
