@@ -163,6 +163,9 @@ jobs:
           pattern: '*results'
           path: results
 
+      - name: Checkout
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+
       - run: |
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
@@ -208,9 +211,6 @@ jobs:
             done
             echo "</details>"
           } >> comment.md
-          
-      - name: Checkout
-        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
