@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionError, ConnectionId, Error as TransportError, Version};
+use neqo_transport::{AppError, ConnectionError, ConnectionId, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -137,7 +137,7 @@ pub struct Args {
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
 
-    #[arg(short = 'r', long)]
+    #[arg(short = 'r', long, hide = true)]
     /// Client attempts to resume by making multiple connections to servers.
     /// Requires that 2 or more URLs are listed for each server.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
@@ -224,6 +224,11 @@ impl Args {
 
         if self.key_update {
             qerror!("internal option key_update set by user");
+            exit(127)
+        }
+
+        if self.resume {
+            qerror!("internal option resume set by user");
             exit(127)
         }
 
@@ -342,7 +347,6 @@ trait Handler {
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
     fn take_token(&mut self) -> Option<ResumptionToken>;
-    fn has_token(&self) -> bool;
 }
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
@@ -359,7 +363,7 @@ trait Client {
     ///
     /// Note that connection was closed without error on
     /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
-    fn is_closed(&self) -> Option<ConnectionError>;
+    fn is_closed(&self) -> Result<bool, ConnectionError>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -376,37 +380,21 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
-
-            match (handler_done, self.args.resume, self.handler.has_token()) {
-                // Handler isn't done. Continue.
-                (false, _, _) => {},
-                // Handler done. Resumption token needed but not present. Continue.
-                (true, true, false) => {
-                    qdebug!("Handler done. Waiting for resumption token.");
-                }
-                // Handler is done, no resumption token needed. Close.
-                (true, false, _) |
-                // Handler is done, resumption token needed and present. Close.
-                (true, true, true) => {
-                    self.client.close(Instant::now(), 0, "kthxbye!");
-                }
-            }
-
             self.process_output().await?;
-
-            if let Some(reason) = self.client.is_closed() {
-                if self.args.stats {
-                    qinfo!("{:?}", self.client.stats());
-                }
-                return match reason {
-                    ConnectionError::Transport(TransportError::NoError)
-                    | ConnectionError::Application(0) => Ok(self.handler.take_token()),
-                    _ => Err(reason.into()),
-                };
-            }
-
             if self.client.has_events() {
                 continue;
+            }
+
+            match (handler_done, self.client.is_closed()?) {
+                // more work
+                (false, _) => {}
+                // no more work, closing connection
+                (true, false) => {
+                    self.client.close(Instant::now(), 0, "kthxbye!");
+                    continue;
+                }
+                // no more work, connection closed, terminating
+                (true, true) => break,
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
@@ -416,6 +404,12 @@ impl<'a, H: Handler> Runner<'a, H> {
                 }
             }
         }
+
+        if self.args.stats {
+            qinfo!("{:?}", self.client.stats());
+        }
+
+        Ok(self.handler.take_token())
     }
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
