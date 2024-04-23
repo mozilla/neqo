@@ -3,19 +3,6 @@ description: 'Run the QUIC Interop Runner tests.'
 author: 'mxinden'
 
 inputs:
-  name:
-    description: 'Name of the QUIC implementation'
-    required: true
-  image:
-    description: 'Docker image to be tested. Needs to reside either locally, or on some registry.'
-    required: true
-  url:
-    description: 'URL of the QUIC implementation'
-    required: true
-  role:
-    description: 'client/server/both'
-    required: false
-    default: 'both'
   client:
     description: 'client implementations (comma-separated)'
     required: false
@@ -26,6 +13,10 @@ inputs:
     default: ''
   test:
     description: 'test cases (comma-separatated)'
+    required: false
+    default: 'onlyTests'
+  implementations:
+    description: 'Modified "implementations.json" data'
     required: false
     default: ''
 
@@ -46,7 +37,7 @@ runs:
       run: |
         sudo add-apt-repository ppa:wireshark-dev/stable
         sudo apt-get update
-        sudo apt-get install -y wireshark tshark jq
+        sudo apt-get install -y --no-install-recommends tshark
       shell: bash
 
     - uses: actions/setup-python@v5
@@ -63,12 +54,12 @@ runs:
       shell: bash
 
     - name: Run tests
-      id: test-run
       run: |
         cd quic-interop-runner
-        jq --arg key "${{ inputs.name }}" --argjson newEntry '{"image": "${{ inputs.image }}", "url": "${{ inputs.url }}", "role": "${{ inputs.role }}"}' '.[$key] = $newEntry' implementations.json > temp.$$ && mv temp.$$ implementations.json
-        cat implementations.json
-        ARGS="--log-dir logs --markdown --must-include ${{ inputs.name }}"
+        if [ -n "${{ inputs.implementations }}" ]; then
+          echo '${{ inputs.implementations }}' > implementations.json
+        fi
+        ARGS="--log-dir ../logs --json ../result.json"
         if [ -n "${{ inputs.client }}" ]; then
           ARGS="$ARGS --client ${{ inputs.client }}"
         fi
@@ -78,33 +69,29 @@ runs:
         if [ -n "${{ inputs.test }}" ]; then
           ARGS="$ARGS --test ${{ inputs.test }}"
         fi
-        python run.py $ARGS 2>&1 | tee summary
+        # Don't fail CI if the interop test fails
+        set -o pipefail
+        python run.py $ARGS 2>&1 | tee ../summary.txt || true
       shell: bash
 
     - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
-      id: artifact-upload-step
-      if: always()
+      id: upload-logs
       with:
-        name: logs
-        path: quic-interop-runner/logs
+        name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
+        path: logs
+        compression-level: 9
 
-    - name: Format GitHub comment
-      if: always()
+    - name: Store log URL
       run: |
-        echo '[**QUIC Interop Runner**](https://github.com/quic-interop/quic-interop-runner)' >> comment
-        echo '' >> comment
-        # Ignore all, but table, which starts with "|".
-        grep -E '^\|' quic-interop-runner/summary |\
-          sed -E -e 's/✓/:white_check_mark:/gi' -e 's/✕/:x:/gi' \
-          >> comment
-        echo '' >> comment
-        echo "EXPORT_COMMENT=1" >> "$GITHUB_ENV"
+        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
+          < result.json  > result.json.tmp && \
+          mv result.json.tmp result.json
       shell: bash
 
-    - name: Export PR comment data
-      if: always()
-      uses: ./.github/actions/pr-comment-data-export
+    - uses: actions/upload-artifact@v4
       with:
-        name: qns
-        contents: comment
-        log-url: ${{ steps.artifact-upload-step.outputs.artifact-url }}
+        name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
+        path: |
+          result.json
+          summary.txt
+          retention-days: 1
