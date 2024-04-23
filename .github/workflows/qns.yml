@@ -178,7 +178,6 @@ jobs:
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
               [ -n "$RESULT" ] || continue
-              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
               {
                 echo -n "* ["
                 [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
@@ -195,6 +194,7 @@ jobs:
           done
           {
             echo "### Failed Interop Tests"
+            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
             cat failed.md
             echo "<details><summary>Succeeded and unsupported tests</summary>"
             for GROUP in succeeded unsupported; do
