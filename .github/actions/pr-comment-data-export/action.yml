@@ -26,9 +26,9 @@ runs:
         mkdir comment-data
         cp "${{ inputs.contents }}" comment-data/contents
         echo "${{ inputs.name }}" > comment-data/name
+        echo "${{ github.event.number }}" > comment-data/pr-number
         if [ -n "${{ inputs.log-url }}" ]; then
           echo "${{ inputs.log-url }}" > comment-data/log-url
-          echo "${{ github.event.number }}" > comment-data/pr-number
         fi
     - if: github.event_name == 'pull_request'
       uses: actions/upload-artifact@v4
