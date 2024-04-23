@@ -67,9 +67,9 @@ jobs:
             echo C:/msys64/usr/bin
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall gyp
-          # python3 -m pip install git+https://github.com/nodejs/gyp-next
-          # echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
+          python3 -m pip install gyp-next
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
