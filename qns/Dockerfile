@@ -1,4 +1,4 @@
-FROM martenseemann/quic-network-simulator-endpoint@sha256:e619d0a2a757cfb416c8aa0e689f9fcb4d62bb988e38b25f44a4809c16fd7909
+FROM martenseemann/quic-network-simulator-endpoint@sha256:12596544531465e77bdede50dd1e85b2c46c00f1634b3445eed277ca177666db AS buildimage
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git mercurial coreutils \
@@ -35,7 +35,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:e619d0a2a757cfb416c8aa0e689f9fcb4d62bb988e38b25f44a4809c16fd7909
+FROM martenseemann/quic-network-simulator-endpoint@sha256:12596544531465e77bdede50dd1e85b2c46c00f1634b3445eed277ca177666db
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=buildimage /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/
