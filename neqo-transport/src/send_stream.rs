@@ -1135,7 +1135,7 @@ impl SendStream {
                 let previous_limit = send_buf.avail();
                 send_buf.mark_as_acked(offset, len);
                 let current_limit = send_buf.avail();
-                self.emit_writable_event(previous_limit, current_limit);
+                self.maybe_emit_writable_event(previous_limit, current_limit);
             }
             SendStreamState::DataSent {
                 ref mut send_buf,
@@ -1222,7 +1222,7 @@ impl SendStream {
             let previous_limit = fc.available();
             fc.update(limit);
             let current_limit = fc.available();
-            self.emit_writable_event(previous_limit, current_limit);
+            self.maybe_emit_writable_event(previous_limit, current_limit);
         }
     }
 
@@ -1381,7 +1381,11 @@ impl SendStream {
         &mut self.state
     }
 
-    pub(crate) fn emit_writable_event(&mut self, previous_limit: usize, current_limit: usize) {
+    pub(crate) fn maybe_emit_writable_event(
+        &mut self,
+        previous_limit: usize,
+        current_limit: usize,
+    ) {
         let low_watermark = self.writable_event_low_watermark.into();
 
         if low_watermark < previous_limit {

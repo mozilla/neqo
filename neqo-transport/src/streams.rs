@@ -482,7 +482,7 @@ impl Streams {
 
         if conn_credit_increased {
             for (_id, ss) in &mut self.send {
-                ss.emit_writable_event(previous_limit, current_limit);
+                ss.maybe_emit_writable_event(previous_limit, current_limit);
             }
         }
     }
