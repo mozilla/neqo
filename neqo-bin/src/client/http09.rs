@@ -87,20 +87,22 @@ impl<'a> super::Handler for Handler<'a> {
             }
         }
 
-        if self.streams.is_empty() && self.url_queue.is_empty() {
-            // Handler is done.
-            return Ok(true);
+        if !self.streams.is_empty() || !self.url_queue.is_empty() {
+            return Ok(false);
         }
 
-        Ok(false)
+        if self.args.resume && self.token.is_none() {
+            let Some(token) = client.take_resumption_token(Instant::now()) else {
+                return Ok(false);
+            };
+            self.token = Some(token);
+        }
+
+        Ok(true)
     }
 
     fn take_token(&mut self) -> Option<ResumptionToken> {
         self.token.take()
-    }
-
-    fn has_token(&self) -> bool {
-        self.token.is_some()
     }
 }
 
@@ -161,11 +163,15 @@ impl super::Client for Connection {
         }
     }
 
-    fn is_closed(&self) -> Option<ConnectionError> {
-        if let State::Closed(err) = self.state() {
-            return Some(err.clone());
+    fn is_closed(&self) -> Result<bool, ConnectionError> {
+        match self.state() {
+            State::Closed(
+                ConnectionError::Transport(neqo_transport::Error::NoError)
+                | ConnectionError::Application(0),
+            ) => Ok(true),
+            State::Closed(err) => Err(err.clone()),
+            _ => Ok(false),
         }
-        None
     }
 
     fn stats(&self) -> neqo_transport::Stats {
