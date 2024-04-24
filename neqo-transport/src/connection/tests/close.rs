@@ -43,8 +43,11 @@ fn connection_close() {
     let stats_before = client.stats().frame_tx;
     let out = client.process(None, now);
     let stats_after = client.stats().frame_tx;
-    assert!(stats_after.connection_close == stats_before.connection_close + 1);
-    assert!(stats_after.ack == stats_before.ack + 1);
+    assert_eq!(
+        stats_after.connection_close,
+        stats_before.connection_close + 1
+    );
+    assert_eq!(stats_after.ack, stats_before.ack + 1);
 
     server.process_input(&out.dgram().unwrap(), now);
     assert_draining(&server, &Error::PeerApplicationError(42));
@@ -64,8 +67,11 @@ fn connection_close_with_long_reason_string() {
     let stats_before = client.stats().frame_tx;
     let out = client.process(None, now);
     let stats_after = client.stats().frame_tx;
-    assert!(stats_after.connection_close == stats_before.connection_close + 1);
-    assert!(stats_after.ack == stats_before.ack + 1);
+    assert_eq!(
+        stats_after.connection_close,
+        stats_before.connection_close + 1
+    );
+    assert_eq!(stats_after.ack, stats_before.ack + 1);
 
     server.process_input(&out.dgram().unwrap(), now);
     assert_draining(&server, &Error::PeerApplicationError(42));
