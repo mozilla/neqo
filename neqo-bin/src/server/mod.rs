@@ -99,9 +99,6 @@ type Res<T> = Result<T, Error>;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[command(flatten)]
-    verbose: Option<clap_verbosity_flag::Verbosity>,
-
-    #[command(flatten)]
     shared: SharedArgs,
 
     /// List of IP:port to listen on
@@ -132,7 +129,6 @@ impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr;
         Self {
-            verbose: None,
             shared: crate::SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
@@ -588,7 +584,8 @@ pub async fn server(mut args: Args) -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
     neqo_common::log::init(
-        args.verbose
+        args.shared
+            .verbose
             .as_ref()
             .map(clap_verbosity_flag::Verbosity::log_level_filter),
     );
