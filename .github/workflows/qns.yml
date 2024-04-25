@@ -198,7 +198,7 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
               cat "$RUN/grouped.json"
-              jq < result.json ". += { client: '$CLIENT', server: '$SERVER' }" | \
+              jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | tee | \
                 jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
                 mv result.json.tmp result.json
               cat result.json
