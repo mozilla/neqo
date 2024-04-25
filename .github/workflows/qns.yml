@@ -181,8 +181,6 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
-            echo "$CLIENT $SERVER"
-            cat "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
@@ -199,8 +197,11 @@ jobs:
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
-              jq ". += { client: '$CLIENT', server: '$SERVER' }" < result.json > result.json.tmp && \
+              cat "$RUN/grouped.json"
+              jq < result.json ". += { client: '$CLIENT', server: '$SERVER' }" | \
+                jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
                 mv result.json.tmp result.json
+              cat result.json
             done
           done
           cat result.json
