@@ -198,34 +198,45 @@ fn transfer_fixed_seed() {
 }
 
 #[test]
-fn unlimited_bandwidth_50ms_delay_connection() {
-    // TODO: Not tenable as a unit test today, given that this will take roughly 300s
-    // of wallclock time to execute on the simulator. Large for now to make sure
-    // congestion control isn't the limiting factor.
-    const TRANSFER_AMOUNT: usize = 50 * 1024 * 1024;
-    // One way delay of 25ms, thus RTT of 50ms.
-    const DELAY: Duration = Duration::from_millis(25);
+#[allow(clippy::cast_precision_loss)]
+fn gbit_bandwidth() {
+    const MIB: usize = 1024 * 1024;
+    const TRANSFER_AMOUNT: usize = 100 * MIB;
 
-    let mut sim = Simulator::new(
-        "unlimited_bandwidth_50ms_delay_connection",
-        boxed![
-            ConnectionNode::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
-            NonRandomDelay::new(DELAY),
-            ConnectionNode::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
-            NonRandomDelay::new(DELAY),
-        ],
-    );
-    // TODO: Shouldn't matter. No packet loss. Ideally no randomness in delay.
-    sim.seed_str("117f65d90ee5c1a7fb685f3af502c7730ba5d31866b758d98f5e3c2117cf9b86");
+    for upload in [false, true] {
+        let sim = Simulator::new(
+            "gbit-bandwidth",
+            boxed![
+                ConnectionNode::default_client(if upload {
+                    boxed![SendData::new(TRANSFER_AMOUNT)]
+                } else {
+                    boxed![ReceiveData::new(TRANSFER_AMOUNT)]
+                }),
+                TailDrop::gbit_link(),
+                ConnectionNode::default_server(if upload {
+                    boxed![ReceiveData::new(TRANSFER_AMOUNT)]
+                } else {
+                    boxed![SendData::new(TRANSFER_AMOUNT)]
+                }),
+                TailDrop::gbit_link()
+            ],
+        );
 
-    let simulated_time = sim.setup().run();
-    let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+        let simulated_time = sim.setup().run();
+        let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
 
-    // TODO: Document 160.0
-    assert!(
-        160.0 * 1024.0 * 1024.0 < bandwidth,
-        "expect transfer on 50ms connection with unlimited bandwidth to eventually surpass 160 Mbit/s but got {} Mbit/s.",
-        bandwidth / 1024.0 / 1024.0,
+        // Given Neqo's current static stream receive buffer of 1MiB, maximum
+        // bandwidth is below gbit link bandwidth.
+        //
+        // Tracked in https://github.com/mozilla/neqo/issues/733.
+        let maximum_bandwidth = MIB as f64 * 8.0 / 0.1; // bandwidth-delay-product / delay = bandwidth
+        let expected_utilization = 0.5;
 
-    );
+        assert!(
+            maximum_bandwidth * expected_utilization < bandwidth,
+            "with upload {upload} expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
+            maximum_bandwidth / MIB as f64,
+            bandwidth  / MIB as f64,
+        );
+    }
 }
