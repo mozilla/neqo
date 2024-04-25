@@ -168,6 +168,8 @@ jobs:
           path: results
 
       - run: |
+          ls -l results-main
+          cat results-main/result.json || true  
           echo "{}" > result.json
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
@@ -197,11 +199,9 @@ jobs:
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
-              cat "$RUN/grouped.json"
               jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | tee | \
                 jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
                 mv result.json.tmp result.json
-              cat result.json
             done
           done
           cat result.json
@@ -221,14 +221,14 @@ jobs:
           } >> comment.md
 
       - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main'
+        # if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         with:
-          path: '*.md'
+          path: result.json
           key: qns-${{ runner.os }}-${{ github.sha }}
 
       - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
+        # if: github.ref == 'refs/heads/main'
         run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
       - uses: ./.github/actions/pr-comment-data-export
