@@ -168,6 +168,7 @@ jobs:
           path: results
 
       - run: |
+          echo "{}" > result.json
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
@@ -180,6 +181,8 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
+            echo "$CLIENT $SERVER"
+            cat "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
@@ -196,8 +199,11 @@ jobs:
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
+              jq ". += { client: '$CLIENT', server: '$SERVER' }" < result.json > result.json.tmp && \
+                mv result.json.tmp result.json
             done
           done
+          cat result.json
           {
             echo "### Failed Interop Tests"
             echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
@@ -217,7 +223,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         with:
-          path: ./target/qns
+          path: *.md
           key: qns-${{ runner.os }}-${{ github.sha }}
 
       - name: Remember main-branch push URL
