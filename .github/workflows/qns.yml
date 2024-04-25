@@ -148,6 +148,7 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+          test: handshake
 
   report:
     name: Report results
@@ -199,7 +200,7 @@ jobs:
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
-              jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | tee | \
+              jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | \
                 jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
                 mv result.json.tmp result.json
             done
@@ -221,16 +222,18 @@ jobs:
             echo "</details>"
           } >> comment.md
 
+      - name: Remember main-branch push URL
+        # if: github.ref == 'refs/heads/main'
+        run: echo "${{ github.sha }}" > baseline-sha.txt
+
       - name: Cache main-branch results
         # if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         with:
-          path: result.json
+          path: |
+            result.json
+            baseline-sha.txt
           key: qns-${{ runner.os }}-${{ github.sha }}
-
-      - name: Remember main-branch push URL
-        # if: github.ref == 'refs/heads/main'
-        run: echo "${{ github.sha }}" > target/criterion/baseline-sha.txt
 
       - uses: ./.github/actions/pr-comment-data-export
         with:

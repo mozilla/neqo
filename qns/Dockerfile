@@ -1,6 +1,6 @@
 FROM martenseemann/quic-network-simulator-endpoint@sha256:12596544531465e77bdede50dd1e85b2c46c00f1634b3445eed277ca177666db AS buildimage
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get install -y --no-install-recommends \
     curl git mercurial coreutils \
     build-essential libclang-dev lld \
     gyp ninja-build zlib1g-dev python \
