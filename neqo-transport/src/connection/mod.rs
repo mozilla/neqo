@@ -292,7 +292,7 @@ impl Debug for Connection {
             "{:?} Connection: {:?} {:?}",
             self.role,
             self.state,
-            self.paths.primary_fallible()
+            self.paths.primary()
         )
     }
 }
@@ -592,7 +592,11 @@ impl Connection {
     fn make_resumption_token(&mut self) -> ResumptionToken {
         debug_assert_eq!(self.role, Role::Client);
         debug_assert!(self.crypto.has_resumption_token());
-        let rtt = self.paths.primary().borrow().rtt().estimate();
+        let rtt = self.paths.primary().map_or_else(
+            || RttEstimate::default().estimate(),
+            |p| p.borrow().rtt().estimate(),
+        );
+
         self.crypto
             .create_resumption_token(
                 self.new_token.take_token(),
@@ -611,7 +615,7 @@ impl Connection {
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
-        self.paths.primary_fallible().map_or_else(
+        self.paths.primary().map_or_else(
             || RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
             |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
         )
@@ -746,7 +750,12 @@ impl Connection {
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
-        self.paths.primary().borrow_mut().rtt_mut().set_initial(rtt);
+        self.paths
+            .primary()
+            .ok_or(Error::InternalError)?
+            .borrow_mut()
+            .rtt_mut()
+            .set_initial(rtt);
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
@@ -786,7 +795,7 @@ impl Connection {
         // If we are able, also send a NEW_TOKEN frame.
         // This should be recording all remote addresses that are valid,
         // but there are just 0 or 1 in the current implementation.
-        if let Some(path) = self.paths.primary_fallible() {
+        if let Some(path) = self.paths.primary() {
             if let Some(token) = self
                 .address_validation
                 .generate_new_token(path.borrow().remote_address(), now)
@@ -858,7 +867,7 @@ impl Connection {
     #[must_use]
     pub fn stats(&self) -> Stats {
         let mut v = self.stats.borrow().clone();
-        if let Some(p) = self.paths.primary_fallible() {
+        if let Some(p) = self.paths.primary() {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
             v.rttvar = p.rtt().rttvar();
@@ -895,14 +904,14 @@ impl Connection {
                 State::WaitInitial => {
                     // We don't have any state yet, so don't bother with
                     // the closing state, just send one CONNECTION_CLOSE.
-                    if let Some(path) = path.or_else(|| self.paths.primary_fallible()) {
+                    if let Some(path) = path.or_else(|| self.paths.primary()) {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                     }
                     self.set_state(State::Closed(error));
                 }
                 _ => {
-                    if let Some(path) = path.or_else(|| self.paths.primary_fallible()) {
+                    if let Some(path) = path.or_else(|| self.paths.primary()) {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                         if matches!(v, Error::KeysExhausted) {
@@ -962,7 +971,7 @@ impl Connection {
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
-        if let Some(path) = self.paths.primary_fallible() {
+        if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
             self.handle_lost_packets(&lost);
             qlog::packets_lost(&mut self.qlog, &lost);
@@ -1016,7 +1025,7 @@ impl Connection {
             delays.push(ack_time);
         }
 
-        if let Some(p) = self.paths.primary_fallible() {
+        if let Some(p) = self.paths.primary() {
             let path = p.borrow();
             let rtt = path.rtt();
             let pto = rtt.pto(PacketNumberSpace::ApplicationData);
@@ -1104,7 +1113,15 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        self.process_output(now)
+        #[allow(clippy::let_and_return)]
+        let output = self.process_output(now);
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        if self.test_frame_writer.is_none() {
+            if let Some(d) = output.clone().dgram() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            }
+        }
+        output
     }
 
     fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) {
@@ -1125,7 +1142,13 @@ impl Connection {
         }
         // At this point, we should only have the connection ID that we generated.
         // Update to the one that the server prefers.
-        let path = self.paths.primary();
+        let Some(path) = self.paths.primary() else {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry without an existing path");
+            return;
+        };
+
         path.borrow_mut().set_remote_cid(packet.scid());
 
         let retry_scid = ConnectionId::from(packet.scid());
@@ -1153,8 +1176,9 @@ impl Connection {
     fn discard_keys(&mut self, space: PacketNumberSpace, now: Instant) {
         if self.crypto.discard(space) {
             qdebug!([self], "Drop packet number space {}", space);
-            let primary = self.paths.primary();
-            self.loss_recovery.discard(&primary, space, now);
+            if let Some(path) = self.paths.primary() {
+                self.loss_recovery.discard(&path, space, now);
+            }
             self.acks.drop_space(space);
         }
     }
@@ -1229,8 +1253,9 @@ impl Connection {
             assert_ne!(self.version, version);
 
             qinfo!([self], "Version negotiation: trying {:?}", version);
-            let local_addr = self.paths.primary().borrow().local_address();
-            let remote_addr = self.paths.primary().borrow().remote_address();
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
+            let local_addr = path.borrow().local_address();
+            let remote_addr = path.borrow().remote_address();
             let conn_params = self
                 .conn_params
                 .clone()
@@ -1500,6 +1525,16 @@ impl Connection {
                         d.tos(),
                     );
 
+                    #[cfg(feature = "build-fuzzing-corpus")]
+                    if packet.packet_type() == PacketType::Initial {
+                        let target = if self.role == Role::Client {
+                            "server_initial"
+                        } else {
+                            "client_initial"
+                        };
+                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
+                    }
+
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
@@ -1571,7 +1606,11 @@ impl Connection {
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
         while d.remaining() > 0 {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let pos = d.offset();
             let f = Frame::decode(&mut d)?;
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &packet[pos..d.offset()]);
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
@@ -1632,10 +1671,15 @@ impl Connection {
             if let Some(cid) = self.connection_ids.next() {
                 self.paths.make_permanent(path, None, cid);
                 Ok(())
-            } else if self.paths.primary().borrow().remote_cid().is_empty() {
-                self.paths
-                    .make_permanent(path, None, ConnectionIdEntry::empty_remote());
-                Ok(())
+            } else if let Some(primary) = self.paths.primary() {
+                if primary.borrow().remote_cid().is_empty() {
+                    self.paths
+                        .make_permanent(path, None, ConnectionIdEntry::empty_remote());
+                    Ok(())
+                } else {
+                    qtrace!([self], "Unable to make path permanent: {}", path.borrow());
+                    Err(Error::InvalidMigration)
+                }
             } else {
                 qtrace!([self], "Unable to make path permanent: {}", path.borrow());
                 Err(Error::InvalidMigration)
@@ -1728,8 +1772,10 @@ impl Connection {
             // Pointless migration is pointless.
             return Err(Error::InvalidMigration);
         }
-        let local = local.unwrap_or_else(|| self.paths.primary().borrow().local_address());
-        let remote = remote.unwrap_or_else(|| self.paths.primary().borrow().remote_address());
+
+        let path = self.paths.primary().ok_or(Error::InvalidMigration)?;
+        let local = local.unwrap_or_else(|| path.borrow().local_address());
+        let remote = remote.unwrap_or_else(|| path.borrow().remote_address());
 
         if mem::discriminant(&local.ip()) != mem::discriminant(&remote.ip()) {
             // Can't mix address families.
@@ -1782,7 +1828,12 @@ impl Connection {
             // has to use the existing address.  So only pay attention to a preferred
             // address from the same family as is currently in use. More thought will
             // be needed to work out how to get addresses from a different family.
-            let prev = self.paths.primary().borrow().remote_address();
+            let prev = self
+                .paths
+                .primary()
+                .ok_or(Error::NoAvailablePath)?
+                .borrow()
+                .remote_address();
             let remote = match prev.ip() {
                 IpAddr::V4(_) => addr.ipv4().map(SocketAddr::V4),
                 IpAddr::V6(_) => addr.ipv6().map(SocketAddr::V6),
@@ -2331,7 +2382,9 @@ impl Connection {
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qdebug!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
-        qlog::client_connection_started(&mut self.qlog, &self.paths.primary());
+        if let Some(path) = self.paths.primary() {
+            qlog::client_connection_started(&mut self.qlog, &path);
+        }
         qlog::client_version_information_initiated(&mut self.qlog, self.conn_params.get_versions());
 
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
@@ -2354,7 +2407,7 @@ impl Connection {
     pub fn close(&mut self, now: Instant, app_error: AppError, msg: impl AsRef<str>) {
         let error = ConnectionError::Application(app_error);
         let timeout = self.get_closing_period_time(now);
-        if let Some(path) = self.paths.primary_fallible() {
+        if let Some(path) = self.paths.primary() {
             self.state_signaling.close(path, error.clone(), 0, msg);
             self.set_state(State::Closing { error, timeout });
         } else {
@@ -2412,10 +2465,8 @@ impl Connection {
                 // That's OK, they can try guessing this.
                 ConnectionIdEntry::random_srt()
             };
-            self.paths
-                .primary()
-                .borrow_mut()
-                .set_reset_token(reset_token);
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
+            path.borrow_mut().set_reset_token(reset_token);
 
             let max_ad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
             let min_ad = if remote.has_value(tparams::MIN_ACK_DELAY) {
@@ -2427,11 +2478,8 @@ impl Connection {
             } else {
                 None
             };
-            self.paths.primary().borrow_mut().set_ack_delay(
-                max_ad,
-                min_ad,
-                self.conn_params.get_ack_ratio(),
-            );
+            path.borrow_mut()
+                .set_ack_delay(max_ad, min_ad, self.conn_params.get_ack_ratio());
 
             let max_active_cids = remote.get_integer(tparams::ACTIVE_CONNECTION_ID_LIMIT);
             self.cid_manager.set_limit(max_active_cids);
@@ -2871,7 +2919,7 @@ impl Connection {
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
-        let Some(path) = self.paths.primary_fallible() else {
+        let Some(path) = self.paths.primary() else {
             return;
         };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
@@ -2917,8 +2965,10 @@ impl Connection {
         qdebug!([self], "0-RTT rejected");
 
         // Tell 0-RTT packets that they were "lost".
-        let dropped = self.loss_recovery.drop_0rtt(&self.paths.primary(), now);
-        self.handle_lost_packets(&dropped);
+        if let Some(path) = self.paths.primary() {
+            let dropped = self.loss_recovery.drop_0rtt(&path, now);
+            self.handle_lost_packets(&dropped);
+        }
 
         self.streams.zero_rtt_rejected();
 
@@ -2937,7 +2987,7 @@ impl Connection {
             // Remove the randomized client CID from the list of acceptable CIDs.
             self.cid_manager.remove_odcid();
             // Mark the path as validated, if it isn't already.
-            let path = self.paths.primary();
+            let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
             qlog::server_connection_started(&mut self.qlog, &path);
@@ -3205,7 +3255,7 @@ impl Connection {
         else {
             return Err(Error::NotAvailable);
         };
-        let path = self.paths.primary_fallible().ok_or(Error::NotAvailable)?;
+        let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().mtu();
         let encoder = Encoder::with_capacity(mtu);
 

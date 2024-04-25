@@ -146,15 +146,8 @@ impl Paths {
             })
     }
 
-    /// Get a reference to the primary path.  This will assert if there is no primary
-    /// path, which happens at a server prior to receiving a valid Initial packet
-    /// from a client.  So be careful using this method.
-    pub fn primary(&self) -> PathRef {
-        self.primary_fallible().unwrap()
-    }
-
-    /// Get a reference to the primary path.  Use this prior to handshake completion.
-    pub fn primary_fallible(&self) -> Option<PathRef> {
+    /// Get a reference to the primary path, if one exists.
+    pub fn primary(&self) -> Option<PathRef> {
         self.primary.clone()
     }
 
@@ -243,7 +236,10 @@ impl Paths {
     /// Returns `true` if the path was migrated.
     pub fn migrate(&mut self, path: &PathRef, force: bool, now: Instant) -> bool {
         debug_assert!(!self.is_temporary(path));
-        let baseline = self.primary().borrow().ecn_info.baseline();
+        let baseline = self.primary().map_or_else(
+            || EcnInfo::default().baseline(),
+            |p| p.borrow().ecn_info.baseline(),
+        );
         path.borrow_mut().set_ecn_baseline(baseline);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
@@ -310,7 +306,6 @@ impl Paths {
     /// Set the identified path to be primary.
     /// This panics if `make_permanent` hasn't been called.
     pub fn handle_migration(&mut self, path: &PathRef, remote: SocketAddr, now: Instant) {
-        qtrace!([self.primary().borrow()], "handle_migration");
         // The update here needs to match the checks in `Path::received_on`.
         // Here, we update the remote port number to match the source port on the
         // datagram that was received.  This ensures that we send subsequent
@@ -428,10 +423,10 @@ impl Paths {
             stats.retire_connection_id += 1;
         }
 
-        // Write out any ACK_FREQUENCY frames.
-        self.primary()
-            .borrow_mut()
-            .write_cc_frames(builder, tokens, stats);
+        if let Some(path) = self.primary() {
+            // Write out any ACK_FREQUENCY frames.
+            path.borrow_mut().write_cc_frames(builder, tokens, stats);
+        }
     }
 
     pub fn lost_retire_cid(&mut self, lost: u64) {
@@ -443,11 +438,15 @@ impl Paths {
     }
 
     pub fn lost_ack_frequency(&mut self, lost: &AckRate) {
-        self.primary().borrow_mut().lost_ack_frequency(lost);
+        if let Some(path) = self.primary() {
+            path.borrow_mut().lost_ack_frequency(lost);
+        }
     }
 
     pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
-        self.primary().borrow_mut().acked_ack_frequency(acked);
+        if let Some(path) = self.primary() {
+            path.borrow_mut().acked_ack_frequency(acked);
+        }
     }
 
     /// Get an estimate of the RTT on the primary path.
@@ -457,7 +456,7 @@ impl Paths {
         // make a new RTT esimate and interrogate that.
         // That is more expensive, but it should be rare and breaking encapsulation
         // is worse, especially as this is only used in tests.
-        self.primary_fallible()
+        self.primary()
             .map_or(RttEstimate::default().estimate(), |p| {
                 p.borrow().rtt().estimate()
             })
@@ -978,8 +977,18 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
+
+        let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn);
+        if ecn_ce_received {
+            let cwnd_reduced = self
+                .sender
+                .on_ecn_ce_received(acked_pkts.first().expect("must be there"));
+            if cwnd_reduced {
+                self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
+            }
+        }
+
         self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
-        self.ecn_info.validate_ack_ecn(acked_pkts, ack_ecn);
     }
 
     /// Record packets as lost with the sender.

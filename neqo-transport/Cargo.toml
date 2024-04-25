@@ -27,6 +27,12 @@ test-fixture = { path = "../test-fixture" }
 
 [features]
 bench = []
+build-fuzzing-corpus = [
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-crypto/disable-encryption",
+        "neqo-crypto/disable-random",
+        "test-fixture/disable-random",
+]
 disable-encryption = ["neqo-crypto/disable-encryption"]
 
 [lib]

@@ -8,7 +8,7 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{qtrace, Decoder};
+use neqo_common::{qtrace, Decoder, Encoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
@@ -464,8 +464,18 @@ impl<'a> Frame<'a> {
             })
         }
 
-        // TODO(ekr@rtfm.com): check for minimal encoding
+        // Check for minimal encoding of frame type.
+        let pos = dec.offset();
         let t = dv(dec)?;
+        // RFC 9000, Section 12.4:
+        //
+        // The Frame Type field uses a variable-length integer encoding [...],
+        // with one exception. To ensure simple and efficient implementations of
+        // frame parsing, a frame type MUST use the shortest possible encoding.
+        if Encoder::varint_len(t) != dec.offset() - pos {
+            return Err(Error::ProtocolViolation);
+        }
+
         match t {
             FRAME_TYPE_PADDING => {
                 let mut length: u16 = 1;
@@ -660,7 +670,7 @@ mod tests {
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);
-        let decoded = Frame::decode(&mut encoded.as_decoder()).unwrap();
+        let decoded = Frame::decode(&mut encoded.as_decoder()).expect("Failed to decode frame");
         assert_eq!(*f, decoded);
     }
 
@@ -1005,14 +1015,14 @@ mod tests {
             fill: true,
         };
 
-        just_dec(&f, "4030010203");
+        just_dec(&f, "30010203");
 
         // With the length bit.
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: false,
         };
-        just_dec(&f, "403103010203");
+        just_dec(&f, "3103010203");
     }
 
     #[test]
@@ -1025,5 +1035,16 @@ mod tests {
         e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
 
         assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to decode frame")]
+    fn invalid_frame_type_len() {
+        let f = Frame::Datagram {
+            data: &[1, 2, 3],
+            fill: true,
+        };
+
+        just_dec(&f, "4030010203");
     }
 }

@@ -12,6 +12,8 @@ on:
     types:
       - completed
 
+permissions: read-all
+
 jobs:
   comment:
     permissions:
@@ -20,9 +22,8 @@ jobs:
     if: |
       github.event.workflow_run.event == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
       - uses: ./.github/actions/pr-comment
         with:
           name: qns
-          mode: ${{ github.event.workflow_run.conclusion == 'success' && 'delete' || 'upsert' }}
           token: ${{ secrets.GITHUB_TOKEN }}
