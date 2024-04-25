@@ -209,15 +209,21 @@ jobs:
           diff -Baur results-main/result.json result.json || true
           {
             echo "### Failed Interop Tests"
-            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
-            cat failed.md
+            if [ -e failed.md ]; then
+              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
+              cat failed.md
+            else
+              echo "None :tada:"
+            fi
             echo "<details><summary>Succeeded and unsupported tests</summary>"
             for GROUP in succeeded unsupported; do
               echo
               echo "### ${GROUP^} Interop Tests"
-              echo
-              cat "$GROUP.md"
-              echo
+              if [ -e "$GROUP.md" ]; then
+                cat "$GROUP.md"
+              else
+                echo "None :question:"
+              fi
             done
             echo "</details>"
           } >> comment.md
