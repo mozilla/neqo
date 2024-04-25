@@ -168,8 +168,8 @@ jobs:
           path: results
 
       - run: |
-          ls -l results-main
-          cat results-main/result.json || true  
+          ls -l results-main || true
+          cat results-main/result.json || true
           echo "{}" > result.json
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
@@ -205,6 +205,7 @@ jobs:
             done
           done
           cat result.json
+          diff -Baur results-main/result.json result.json || true
           {
             echo "### Failed Interop Tests"
             echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
