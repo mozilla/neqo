@@ -196,3 +196,38 @@ fn transfer_fixed_seed() {
     sim.seed_str("117f65d90ee5c1a7fb685f3af502c7730ba5d31866b758d98f5e3c2117cf9b86");
     sim.run();
 }
+
+#[test]
+fn unlimited_bandwidth_50ms_delay_connection() {
+    // TODO: Not tenable as a unit test today, given that this will take roughly 300s
+    // of wallclock time to execute on the simulator. Large for now to make sure
+    // congestion control isn't the limiting factor.
+    const TRANSFER_AMOUNT: usize = 1024 * 1024 * 1024;
+    // One way delay of 25ms, thus RTT of 50ms.
+    const DELAY: Duration = Duration::from_millis(25);
+    // TODO: We actually always want 25ms here. Hack for a range including 25ms
+    // only. Better use RangeInclusive.
+    const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_nanos(25_000_002);
+
+    let mut sim = Simulator::new(
+        "unlimited_bandwidth_50ms_delay_connection",
+        boxed![
+            ConnectionNode::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
+            Delay::new(DELAY_RANGE.clone()),
+            ConnectionNode::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+            Delay::new(DELAY_RANGE),
+        ],
+    );
+    // TODO: Shouldn't matter. No packet loss. Ideally no randomness in delay.
+    sim.seed_str("117f65d90ee5c1a7fb685f3af502c7730ba5d31866b758d98f5e3c2117cf9b86");
+
+    let simulated_time = sim.setup().run_sim_time();
+    let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+
+    assert!(
+        1024.0 * 1024.0 * 1024.0 < bandwidth,
+        "expect transfer on 50ms connection with unlimited bandwidth to eventually surpass 1 Gbit/s but got {} Mbit/s.",
+        bandwidth / 1024.0 / 1024.0,
+
+    );
+}
