@@ -156,10 +156,14 @@ impl ClosingFrame {
         }
     }
 
-    pub fn write_frame(&self, builder: &mut PacketBuilder) {
+    pub const fn min_length() -> usize {
         // Allow 8 bytes for the reason phrase to ensure that if it needs to be
         // truncated there is still at least a few bytes of the value.
-        if builder.remaining() < 1 + 8 + 8 + 2 + 8 {
+        1 + 8 + 8 + 2 + 8
+    }
+
+    pub fn write_frame(&self, builder: &mut PacketBuilder) {
+        if builder.remaining() < ClosingFrame::min_length() {
             return;
         }
         match &self.error {

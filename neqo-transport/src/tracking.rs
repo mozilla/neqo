@@ -559,6 +559,12 @@ impl RecvdPackets {
         }
     }
 
+    pub const fn max_len() -> usize {
+        // The worst possible ACK frame, assuming only one range.
+        // Note that this assumes one byte for the type and count of extra ranges.
+        1 + 8 + 8 + 1 + 8
+    }
+
     /// Generate an ACK frame for this packet number space.
     ///
     /// Unlike other frame generators this doesn't modify the underlying instance
@@ -577,10 +583,6 @@ impl RecvdPackets {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        // The worst possible ACK frame, assuming only one range.
-        // Note that this assumes one byte for the type and count of extra ranges.
-        const LONGEST_ACK_HEADER: usize = 1 + 8 + 8 + 1 + 8;
-
         // Check that we aren't delaying ACKs.
         if !self.ack_now(now, rtt) {
             return;
@@ -592,12 +594,13 @@ impl RecvdPackets {
         // When congestion limited, ACK-only packets are 255 bytes at most
         // (`recovery::ACK_ONLY_SIZE_LIMIT - 1`).  This results in limiting the
         // ranges to 13 here.
-        let max_ranges = if let Some(avail) = builder.remaining().checked_sub(LONGEST_ACK_HEADER) {
-            // Apply a hard maximum to keep plenty of space for other stuff.
-            min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
-        } else {
-            return;
-        };
+        let max_ranges =
+            if let Some(avail) = builder.remaining().checked_sub(RecvdPackets::max_len()) {
+                // Apply a hard maximum to keep plenty of space for other stuff.
+                min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
+            } else {
+                return;
+            };
 
         let ranges = self
             .ranges

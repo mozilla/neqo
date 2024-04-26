@@ -56,7 +56,7 @@ use crate::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
     },
-    tracking::{AckTracker, PacketNumberSpace, SentPacket},
+    tracking::{AckTracker, PacketNumberSpace, RecvdPackets, SentPacket},
     version::{Version, WireVersion},
     AppError, ConnectionError, Error, Res, StreamId,
 };
@@ -2252,6 +2252,18 @@ impl Connection {
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
             if let Some(ref close) = closing_frame {
+                if builder.remaining() > ClosingFrame::min_length() + RecvdPackets::max_len() {
+                    // Include an ACK frame with the CONNECTION_CLOSE.
+                    self.acks.immediate_ack(now);
+                    self.acks.write_frame(
+                        *space,
+                        now,
+                        path.borrow().rtt().estimate(),
+                        &mut builder,
+                        &mut tokens,
+                        &mut self.stats.borrow_mut().frame_tx,
+                    );
+                }
                 // ConnectionError::Application is only allowed at 1RTT.
                 let sanitized = if *space == PacketNumberSpace::ApplicationData {
                     None
@@ -2263,16 +2275,6 @@ impl Connection {
                     .unwrap_or(close)
                     .write_frame(&mut builder);
                 self.stats.borrow_mut().frame_tx.connection_close += 1;
-                // Include an ACK frame with the CONNECTION_CLOSE.
-                self.acks.immediate_ack(now);
-                self.acks.write_frame(
-                    *space,
-                    now,
-                    path.borrow().rtt().estimate(),
-                    &mut builder,
-                    &mut tokens,
-                    &mut self.stats.borrow_mut().frame_tx,
-                );
             } else {
                 (tokens, ack_eliciting, padded) =
                     self.write_frames(path, *space, &profile, &mut builder, now);
