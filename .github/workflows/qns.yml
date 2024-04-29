@@ -148,7 +148,7 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
-          test: handshake
+          test: handshake,transfer
 
   report:
     name: Report results
@@ -200,9 +200,11 @@ jobs:
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
+              cat result.json
               jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | \
                 jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
                 mv result.json.tmp result.json
+              cat result.json
             done
           done
           cat result.json
