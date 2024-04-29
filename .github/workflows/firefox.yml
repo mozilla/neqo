@@ -67,7 +67,7 @@ jobs:
             echo "mk_add_options MOZ_OBJDIR=../$FIREFOX"
             echo "ac_add_options --with-ccache=sccache"
             echo "ac_add_options --enable-application=browser"
-            echo "ac_add_options --disable-tests"
+            [ "${{ matrix.type}}" == "debug" ] || echo "ac_add_options --disable-tests"
             echo "ac_add_options --enable-${{ matrix.type }}"
           } >> mozconfig
           ./mach bootstrap --application-choice browser
