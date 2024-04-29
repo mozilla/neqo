@@ -2189,6 +2189,28 @@ impl Connection {
         (tokens, ack_eliciting, padded)
     }
 
+    fn write_ack_frame(
+        &mut self,
+        builder: &mut PacketBuilder,
+        space: PacketNumberSpace,
+        now: Instant,
+        path: &PathRef,
+        tokens: &mut Vec<RecoveryToken>,
+    ) {
+        let limit = builder.limit();
+        builder.set_limit(limit - ClosingFrame::MIN_LENGTH);
+        self.acks.immediate_ack(now);
+        self.acks.write_frame(
+            space,
+            now,
+            path.borrow().rtt().estimate(),
+            builder,
+            tokens,
+            &mut self.stats.borrow_mut().frame_tx,
+        );
+        builder.set_limit(limit);
+    }
+
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
@@ -2254,18 +2276,7 @@ impl Connection {
             if let Some(ref close) = closing_frame {
                 if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::MAX_ACK_LEN {
                     // Include an ACK frame with the CONNECTION_CLOSE.
-                    let limit = builder.limit();
-                    builder.set_limit(limit - ClosingFrame::MIN_LENGTH);
-                    self.acks.immediate_ack(now);
-                    self.acks.write_frame(
-                        *space,
-                        now,
-                        path.borrow().rtt().estimate(),
-                        &mut builder,
-                        &mut tokens,
-                        &mut self.stats.borrow_mut().frame_tx,
-                    );
-                    builder.set_limit(limit);
+                    self.write_ack_frame(&mut builder, *space, now, path, &mut tokens);
                 }
                 // ConnectionError::Application is only allowed at 1RTT.
                 let sanitized = if *space == PacketNumberSpace::ApplicationData {
