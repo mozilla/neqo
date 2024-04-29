@@ -173,12 +173,12 @@ jobs:
           cat results-main/result.json || true
           echo "{}" > result.json
           for RUN in results/*; do
-            echo "$CLIENT $SERVER"
-            ls -l result.json || true
-            cat result.json || true
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
             SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
+            echo "$CLIENT $SERVER"
+            ls -l result.json || true
+            cat result.json || true
             jq < "$RUN/result.json" '
                 . as $data |
                 {
@@ -187,6 +187,8 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
+            echo "$RUN/grouped.json"
+            cat "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
@@ -204,12 +206,12 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
-            jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > a
-            cat a
-            cat a | \
-              jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp
-            cat result.json.tmp
-            mv result.json.tmp result.json
+            # jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > a
+            # cat a
+            # cat a | \
+            #   jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp
+            # cat result.json.tmp
+            # mv result.json.tmp result.json
           done
           diff -Baur results-main/result.json result.json || true
           {
