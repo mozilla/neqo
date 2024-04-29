@@ -99,9 +99,6 @@ type Res<T> = Result<T, Error>;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[command(flatten)]
-    verbose: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
-
-    #[command(flatten)]
     shared: SharedArgs,
 
     /// List of IP:port to listen on
@@ -132,7 +129,6 @@ impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr;
         Self {
-            verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
             shared: crate::SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
@@ -587,7 +583,12 @@ enum Ready {
 pub async fn server(mut args: Args) -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
-    neqo_common::log::init(Some(args.verbose.log_level_filter()));
+    neqo_common::log::init(
+        args.shared
+            .verbose
+            .as_ref()
+            .map(clap_verbosity_flag::Verbosity::log_level_filter),
+    );
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone())?;

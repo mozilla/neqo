@@ -49,14 +49,14 @@ runs:
     #
     # - name: Checkout NSPR
     #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@v4
+    #   uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
     #   with:
     #     repository: "nss-dev/nspr"
     #     path: ${{ github.workspace }}/nspr
 
     # - name: Checkout NSS
     #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@v4
+    #   uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
     #   with:
     #     repository: "nss-dev/nss"
     #     path: ${{ github.workspace }}/nss
