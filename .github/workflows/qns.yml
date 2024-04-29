@@ -204,9 +204,12 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
-              jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | \
-                jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
-                mv result.json.tmp result.json
+            jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > a
+            cat a
+            cat a | \
+              jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp
+            cat result.json.tmp
+            mv result.json.tmp result.json
           done
           diff -Baur results-main/result.json result.json || true
           {
