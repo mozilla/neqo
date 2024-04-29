@@ -187,8 +187,6 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/grouped.json"
-            echo "$RUN/grouped.json"
-            cat "$RUN/grouped.json"
             for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
               RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
               LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
@@ -206,12 +204,13 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
-            jq < "$RUN/grouped.json" ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > new.json
-            cat new.json
-            jq < result.json --argjson new "$(cat new.json)" '. += [$new]' > result.json.tmp
-            cat result.json.tmp
-            mv result.json.tmp result.json
+            jq < "$RUN/grouped.json" ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > new.json && \
+              jq < result.json --argjson new "$(cat new.json)" '. += [$new]' > result.json.tmp && \
+              rm new.json && \
+              mv result.json.tmp result.json
           done
+          DIFFER='def post_recurse(f): def r: (f | select(. != null) | r), .; r; def post_recurse: post_recurse(.[]?); (. | (post_recurse | arrays) |= sort)'
+          diff <(jq -S "$DIFFER" results-main/result.json) <(jq -S "$DIFFER" result.json) || true
           diff -Baur results-main/result.json result.json || true
           {
             echo "### Failed Interop Tests"
