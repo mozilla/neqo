@@ -173,6 +173,9 @@ jobs:
           cat results-main/result.json || true
           echo "{}" > result.json
           for RUN in results/*; do
+            echo "$CLIENT $SERVER"
+            ls -l result.json || true
+            cat result.json || true
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
             SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
@@ -200,26 +203,31 @@ jobs:
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
-              cat result.json
+            done
               jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" | \
                 jq ". += $(cat "$RUN/grouped.json")" > result.json.tmp && \
                 mv result.json.tmp result.json
-              cat result.json
-            done
           done
-          cat result.json
           diff -Baur results-main/result.json result.json || true
           {
             echo "### Failed Interop Tests"
+            SHA=$(cat results-main/baseline-sha.txt || true)
+            if [ -n "$SHA" ]; then
+              {
+                echo "Interop failures relative to $SHA."
+                echo
+              } >> results.md
+            fi
             if [ -e failed.md ]; then
-              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
+              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
               cat failed.md
             else
               echo "None :tada:"
             fi
-            echo "<details><summary>Succeeded and unsupported tests</summary>"
+            echo "<details><summary>All results</summary>"
+            echo
+            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
             for GROUP in succeeded unsupported; do
-              echo
               echo "### ${GROUP^} Interop Tests"
               if [ -e "$GROUP.md" ]; then
                 cat "$GROUP.md"
@@ -227,6 +235,7 @@ jobs:
                 echo "None :question:"
               fi
             done
+            echo
             echo "</details>"
           } >> comment.md
 
