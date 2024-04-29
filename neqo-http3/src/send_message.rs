@@ -181,7 +181,7 @@ impl SendStream for SendMessage {
         if available < MIN_DATA_FRAME_SIZE {
             conn.stream_set_writable_event_low_watermark(
                 self.stream_id(),
-                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).expect("MIN_DATA_FRAME_SIZE greater than 0"),
+                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).unwrap(),
             )?;
             return Ok(0);
         }
