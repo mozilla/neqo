@@ -559,11 +559,9 @@ impl RecvdPackets {
         }
     }
 
-    pub const fn max_len() -> usize {
-        // The worst possible ACK frame, assuming only one range.
-        // Note that this assumes one byte for the type and count of extra ranges.
-        1 + 8 + 8 + 1 + 8
-    }
+    /// Length of the worst possible ACK frame, assuming only one range and ECN counts.
+    /// Note that this assumes one byte for the type and count of extra ranges.
+    pub const MAX_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
 
     /// Generate an ACK frame for this packet number space.
     ///
@@ -595,7 +593,7 @@ impl RecvdPackets {
         // (`recovery::ACK_ONLY_SIZE_LIMIT - 1`).  This results in limiting the
         // ranges to 13 here.
         let max_ranges =
-            if let Some(avail) = builder.remaining().checked_sub(RecvdPackets::max_len()) {
+            if let Some(avail) = builder.remaining().checked_sub(RecvdPackets::MAX_ACK_LEN) {
                 // Apply a hard maximum to keep plenty of space for other stuff.
                 min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
             } else {
@@ -1161,7 +1159,7 @@ mod tests {
             .is_some());
 
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-        builder.set_limit(32);
+        builder.set_limit(RecvdPackets::MAX_ACK_LEN + 8);
 
         let mut stats = FrameStats::default();
         tracker.write_frame(

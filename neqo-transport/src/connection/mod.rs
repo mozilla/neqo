@@ -2252,8 +2252,10 @@ impl Connection {
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
             if let Some(ref close) = closing_frame {
-                if builder.remaining() > ClosingFrame::min_length() + RecvdPackets::max_len() {
+                if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::MAX_ACK_LEN {
                     // Include an ACK frame with the CONNECTION_CLOSE.
+                    let limit = builder.limit();
+                    builder.set_limit(limit - ClosingFrame::MIN_LENGTH);
                     self.acks.immediate_ack(now);
                     self.acks.write_frame(
                         *space,
@@ -2263,6 +2265,7 @@ impl Connection {
                         &mut tokens,
                         &mut self.stats.borrow_mut().frame_tx,
                     );
+                    builder.set_limit(limit);
                 }
                 // ConnectionError::Application is only allowed at 1RTT.
                 let sanitized = if *space == PacketNumberSpace::ApplicationData {
