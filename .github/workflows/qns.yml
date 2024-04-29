@@ -171,7 +171,7 @@ jobs:
       - run: |
           ls -l results-main || true
           cat results-main/result.json || true
-          echo "{}" > result.json
+          echo "[]" > result.json
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
@@ -206,9 +206,9 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
-            jq < result.json ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > a
-            cat a
-            jq < a ". += $(cat "$RUN/grouped.json")" > result.json.tmp
+            jq < "$RUN/grouped.json" ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > new.json
+            cat new.json
+            jq < result.json --argjson new "$(cat new.json)" '. += [$new]' > result.json.tmp
             cat result.json.tmp
             mv result.json.tmp result.json
           done
