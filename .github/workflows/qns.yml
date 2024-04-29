@@ -196,7 +196,7 @@ jobs:
           done
           {
             echo "### Failed Interop Tests"
-            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
+            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
             cat failed.md
             echo "<details><summary>Succeeded and unsupported tests</summary>"
             for GROUP in succeeded unsupported; do
