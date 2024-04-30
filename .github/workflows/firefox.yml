@@ -37,14 +37,14 @@ jobs:
       - name: Check out Neqo
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
-      - name: Maximize build space
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/maximize-build-space
+      # - name: Maximize build space
+      #   if: runner.os == 'Linux'
+      #   uses: ./.github/actions/maximize-build-space
 
-      # The previous step blew it away, so we need to check it out again.
-      - name: Check out Neqo again
-        if: runner.os == 'Linux'
-        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+      # # The previous step blew it away, so we need to check it out again.
+      # - name: Check out Neqo again
+      #   if: runner.os == 'Linux'
+      #   uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - name: Check out Firefox
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
