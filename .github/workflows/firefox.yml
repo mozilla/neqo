@@ -37,14 +37,22 @@ jobs:
       - name: Check out Neqo
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
-      # - name: Maximize build space
-      #   if: runner.os == 'Linux'
-      #   uses: ./.github/actions/maximize-build-space
+      - name: Maximize build space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/maximize-build-space
+        with:
+          root-reserve-mb: 4096
+          temp-reserve-mb: 4096
+          swap-size-mb: 8192
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-docker-images: true
 
-      # # The previous step blew it away, so we need to check it out again.
-      # - name: Check out Neqo again
-      #   if: runner.os == 'Linux'
-      #   uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+      # The previous step blew it away, so we need to check it out again.
+      - name: Check out Neqo again
+        if: runner.os == 'Linux'
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - name: Check out Firefox
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
@@ -70,7 +78,9 @@ jobs:
             echo "ac_add_options --with-ccache=sccache"
             echo "ac_add_options --enable-application=browser"
             # Work around https://bugzilla.mozilla.org/show_bug.cgi?id=1894031
-            [ "${{ matrix.type}}" == "debug" ] || echo "ac_add_options --disable-tests"
+            if [ "${{ runner.os }}" != "Windows" ] || [ "${{ matrix.type}}" != "debug" ]; then
+              echo "ac_add_options --disable-tests"
+            fi
             echo "ac_add_options --enable-${{ matrix.type }}"
           } >> mozconfig
           ./mach bootstrap --application-choice browser
