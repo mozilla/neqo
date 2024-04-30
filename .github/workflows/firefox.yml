@@ -106,7 +106,8 @@ jobs:
           EXT: ${{ runner.os == 'MacOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
-          ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT" || true
+          ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
+          exit 0
 
       - name: Export binary
         id: export
