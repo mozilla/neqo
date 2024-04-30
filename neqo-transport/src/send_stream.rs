@@ -1386,7 +1386,7 @@ impl SendStream {
         previous_limit: usize,
         current_limit: usize,
     ) {
-        let low_watermark = self.writable_event_low_watermark.into();
+        let low_watermark = self.writable_event_low_watermark.get();
 
         if low_watermark < previous_limit {
             // Stream was not constrained by limit before.
