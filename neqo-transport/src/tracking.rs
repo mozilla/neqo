@@ -592,13 +592,15 @@ impl RecvdPackets {
         // When congestion limited, ACK-only packets are 255 bytes at most
         // (`recovery::ACK_ONLY_SIZE_LIMIT - 1`).  This results in limiting the
         // ranges to 13 here.
-        let max_ranges =
-            if let Some(avail) = builder.remaining().checked_sub(RecvdPackets::MAX_ACK_LEN) {
-                // Apply a hard maximum to keep plenty of space for other stuff.
-                min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
-            } else {
-                return;
-            };
+        let max_ranges = if let Some(avail) = builder
+            .remaining()
+            .checked_sub(RecvdPackets::USEFUL_ACK_LEN)
+        {
+            // Apply a hard maximum to keep plenty of space for other stuff.
+            min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
+        } else {
+            return;
+        };
 
         let ranges = self
             .ranges
@@ -1161,7 +1163,7 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
-        builder.set_limit(RecvdPackets::MAX_ACK_LEN + 8);
+        builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);
 
         let mut stats = FrameStats::default();
         tracker.write_frame(
