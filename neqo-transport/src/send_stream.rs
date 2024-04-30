@@ -748,7 +748,7 @@ impl SendStream {
             sendorder: None,
             bytes_sent: 0,
             fair: false,
-            writable_event_low_watermark: 1.try_into().expect("1 greater 0"),
+            writable_event_low_watermark: 1.try_into().unwrap(),
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
