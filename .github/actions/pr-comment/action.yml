@@ -15,7 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395 # v4.1.6
       with:
         run-id: ${{ github.event.workflow_run.id }}
         name: ${{ inputs.name }}
@@ -32,7 +32,7 @@ runs:
           echo "[:arrow_down: Download logs]($(cat log-url))" >> contents
         fi
 
-    - uses: thollander/actions-comment-pull-request@v2
+    - uses: thollander/actions-comment-pull-request@fabd468d3a1a0b97feee5f6b9e499eab0dd903f6 # v2.5.0
       with:
         filePath: contents
         mode: ${{ inputs.mode }}
