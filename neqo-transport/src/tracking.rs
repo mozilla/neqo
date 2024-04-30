@@ -561,7 +561,7 @@ impl RecvdPackets {
 
     /// Length of the worst possible ACK frame, assuming only one range and ECN counts.
     /// Note that this assumes one byte for the type and count of extra ranges.
-    pub const MAX_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
+    pub const USEFUL_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
 
     /// Generate an ACK frame for this packet number space.
     ///
