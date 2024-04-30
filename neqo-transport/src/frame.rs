@@ -184,7 +184,7 @@ pub enum Frame<'a> {
         frame_type: u64,
         // Not a reference as we use this to hold the value.
         // This is not used in optimized builds anyway.
-        reason_phrase: Vec<u8>,
+        reason_phrase: String,
     },
     HandshakeDone,
     AckFrequency {
@@ -618,7 +618,7 @@ impl<'a> Frame<'a> {
                 Ok(Self::ConnectionClose {
                     error_code,
                     frame_type,
-                    reason_phrase,
+                    reason_phrase: String::from_utf8_lossy(&reason_phrase).to_string(),
                 })
             }
             FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
@@ -925,7 +925,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Transport(0x5678),
             frame_type: 0x1234,
-            reason_phrase: vec![0x01, 0x02, 0x03],
+            reason_phrase: String::from_utf8("\u{1}\u{2}\u{3}"),
         };
 
         just_dec(&f, "1c80005678523403010203");
@@ -936,7 +936,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Application(0x5678),
             frame_type: 0,
-            reason_phrase: vec![0x01, 0x02, 0x03],
+            reason_phrase: String::from_utf8("\u{1}\u{2}\u{3}"),
         };
 
         just_dec(&f, "1d8000567803010203");

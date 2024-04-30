@@ -545,7 +545,7 @@ impl From<&Frame<'_>> for QuicFrame {
                 },
                 error_code: Some(error_code.code()),
                 error_code_value: Some(0),
-                reason: Some(String::from_utf8_lossy(reason_phrase).to_string()),
+                reason: Some(reason_phrase.to_string()),
                 trigger_frame_type: Some(*frame_type),
             },
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
