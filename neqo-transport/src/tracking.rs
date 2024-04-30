@@ -1159,6 +1159,8 @@ mod tests {
             .is_some());
 
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        // The code pessimistically assumes that each range needs 16 bytes to express.
+        // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::MAX_ACK_LEN + 8);
 
         let mut stats = FrameStats::default();
