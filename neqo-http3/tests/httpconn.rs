@@ -276,7 +276,7 @@ fn test_data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::E
     let mut request = receive_request(&mut hconn_s).unwrap();
     request.send_headers(&[Header::new(":status", "200")])?;
 
-    // Sending these headers clears the serve's send stream buffer and thus
+    // Sending these headers clears the server's send stream buffer and thus
     // emits a DataWritable event.
     exchange_packets(&mut hconn_c, &mut hconn_s, None);
     let data_writable = |e| {
