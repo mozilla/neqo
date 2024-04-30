@@ -925,7 +925,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Transport(0x5678),
             frame_type: 0x1234,
-            reason_phrase: String::from_utf8("\u{1}\u{2}\u{3}"),
+            reason_phrase: String::from_utf8(vec![0x01, 0x02, 0x03]).unwrap(),
         };
 
         just_dec(&f, "1c80005678523403010203");
@@ -936,7 +936,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Application(0x5678),
             frame_type: 0,
-            reason_phrase: String::from_utf8("\u{1}\u{2}\u{3}"),
+            reason_phrase: String::from_utf8(vec![0x01, 0x02, 0x03]).unwrap(),
         };
 
         just_dec(&f, "1d8000567803010203");
