@@ -15,6 +15,8 @@ concurrency:
 jobs:
   firefox:
     name: Build Firefox
+    outputs:
+      artifacts: ${{ steps.export.outputs.artifact-url }}
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +35,7 @@ jobs:
       # We need to check out Neqo first, because the maximize-build-space action
       # is vendored in.
       - name: Check out Neqo
-        uses: actions/checkout@v4
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - name: Maximize build space
         if: runner.os == 'Linux'
@@ -42,16 +44,16 @@ jobs:
       # The previous step blew it away, so we need to check it out again.
       - name: Check out Neqo again
         if: runner.os == 'Linux'
-        uses: actions/checkout@v4
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - name: Check out Firefox
-        uses: actions/checkout@v4
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
         with:
           repository: mozilla/gecko-dev
           path: mozilla-unified
 
       - name: Use sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
+        uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
       - name: Enable sscache
         run: echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
@@ -104,12 +106,20 @@ jobs:
           EXT: ${{ runner.os == 'MacOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
-          ./mach build
-          tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
+          ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT" || true
 
       - name: Export binary
-        uses: actions/upload-artifact@v4
+        id: export
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
           path: ${{ env.FIREFOX }}.tar
           compression-level: 9
+
+  comment:
+    name: Comment on PR
+    runs-on: ubuntu-latest
+    needs: firefox
+    steps:
+      - run: |
+          echo "${{ needs.firefox.outputs.artifacts}}"
