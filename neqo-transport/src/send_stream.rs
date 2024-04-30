@@ -1220,9 +1220,9 @@ impl SendStream {
             &mut self.state
         {
             let previous_limit = fc.available();
-            fc.update(limit);
-            let current_limit = fc.available();
-            self.maybe_emit_writable_event(previous_limit, current_limit);
+            if let Some(current_limit) = fc.update(limit) {
+                self.maybe_emit_writable_event(previous_limit, current_limit);
+            }
         }
     }
 
@@ -2486,7 +2486,7 @@ mod tests {
         // Increasing conn max (conn:4, stream:4) will unblock but not emit
         // event b/c that happens in Connection::emit_frame() (tested in
         // connection.rs)
-        assert!(conn_fc.borrow_mut().update(4));
+        assert!(conn_fc.borrow_mut().update(4).is_some());
         assert_eq!(conn_events.events().count(), 0);
         assert_eq!(s.avail(), 2);
         assert_eq!(s.send(b"hello").unwrap(), 2);
@@ -2528,14 +2528,14 @@ mod tests {
 
         // Increasing the connection limit (conn:10, stream:0, watermark: 3) will not generate
         // event or allow sending anything. Stream is constrained by stream limit.
-        assert!(conn_fc.borrow_mut().update(10));
+        assert!(conn_fc.borrow_mut().update(10).is_some());
         assert_eq!(s.avail(), 0);
         assert_eq!(conn_events.events().count(), 0);
 
         // Increasing the connection limit further (conn:11, stream:0, watermark: 3) will not
         // generate event or allow sending anything. Stream wasn't constrained by connection
         // limit before.
-        assert!(conn_fc.borrow_mut().update(11));
+        assert!(conn_fc.borrow_mut().update(11).is_some());
         assert_eq!(s.avail(), 0);
         assert_eq!(conn_events.events().count(), 0);
 
