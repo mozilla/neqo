@@ -176,9 +176,6 @@ jobs:
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
             SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
-            echo "$CLIENT $SERVER"
-            ls -l result.json || true
-            cat result.json || true
             jq < "$RUN/result.json" '
                 . as $data |
                 {
