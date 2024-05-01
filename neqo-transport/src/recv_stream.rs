@@ -13,6 +13,7 @@ use std::{
     collections::BTreeMap,
     mem,
     rc::{Rc, Weak},
+    time::{Duration, Instant},
 };
 
 use neqo_common::{qtrace, Role};
@@ -30,11 +31,12 @@ use crate::{
     AppError, Error, Res,
 };
 
+// TODO: Remove. Should no longer be needed.
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
 // Export as usize for consistency with SEND_BUFFER_SIZE
 #[allow(clippy::cast_possible_truncation)] // Yeah, nope.
-pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
+pub const INITIAL_RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 #[derive(Debug, Default)]
 pub(crate) struct RecvStreams {
@@ -48,9 +50,11 @@ impl RecvStreams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         for stream in self.streams.values_mut() {
-            stream.write_frame(builder, tokens, stats);
+            stream.write_frame(builder, tokens, stats, now, rtt);
             if builder.is_full() {
                 return;
             }
@@ -124,9 +128,10 @@ impl RecvStreams {
 /// from incoming STREAM frames.
 #[derive(Debug, Default)]
 pub struct RxStreamOrderer {
+    // TODO: Consider shrinking from time to time?
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
-    received: u64,                       // The number of bytes has stored in `data_ranges`
+    received: u64,                       // The number of bytes stored in `data_ranges`
 }
 
 impl RxStreamOrderer {
@@ -764,6 +769,7 @@ impl RecvStream {
     }
 
     /// If we should tell the sender they have more credit, return an offset
+    // TODO: This doesn't return anything.
     fn flow_control_retire_data(
         new_read: u64,
         fc: &mut ReceiverFlowControl<StreamId>,
@@ -914,10 +920,12 @@ impl RecvStream {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         match &mut self.state {
             // Maybe send MAX_STREAM_DATA
-            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats),
+            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats, now, rtt),
             // Maybe send STOP_SENDING
             RecvStreamState::AbortReading {
                 frame_needed, err, ..
@@ -1010,7 +1018,12 @@ impl RecvStream {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, ops::Range, rc::Rc};
+    use std::{
+        cell::RefCell,
+        ops::Range,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
 
     use neqo_common::{qtrace, Encoder};
 
@@ -1020,7 +1033,7 @@ mod tests {
         packet::PacketBuilder,
         recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
         stats::FrameStats,
-        ConnectionEvents, Error, StreamId, RECV_BUFFER_SIZE,
+        ConnectionEvents, Error, StreamId, INITIAL_RECV_BUFFER_SIZE,
     };
 
     const SESSION_WINDOW: usize = 1024;
@@ -1468,13 +1481,13 @@ mod tests {
     #[test]
     fn stream_flowc_update() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
+        let mut buf = vec![0u8; INITIAL_RECV_BUFFER_SIZE + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; RECV_BUFFER_SIZE];
+        let big_buf = vec![0; INITIAL_RECV_BUFFER_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         assert!(!s.has_frames_to_write());
-        assert_eq!(s.read(&mut buf).unwrap(), (RECV_BUFFER_SIZE, false));
+        assert_eq!(s.read(&mut buf).unwrap(), (INITIAL_RECV_BUFFER_SIZE, false));
         assert!(!s.data_ready());
 
         // flow msg generated!
@@ -1483,7 +1496,13 @@ mod tests {
         // consume it
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let mut token = Vec::new();
-        s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
+        s.write_frame(
+            &mut builder,
+            &mut token,
+            &mut FrameStats::default(),
+            Instant::now(),
+            Duration::from_millis(100),
+        );
 
         // it should be gone
         assert!(!s.has_frames_to_write());
@@ -1503,7 +1522,7 @@ mod tests {
     fn stream_max_stream_data() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; RECV_BUFFER_SIZE];
+        let big_buf = vec![0; INITIAL_RECV_BUFFER_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
             .unwrap_err();
@@ -1547,7 +1566,7 @@ mod tests {
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        let mut buf = vec![0; RECV_BUFFER_SIZE];
+        let mut buf = vec![0; INITIAL_RECV_BUFFER_SIZE];
         // Write from buf at first.
         s.inbound_stream_frame(false, 0, &buf).unwrap();
         // Then read into it.
@@ -1870,7 +1889,13 @@ mod tests {
         fc.borrow_mut()
             .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 0);
-        s.write_frame(&mut builder, &mut token, &mut stats);
+        s.write_frame(
+            &mut builder,
+            &mut token,
+            &mut stats,
+            Instant::now(),
+            Duration::from_millis(100),
+        );
         assert_eq!(stats.max_stream_data, 1);
 
         // Receive 1 byte that will case a session fc update after it is read.
@@ -1883,7 +1908,13 @@ mod tests {
         fc.borrow_mut()
             .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 1);
-        s.write_frame(&mut builder, &mut token, &mut stats);
+        s.write_frame(
+            &mut builder,
+            &mut token,
+            &mut stats,
+            Instant::now(),
+            Duration::from_millis(100),
+        );
         assert_eq!(stats.max_stream_data, 1);
     }
 

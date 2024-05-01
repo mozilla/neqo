@@ -202,7 +202,7 @@ fn unlimited_bandwidth_50ms_delay_connection() {
     // TODO: Not tenable as a unit test today, given that this will take roughly 300s
     // of wallclock time to execute on the simulator. Large for now to make sure
     // congestion control isn't the limiting factor.
-    const TRANSFER_AMOUNT: usize = 1024 * 1024 * 1024;
+    const TRANSFER_AMOUNT: usize = 10 * 1024 * 1024 * 1024;
     // One way delay of 25ms, thus RTT of 50ms.
     const DELAY: Duration = Duration::from_millis(25);
     // TODO: We actually always want 25ms here. Hack for a range including 25ms

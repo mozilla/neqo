@@ -1987,7 +1987,13 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
+        now: Instant,
     ) {
+        let rtt = self.paths.primary().map_or_else(
+            || RttEstimate::default().estimate(),
+            |p| p.borrow().rtt().estimate(),
+        );
+
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
@@ -2002,7 +2008,7 @@ impl Connection {
             TransmissionPriority::Important,
         ] {
             self.streams
-                .write_frames(prio, builder, tokens, frame_stats);
+                .write_frames(prio, builder, tokens, frame_stats, now, rtt);
             if builder.is_full() {
                 return;
             }
@@ -2021,7 +2027,7 @@ impl Connection {
 
         for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
             self.streams
-                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+                .write_frames(prio, builder, tokens, &mut stats.frame_tx, now, rtt);
             if builder.is_full() {
                 return;
             }
@@ -2051,8 +2057,14 @@ impl Connection {
             return;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
+        self.streams.write_frames(
+            TransmissionPriority::Low,
+            builder,
+            tokens,
+            frame_stats,
+            now,
+            rtt,
+        );
 
         #[cfg(test)]
         if let Some(w) = &mut self.test_frame_writer {
@@ -2159,7 +2171,7 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                self.write_appdata_frames(builder, &mut tokens);
+                self.write_appdata_frames(builder, &mut tokens, now);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(space, builder, &mut tokens, stats);
