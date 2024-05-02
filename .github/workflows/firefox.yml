@@ -60,11 +60,11 @@ jobs:
           repository: mozilla/gecko-dev
           path: mozilla-unified
 
-      - name: Use sccache
-        uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+      # - name: Use sccache
+      #   uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-      - name: Enable sscache
-        run: echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+      # - name: Enable sscache
+      #   run: echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
