@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+env:
+    FIREFOX: Firefox
+
 jobs:
   firefox:
     name: Build Firefox
@@ -27,7 +30,6 @@ jobs:
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
       CARGO_HOME: ${{ github.workspace }}/cargo
-      FIREFOX: Firefox
 
     steps:
       # We need to check out Neqo first, because the maximize-build-space action
@@ -106,7 +108,7 @@ jobs:
             echo 'neqo-crypto = { path = "../neqo-crypto" }'
           } >> Cargo.toml
           # shellcheck disable=SC2046
-          cargo update $(ls ../neqo-*)
+          cargo update neqo-http3 neqo-transport neqo-common neqo-qpack neqo-crypto
           ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
@@ -123,7 +125,7 @@ jobs:
         id: export
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
-          name: ${{ matrix.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
+          name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
           path: ${{ env.FIREFOX }}.tar
           compression-level: 9
 
@@ -132,7 +134,7 @@ jobs:
       - name: Export artifact URL
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
-          name: artifact-${{ matrix.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
+          name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
           path: artifact
 
   comment:
@@ -148,10 +150,10 @@ jobs:
       - run: |
           {
             echo "### Firefox builds for this PR"
-            for os in "${{ job.firefox.strategy.matrix.os }}"; do
+            for os in Linux MacOS Windows; do
               echo -n "* **$os**:"
-              for type in "${{ job.firefox.strategy.matrix.type }}"; do
-                echo -n " [$type]($(cat artifacts/artifact-$os-${{ env.FIREFOX }}-$type))"
+              for type in debug release; do
+                echo -n " [${type^}]($(cat artifacts/artifact-$os-${{ env.FIREFOX }}-$type))"
               done
               echo
             done
