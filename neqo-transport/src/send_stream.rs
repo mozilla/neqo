@@ -1388,18 +1388,14 @@ impl SendStream {
     ) {
         let low_watermark = self.writable_event_low_watermark.get();
 
-        if low_watermark < previous_limit {
-            // Stream was not constrained by limit before.
-            return;
-        }
-
-        if current_limit < low_watermark {
-            // Stream is still constrained by limit.
-            return;
-        }
-
-        if self.avail() < low_watermark {
-            // Stream is constrained by different limit.
+        // Skip if:
+        // - stream was not constrained by limit before,
+        // - or stream is still constrained by limit,
+        // - or stream is constrained by different limit.
+        if low_watermark < previous_limit
+            || current_limit < low_watermark
+            || self.avail() < low_watermark
+        {
             return;
         }
 
