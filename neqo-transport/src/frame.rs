@@ -614,11 +614,11 @@ impl<'a> Frame<'a> {
                     0
                 };
                 // We can tolerate this copy for now.
-                let reason_phrase = d(dec.decode_vvec())?.to_vec();
+                let reason_phrase = String::from_utf8_lossy(d(dec.decode_vvec())?).to_string();
                 Ok(Self::ConnectionClose {
                     error_code,
                     frame_type,
-                    reason_phrase: String::from_utf8_lossy(&reason_phrase).to_string(),
+                    reason_phrase,
                 })
             }
             FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
@@ -936,7 +936,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Application(0x5678),
             frame_type: 0,
-            reason_phrase: String::from_utf8(vec![0x01, 0x02, 0x03]).unwrap(),
+            reason_phrase: String::from("\x01\x02\x03"),
         };
 
         just_dec(&f, "1d8000567803010203");
