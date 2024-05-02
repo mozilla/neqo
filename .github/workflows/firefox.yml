@@ -105,6 +105,7 @@ jobs:
             echo 'neqo-qpack = { path = "../neqo-qpack" }'
             echo 'neqo-crypto = { path = "../neqo-crypto" }'
           } >> Cargo.toml
+          cargo update
           ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
