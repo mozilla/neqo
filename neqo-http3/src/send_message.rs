@@ -179,6 +179,9 @@ impl SendStream for SendMessage {
             .stream_avail_send_space(self.stream_id())
             .map_err(|e| Error::map_stream_send_errors(&e.into()))?;
         if available < MIN_DATA_FRAME_SIZE {
+            // Setting this once, instead of every time the available send space
+            // is exhausted, would suffice. That said, function call should be
+            // cheap, thus not worth optimizing.
             conn.stream_set_writable_event_low_watermark(
                 self.stream_id(),
                 NonZeroUsize::new(MIN_DATA_FRAME_SIZE).unwrap(),
