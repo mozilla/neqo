@@ -2828,7 +2828,6 @@ impl Connection {
                 reason_phrase,
             } => {
                 self.stats.borrow_mut().frame_rx.connection_close += 1;
-                let reason_phrase = String::from_utf8_lossy(&reason_phrase);
                 qinfo!(
                     [self],
                     "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
