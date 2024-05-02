@@ -156,10 +156,13 @@ impl ClosingFrame {
         }
     }
 
+    /// Length of a closing frame with a truncated `reason_length`. Allow 8 bytes for the reason
+    /// phrase to ensure that if it needs to be truncated there is still at least a few bytes of
+    /// the value.
+    pub const MIN_LENGTH: usize = 1 + 8 + 8 + 2 + 8;
+
     pub fn write_frame(&self, builder: &mut PacketBuilder) {
-        // Allow 8 bytes for the reason phrase to ensure that if it needs to be
-        // truncated there is still at least a few bytes of the value.
-        if builder.remaining() < 1 + 8 + 8 + 2 + 8 {
+        if builder.remaining() < ClosingFrame::MIN_LENGTH {
             return;
         }
         match &self.error {
