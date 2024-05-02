@@ -1,12 +1,16 @@
 name: QUIC Network Simulator
 on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
   schedule:
     # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
     - cron: '0 1 * * *'
   workflow_dispatch:
-  pull_request:
-    branches: ["main"]
-  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
