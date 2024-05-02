@@ -345,6 +345,12 @@ trait Handler {
     fn take_token(&mut self) -> Option<ResumptionToken>;
 }
 
+enum CloseState {
+    NotClosing,
+    Closing,
+    Closed,
+}
+
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
     fn process_output(&mut self, now: Instant) -> Output;
@@ -355,11 +361,7 @@ trait Client {
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
-    /// Returns [`Some(_)`] if the connection is closed.
-    ///
-    /// Note that connection was closed without error on
-    /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
-    fn is_closed(&self) -> Result<bool, ConnectionError>;
+    fn is_closed(&self) -> Result<CloseState, ConnectionError>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -385,12 +387,14 @@ impl<'a, H: Handler> Runner<'a, H> {
                 // more work
                 (false, _) => {}
                 // no more work, closing connection
-                (true, false) => {
+                (true, CloseState::NotClosing) => {
                     self.client.close(Instant::now(), 0, "kthxbye!");
                     continue;
                 }
+                // no more work, already closing connection
+                (true, CloseState::Closing) => {}
                 // no more work, connection closed, terminating
-                (true, true) => break,
+                (true, CloseState::Closed) => break,
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {

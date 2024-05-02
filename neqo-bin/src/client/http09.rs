@@ -25,7 +25,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, Res};
+use super::{get_output_file, qlog_new, Args, CloseState, Res};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -163,15 +163,23 @@ impl super::Client for Connection {
         }
     }
 
-    fn is_closed(&self) -> Result<bool, ConnectionError> {
-        match self.state() {
-            State::Closed(
-                ConnectionError::Transport(neqo_transport::Error::NoError)
+    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
+        let (state, error) = match self.state() {
+            State::Closing { error, .. } => (CloseState::Closing, error),
+            State::Draining { error, .. } => (CloseState::Closing, error),
+            State::Closed(error) => (CloseState::Closed, error),
+            _ => return Ok(CloseState::NotClosing),
+        };
+
+        if matches!(
+            error,
+            ConnectionError::Transport(neqo_transport::Error::NoError)
                 | ConnectionError::Application(0),
-            ) => Ok(true),
-            State::Closed(err) => Err(err.clone()),
-            _ => Ok(false),
+        ) {
+            return Ok(state);
         }
+
+        Err(error.clone())
     }
 
     fn stats(&self) -> neqo_transport::Stats {

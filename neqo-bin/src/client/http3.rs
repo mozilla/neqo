@@ -27,7 +27,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, Res};
+use super::{get_output_file, qlog_new, Args, CloseState, Res};
 
 pub(crate) struct Handler<'a> {
     #[allow(
@@ -106,15 +106,22 @@ pub(crate) fn create_client(
 }
 
 impl super::Client for Http3Client {
-    fn is_closed(&self) -> Result<bool, ConnectionError> {
-        match self.state() {
-            Http3State::Closed(
-                ConnectionError::Transport(neqo_transport::Error::NoError)
+    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
+        let (state, error) = match self.state() {
+            Http3State::Closing(error) => (CloseState::Closing, error),
+            Http3State::Closed(error) => (CloseState::Closed, error),
+            _ => return Ok(CloseState::NotClosing),
+        };
+
+        if matches!(
+            error,
+            ConnectionError::Transport(neqo_transport::Error::NoError)
                 | ConnectionError::Application(0),
-            ) => Ok(true),
-            Http3State::Closed(err) => Err(err.clone()),
-            _ => Ok(false),
+        ) {
+            return Ok(state);
         }
+
+        Err(error.clone())
     }
 
     fn process_output(&mut self, now: Instant) -> Output {
