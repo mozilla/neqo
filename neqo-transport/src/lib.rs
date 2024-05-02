@@ -223,6 +223,16 @@ impl ConnectionError {
             Self::Transport(_) => None,
         }
     }
+
+    /// Checks enclosed error for [`Error::NoError`] and
+    /// [`ConnectionError::Application(0)`].
+    #[must_use]
+    pub fn is_error(&self) -> bool {
+        !matches!(
+            self,
+            ConnectionError::Transport(Error::NoError) | ConnectionError::Application(0),
+        )
+    }
 }
 
 impl From<CloseError> for ConnectionError {

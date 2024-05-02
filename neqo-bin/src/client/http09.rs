@@ -25,7 +25,7 @@ use neqo_transport::{
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, Res};
+use super::{get_output_file, qlog_new, Args, CloseState, Res};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -142,6 +142,26 @@ pub(crate) fn create_client(
     Ok(client)
 }
 
+impl TryFrom<&State> for CloseState {
+    type Error = ConnectionError;
+
+    fn try_from(value: &State) -> Result<Self, Self::Error> {
+        let (state, error) = match value {
+            State::Closing { error, .. } | State::Draining { error, .. } => {
+                (CloseState::Closing, error)
+            }
+            State::Closed(error) => (CloseState::Closed, error),
+            _ => return Ok(CloseState::NotClosing),
+        };
+
+        if error.is_error() {
+            Err(error.clone())
+        } else {
+            Ok(state)
+        }
+    }
+}
+
 impl super::Client for Connection {
     fn process_output(&mut self, now: Instant) -> Output {
         self.process_output(now)
@@ -163,15 +183,8 @@ impl super::Client for Connection {
         }
     }
 
-    fn is_closed(&self) -> Result<bool, ConnectionError> {
-        match self.state() {
-            State::Closed(
-                ConnectionError::Transport(neqo_transport::Error::NoError)
-                | ConnectionError::Application(0),
-            ) => Ok(true),
-            State::Closed(err) => Err(err.clone()),
-            _ => Ok(false),
-        }
+    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
+        self.state().try_into()
     }
 
     fn stats(&self) -> neqo_transport::Stats {
