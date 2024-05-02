@@ -142,6 +142,26 @@ pub(crate) fn create_client(
     Ok(client)
 }
 
+impl TryFrom<&State> for CloseState {
+    type Error = ConnectionError;
+
+    fn try_from(value: &State) -> Result<Self, Self::Error> {
+        let (state, error) = match value {
+            State::Closing { error, .. } | State::Draining { error, .. } => {
+                (CloseState::Closing, error)
+            }
+            State::Closed(error) => (CloseState::Closed, error),
+            _ => return Ok(CloseState::NotClosing),
+        };
+
+        if error.is_error() {
+            Err(error.clone())
+        } else {
+            Ok(state)
+        }
+    }
+}
+
 impl super::Client for Connection {
     fn process_output(&mut self, now: Instant) -> Output {
         self.process_output(now)
@@ -164,22 +184,7 @@ impl super::Client for Connection {
     }
 
     fn is_closed(&self) -> Result<CloseState, ConnectionError> {
-        let (state, error) = match self.state() {
-            State::Closing { error, .. } => (CloseState::Closing, error),
-            State::Draining { error, .. } => (CloseState::Closing, error),
-            State::Closed(error) => (CloseState::Closed, error),
-            _ => return Ok(CloseState::NotClosing),
-        };
-
-        if matches!(
-            error,
-            ConnectionError::Transport(neqo_transport::Error::NoError)
-                | ConnectionError::Application(0),
-        ) {
-            return Ok(state);
-        }
-
-        Err(error.clone())
+        self.state().try_into()
     }
 
     fn stats(&self) -> neqo_transport::Stats {

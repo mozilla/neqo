@@ -105,23 +105,27 @@ pub(crate) fn create_client(
     Ok(client)
 }
 
-impl super::Client for Http3Client {
-    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
-        let (state, error) = match self.state() {
+impl TryFrom<Http3State> for CloseState {
+    type Error = ConnectionError;
+
+    fn try_from(value: Http3State) -> Result<Self, Self::Error> {
+        let (state, error) = match value {
             Http3State::Closing(error) => (CloseState::Closing, error),
             Http3State::Closed(error) => (CloseState::Closed, error),
             _ => return Ok(CloseState::NotClosing),
         };
 
-        if matches!(
-            error,
-            ConnectionError::Transport(neqo_transport::Error::NoError)
-                | ConnectionError::Application(0),
-        ) {
-            return Ok(state);
+        if error.is_error() {
+            Err(error.clone())
+        } else {
+            Ok(state)
         }
+    }
+}
 
-        Err(error.clone())
+impl super::Client for Http3Client {
+    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
+        self.state().try_into()
     }
 
     fn process_output(&mut self, now: Instant) -> Output {

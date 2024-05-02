@@ -383,6 +383,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 continue;
             }
 
+            #[allow(clippy::match_same_arms)]
             match (handler_done, self.client.is_closed()?) {
                 // more work
                 (false, _) => {}
