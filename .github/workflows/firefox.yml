@@ -30,6 +30,8 @@ jobs:
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
       CARGO_HOME: ${{ github.workspace }}/cargo
+    outputs:
+      export: ${{ steps.export.outputs.export }}
 
     steps:
       # We need to check out Neqo first, because the maximize-build-space action
@@ -106,29 +108,33 @@ jobs:
 
       - name: Build Firefox
         env:
-          NAME: ${{ runner.os == 'MacOS' && 'Nightly' || 'bin' }}
-          TYPE: ${{ runner.os == 'MacOS' && matrix.type == 'debug' && 'Debug' || '' }}
-          EXT: ${{ runner.os == 'MacOS' && '.app' || '' }}
+          NAME: ${{ runner.os == 'macOS' && 'Nightly' || 'bin' }}
+          TYPE: ${{ runner.os == 'macOS' && matrix.type == 'debug' && 'Debug' || '' }}
+          EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
           exit 0
 
       - name: Export binary
-        id: export
+        id: upload
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
           path: ${{ env.FIREFOX }}.tar
           compression-level: 9
 
-      - run: echo "${{ steps.export.outputs.artifact-url }}" >> artifact
+      - id: export
+        run: |
+          echo "${{ runner.os }}_${{ env.FIREFOX }}_${{ matrix.type }}=${{ steps.upload.outputs.artifact-url }}" >> "$GITHUB_OUTPUT"
+          echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
 
       - name: Export artifact URL
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
           path: artifact
+          retention-days: 1
 
   comment:
     name: Comment on PR
@@ -147,11 +153,13 @@ jobs:
           {
             echo "### Firefox builds for this PR"
             echo "The following builds are available for testing. Crossed-out builds did not succeed."
-            for os in Linux MacOS Windows; do
+            for os in Linux macOS Windows; do
               echo -n "* **$os**:"
               for type in debug release; do
-                if [ -e "artifacts/artifact-$os-${{ env.FIREFOX }}-$type" ]; then
-                  echo -n " [${type^}]($(cat artifacts/artifact-$os-${{ env.FIREFOX }}-$type))"
+                echo "${{ needs.firefox.outputs.export }}"
+                artifact="artifacts/artifact-$os-${{ env.FIREFOX }}-$type/artifact"
+                if [ -e "$artifact" ]; then
+                  echo -n " [${type^}]($(cat $artifact))"
                 else
                   echo -n " ~~${type^}~~"
                 fi
