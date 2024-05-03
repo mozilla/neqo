@@ -209,13 +209,17 @@ impl ::std::fmt::Display for Error {
 
 pub type AppError = u64;
 
+#[deprecated(note = "use `CloseReason` instead")]
+pub type ConnectionError = CloseReason;
+
+/// Reason why a connection closed.
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
-pub enum ConnectionError {
+pub enum CloseReason {
     Transport(Error),
     Application(AppError),
 }
 
-impl ConnectionError {
+impl CloseReason {
     #[must_use]
     pub fn app_code(&self) -> Option<AppError> {
         match self {
@@ -225,17 +229,17 @@ impl ConnectionError {
     }
 
     /// Checks enclosed error for [`Error::NoError`] and
-    /// [`ConnectionError::Application(0)`].
+    /// [`CloseReason::Application(0)`].
     #[must_use]
     pub fn is_error(&self) -> bool {
         !matches!(
             self,
-            ConnectionError::Transport(Error::NoError) | ConnectionError::Application(0),
+            CloseReason::Transport(Error::NoError) | CloseReason::Application(0),
         )
     }
 }
 
-impl From<CloseError> for ConnectionError {
+impl From<CloseError> for CloseReason {
     fn from(err: CloseError) -> Self {
         match err {
             CloseError::Transport(c) => Self::Transport(Error::PeerError(c)),

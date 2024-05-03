@@ -20,7 +20,7 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
+    CloseReason, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
     StreamId, StreamType,
 };
 use url::Url;
@@ -143,7 +143,7 @@ pub(crate) fn create_client(
 }
 
 impl TryFrom<&State> for CloseState {
-    type Error = ConnectionError;
+    type Error = CloseReason;
 
     fn try_from(value: &State) -> Result<Self, Self::Error> {
         let (state, error) = match value {
@@ -183,7 +183,7 @@ impl super::Client for Connection {
         }
     }
 
-    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
+    fn is_closed(&self) -> Result<CloseState, CloseReason> {
         self.state().try_into()
     }
 

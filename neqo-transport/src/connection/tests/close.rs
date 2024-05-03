@@ -14,13 +14,13 @@ use super::{
 };
 use crate::{
     tparams::{self, TransportParameter},
-    AppError, ConnectionError, Error, ERROR_APPLICATION_CLOSE,
+    AppError, CloseReason, Error, ERROR_APPLICATION_CLOSE,
 };
 
 fn assert_draining(c: &Connection, expected: &Error) {
     assert!(c.state().closed());
     if let State::Draining {
-        error: ConnectionError::Transport(error),
+        error: CloseReason::Transport(error),
         ..
     } = c.state()
     {
@@ -114,7 +114,7 @@ fn bad_tls_version() {
     let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert_eq!(
         *server.state(),
-        State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+        State::Closed(CloseReason::Transport(Error::ProtocolViolation))
     );
     assert!(dgram.is_some());
     client.process_input(&dgram.unwrap(), now());
@@ -168,7 +168,6 @@ fn closing_and_draining() {
     assert!(client_close.is_some());
     let client_close_timer = client.process(None, now()).callback();
     assert_ne!(client_close_timer, Duration::from_secs(0));
-
     // The client will spit out the same packet in response to anything it receives.
     let p3 = send_something(&mut server, now());
     let client_close2 = client.process(Some(&p3), now()).dgram();
@@ -182,7 +181,7 @@ fn closing_and_draining() {
     assert_eq!(end, Output::None);
     assert_eq!(
         *client.state(),
-        State::Closed(ConnectionError::Application(APP_ERROR))
+        State::Closed(CloseReason::Application(APP_ERROR))
     );
 
     // When the server receives the close, it too should generate CONNECTION_CLOSE.
@@ -200,7 +199,7 @@ fn closing_and_draining() {
     assert_eq!(end, Output::None);
     assert_eq!(
         *server.state(),
-        State::Closed(ConnectionError::Transport(Error::PeerApplicationError(
+        State::Closed(CloseReason::Transport(Error::PeerApplicationError(
             APP_ERROR
         )))
     );
