@@ -338,7 +338,7 @@ impl Connection {
             NeqoQlog::default(),
             now,
         );
-        c.setup_handshake_path(&Rc::new(RefCell::new(path)));
+        c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
         Ok(c)
     }
 
@@ -1456,7 +1456,7 @@ impl Connection {
         }
 
         if self.state == State::WaitInitial {
-            self.start_handshake(path, packet);
+            self.start_handshake(path, packet, now);
         }
 
         if self.state.connected() {
@@ -1654,7 +1654,7 @@ impl Connection {
     /// During connection setup, the first path needs to be setup.
     /// This uses the connection IDs that were provided during the handshake
     /// to setup that path.
-    fn setup_handshake_path(&mut self, path: &PathRef) {
+    fn setup_handshake_path(&mut self, path: &PathRef, now: Instant) {
         self.paths.make_permanent(
             path,
             Some(self.local_initial_source_cid.clone()),
@@ -1668,6 +1668,9 @@ impl Connection {
                     .clone(),
             ),
         );
+        if self.role == Role::Client {
+            path.borrow_mut().set_valid(now);
+        }
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
@@ -1706,7 +1709,7 @@ impl Connection {
             // First try to fill in handshake details.
             if packet.packet_type() == PacketType::Initial {
                 self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
-                self.setup_handshake_path(path);
+                self.setup_handshake_path(path, now);
             } else {
                 // Otherwise try to get a usable connection ID.
                 mem::drop(self.ensure_permanent(path));
@@ -1714,7 +1717,7 @@ impl Connection {
         }
     }
 
-    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket) {
+    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) {
         qtrace!([self], "starting handshake");
         debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
@@ -1723,7 +1726,7 @@ impl Connection {
             self.cid_manager
                 .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
             // Make a path on which to run the handshake.
-            self.setup_handshake_path(path);
+            self.setup_handshake_path(path, now);
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.version, self.role) {
                 Ok(true) => {
