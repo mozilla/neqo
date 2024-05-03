@@ -893,7 +893,9 @@ impl LossRecovery {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
+        if primary_path.borrow().is_valid() {
+            self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
+        }
         lost_packets
     }
 
@@ -922,7 +924,7 @@ impl LossRecovery {
                 } else {
                     SendProfile::new_limited(mtu)
                 }
-            } else if sender.recovery_packet() {
+            } else if path.is_valid() && sender.recovery_packet() {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
