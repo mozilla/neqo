@@ -7,7 +7,7 @@
 use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId};
 
-use crate::Res;
+use crate::{qlog, Res};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BufferedStream {
@@ -75,6 +75,8 @@ impl BufferedStream {
                     *buf = b;
                 }
             }
+
+            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, sent);
         }
         Ok(sent)
     }
@@ -88,6 +90,9 @@ impl BufferedStream {
         if let Self::Initialized { stream_id, buf } = self {
             if buf.is_empty() {
                 let res = conn.stream_send_atomic(*stream_id, to_send)?;
+                if res {
+                    qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, to_send.len());
+                }
                 Ok(res)
             } else {
                 Ok(false)
