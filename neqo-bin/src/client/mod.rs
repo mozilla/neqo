@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionError, ConnectionId, Version};
+use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -80,11 +80,11 @@ impl From<neqo_transport::Error> for Error {
     }
 }
 
-impl From<neqo_transport::ConnectionError> for Error {
-    fn from(err: neqo_transport::ConnectionError) -> Self {
+impl From<neqo_transport::CloseReason> for Error {
+    fn from(err: neqo_transport::CloseReason) -> Self {
         match err {
-            ConnectionError::Transport(e) => Self::TransportError(e),
-            ConnectionError::Application(e) => Self::ApplicationError(e),
+            CloseReason::Transport(e) => Self::TransportError(e),
+            CloseReason::Application(e) => Self::ApplicationError(e),
         }
     }
 }
@@ -104,9 +104,6 @@ type Res<T> = Result<T, Error>;
 #[command(author, version, about, long_about = None)]
 #[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
-    #[command(flatten)]
-    verbose: clap_verbosity_flag::Verbosity<clap_verbosity_flag::InfoLevel>,
-
     #[command(flatten)]
     shared: SharedArgs,
 
@@ -180,7 +177,6 @@ impl Args {
     pub fn new(requests: &[u64]) -> Self {
         use std::str::FromStr;
         Self {
-            verbose: clap_verbosity_flag::Verbosity::<clap_verbosity_flag::InfoLevel>::default(),
             shared: crate::SharedArgs::default(),
             urls: requests
                 .iter()
@@ -349,6 +345,12 @@ trait Handler {
     fn take_token(&mut self) -> Option<ResumptionToken>;
 }
 
+enum CloseState {
+    NotClosing,
+    Closing,
+    Closed,
+}
+
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
     fn process_output(&mut self, now: Instant) -> Output;
@@ -359,11 +361,7 @@ trait Client {
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
-    /// Returns [`Some(_)`] if the connection is closed.
-    ///
-    /// Note that connection was closed without error on
-    /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
-    fn is_closed(&self) -> Result<bool, ConnectionError>;
+    fn is_closed(&self) -> Result<CloseState, CloseReason>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -385,16 +383,19 @@ impl<'a, H: Handler> Runner<'a, H> {
                 continue;
             }
 
+            #[allow(clippy::match_same_arms)]
             match (handler_done, self.client.is_closed()?) {
                 // more work
                 (false, _) => {}
                 // no more work, closing connection
-                (true, false) => {
+                (true, CloseState::NotClosing) => {
                     self.client.close(Instant::now(), 0, "kthxbye!");
                     continue;
                 }
+                // no more work, already closing connection
+                (true, CloseState::Closing) => {}
                 // no more work, connection closed, terminating
-                (true, true) => break,
+                (true, CloseState::Closed) => break,
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
@@ -479,7 +480,12 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
 }
 
 pub async fn client(mut args: Args) -> Res<()> {
-    neqo_common::log::init(Some(args.verbose.log_level_filter()));
+    neqo_common::log::init(
+        args.shared
+            .verbose
+            .as_ref()
+            .map(clap_verbosity_flag::Verbosity::log_level_filter),
+    );
     init()?;
 
     args.update_for_tests();

@@ -1,16 +1,22 @@
 name: QUIC Network Simulator
-
 on:
-  schedule:
-    - cron: '42 3 * * 2,5' # Runs at 03:42 UTC (m and h chosen arbitrarily) twice a week.
-  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
+  schedule:
+    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
+
+permissions: read-all
 
 env:
   LATEST: neqo-latest
@@ -25,15 +31,15 @@ jobs:
     permissions:
       packages: write
     steps:
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@68827325e0b33c7199eb31dd4e31fbe9023e06e3 # v3.0.0
+      - uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
+      - uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v3.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -46,7 +52,7 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
         if: github.event_name != 'pull_request'
         with:
           push: true
@@ -57,8 +63,7 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@v5
-        if: github.event_name == 'pull_request'
+      - uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
@@ -69,14 +74,12 @@ jobs:
           platforms: 'linux/amd64'
           outputs: type=docker,dest=/tmp/${{ env.LATEST }}.tar
 
-      - uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request'
+      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
-    if: ${{ github.event_name == 'pull_request' }}
     name: Determine interop pairs
     needs: docker-image
     runs-on: ubuntu-latest
@@ -118,7 +121,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   run-qns:
-    if: ${{ github.event_name == 'pull_request' }}
     name: Run QNS
     needs: implementations
     strategy:
@@ -127,7 +129,7 @@ jobs:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395 # v4.1.6
         with:
           name: '${{ env.LATEST }} Docker image'
           path: /tmp
@@ -140,7 +142,7 @@ jobs:
           echo "client=$(echo "$PAIR" | cut -d% -f1)" >> "$GITHUB_OUTPUT"
           echo "server=$(echo "$PAIR" | cut -d% -f2)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
@@ -150,18 +152,27 @@ jobs:
           implementations: ${{ needs.implementations.outputs.implementations }}
 
   report:
-    if: ${{ always() && github.event_name == 'pull_request' }}
     name: Report results
     needs: run-qns
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Download cached main-branch results
+        uses: actions/cache/restore@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        with:
+          path: results-main
+          key: qns-${{ runner.os }}-${{ github.sha }}
+          restore-keys: qns-${{ runner.os }}-
+
+      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+      - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395 # v4.1.6
         with:
           pattern: '*results'
           path: results
 
       - run: |
+          ls -l results-main || true
+          cat results-main/result.json || true
+          echo "[]" > result.json
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
@@ -191,21 +202,56 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
+            jq < "$RUN/grouped.json" ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > new.json && \
+              jq < result.json --argjson new "$(cat new.json)" '. += [$new]' > result.json.tmp && \
+              rm new.json && \
+              mv result.json.tmp result.json
           done
+          DIFFER='def post_recurse(f): def r: (f | select(. != null) | r), .; r; def post_recurse: post_recurse(.[]?); (. | (post_recurse | arrays) |= sort)'
+          diff <(jq -S "$DIFFER" results-main/result.json) <(jq -S "$DIFFER" result.json) || true
+          diff -Baur results-main/result.json result.json || true
           {
             echo "### Failed Interop Tests"
-            echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*" >> "$GROUP.md"
-            cat failed.md
-            echo "<details><summary>Succeeded and unsupported tests</summary>"
+            SHA=$(cat results-main/baseline-sha.txt || true)
+            if [ -n "$SHA" ]; then
+              {
+                echo "Interop failures relative to $SHA."
+                echo
+              } >> results.md
+            fi
+            if [ -e failed.md ]; then
+              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              cat failed.md
+            else
+              echo "None :tada:"
+            fi
+            echo "<details><summary>All results</summary>"
+            echo
             for GROUP in succeeded unsupported; do
-              echo
               echo "### ${GROUP^} Interop Tests"
-              echo
-              cat "$GROUP.md"
-              echo
+              if [ -e "$GROUP.md" ]; then
+                echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+                cat "$GROUP.md"
+              else
+                echo "None :question:"
+              fi
             done
+            echo
             echo "</details>"
           } >> comment.md
+
+      - name: Remember main-branch push URL
+        if: github.ref == 'refs/heads/main'
+        run: echo "${{ github.sha }}" > baseline-sha.txt
+
+      - name: Cache main-branch results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        with:
+          path: |
+            result.json
+            baseline-sha.txt
+          key: qns-${{ runner.os }}-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
