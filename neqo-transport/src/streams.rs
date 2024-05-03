@@ -477,10 +477,12 @@ impl Streams {
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {
         let previous_limit = self.sender_fc.borrow().available();
-        if let Some(current_limit) = self.sender_fc.borrow_mut().update(maximum_data) {
-            for (_id, ss) in &mut self.send {
-                ss.maybe_emit_writable_event(previous_limit, current_limit);
-            }
+        let Some(current_limit) = self.sender_fc.borrow_mut().update(maximum_data) else {
+            return;
+        };
+
+        for (_id, ss) in &mut self.send {
+            ss.maybe_emit_writable_event(previous_limit, current_limit);
         }
     }
 
