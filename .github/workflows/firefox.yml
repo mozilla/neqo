@@ -132,8 +132,12 @@ jobs:
 
   comment:
     name: Comment on PR
+    if: always()
+    needs: firefox
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+
       - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395 # v4.1.6
         with:
           pattern: 'artifact-*'
@@ -142,14 +146,20 @@ jobs:
       - run: |
           {
             echo "### Firefox builds for this PR"
+            echo "The following builds are available for testing. Crossed-out builds did not succeed."
             for os in Linux MacOS Windows; do
               echo -n "* **$os**:"
               for type in debug release; do
-                echo -n " [${type^}]($(cat artifacts/artifact-$os-${{ env.FIREFOX }}-$type))"
+                if [ -e "artifacts/artifact-$os-${{ env.FIREFOX }}-$type" ]; then
+                  echo -n " [${type^}]($(cat artifacts/artifact-$os-${{ env.FIREFOX }}-$type))"
+                else
+                  echo -n " ~~${type^}~~"
+                fi
               done
               echo
             done
           } > comment.md
+          cat comment.md > "$GITHUB_STEP_SUMMARY"
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
