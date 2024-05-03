@@ -22,8 +22,8 @@ use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
-    AppError, Connection, ConnectionError, EmptyConnectionIdGenerator, Error as TransportError,
-    Output, StreamId,
+    AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output,
+    StreamId,
 };
 use url::Url;
 
@@ -106,7 +106,7 @@ pub(crate) fn create_client(
 }
 
 impl TryFrom<Http3State> for CloseState {
-    type Error = ConnectionError;
+    type Error = CloseReason;
 
     fn try_from(value: Http3State) -> Result<Self, Self::Error> {
         let (state, error) = match value {
@@ -124,7 +124,7 @@ impl TryFrom<Http3State> for CloseState {
 }
 
 impl super::Client for Http3Client {
-    fn is_closed(&self) -> Result<CloseState, ConnectionError> {
+    fn is_closed(&self) -> Result<CloseState, CloseReason> {
         self.state().try_into()
     }
 

@@ -58,7 +58,7 @@ use crate::{
     },
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets, SentPacket},
     version::{Version, WireVersion},
-    AppError, ConnectionError, Error, Res, StreamId,
+    AppError, CloseReason, Error, Res, StreamId,
 };
 
 mod dump;
@@ -889,7 +889,7 @@ impl Connection {
             let msg = format!("{v:?}");
             #[cfg(not(debug_assertions))]
             let msg = "";
-            let error = ConnectionError::Transport(v.clone());
+            let error = CloseReason::Transport(v.clone());
             match &self.state {
                 State::Closing { error: err, .. }
                 | State::Draining { error: err, .. }
@@ -960,9 +960,7 @@ impl Connection {
         let pto = self.pto();
         if self.idle_timeout.expired(now, pto) {
             qinfo!([self], "idle timeout expired");
-            self.set_state(State::Closed(ConnectionError::Transport(
-                Error::IdleTimeout,
-            )));
+            self.set_state(State::Closed(CloseReason::Transport(Error::IdleTimeout)));
             return;
         }
 
@@ -1206,7 +1204,7 @@ impl Connection {
             qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
             self.state_signaling.reset();
             self.set_state(State::Draining {
-                error: ConnectionError::Transport(Error::StatelessReset),
+                error: CloseReason::Transport(Error::StatelessReset),
                 timeout: self.get_closing_period_time(now),
             });
             Err(Error::StatelessReset)
@@ -1283,7 +1281,7 @@ impl Connection {
         } else {
             qinfo!([self], "Version negotiation: failed with {:?}", supported);
             // This error goes straight to closed.
-            self.set_state(State::Closed(ConnectionError::Transport(
+            self.set_state(State::Closed(CloseReason::Transport(
                 Error::VersionNegotiation,
             )));
             Err(Error::VersionNegotiation)
@@ -2213,7 +2211,7 @@ impl Connection {
             );
             builder.set_limit(limit);
         }
-        // ConnectionError::Application is only allowed at 1RTT.
+        // CloseReason::Application is only allowed at 1RTT.
         let sanitized = if space == PacketNumberSpace::ApplicationData {
             None
         } else {
@@ -2429,7 +2427,7 @@ impl Connection {
 
     /// Close the connection.
     pub fn close(&mut self, now: Instant, app_error: AppError, msg: impl AsRef<str>) {
-        let error = ConnectionError::Application(app_error);
+        let error = CloseReason::Application(app_error);
         let timeout = self.get_closing_period_time(now);
         if let Some(path) = self.paths.primary() {
             self.state_signaling.close(path, error.clone(), 0, msg);
@@ -2848,7 +2846,7 @@ impl Connection {
                         FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
                     )
                 };
-                let error = ConnectionError::Transport(detail);
+                let error = CloseReason::Transport(detail);
                 self.state_signaling
                     .drain(Rc::clone(path), error.clone(), frame_type, "");
                 self.set_state(State::Draining {

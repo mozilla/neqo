@@ -15,7 +15,7 @@ use crate::{
     ecn::EcnCount,
     packet::PacketType,
     stream_id::{StreamId, StreamType},
-    AppError, ConnectionError, Error, Res, TransportError,
+    AppError, CloseReason, Error, Res, TransportError,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -87,11 +87,11 @@ impl CloseError {
     }
 }
 
-impl From<ConnectionError> for CloseError {
-    fn from(err: ConnectionError) -> Self {
+impl From<CloseReason> for CloseError {
+    fn from(err: CloseReason) -> Self {
         match err {
-            ConnectionError::Transport(c) => Self::Transport(c.code()),
-            ConnectionError::Application(c) => Self::Application(c),
+            CloseReason::Transport(c) => Self::Transport(c.code()),
+            CloseReason::Application(c) => Self::Application(c),
         }
     }
 }

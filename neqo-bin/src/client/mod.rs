@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionError, ConnectionId, Version};
+use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -80,11 +80,11 @@ impl From<neqo_transport::Error> for Error {
     }
 }
 
-impl From<neqo_transport::ConnectionError> for Error {
-    fn from(err: neqo_transport::ConnectionError) -> Self {
+impl From<neqo_transport::CloseReason> for Error {
+    fn from(err: neqo_transport::CloseReason) -> Self {
         match err {
-            ConnectionError::Transport(e) => Self::TransportError(e),
-            ConnectionError::Application(e) => Self::ApplicationError(e),
+            CloseReason::Transport(e) => Self::TransportError(e),
+            CloseReason::Application(e) => Self::ApplicationError(e),
         }
     }
 }
@@ -361,7 +361,7 @@ trait Client {
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
-    fn is_closed(&self) -> Result<CloseState, ConnectionError>;
+    fn is_closed(&self) -> Result<CloseState, CloseReason>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
