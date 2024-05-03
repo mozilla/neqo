@@ -17,21 +17,21 @@ use neqo_transport::{
 };
 use regex::Regex;
 
-use super::{qns_read_response, Args, HttpServer};
+use super::{qns_read_response, Args};
 
 #[derive(Default)]
-struct Http09StreamState {
+struct HttpStreamState {
     writable: bool,
     data_to_send: Option<(Vec<u8>, usize)>,
 }
 
-pub struct Http09Server {
+pub struct HttpServer {
     server: Server,
-    write_state: HashMap<StreamId, Http09StreamState>,
+    write_state: HashMap<StreamId, HttpStreamState>,
     read_state: HashMap<StreamId, Vec<u8>>,
 }
 
-impl Http09Server {
+impl HttpServer {
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
@@ -92,7 +92,7 @@ impl Http09Server {
         } else {
             self.write_state.insert(
                 stream_id,
-                Http09StreamState {
+                HttpStreamState {
                     writable: false,
                     data_to_send: Some((resp, 0)),
                 },
@@ -194,7 +194,7 @@ impl Http09Server {
     }
 }
 
-impl HttpServer for Http09Server {
+impl super::HttpServer for HttpServer {
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         self.server.process(dgram, now)
     }
@@ -210,7 +210,7 @@ impl HttpServer for Http09Server {
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
                         self.write_state
-                            .insert(stream_id, Http09StreamState::default());
+                            .insert(stream_id, HttpStreamState::default());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         self.stream_readable(stream_id, &mut acr, args);
@@ -258,7 +258,7 @@ impl HttpServer for Http09Server {
     }
 }
 
-impl Display for Http09Server {
+impl Display for HttpServer {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "Http 0.9 server ")
     }
