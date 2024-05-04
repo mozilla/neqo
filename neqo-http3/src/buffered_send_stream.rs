@@ -38,7 +38,7 @@ impl BufferedStream {
 
     /// # Panics
     ///
-    /// If the `BufferedStream` is initialized more than one it will panic.
+    /// If the `BufferedStream` is initialized more than once, it will panic.
     pub fn init(&mut self, stream_id: StreamId) {
         debug_assert!(&Self::Uninitialized == self);
         *self = Self::Initialized {
