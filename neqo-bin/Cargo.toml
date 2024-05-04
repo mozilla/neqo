@@ -39,6 +39,10 @@ quinn-udp = { git = "https://github.com/quinn-rs/quinn/", rev = "a947962131aba8a
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }
+# TODO: Consider feature flagging. Definitely reduce feature set.
+hyper = { version = "0.14", features = ["full"] }
+# TODO: sort?
+cfg-if = "1.0"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports", "async_tokio"] }
