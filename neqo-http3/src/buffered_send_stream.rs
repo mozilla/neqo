@@ -74,9 +74,8 @@ impl BufferedStream {
                     let b = buf.split_off(sent);
                     *buf = b;
                 }
+                qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, sent);
             }
-
-            qlog::h3_data_moved_down(conn.qlog_mut(), *stream_id, sent);
         }
         Ok(sent)
     }
