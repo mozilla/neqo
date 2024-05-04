@@ -71,7 +71,9 @@ impl BufferedStream {
         }
         qtrace!([label], "sending data.");
         let sent = conn.stream_send(*stream_id, &buf[..])?;
-        if sent == buf.len() {
+        if sent == 0 {
+            return Ok(0);
+        } else if sent == buf.len() {
             buf.clear();
         } else {
             let b = buf.split_off(sent);
