@@ -8,7 +8,7 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   schedule:
-    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    # Run at 1 AM each day
     - cron: '0 1 * * *'
   workflow_dispatch:
 
@@ -156,13 +156,6 @@ jobs:
     needs: run-qns
     runs-on: ubuntu-latest
     steps:
-      - name: Download cached main-branch results
-        uses: actions/cache/restore@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
-        with:
-          path: results-main
-          key: qns-${{ runner.os }}-${{ github.sha }}
-          restore-keys: qns-${{ runner.os }}-
-
       - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         with:
@@ -170,9 +163,6 @@ jobs:
           path: results
 
       - run: |
-          ls -l results-main || true
-          cat results-main/result.json || true
-          echo "[]" > result.json
           for RUN in results/*; do
             [ -e "$RUN/result.json" ] || continue
             CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
@@ -202,23 +192,9 @@ jobs:
                 echo "**$RESULT**"
               } >> "$GROUP.md"
             done
-            jq < "$RUN/grouped.json" ". += { client: \"$CLIENT\", server: \"$SERVER\" }" > new.json && \
-              jq < result.json --argjson new "$(cat new.json)" '. += [$new]' > result.json.tmp && \
-              rm new.json && \
-              mv result.json.tmp result.json
           done
-          DIFFER='def post_recurse(f): def r: (f | select(. != null) | r), .; r; def post_recurse: post_recurse(.[]?); (. | (post_recurse | arrays) |= sort)'
-          diff <(jq -S "$DIFFER" results-main/result.json) <(jq -S "$DIFFER" result.json) || true
-          diff -Baur results-main/result.json result.json || true
           {
             echo "### Failed Interop Tests"
-            SHA=$(cat results-main/baseline-sha.txt || true)
-            if [ -n "$SHA" ]; then
-              {
-                echo "Interop failures relative to $SHA."
-                echo
-              } >> results.md
-            fi
             if [ -e failed.md ]; then
               echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
               cat failed.md
@@ -239,19 +215,6 @@ jobs:
             echo
             echo "</details>"
           } >> comment.md
-
-      - name: Remember main-branch push URL
-        if: github.ref == 'refs/heads/main'
-        run: echo "${{ github.sha }}" > baseline-sha.txt
-
-      - name: Cache main-branch results
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
-        with:
-          path: |
-            result.json
-            baseline-sha.txt
-          key: qns-${{ runner.os }}-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
