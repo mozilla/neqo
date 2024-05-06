@@ -22,7 +22,7 @@ jobs:
     if: |
       github.event.workflow_run.event == 'pull_request'
     steps:
-      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - uses: ./.github/actions/pr-comment
         with:
           name: qns
