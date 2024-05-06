@@ -790,7 +790,7 @@ fn anti_amplification() {
     assert_eq!(s_init3.len(), server.plpmtu());
     let cb = server.process_output(now).callback();
     // We are blocked by the amplification limit now.
-    assert_eq!(cb, Duration::from_millis(300));
+    assert_eq!(cb, DEFAULT_RTT * 3);
 
     now += DEFAULT_RTT / 2;
     client.process_input(&s_init1, now);
