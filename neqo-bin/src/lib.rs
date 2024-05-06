@@ -22,7 +22,7 @@ use neqo_transport::{
 
 pub mod client;
 pub mod server;
-mod udp;
+pub mod udp;
 
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
@@ -65,7 +65,8 @@ pub struct SharedArgs {
     pub quic_parameters: QuicParameters,
 }
 
-#[cfg(feature = "bench")]
+// TODO
+// #[cfg(feature = "bench")]
 impl Default for SharedArgs {
     fn default() -> Self {
         Self {
@@ -128,7 +129,8 @@ pub struct QuicParameters {
     pub preferred_address_v6: Option<String>,
 }
 
-#[cfg(feature = "bench")]
+// TODO:
+// #[cfg(feature = "bench")]
 impl Default for QuicParameters {
     fn default() -> Self {
         Self {

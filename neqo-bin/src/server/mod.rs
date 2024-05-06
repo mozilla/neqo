@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    env,
     fmt::{self, Display},
     fs, io,
     net::{SocketAddr, ToSocketAddrs},
@@ -14,7 +13,6 @@ use std::{
     pin::Pin,
     process::exit,
     rc::Rc,
-    thread,
     time::{Duration, Instant},
 };
 
@@ -26,24 +24,15 @@ use futures::{
 use neqo_common::{hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    generate_ech_keys, init_db, AllowZeroRtt, AntiReplay, Cipher,
+    init_db, AntiReplay, Cipher,
 };
-use neqo_http3::Http3Parameters;
-use neqo_transport::{
-    server::ValidateAddress, ConnectionParameters, Output, RandomConnectionIdGenerator, Version,
-};
+use neqo_transport::{server::ValidateAddress, Output, RandomConnectionIdGenerator, Version};
 use tokio::time::Sleep;
 
 use crate::{udp, SharedArgs};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
-const MAX_TABLE_SIZE: u64 = 65536;
-const MAX_BLOCKED_STREAMS: u16 = 10;
-const PROTOCOLS: &[&str] = &["h3-29", "h3"];
-const ECH_CONFIG_ID: u8 = 7;
-const ECH_PUBLIC_NAME: &str = "public.example";
 
-mod firefox;
 mod http09;
 mod http3;
 
@@ -127,7 +116,8 @@ pub struct Args {
     ech: bool,
 }
 
-#[cfg(feature = "bench")]
+// TODO: Not quite idiomatic to enable defaults. Maybe Firefox tests input can also be parsed?
+// #[cfg(feature = "bench")]
 impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr;
@@ -193,154 +183,27 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
-trait HttpServer: Display {
+pub trait HttpServer: Display {
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    // TODO: Is the provided Args really needed here? Maybe clone on construction of the HttpServer implementation?
     fn process_events(&mut self, args: &Args, now: Instant);
     fn has_events(&self) -> bool;
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
     fn validate_address(&mut self, when: ValidateAddress);
     fn enable_ech(&mut self) -> &[u8];
-    fn get_timeout(&self) -> Option<Duration> {
-        None
-    }
-}
-
-enum ServerType {
-    Http3,
-    Http3Fail,
-    Http3NoResponse,
-    Http3Ech,
-    Http3Proxy,
 }
 
 // TODO: Use singular form.
-struct ServersRunner {
-    args: Args,
-    server: Box<dyn HttpServer>,
-    timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, udp::Socket)>,
+// TODO: Remove pub on fields.
+pub struct ServersRunner {
+    pub args: Args,
+    pub server: Box<dyn HttpServer>,
+    pub timeout: Option<Pin<Box<Sleep>>>,
+    pub sockets: Vec<(SocketAddr, udp::Socket)>,
 }
 
 impl ServersRunner {
-    pub fn firefox(server_type: ServerType, port: u16) -> Result<Self, io::Error> {
-        let mut ech_config = Vec::new();
-        let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-
-        let socket = match udp::Socket::bind(&addr) {
-            Err(err) => {
-                eprintln!("Unable to bind UDP socket: {}", err);
-                exit(1)
-            }
-            Ok(s) => s,
-        };
-
-        let local_addr = match socket.local_addr() {
-            Err(err) => {
-                eprintln!("Socket local address not bound: {}", err);
-                exit(1)
-            }
-            Ok(s) => s,
-        };
-
-        let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-            .expect("unable to setup anti-replay");
-        let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
-
-        let server: Box<dyn HttpServer> = match server_type {
-            ServerType::Http3 => Box::new(firefox::Http3TestServer::new(
-                // TODO: Construction should happen in firefox module.
-                neqo_http3::Http3Server::new(
-                    Instant::now(),
-                    &[" HTTP2 Test Cert"],
-                    PROTOCOLS,
-                    anti_replay,
-                    cid_mgr,
-                    Http3Parameters::default()
-                        .max_table_size_encoder(MAX_TABLE_SIZE)
-                        .max_table_size_decoder(MAX_TABLE_SIZE)
-                        .max_blocked_streams(MAX_BLOCKED_STREAMS)
-                        .webtransport(true)
-                        .connection_parameters(ConnectionParameters::default().datagram_size(1200)),
-                    None,
-                )
-                .expect("We cannot make a server!"),
-            )),
-            ServerType::Http3Fail => Box::new(
-                neqo_transport::server::Server::new(
-                    Instant::now(),
-                    &[" HTTP2 Test Cert"],
-                    PROTOCOLS,
-                    anti_replay,
-                    Box::new(AllowZeroRtt {}),
-                    cid_mgr,
-                    ConnectionParameters::default(),
-                )
-                .expect("We cannot make a server!"),
-            ),
-            ServerType::Http3NoResponse => Box::new(firefox::NonRespondingServer::default()),
-            ServerType::Http3Ech => {
-                let mut server = Box::new(firefox::Http3TestServer::new(
-                    neqo_http3::Http3Server::new(
-                        Instant::now(),
-                        &[" HTTP2 Test Cert"],
-                        PROTOCOLS,
-                        anti_replay,
-                        cid_mgr,
-                        Http3Parameters::default()
-                            .max_table_size_encoder(MAX_TABLE_SIZE)
-                            .max_table_size_decoder(MAX_TABLE_SIZE)
-                            .max_blocked_streams(MAX_BLOCKED_STREAMS),
-                        None,
-                    )
-                    .expect("We cannot make a server!"),
-                ));
-                let ref mut unboxed_server = (*server).server;
-                let (sk, pk) = generate_ech_keys().unwrap();
-                unboxed_server
-                    .enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
-                    .expect("unable to enable ech");
-                ech_config = Vec::from(unboxed_server.ech_config());
-                server
-            }
-            ServerType::Http3Proxy => {
-                let server_config = if env::var("MOZ_HTTP3_MOCHITEST").is_ok() {
-                    ("mochitest-cert", 8888)
-                } else {
-                    (" HTTP2 Test Cert", -1)
-                };
-                let server = Box::new(firefox::Http3ProxyServer::new(
-                    neqo_http3::Http3Server::new(
-                        Instant::now(),
-                        &[server_config.0],
-                        PROTOCOLS,
-                        anti_replay,
-                        cid_mgr,
-                        Http3Parameters::default()
-                            .max_table_size_encoder(MAX_TABLE_SIZE)
-                            .max_table_size_decoder(MAX_TABLE_SIZE)
-                            .max_blocked_streams(MAX_BLOCKED_STREAMS)
-                            .webtransport(true)
-                            .connection_parameters(
-                                ConnectionParameters::default().datagram_size(1200),
-                            ),
-                        None,
-                    )
-                    .expect("We cannot make a server!"),
-                    server_config.1,
-                ));
-                server
-            }
-        };
-
-        Ok(Self {
-            args: todo!(),
-            server,
-            timeout: None,
-            sockets: vec![(local_addr, socket)],
-        })
-    }
-
     pub fn new(args: Args) -> Result<Self, io::Error> {
         let hosts = args.listen_addresses();
         if hosts.is_empty() {
@@ -454,7 +317,7 @@ impl ServersRunner {
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
-    async fn run(mut self) -> Res<()> {
+    pub async fn run(mut self) -> Res<()> {
         loop {
             self.server.process_events(&self.args, self.args.now());
 
@@ -487,60 +350,6 @@ impl ServersRunner {
 enum Ready {
     Socket(usize),
     Timeout,
-}
-
-pub async fn firefox() -> Res<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Wrong arguments.");
-        exit(1)
-    }
-
-    // Read data from stdin and terminate the server if EOF is detected, which
-    // means that runxpcshelltests.py ended without shutting down the server.
-    thread::spawn(|| loop {
-        let mut buffer = String::new();
-        match io::stdin().read_line(&mut buffer) {
-            Ok(n) => {
-                if n == 0 {
-                    exit(0);
-                }
-            }
-            Err(_) => {
-                exit(0);
-            }
-        }
-    });
-
-    init_db(PathBuf::from(args[1].clone())).unwrap();
-
-    let local = tokio::task::LocalSet::new();
-
-    local.spawn_local(ServersRunner::firefox(ServerType::Http3, 0)?.run());
-    local.spawn_local(ServersRunner::firefox(ServerType::Http3Fail, 0)?.run());
-    local.spawn_local(ServersRunner::firefox(ServerType::Http3Ech, 0)?.run());
-
-    let proxy_port = match env::var("MOZ_HTTP3_PROXY_PORT") {
-        Ok(val) => val.parse::<u16>().unwrap(),
-        _ => 0,
-    };
-    local.spawn_local(ServersRunner::firefox(ServerType::Http3Proxy, proxy_port)?.run());
-    local.spawn_local(ServersRunner::firefox(ServerType::Http3NoResponse, 0)?.run());
-
-    // TODO
-    // println!(
-    //     "HTTP3 server listening on ports {}, {}, {}, {} and {}. EchConfig is @{}@",
-    //     self.hosts[0].port(),
-    //     self.hosts[1].port(),
-    //     self.hosts[2].port(),
-    //     self.hosts[3].port(),
-    //     self.hosts[4].port(),
-    //     BASE64_STANDARD.encode(&self.ech_config)
-    // );
-
-    local.await;
-
-    Ok(())
 }
 
 pub async fn server(mut args: Args) -> Res<()> {
@@ -597,6 +406,5 @@ pub async fn server(mut args: Args) -> Res<()> {
         }
     }
 
-    let mut servers_runner = ServersRunner::new(args)?;
-    servers_runner.run().await
+    ServersRunner::new(args)?.run().await
 }
