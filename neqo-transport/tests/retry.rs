@@ -17,7 +17,7 @@ use std::{
 use common::{connected_server, default_server, generate_ticket};
 use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{server::ValidateAddress, ConnectionError, Error, State, StreamType};
+use neqo_transport::{server::ValidateAddress, CloseReason, Error, State, StreamType};
 use test_fixture::{
     assertions, datagram, default_client,
     header_protection::{
@@ -469,7 +469,7 @@ fn mitm_retry() {
     assert!(matches!(
         *client.state(),
         State::Closing {
-            error: ConnectionError::Transport(Error::ProtocolViolation),
+            error: CloseReason::Transport(Error::ProtocolViolation),
             ..
         }
     ));
