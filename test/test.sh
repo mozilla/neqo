@@ -16,7 +16,7 @@ cargo build --bin neqo-client --bin neqo-server
 addr=127.0.0.1
 port=4433
 path=/20000
-flags="--verbose --verbose --verbose --qlog-dir $tmp --use-old-http --alpn hq-interop --quic-version 1"
+flags="--verbose --verbose --verbose --verbose --qlog-dir $tmp --use-old-http --alpn hq-interop --quic-version 1"
 if [ "$(uname -s)" != "Linux" ]; then
         iface=lo0
 else
@@ -36,6 +36,6 @@ tmux -CC \
         split-window -h "$server" \; \
         split-window -v -f "\
                 until [ -e $tmp/done ]; do sleep 1; done; \
-                echo $tmp; ls -l $tmp; echo; \
+                echo \"Logs are in $tmp\"; ls -l $tmp; echo; \
                 tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
         set remain-on-exit on

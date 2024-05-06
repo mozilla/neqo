@@ -1468,10 +1468,6 @@ impl Connection {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
             path.borrow_mut().set_valid(now);
-        } else if self.role == Role::Client && packet.packet_type() == PacketType::Initial {
-            // If we are a client and we receive an Initial packet, we can
-            // assume that the server has validated the path.
-            path.borrow_mut().set_valid(now);
         }
     }
 

@@ -835,7 +835,12 @@ impl LossRecovery {
     /// When it has, mark a few packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
-    fn maybe_fire_pto(&mut self, rtt: &RttEstimate, now: Instant, lost: &mut Vec<SentPacket>) {
+    fn maybe_fire_pto(&mut self, primary_path: &PathRef, now: Instant, lost: &mut Vec<SentPacket>) {
+        let path = primary_path.borrow();
+        if !path.is_valid() {
+            return;
+        }
+        let rtt = path.rtt();
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
@@ -893,9 +898,7 @@ impl LossRecovery {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        if primary_path.borrow().is_valid() {
-            self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
-        }
+        self.maybe_fire_pto(primary_path, now, &mut lost_packets);
         lost_packets
     }
 

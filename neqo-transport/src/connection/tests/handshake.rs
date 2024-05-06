@@ -791,6 +791,7 @@ fn anti_amplification() {
     let cb = server.process_output(now).callback();
     // We are blocked by the amplification limit now.
     assert_eq!(cb, DEFAULT_RTT * 3);
+    now += cb;
 
     now += DEFAULT_RTT / 2;
     client.process_input(&s_init1, now);

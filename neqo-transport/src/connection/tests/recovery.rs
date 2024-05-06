@@ -582,10 +582,10 @@ fn loss_time_past_largest_acked() {
     let s_hs2 = server.process(None, now + s_pto).dgram();
     assert!(s_hs2.is_some());
 
-    // Skip the gap for pacing here.
-    let s_pacing = server.process_output(now).callback();
-    assert_ne!(s_pacing, Duration::new(0, 0));
-    now += s_pacing;
+    // Server is amplification-limited.
+    let amplification_limit = server.process_output(now).callback();
+    assert_ne!(amplification_limit, Duration::new(0, 0));
+    now += amplification_limit;
 
     let s_hs3 = server.process(None, now + s_pto).dgram();
     assert!(s_hs3.is_some());
