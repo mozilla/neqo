@@ -1,4 +1,4 @@
-name: QUIC Network Simulator
+name: QNS
 
 on:
   schedule:
@@ -211,5 +211,5 @@ jobs:
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
-          name: qns
+          name: ${{ github.workflow.name }}
           contents: comment.md

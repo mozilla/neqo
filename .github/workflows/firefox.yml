@@ -30,8 +30,6 @@ jobs:
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
       CARGO_HOME: ${{ github.workspace }}/cargo
-    outputs:
-      export: ${{ steps.export.outputs.export }}
 
     steps:
       # We need to check out Neqo first, because the maximize-build-space action
@@ -124,10 +122,7 @@ jobs:
           path: ${{ env.FIREFOX }}.tar
           compression-level: 9
 
-      - id: export
-        run: |
-          echo "${{ runner.os }}_${{ env.FIREFOX }}_${{ matrix.type }}=${{ steps.upload.outputs.artifact-url }}" >> "$GITHUB_OUTPUT"
-          echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
+      - run: echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
 
       - name: Export artifact URL
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
@@ -156,7 +151,6 @@ jobs:
             for os in Linux macOS Windows; do
               echo -n "* **$os**:"
               for type in debug release; do
-                echo "${{ needs.firefox.outputs.export }}"
                 artifact="artifacts/artifact-$os-${{ env.FIREFOX }}-$type/artifact"
                 if [ -e "$artifact" ]; then
                   echo -n " [${type^}]($(cat $artifact))"
@@ -171,5 +165,5 @@ jobs:
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
-          name: firefox
+          name: ${{ github.workflow.name }}
           contents: comment.md
