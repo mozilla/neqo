@@ -116,8 +116,7 @@ pub struct Args {
     ech: bool,
 }
 
-// TODO: Not quite idiomatic to enable defaults. Maybe Firefox tests input can also be parsed?
-// #[cfg(feature = "bench")]
+#[cfg(feature = "bench")]
 impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr;
@@ -183,61 +182,33 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-// TODO: Use singular form.
-// TODO: Remove pub on fields.
-pub struct ServersRunner {
-    pub args: Args,
-    pub server: Box<dyn HttpServer>,
-    pub timeout: Option<Pin<Box<Sleep>>>,
-    pub sockets: Vec<(SocketAddr, udp::Socket)>,
+#[allow(clippy::module_name_repetitions)]
+pub struct ServerRunner {
+    now: Box<dyn Fn() -> Instant>,
+    server: Box<dyn HttpServer>,
+    timeout: Option<Pin<Box<Sleep>>>,
+    sockets: Vec<(SocketAddr, udp::Socket)>,
 }
 
-impl ServersRunner {
-    pub fn new(args: Args) -> Result<Self, io::Error> {
-        let hosts = args.listen_addresses();
-        if hosts.is_empty() {
-            qerror!("No valid hosts defined");
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
-        }
-        let sockets = hosts
-            .into_iter()
-            .map(|host| {
-                let socket = udp::Socket::bind(host)?;
-                let local_addr = socket.local_addr()?;
-                qinfo!("Server waiting for connection on: {local_addr:?}");
-
-                Ok((host, socket))
-            })
-            .collect::<Result<_, io::Error>>()?;
-        let server = Self::create_server(&args);
-
-        Ok(Self {
-            args,
+impl ServerRunner {
+    #[must_use]
+    pub fn new(
+        now: Box<dyn Fn() -> Instant>,
+        server: Box<dyn HttpServer>,
+        sockets: Vec<(SocketAddr, udp::Socket)>,
+    ) -> Self {
+        Self {
+            now,
             server,
             timeout: None,
             sockets,
-        })
-    }
-
-    fn create_server(args: &Args) -> Box<dyn HttpServer> {
-        // Note: this is the exception to the case where we use `Args::now`.
-        let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
-            .expect("unable to setup anti-replay");
-        let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
-
-        if args.shared.use_old_http {
-            Box::new(
-                http09::HttpServer::new(args, anti_replay, cid_mgr)
-                    .expect("We cannot make a server!"),
-            )
-        } else {
-            Box::new(http3::HttpServer::new(args, anti_replay, cid_mgr))
         }
     }
 
@@ -257,7 +228,7 @@ impl ServersRunner {
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
         loop {
-            match self.server.process(dgram.take(), self.args.now()) {
+            match self.server.process(dgram.take(), (self.now)()) {
                 Output::Datagram(dgram) => {
                     let socket = self.find_socket(dgram.source());
                     socket.writable().await?;
@@ -297,7 +268,7 @@ impl ServersRunner {
 
     pub async fn run(mut self) -> Res<()> {
         loop {
-            self.server.process_events(self.args.now());
+            self.server.process_events((self.now)());
 
             self.process(None).await?;
 
@@ -384,5 +355,36 @@ pub async fn server(mut args: Args) -> Res<()> {
         }
     }
 
-    ServersRunner::new(args)?.run().await
+    let hosts = args.listen_addresses();
+    if hosts.is_empty() {
+        qerror!("No valid hosts defined");
+        Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
+    }
+    let sockets = hosts
+        .into_iter()
+        .map(|host| {
+            let socket = udp::Socket::bind(host)?;
+            let local_addr = socket.local_addr()?;
+            qinfo!("Server waiting for connection on: {local_addr:?}");
+
+            Ok((host, socket))
+        })
+        .collect::<Result<_, io::Error>>()?;
+
+    // Note: this is the exception to the case where we use `Args::now`.
+    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
+        .expect("unable to setup anti-replay");
+    let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
+
+    let server: Box<dyn HttpServer> = if args.shared.use_old_http {
+        Box::new(
+            http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
+        )
+    } else {
+        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
+    };
+
+    ServerRunner::new(Box::new(move || args.now()), server, sockets)
+        .run()
+        .await
 }

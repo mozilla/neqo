@@ -65,8 +65,7 @@ pub struct SharedArgs {
     pub quic_parameters: QuicParameters,
 }
 
-// TODO
-// #[cfg(feature = "bench")]
+#[cfg(feature = "bench")]
 impl Default for SharedArgs {
     fn default() -> Self {
         Self {
@@ -129,8 +128,7 @@ pub struct QuicParameters {
     pub preferred_address_v6: Option<String>,
 }
 
-// TODO:
-// #[cfg(feature = "bench")]
+#[cfg(feature = "bench")]
 impl Default for QuicParameters {
     fn default() -> Self {
         Self {
