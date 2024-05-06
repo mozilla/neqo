@@ -1267,6 +1267,7 @@ mod tests {
         let out = peer_conn.process(None, now());
         hconn.process(out.as_dgram_ref(), now());
 
+        #[allow(clippy::mutable_key_type)]
         let mut requests = HashMap::new();
         while let Some(event) = hconn.next_event() {
             match event {
