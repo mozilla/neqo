@@ -10,13 +10,12 @@ use std::{
     cmp::min,
     collections::HashMap,
     fmt::{self, Display},
-    path::PathBuf,
     rc::Rc,
     time::Instant,
 };
 
-use neqo_common::{qdebug, qerror, qwarn, Datagram, Header};
-use neqo_crypto::{generate_ech_keys, random, AntiReplay, Cipher};
+use neqo_common::{hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
+use neqo_crypto::{generate_ech_keys, random, AntiReplay};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
@@ -29,6 +28,7 @@ pub struct HttpServer {
     /// Progress writing to each stream.
     remaining_data: HashMap<StreamId, ResponseData>,
     posts: HashMap<Http3OrWebTransportStream, usize>,
+    is_qns_test: bool,
 }
 
 impl HttpServer {
@@ -39,7 +39,7 @@ impl HttpServer {
         anti_replay: AntiReplay,
         cid_mgr: Rc<RefCell<dyn ConnectionIdGenerator>>,
     ) -> Self {
-        let server = Http3Server::new(
+        let mut server = Http3Server::new(
             args.now(),
             &[args.key.clone()],
             &[args.shared.alpn.clone()],
@@ -53,10 +53,25 @@ impl HttpServer {
             None,
         )
         .expect("We cannot make a server!");
+
+        server.set_ciphers(&args.get_ciphers());
+        server.set_qlog_dir(args.shared.qlog_dir.clone());
+        if args.retry {
+            server.set_validation(ValidateAddress::Always);
+        }
+        if args.ech {
+            let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
+            server
+                .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
+                .unwrap();
+            let cfg = server.ech_config();
+            qinfo!("ECHConfigList: {}", hex(cfg));
+        }
         Self {
             server,
             remaining_data: HashMap::new(),
             posts: HashMap::new(),
+            is_qns_test: args.shared.qns_test.is_some(),
         }
     }
 }
@@ -72,7 +87,7 @@ impl super::HttpServer for HttpServer {
         self.server.process(dgram, now)
     }
 
-    fn process_events(&mut self, args: &Args, _now: Instant) {
+    fn process_events(&mut self, _now: Instant) {
         while let Some(event) = self.server.next_event() {
             match event {
                 Http3ServerEvent::Headers {
@@ -97,7 +112,7 @@ impl super::HttpServer for HttpServer {
                         continue;
                     };
 
-                    let mut response = if args.shared.qns_test.is_some() {
+                    let mut response = if self.is_qns_test {
                         match qns_read_response(path.value()) {
                             Ok(data) => ResponseData::from(data),
                             Err(e) => {
@@ -164,26 +179,6 @@ impl super::HttpServer for HttpServer {
                 _ => {}
             }
         }
-    }
-
-    fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir);
-    }
-
-    fn validate_address(&mut self, v: ValidateAddress) {
-        self.server.set_validation(v);
-    }
-
-    fn set_ciphers(&mut self, ciphers: &[Cipher]) {
-        self.server.set_ciphers(ciphers);
-    }
-
-    fn enable_ech(&mut self) -> &[u8] {
-        let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
-        self.server
-            .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
-            .unwrap();
-        self.server.ech_config()
     }
 
     fn has_events(&self) -> bool {
