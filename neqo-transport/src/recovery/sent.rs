@@ -365,11 +365,8 @@ mod tests {
         }
 
         // Expire up to pkt(1).
-        let mut it = pkts.remove_expired(start_time() + PACKET_GAP, Duration::new(0, 0));
-        assert_eq!(it.next().unwrap().pn(), 1);
-        assert!(it.next().is_none());
-        std::mem::drop(it);
-
+        let count = pkts.remove_expired(start_time() + PACKET_GAP, Duration::new(0, 0));
+        assert_eq!(count, 1);
         assert_eq!(pkts.len(), 1);
     }
 
