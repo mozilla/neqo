@@ -345,7 +345,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         self.bytes_in_flight += pkt.len();
-        qinfo!(
+        qdebug!(
             "packet_sent this={:p}, pn={}, ps={}",
             self,
             pkt.pn(),
