@@ -1267,16 +1267,15 @@ mod tests {
         let out = peer_conn.process(None, now());
         hconn.process(out.as_dgram_ref(), now());
 
-        #[allow(clippy::mutable_key_type)]
         let mut requests = HashMap::new();
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { stream, .. } => {
-                    assert!(!requests.contains_key(&stream));
-                    requests.insert(stream, 0);
+                    assert!(!requests.contains_key(&stream.stream_id()));
+                    requests.insert(stream.stream_id(), 0);
                 }
                 Http3ServerEvent::Data { stream, .. } => {
-                    assert!(requests.contains_key(&stream));
+                    assert!(requests.contains_key(&stream.stream_id()));
                 }
                 Http3ServerEvent::DataWritable { .. }
                 | Http3ServerEvent::StreamReset { .. }
