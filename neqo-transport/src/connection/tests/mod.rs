@@ -58,7 +58,7 @@ const CLIENT_HANDSHAKE_1RTT_PACKETS: usize = 1;
 
 /// WARNING!  In this module, this version of the generator needs to be used.
 /// This copies the implementation from
-/// `test_fixture::CountingConnectionIdGenerator`, but it uses the different
+/// `test_fixHttpture::CountingConnectionIdGenerator`, but it uses the different
 /// types that are exposed to this module.  See also `default_client`.
 ///
 /// This version doesn't randomize the length; as the congestion control tests
