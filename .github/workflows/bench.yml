@@ -14,6 +14,8 @@ env:
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
 
+permissions: read-all
+
 jobs:
   bench:
     name: Benchmark
@@ -24,10 +26,10 @@ jobs:
 
     steps:
       - name: Checkout neqo
-        uses: actions/checkout@v4
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
 
       - name: Checkout msquic
-        uses: actions/checkout@v4
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
         with:
           repository: microsoft/msquic
           ref: main
@@ -60,7 +62,7 @@ jobs:
 
       - name: Download cached main-branch results
         id: criterion-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
@@ -220,14 +222,14 @@ jobs:
 
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |
@@ -242,6 +244,6 @@ jobs:
       - name: Export PR comment data
         uses: ./.github/actions/pr-comment-data-export
         with:
-          name: bench
+          name: ${{ github.workflow }}
           contents: results.md
           log-url: ${{ steps.export.outputs.artifact-url }}

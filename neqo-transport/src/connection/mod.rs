@@ -56,9 +56,9 @@ use crate::{
         self, TransportParameter, TransportParameterId, TransportParameters,
         TransportParametersHandler,
     },
-    tracking::{AckTracker, PacketNumberSpace},
+    tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
     version::{Version, WireVersion},
-    AppError, ConnectionError, Error, Res, StreamId,
+    AppError, CloseReason, Error, Res, StreamId,
 };
 
 mod dump;
@@ -889,7 +889,7 @@ impl Connection {
             let msg = format!("{v:?}");
             #[cfg(not(debug_assertions))]
             let msg = "";
-            let error = ConnectionError::Transport(v.clone());
+            let error = CloseReason::Transport(v.clone());
             match &self.state {
                 State::Closing { error: err, .. }
                 | State::Draining { error: err, .. }
@@ -960,9 +960,7 @@ impl Connection {
         let pto = self.pto();
         if self.idle_timeout.expired(now, pto) {
             qinfo!([self], "idle timeout expired");
-            self.set_state(State::Closed(ConnectionError::Transport(
-                Error::IdleTimeout,
-            )));
+            self.set_state(State::Closed(CloseReason::Transport(Error::IdleTimeout)));
             return;
         }
 
@@ -1113,7 +1111,15 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        self.process_output(now)
+        #[allow(clippy::let_and_return)]
+        let output = self.process_output(now);
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        if self.test_frame_writer.is_none() {
+            if let Some(d) = output.clone().dgram() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            }
+        }
+        output
     }
 
     fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) {
@@ -1198,7 +1204,7 @@ impl Connection {
             qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
             self.state_signaling.reset();
             self.set_state(State::Draining {
-                error: ConnectionError::Transport(Error::StatelessReset),
+                error: CloseReason::Transport(Error::StatelessReset),
                 timeout: self.get_closing_period_time(now),
             });
             Err(Error::StatelessReset)
@@ -1275,7 +1281,7 @@ impl Connection {
         } else {
             qinfo!([self], "Version negotiation: failed with {:?}", supported);
             // This error goes straight to closed.
-            self.set_state(State::Closed(ConnectionError::Transport(
+            self.set_state(State::Closed(CloseReason::Transport(
                 Error::VersionNegotiation,
             )));
             Err(Error::VersionNegotiation)
@@ -1517,6 +1523,16 @@ impl Connection {
                         d.tos(),
                     );
 
+                    #[cfg(feature = "build-fuzzing-corpus")]
+                    if packet.packet_type() == PacketType::Initial {
+                        let target = if self.role == Role::Client {
+                            "server_initial"
+                        } else {
+                            "client_initial"
+                        };
+                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
+                    }
+
                     qlog::packet_received(&mut self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
@@ -1588,7 +1604,11 @@ impl Connection {
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
         while d.remaining() > 0 {
+            #[cfg(feature = "build-fuzzing-corpus")]
+            let pos = d.offset();
             let f = Frame::decode(&mut d)?;
+            #[cfg(feature = "build-fuzzing-corpus")]
+            neqo_common::write_item_to_fuzzing_corpus("frame", &packet[pos..d.offset()]);
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
@@ -2167,6 +2187,40 @@ impl Connection {
         (tokens, ack_eliciting, padded)
     }
 
+    fn write_closing_frames(
+        &mut self,
+        close: &ClosingFrame,
+        builder: &mut PacketBuilder,
+        space: PacketNumberSpace,
+        now: Instant,
+        path: &PathRef,
+        tokens: &mut Vec<RecoveryToken>,
+    ) {
+        if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::USEFUL_ACK_LEN {
+            // Include an ACK frame with the CONNECTION_CLOSE.
+            let limit = builder.limit();
+            builder.set_limit(limit - ClosingFrame::MIN_LENGTH);
+            self.acks.immediate_ack(now);
+            self.acks.write_frame(
+                space,
+                now,
+                path.borrow().rtt().estimate(),
+                builder,
+                tokens,
+                &mut self.stats.borrow_mut().frame_tx,
+            );
+            builder.set_limit(limit);
+        }
+        // CloseReason::Application is only allowed at 1RTT.
+        let sanitized = if space == PacketNumberSpace::ApplicationData {
+            None
+        } else {
+            close.sanitize()
+        };
+        sanitized.as_ref().unwrap_or(close).write_frame(builder);
+        self.stats.borrow_mut().frame_tx.connection_close += 1;
+    }
+
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
@@ -2230,17 +2284,7 @@ impl Connection {
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
             if let Some(ref close) = closing_frame {
-                // ConnectionError::Application is only allowed at 1RTT.
-                let sanitized = if *space == PacketNumberSpace::ApplicationData {
-                    None
-                } else {
-                    close.sanitize()
-                };
-                sanitized
-                    .as_ref()
-                    .unwrap_or(close)
-                    .write_frame(&mut builder);
-                self.stats.borrow_mut().frame_tx.connection_close += 1;
+                self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
                     self.write_frames(path, *space, &profile, &mut builder, now);
@@ -2383,7 +2427,7 @@ impl Connection {
 
     /// Close the connection.
     pub fn close(&mut self, now: Instant, app_error: AppError, msg: impl AsRef<str>) {
-        let error = ConnectionError::Application(app_error);
+        let error = CloseReason::Application(app_error);
         let timeout = self.get_closing_period_time(now);
         if let Some(path) = self.paths.primary() {
             self.state_signaling.close(path, error.clone(), 0, msg);
@@ -2782,7 +2826,6 @@ impl Connection {
                 reason_phrase,
             } => {
                 self.stats.borrow_mut().frame_rx.connection_close += 1;
-                let reason_phrase = String::from_utf8_lossy(&reason_phrase);
                 qinfo!(
                     [self],
                     "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
@@ -2803,7 +2846,7 @@ impl Connection {
                         FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
                     )
                 };
-                let error = ConnectionError::Transport(detail);
+                let error = CloseReason::Transport(detail);
                 self.state_signaling
                     .drain(Rc::clone(path), error.clone(), frame_type, "");
                 self.set_state(State::Draining {

@@ -4,13 +4,15 @@
 # tests itself might run off of a fork, i.e., an untrusted environment and should
 # thus not be granted write permissions.
 
-name: QUIC Network Simulator Comment
+name: PR Comment
 
 on:
   workflow_run:
-    workflows: ["QUIC Network Simulator"]
+    workflows: ["QNS", "CI", "Firefox"]
     types:
       - completed
+
+permissions: read-all
 
 jobs:
   comment:
@@ -18,11 +20,11 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     if: |
-      github.event.workflow_run.event == 'pull_request'
+      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.name != 'CI' || github.event.workflow_run.conclusion == 'success' )
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - uses: ./.github/actions/pr-comment
         with:
-          name: qns
-          mode: ${{ github.event.workflow_run.conclusion == 'success' && 'delete' || 'upsert' }}
+          name: ${{ github.event.workflow_run.name }}
           token: ${{ secrets.GITHUB_TOKEN }}

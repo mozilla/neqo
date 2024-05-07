@@ -205,7 +205,7 @@ pub fn packet_sent(
         let mut frames = SmallVec::new();
         while d.remaining() > 0 {
             if let Ok(f) = Frame::decode(&mut d) {
-                frames.push(QuicFrame::from(&f));
+                frames.push(QuicFrame::from(f));
             } else {
                 qinfo!("qlog: invalid frame");
                 break;
@@ -294,7 +294,7 @@ pub fn packet_received(
 
         while d.remaining() > 0 {
             if let Ok(f) = Frame::decode(&mut d) {
-                frames.push(QuicFrame::from(&f));
+                frames.push(QuicFrame::from(f));
             } else {
                 qinfo!("qlog: invalid frame");
                 break;
@@ -388,12 +388,12 @@ pub fn metrics_updated(qlog: &mut NeqoQlog, updated_metrics: &[QlogMetric]) {
 
 #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
-impl From<&Frame<'_>> for QuicFrame {
-    fn from(frame: &Frame) -> Self {
+impl From<Frame<'_>> for QuicFrame {
+    fn from(frame: Frame) -> Self {
         match frame {
             Frame::Padding(len) => QuicFrame::Padding {
                 length: None,
-                payload_length: u32::from(*len),
+                payload_length: u32::from(len),
             },
             Frame::Ping => QuicFrame::Ping {
                 length: None,
@@ -407,7 +407,7 @@ impl From<&Frame<'_>> for QuicFrame {
                 ecn_count,
             } => {
                 let ranges =
-                    Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges)
+                    Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)
                         .ok();
 
                 let acked_ranges = ranges.map(|all| {
@@ -419,7 +419,7 @@ impl From<&Frame<'_>> for QuicFrame {
                 });
 
                 QuicFrame::Ack {
-                    ack_delay: Some(*ack_delay as f32 / 1000.0),
+                    ack_delay: Some(ack_delay as f32 / 1000.0),
                     acked_ranges,
                     ect1: ecn_count.map(|c| c[IpTosEcn::Ect1]),
                     ect0: ecn_count.map(|c| c[IpTosEcn::Ect0]),
@@ -434,8 +434,8 @@ impl From<&Frame<'_>> for QuicFrame {
                 final_size,
             } => QuicFrame::ResetStream {
                 stream_id: stream_id.as_u64(),
-                error_code: *application_error_code,
-                final_size: *final_size,
+                error_code: application_error_code,
+                final_size,
                 length: None,
                 payload_length: None,
             },
@@ -444,12 +444,12 @@ impl From<&Frame<'_>> for QuicFrame {
                 application_error_code,
             } => QuicFrame::StopSending {
                 stream_id: stream_id.as_u64(),
-                error_code: *application_error_code,
+                error_code: application_error_code,
                 length: None,
                 payload_length: None,
             },
             Frame::Crypto { offset, data } => QuicFrame::Crypto {
-                offset: *offset,
+                offset,
                 length: data.len() as u64,
             },
             Frame::NewToken { token } => QuicFrame::NewToken {
@@ -471,20 +471,20 @@ impl From<&Frame<'_>> for QuicFrame {
                 ..
             } => QuicFrame::Stream {
                 stream_id: stream_id.as_u64(),
-                offset: *offset,
+                offset,
                 length: data.len() as u64,
-                fin: Some(*fin),
+                fin: Some(fin),
                 raw: None,
             },
             Frame::MaxData { maximum_data } => QuicFrame::MaxData {
-                maximum: *maximum_data,
+                maximum: maximum_data,
             },
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
             } => QuicFrame::MaxStreamData {
                 stream_id: stream_id.as_u64(),
-                maximum: *maximum_stream_data,
+                maximum: maximum_stream_data,
             },
             Frame::MaxStreams {
                 stream_type,
@@ -494,15 +494,15 @@ impl From<&Frame<'_>> for QuicFrame {
                     NeqoStreamType::BiDi => StreamType::Bidirectional,
                     NeqoStreamType::UniDi => StreamType::Unidirectional,
                 },
-                maximum: *maximum_streams,
+                maximum: maximum_streams,
             },
-            Frame::DataBlocked { data_limit } => QuicFrame::DataBlocked { limit: *data_limit },
+            Frame::DataBlocked { data_limit } => QuicFrame::DataBlocked { limit: data_limit },
             Frame::StreamDataBlocked {
                 stream_id,
                 stream_data_limit,
             } => QuicFrame::StreamDataBlocked {
                 stream_id: stream_id.as_u64(),
-                limit: *stream_data_limit,
+                limit: stream_data_limit,
             },
             Frame::StreamsBlocked {
                 stream_type,
@@ -512,7 +512,7 @@ impl From<&Frame<'_>> for QuicFrame {
                     NeqoStreamType::BiDi => StreamType::Bidirectional,
                     NeqoStreamType::UniDi => StreamType::Unidirectional,
                 },
-                limit: *stream_limit,
+                limit: stream_limit,
             },
             Frame::NewConnectionId {
                 sequence_number,
@@ -520,14 +520,14 @@ impl From<&Frame<'_>> for QuicFrame {
                 connection_id,
                 stateless_reset_token,
             } => QuicFrame::NewConnectionId {
-                sequence_number: *sequence_number as u32,
-                retire_prior_to: *retire_prior as u32,
+                sequence_number: sequence_number as u32,
+                retire_prior_to: retire_prior as u32,
                 connection_id_length: Some(connection_id.len() as u8),
                 connection_id: hex(connection_id),
                 stateless_reset_token: Some(hex(stateless_reset_token)),
             },
             Frame::RetireConnectionId { sequence_number } => QuicFrame::RetireConnectionId {
-                sequence_number: *sequence_number as u32,
+                sequence_number: sequence_number as u32,
             },
             Frame::PathChallenge { data } => QuicFrame::PathChallenge {
                 data: Some(hex(data)),
@@ -546,8 +546,8 @@ impl From<&Frame<'_>> for QuicFrame {
                 },
                 error_code: Some(error_code.code()),
                 error_code_value: Some(0),
-                reason: Some(String::from_utf8_lossy(reason_phrase).to_string()),
-                trigger_frame_type: Some(*frame_type),
+                reason: Some(reason_phrase),
+                trigger_frame_type: Some(frame_type),
             },
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
             Frame::AckFrequency { .. } => QuicFrame::Unknown {

@@ -15,7 +15,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
+    CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
     assertions, datagram, default_client,
@@ -390,7 +390,7 @@ fn bad_client_initial() {
     let mut server = default_server();
 
     let dgram = client.process(None, now()).dgram().expect("a datagram");
-    let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client);
+    let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (fixed_header, pn) = remove_header_protection(&hp, header, payload);
     let payload = &payload[(fixed_header.len() - header.len())..];
@@ -463,13 +463,13 @@ fn bad_client_initial() {
     assert_ne!(delay, Duration::from_secs(0));
     assert!(matches!(
         *client.state(),
-        State::Draining { error: ConnectionError::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
+        State::Draining { error: CloseReason::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
     ));
 
     for server in server.active_connections() {
         assert_eq!(
             *server.borrow().state(),
-            State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+            State::Closed(CloseReason::Transport(Error::ProtocolViolation))
         );
     }
 
@@ -484,7 +484,7 @@ fn bad_client_initial_connection_close() {
     let mut server = default_server();
 
     let dgram = client.process(None, now()).dgram().expect("a datagram");
-    let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client);
+    let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 

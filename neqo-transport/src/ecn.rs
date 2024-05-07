@@ -122,15 +122,36 @@ impl EcnInfo {
         }
     }
 
+    /// Process ECN counts from an ACK frame.
+    ///
+    /// Returns whether ECN counts contain new valid ECN CE marks.
+    pub fn on_packets_acked(
+        &mut self,
+        acked_packets: &[SentPacket],
+        ack_ecn: Option<EcnCount>,
+    ) -> bool {
+        let prev_baseline = self.baseline;
+
+        self.validate_ack_ecn_and_update(acked_packets, ack_ecn);
+
+        matches!(self.state, EcnValidationState::Capable)
+            && (self.baseline - prev_baseline)[IpTosEcn::Ce] > 0
+    }
+
     /// After the ECN validation test has ended, check if the path is ECN capable.
-    pub fn validate_ack_ecn(&mut self, acked_packets: &[SentPacket], ack_ecn: Option<EcnCount>) {
+    pub fn validate_ack_ecn_and_update(
+        &mut self,
+        acked_packets: &[SentPacket],
+        ack_ecn: Option<EcnCount>,
+    ) {
         // RFC 9000, Appendix A.4:
         //
         // > From the "unknown" state, successful validation of the ECN counts in an ACK frame
         // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
         // > no marked packet has been acknowledged.
-        if self.state != EcnValidationState::Unknown {
-            return;
+        match self.state {
+            EcnValidationState::Testing { .. } | EcnValidationState::Failed => return,
+            EcnValidationState::Unknown | EcnValidationState::Capable => {}
         }
 
         // RFC 9000, Section 13.4.2.1:

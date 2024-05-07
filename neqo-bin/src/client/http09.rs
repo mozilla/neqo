@@ -20,12 +20,12 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
+    CloseReason, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
     StreamId, StreamType,
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, Res};
+use super::{get_output_file, qlog_new, Args, CloseState, Res};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -87,20 +87,22 @@ impl<'a> super::Handler for Handler<'a> {
             }
         }
 
-        if self.streams.is_empty() && self.url_queue.is_empty() {
-            // Handler is done.
-            return Ok(true);
+        if !self.streams.is_empty() || !self.url_queue.is_empty() {
+            return Ok(false);
         }
 
-        Ok(false)
+        if self.args.resume && self.token.is_none() {
+            let Some(token) = client.take_resumption_token(Instant::now()) else {
+                return Ok(false);
+            };
+            self.token = Some(token);
+        }
+
+        Ok(true)
     }
 
     fn take_token(&mut self) -> Option<ResumptionToken> {
         self.token.take()
-    }
-
-    fn has_token(&self) -> bool {
-        self.token.is_some()
     }
 }
 
@@ -140,6 +142,26 @@ pub(crate) fn create_client(
     Ok(client)
 }
 
+impl TryFrom<&State> for CloseState {
+    type Error = CloseReason;
+
+    fn try_from(value: &State) -> Result<Self, Self::Error> {
+        let (state, error) = match value {
+            State::Closing { error, .. } | State::Draining { error, .. } => {
+                (CloseState::Closing, error)
+            }
+            State::Closed(error) => (CloseState::Closed, error),
+            _ => return Ok(CloseState::NotClosing),
+        };
+
+        if error.is_error() {
+            Err(error.clone())
+        } else {
+            Ok(state)
+        }
+    }
+}
+
 impl super::Client for Connection {
     fn process_output(&mut self, now: Instant) -> Output {
         self.process_output(now)
@@ -161,11 +183,8 @@ impl super::Client for Connection {
         }
     }
 
-    fn is_closed(&self) -> Option<ConnectionError> {
-        if let State::Closed(err) = self.state() {
-            return Some(err.clone());
-        }
-        None
+    fn is_closed(&self) -> Result<CloseState, CloseReason> {
+        self.state().try_into()
     }
 
     fn stats(&self) -> neqo_transport::Stats {

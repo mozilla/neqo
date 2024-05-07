@@ -26,6 +26,9 @@ mod udp;
 
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
+    #[command(flatten)]
+    verbose: Option<clap_verbosity_flag::Verbosity>,
+
     #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
@@ -66,6 +69,7 @@ pub struct SharedArgs {
 impl Default for SharedArgs {
     fn default() -> Self {
         Self {
+            verbose: None,
             alpn: "h3".into(),
             qlog_dir: None,
             max_table_size_encoder: 16384,
