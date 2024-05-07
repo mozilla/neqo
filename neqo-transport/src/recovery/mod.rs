@@ -257,12 +257,9 @@ impl LossRecoverySpace {
         R: IntoIterator<Item = RangeInclusive<PacketNumber>>,
         R::IntoIter: ExactSizeIterator,
     {
+        let acked = self.sent_packets.take_ranges(acked_ranges);
         let mut eliciting = false;
-        let mut acked = Vec::new();
-        for range in acked_ranges {
-            self.sent_packets.take_range(range, &mut acked);
-        }
-        for p in acked.iter().rev() {
+        for p in &acked {
             self.remove_packet(p);
             eliciting |= p.ack_eliciting();
             if p.lost() {

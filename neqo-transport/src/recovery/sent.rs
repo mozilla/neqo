@@ -7,9 +7,7 @@
 // A collection for sent packets.
 
 use std::{
-    cmp::min,
-    collections::VecDeque,
-    convert::TryFrom,
+    collections::BTreeMap,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -172,81 +170,49 @@ impl SentPacket {
 #[derive(Debug, Default)]
 pub struct SentPackets {
     /// The collection.
-    packets: VecDeque<Option<SentPacket>>,
-    /// The packet number of the first item in the collection.
-    offset: PacketNumber,
-    /// The number of `Some` values in the packet.  This is cached to keep things squeaky-fast.
-    len: usize,
+    packets: BTreeMap<u64, SentPacket>,
 }
 
 impl SentPackets {
     pub fn len(&self) -> usize {
-        self.len
+        self.packets.len()
     }
 
     pub fn track(&mut self, packet: SentPacket) {
-        if self.offset + PacketNumber::try_from(self.packets.len()).unwrap() != packet.pn {
-            assert_eq!(
-                self.len, 0,
-                "packet number skipping only supported for the first packet in a space"
-            );
-            self.offset = packet.pn;
-        }
-        self.len += 1;
-        self.packets.push_back(Some(packet));
+        self.packets.insert(packet.pn, packet);
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut SentPacket> {
-        self.packets.iter_mut().flatten()
+        self.packets.values_mut()
     }
 
-    /// Take values from a specified range of packet numbers.
-    /// Note that this will not remove values unless the iterator is consumed.
+    /// Take values from a specified ranges of packet numbers.
     /// The values returned will be reversed, so that the most recent packet appears first.
     /// This is because ACK frames arrive with ranges starting from the largest acknowledged
     /// and we want to match that.
-    pub fn take_range(&mut self, r: RangeInclusive<PacketNumber>, store: &mut Vec<SentPacket>) {
-        let start = usize::try_from((*r.start()).saturating_sub(self.offset)).unwrap();
-        let end = min(
-            usize::try_from((*r.end() + 1).saturating_sub(self.offset)).unwrap(),
-            self.packets.len(),
-        );
-
-        let before = store.len();
-        if self.packets.range(..start).all(Option::is_none) {
-            // If there are extra empty slots, split those off too.
-            let extra = self
-                .packets
-                .range(end..)
-                .take_while(|&p| p.is_none())
-                .count();
-            self.offset += u64::try_from(end + extra).unwrap();
-            let mut other = self.packets.split_off(end + extra);
-            std::mem::swap(&mut self.packets, &mut other);
-            store.extend(
-                other
-                    .into_iter()
-                    .rev()
-                    .skip(extra)
-                    .take(end - start)
-                    .flatten(),
-            );
-        } else {
-            store.extend(
-                self.packets
-                    .range_mut(start..end)
-                    .rev()
-                    .filter_map(Option::take),
-            );
+    pub fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<SentPacket>
+    where
+        R: IntoIterator<Item = RangeInclusive<PacketNumber>>,
+        R::IntoIter: ExactSizeIterator,
+    {
+        let mut result = Vec::new();
+        // Remove all packets. We will add them back as we don't need them.
+        let mut packets = std::mem::take(&mut self.packets);
+        for range in acked_ranges {
+            // Split off any unacknowledged tail, then any acknowledged part.
+            // Note: `BTreeMap::split_off` can be invoked for a key that doesn't exist.
+            let keep = packets.split_off(&(*range.end() + 1));
+            self.packets.extend(keep);
+            let acked = packets.split_off(range.start());
+            result.extend(acked.into_values().rev());
         }
-        self.len -= store.len() - before;
+        self.packets.extend(packets);
+        result
     }
 
     /// Empty out the packets, but keep the offset.
     pub fn drain_all(&mut self) -> impl Iterator<Item = SentPacket> {
-        self.len = 0;
-        self.offset += u64::try_from(self.packets.len()).unwrap();
-        std::mem::take(&mut self.packets).into_iter().flatten()
+        std::mem::take(&mut self.packets).into_values()
     }
 
     /// See `LossRecoverySpace::remove_old_lost` for details on `now` and `cd`.
@@ -255,23 +221,24 @@ impl SentPackets {
         now: Instant,
         cd: Duration,
     ) -> impl Iterator<Item = SentPacket> {
-        let mut count = 0;
-        // Find the first unexpired packet and only keep from that one onwards.
-        for (i, p) in self.packets.iter().enumerate() {
-            if p.as_ref().map_or(false, |p| !p.expired(now, cd)) {
-                let mut other = self.packets.split_off(i);
-                self.len -= count;
-                self.offset += u64::try_from(i).unwrap();
-                std::mem::swap(&mut self.packets, &mut other);
-                return other.into_iter().flatten();
-            }
-            // Count `Some` values that we are removing.
-            count += usize::from(p.is_some());
+        let mut it = self.packets.iter();
+        // If the first item is not expired, do nothing.
+        if it.next().map_or(false, |(_, p)| p.expired(now, cd)) {
+            // Find the index of the first unexpired packet.
+            let to_remove = if let Some(first_keep) =
+                it.find_map(|(i, p)| if p.expired(now, cd) { None } else { Some(*i) })
+            {
+                // Some packets haven't expired, so keep those.
+                let keep = self.packets.split_off(&first_keep);
+                std::mem::replace(&mut self.packets, keep)
+            } else {
+                // All packets are expired.
+                std::mem::take(&mut self.packets)
+            };
+            to_remove.into_values()
+        } else {
+            BTreeMap::new().into_values()
         }
-
-        self.len = 0;
-        self.offset += u64::try_from(self.packets.len()).unwrap();
-        std::mem::take(&mut self.packets).into_iter().flatten()
     }
 }
 
@@ -336,8 +303,7 @@ mod tests {
 
     fn remove_one(pkts: &mut SentPackets, idx: PacketNumber) {
         assert_eq!(pkts.len(), 3);
-        let mut store = Vec::new();
-        pkts.take_range(idx..=idx, &mut store);
+        let store = pkts.take_ranges([idx..=idx]);
         let mut it = store.into_iter();
         assert_eq!(idx, it.next().unwrap().pn());
         assert!(it.next().is_none());
@@ -356,8 +322,8 @@ mod tests {
     #[test]
     fn iterate_skipped() {
         let mut pkts = pkts();
-        for (i, p) in pkts.packets.iter().enumerate() {
-            assert_eq!(i, usize::try_from(p.as_ref().unwrap().pn).unwrap());
+        for (i, p) in pkts.packets.values().enumerate() {
+            assert_eq!(i, usize::try_from(p.pn).unwrap());
         }
         remove_one(&mut pkts, 1);
 
@@ -366,8 +332,7 @@ mod tests {
 
         {
             // Reverse the expectations here as this iterator reverses its output.
-            let mut store = Vec::new();
-            pkts.take_range(0..=2, &mut store);
+            let store = pkts.take_ranges([0..=2]);
             let mut it = store.into_iter();
             assert_eq!(it.next().unwrap().pn(), 2);
             assert_eq!(it.next().unwrap().pn(), 0);
@@ -375,7 +340,6 @@ mod tests {
         };
 
         // The None values are still there in this case, so offset is 0.
-        assert_eq!(pkts.offset, 3);
         assert_eq!(pkts.packets.len(), 0);
         assert_eq!(pkts.len(), 0);
     }
@@ -386,7 +350,6 @@ mod tests {
         remove_one(&mut pkts, 1);
 
         assert_zero_and_two(pkts.drain_all());
-        assert_eq!(pkts.offset, 3);
         assert_eq!(pkts.len(), 0);
     }
 
@@ -405,22 +368,13 @@ mod tests {
         assert!(it.next().is_none());
         std::mem::drop(it);
 
-        assert_eq!(pkts.offset, 2);
         assert_eq!(pkts.len(), 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "packet number skipping only supported for the first packet")]
-    fn skipped_not_ok() {
-        let mut pkts = pkts();
-        pkts.track(pkt(4));
     }
 
     #[test]
     fn first_skipped_ok() {
         let mut pkts = SentPackets::default();
         pkts.track(pkt(4)); // This is fine.
-        assert_eq!(pkts.offset, 4);
         assert_eq!(pkts.len(), 1);
     }
 }
