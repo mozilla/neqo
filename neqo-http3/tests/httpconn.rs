@@ -522,14 +522,12 @@ fn fetch_noresponse_will_idletimeout() {
     let mut done = false;
     while !done {
         while let Some(event) = hconn_c.next_event() {
-            if let Http3ClientEvent::StateChange(state) = event {
-                match state {
-                    Http3State::Closing(error_code) | Http3State::Closed(error_code) => {
-                        assert_eq!(error_code, CloseReason::Transport(Error::IdleTimeout));
-                        done = true;
-                    }
-                    _ => {}
-                }
+            if let Http3ClientEvent::StateChange(
+                Http3State::Closing(error_code) | Http3State::Closed(error_code),
+            ) = event
+            {
+                assert_eq!(error_code, CloseReason::Transport(Error::IdleTimeout));
+                done = true;
             }
         }
 
