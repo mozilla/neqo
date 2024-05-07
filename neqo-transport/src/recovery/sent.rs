@@ -107,7 +107,7 @@ impl SentPacket {
     }
 
     /// For Initial packets, it is possible that the packet builder needs to amend the length.
-    pub fn add_padding(&mut self, padding: usize) {
+    pub fn track_padding(&mut self, padding: usize) {
         debug_assert_eq!(self.pt, PacketType::Initial);
         self.len += padding;
     }

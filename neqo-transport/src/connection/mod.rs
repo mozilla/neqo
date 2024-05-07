@@ -2370,7 +2370,7 @@ impl Connection {
                         packets.len(),
                         mtu
                     );
-                    initial.add_padding(mtu - packets.len());
+                    initial.track_padding(mtu - packets.len());
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
                     packets.resize(mtu, 0);
