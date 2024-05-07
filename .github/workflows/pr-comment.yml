@@ -4,11 +4,11 @@
 # tests itself might run off of a fork, i.e., an untrusted environment and should
 # thus not be granted write permissions.
 
-name: Benchmark Comment
+name: PR Comment
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["QNS", "CI", "Firefox"]
     types:
       - completed
 
@@ -21,10 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.name != 'CI' || github.event.workflow_run.conclusion == 'success' )
     steps:
-      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - uses: ./.github/actions/pr-comment
         with:
-          name: bench
+          name: ${{ github.event.workflow_run.name }}
           token: ${{ secrets.GITHUB_TOKEN }}
