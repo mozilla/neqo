@@ -30,7 +30,7 @@ use crate::{
     packet::PacketBuilder,
     path::{PATH_MTU_V4, PATH_MTU_V6},
     tparams::{self, PreferredAddress, TransportParameter},
-    ConnectionError, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
+    CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
     ConnectionParameters, EmptyConnectionIdGenerator, Error,
 };
 
@@ -357,7 +357,7 @@ fn migrate_same_fail() {
     assert!(matches!(res, Output::None));
     assert!(matches!(
         client.state(),
-        State::Closed(ConnectionError::Transport(Error::NoAvailablePath))
+        State::Closed(CloseReason::Transport(Error::NoAvailablePath))
     ));
 }
 
@@ -894,7 +894,7 @@ fn retire_prior_to_migration_failure() {
     assert!(matches!(
         client.state(),
         State::Closing {
-            error: ConnectionError::Transport(Error::InvalidMigration),
+            error: CloseReason::Transport(Error::InvalidMigration),
             ..
         }
     ));

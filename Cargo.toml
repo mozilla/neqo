@@ -15,13 +15,14 @@ resolver = "2"
 homepage = "https://github.com/mozilla/neqo/"
 repository = "https://github.com/mozilla/neqo/"
 authors = ["The Neqo Authors <necko@mozilla.com>"]
-version = "0.7.5"
+version = "0.7.7"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-rust-version = "1.74.0"
+# Keep in sync with .github/workflows/check.yml
+rust-version = "1.76.0"
 
 [workspace.dependencies]
 log = { version = "0.4", default-features = false }

@@ -17,7 +17,7 @@ use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
-use super::{Connection, ConnectionError, ConnectionId, Output, State};
+use super::{CloseReason, Connection, ConnectionId, Output, State};
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
     cc::{CWND_INITIAL_PKTS, CWND_MIN},
@@ -245,8 +245,8 @@ fn connect_fail(
     server_error: Error,
 ) {
     handshake(client, server, now(), Duration::new(0, 0));
-    assert_error(client, &ConnectionError::Transport(client_error));
-    assert_error(server, &ConnectionError::Transport(server_error));
+    assert_error(client, &CloseReason::Transport(client_error));
+    assert_error(server, &CloseReason::Transport(server_error));
 }
 
 fn connect_with_rtt_and_modifier(
@@ -284,7 +284,7 @@ fn connect(client: &mut Connection, server: &mut Connection) {
     connect_with_rtt(client, server, now(), Duration::new(0, 0));
 }
 
-fn assert_error(c: &Connection, expected: &ConnectionError) {
+fn assert_error(c: &Connection, expected: &CloseReason) {
     match c.state() {
         State::Closing { error, .. } | State::Draining { error, .. } | State::Closed(error) => {
             assert_eq!(*error, *expected, "{c} error mismatch");

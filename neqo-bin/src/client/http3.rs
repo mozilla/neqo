@@ -22,12 +22,12 @@ use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
-    AppError, Connection, ConnectionError, EmptyConnectionIdGenerator, Error as TransportError,
-    Output, StreamId,
+    AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output,
+    StreamId,
 };
 use url::Url;
 
-use super::{get_output_file, qlog_new, Args, Res};
+use super::{get_output_file, qlog_new, Args, CloseState, Res};
 
 pub(crate) struct Handler<'a> {
     #[allow(
@@ -105,16 +105,27 @@ pub(crate) fn create_client(
     Ok(client)
 }
 
-impl super::Client for Http3Client {
-    fn is_closed(&self) -> Result<bool, ConnectionError> {
-        match self.state() {
-            Http3State::Closed(
-                ConnectionError::Transport(neqo_transport::Error::NoError)
-                | ConnectionError::Application(0),
-            ) => Ok(true),
-            Http3State::Closed(err) => Err(err.clone()),
-            _ => Ok(false),
+impl TryFrom<Http3State> for CloseState {
+    type Error = CloseReason;
+
+    fn try_from(value: Http3State) -> Result<Self, Self::Error> {
+        let (state, error) = match value {
+            Http3State::Closing(error) => (CloseState::Closing, error),
+            Http3State::Closed(error) => (CloseState::Closed, error),
+            _ => return Ok(CloseState::NotClosing),
+        };
+
+        if error.is_error() {
+            Err(error.clone())
+        } else {
+            Ok(state)
         }
+    }
+}
+
+impl super::Client for Http3Client {
+    fn is_closed(&self) -> Result<CloseState, CloseReason> {
+        self.state().try_into()
     }
 
     fn process_output(&mut self, now: Instant) -> Output {

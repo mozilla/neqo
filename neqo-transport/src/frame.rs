@@ -15,7 +15,7 @@ use crate::{
     ecn::EcnCount,
     packet::PacketType,
     stream_id::{StreamId, StreamType},
-    AppError, ConnectionError, Error, Res, TransportError,
+    AppError, CloseReason, Error, Res, TransportError,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -87,11 +87,11 @@ impl CloseError {
     }
 }
 
-impl From<ConnectionError> for CloseError {
-    fn from(err: ConnectionError) -> Self {
+impl From<CloseReason> for CloseError {
+    fn from(err: CloseReason) -> Self {
         match err {
-            ConnectionError::Transport(c) => Self::Transport(c.code()),
-            ConnectionError::Application(c) => Self::Application(c),
+            CloseReason::Transport(c) => Self::Transport(c.code()),
+            CloseReason::Application(c) => Self::Application(c),
         }
     }
 }
@@ -184,7 +184,7 @@ pub enum Frame<'a> {
         frame_type: u64,
         // Not a reference as we use this to hold the value.
         // This is not used in optimized builds anyway.
-        reason_phrase: Vec<u8>,
+        reason_phrase: String,
     },
     HandshakeDone,
     AckFrequency {
@@ -614,7 +614,7 @@ impl<'a> Frame<'a> {
                     0
                 };
                 // We can tolerate this copy for now.
-                let reason_phrase = d(dec.decode_vvec())?.to_vec();
+                let reason_phrase = String::from_utf8_lossy(d(dec.decode_vvec())?).to_string();
                 Ok(Self::ConnectionClose {
                     error_code,
                     frame_type,
@@ -925,7 +925,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Transport(0x5678),
             frame_type: 0x1234,
-            reason_phrase: vec![0x01, 0x02, 0x03],
+            reason_phrase: String::from("\x01\x02\x03"),
         };
 
         just_dec(&f, "1c80005678523403010203");
@@ -936,7 +936,7 @@ mod tests {
         let f = Frame::ConnectionClose {
             error_code: CloseError::Application(0x5678),
             frame_type: 0,
-            reason_phrase: vec![0x01, 0x02, 0x03],
+            reason_phrase: String::from("\x01\x02\x03"),
         };
 
         just_dec(&f, "1d8000567803010203");

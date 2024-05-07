@@ -7,7 +7,7 @@
 mod common;
 
 use neqo_common::{Datagram, Decoder, Encoder, Role};
-use neqo_transport::{ConnectionError, ConnectionParameters, Error, State, Version};
+use neqo_transport::{CloseReason, ConnectionParameters, Error, State, Version};
 use test_fixture::{
     default_client, default_server,
     header_protection::{
@@ -180,7 +180,7 @@ fn packet_without_frames() {
     client.process_input(&modified, now());
     assert_eq!(
         client.state(),
-        &State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+        &State::Closed(CloseReason::Transport(Error::ProtocolViolation))
     );
 }
 
@@ -266,10 +266,7 @@ fn overflow_crypto() {
         client.process_input(&dgram, now());
         if let State::Closing { error, .. } = client.state() {
             assert!(
-                matches!(
-                    error,
-                    ConnectionError::Transport(Error::CryptoBufferExceeded),
-                ),
+                matches!(error, CloseReason::Transport(Error::CryptoBufferExceeded),),
                 "the connection need to abort on crypto buffer"
             );
             assert!(pn > 64, "at least 64000 bytes of data is buffered");

@@ -13,7 +13,7 @@ runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@bb45937a053e097f8591208d8e74c90db1873d07 # master
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
@@ -35,7 +35,7 @@ runs:
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.
     # - name: Use sccache
-    #   uses: mozilla-actions/sccache-action@v0.0.4
+    #   uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     # - name: Enable sscache
     #   shell: bash
@@ -53,6 +53,6 @@ runs:
 
     # Ditto for rust-cache.
     # - name: Use Rust cache
-    #   uses: Swatinem/rust-cache@v2
+    #   uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
     #   with:
     #     cache-all-crates: "true"

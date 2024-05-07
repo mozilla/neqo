@@ -1,0 +1,169 @@
+name: Firefox
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+    FIREFOX: Firefox
+
+jobs:
+  firefox:
+    name: Build Firefox
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        type: [debug, release]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
+      CARGO_HOME: ${{ github.workspace }}/cargo
+
+    steps:
+      # We need to check out Neqo first, because the maximize-build-space action
+      # is vendored in.
+      - name: Check out Neqo
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+
+      - name: Maximize build space
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/maximize-build-space
+        with:
+          root-reserve-mb: 2048
+          temp-reserve-mb: 2048
+          swap-size-mb: 4096
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-docker-images: true
+
+      # The previous step blew it away, so we need to check it out again.
+      - name: Check out Neqo again
+        if: runner.os == 'Linux'
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+
+      - name: Check out Firefox
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+        with:
+          repository: mozilla/gecko-dev
+          path: mozilla-unified
+
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install -y mozillabuild
+
+      - name: Bootstrap Firefox
+        run: |
+          cd mozilla-unified
+          {
+            echo "mk_add_options MOZ_OBJDIR=../$FIREFOX"
+            echo "ac_add_options --with-ccache=sccache"
+            echo "ac_add_options --enable-application=browser"
+            # Work around https://bugzilla.mozilla.org/show_bug.cgi?id=1894031
+            if [ "${{ runner.os }}" != "Windows" ] || [ "${{ matrix.type}}" != "debug" ]; then
+              echo "ac_add_options --disable-tests"
+            fi
+            echo "ac_add_options --enable-${{ matrix.type }}"
+          } >> mozconfig
+          ./mach bootstrap --application-choice browser
+
+      - name: Plumb in Neqo
+        run: |
+          # Get qlog version used by neqo
+          cargo generate-lockfile
+          QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
+          rm Cargo.lock
+          cd mozilla-unified
+          {
+            echo '[[audits.qlog]]'
+            echo 'who = "CI"'
+            echo 'criteria = "safe-to-deploy"'
+            echo "version = \"$QLOG_VERSION\""
+          } >> supply-chain/audits.toml
+          sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
+          {
+            echo '[patch."https://github.com/mozilla/neqo"]'
+            echo 'neqo-http3 = { path = "../neqo-http3" }'
+            echo 'neqo-transport = { path = "../neqo-transport" }'
+            echo 'neqo-common = { path = "../neqo-common" }'
+            echo 'neqo-qpack = { path = "../neqo-qpack" }'
+            echo 'neqo-crypto = { path = "../neqo-crypto" }'
+          } >> Cargo.toml
+          cargo update neqo-http3 neqo-transport neqo-common neqo-qpack neqo-crypto
+          ./mach vendor rust --ignore-modified
+
+      - name: Build Firefox
+        env:
+          NAME: ${{ runner.os == 'macOS' && 'Nightly' || 'bin' }}
+          TYPE: ${{ runner.os == 'macOS' && matrix.type == 'debug' && 'Debug' || '' }}
+          EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
+        run: |
+          cd mozilla-unified
+          ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
+          exit 0
+
+      - name: Export binary
+        id: upload
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
+          path: ${{ env.FIREFOX }}.tar
+          compression-level: 9
+
+      - run: echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
+
+      - name: Export artifact URL
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
+          path: artifact
+          retention-days: 1
+
+  comment:
+    name: Comment on PR
+    if: always()
+    needs: firefox
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+
+      - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395 # v4.1.6
+        with:
+          pattern: 'artifact-*'
+          path: artifacts
+
+      - run: |
+          {
+            echo "### Firefox builds for this PR"
+            echo "The following builds are available for testing. Crossed-out builds did not succeed."
+            for os in Linux macOS Windows; do
+              echo -n "* **$os**:"
+              for type in debug release; do
+                artifact="artifacts/artifact-$os-${{ env.FIREFOX }}-$type/artifact"
+                if [ -e "$artifact" ]; then
+                  echo -n " [${type^}]($(cat $artifact))"
+                else
+                  echo -n " ~~${type^}~~"
+                fi
+              done
+              echo
+            done
+          } > comment.md
+          cat comment.md > "$GITHUB_STEP_SUMMARY"
+
+      - uses: ./.github/actions/pr-comment-data-export
+        with:
+          name: ${{ github.workflow }}
+          contents: comment.md

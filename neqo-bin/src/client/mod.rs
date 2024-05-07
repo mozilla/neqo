@@ -27,7 +27,7 @@ use neqo_crypto::{
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
-use neqo_transport::{AppError, ConnectionError, ConnectionId, Version};
+use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
@@ -80,11 +80,11 @@ impl From<neqo_transport::Error> for Error {
     }
 }
 
-impl From<neqo_transport::ConnectionError> for Error {
-    fn from(err: neqo_transport::ConnectionError) -> Self {
+impl From<neqo_transport::CloseReason> for Error {
+    fn from(err: neqo_transport::CloseReason) -> Self {
         match err {
-            ConnectionError::Transport(e) => Self::TransportError(e),
-            ConnectionError::Application(e) => Self::ApplicationError(e),
+            CloseReason::Transport(e) => Self::TransportError(e),
+            CloseReason::Application(e) => Self::ApplicationError(e),
         }
     }
 }
@@ -345,6 +345,12 @@ trait Handler {
     fn take_token(&mut self) -> Option<ResumptionToken>;
 }
 
+enum CloseState {
+    NotClosing,
+    Closing,
+    Closed,
+}
+
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
     fn process_output(&mut self, now: Instant) -> Output;
@@ -355,11 +361,7 @@ trait Client {
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display;
-    /// Returns [`Some(_)`] if the connection is closed.
-    ///
-    /// Note that connection was closed without error on
-    /// [`Some(ConnectionError::Transport(TransportError::NoError))`].
-    fn is_closed(&self) -> Result<bool, ConnectionError>;
+    fn is_closed(&self) -> Result<CloseState, CloseReason>;
     fn stats(&self) -> neqo_transport::Stats;
 }
 
@@ -381,16 +383,19 @@ impl<'a, H: Handler> Runner<'a, H> {
                 continue;
             }
 
+            #[allow(clippy::match_same_arms)]
             match (handler_done, self.client.is_closed()?) {
                 // more work
                 (false, _) => {}
                 // no more work, closing connection
-                (true, false) => {
+                (true, CloseState::NotClosing) => {
                     self.client.close(Instant::now(), 0, "kthxbye!");
                     continue;
                 }
+                // no more work, already closing connection
+                (true, CloseState::Closing) => {}
                 // no more work, connection closed, terminating
-                (true, true) => break,
+                (true, CloseState::Closed) => break,
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {

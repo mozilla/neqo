@@ -25,8 +25,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-14, windows-latest]
         # Don't increase beyond what Firefox is currently using:
-        # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
-        rust-toolchain: [1.74.0, stable, nightly]
+        # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
+        # Keep in sync with Cargo.toml
+        rust-toolchain: [1.76.0, stable, nightly]
         type: [debug]
         include:
           - os: ubuntu-latest
@@ -41,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -151,7 +152,7 @@ jobs:
         if: success() || failure()
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@84508663e988701840491b86de86b666e8a86bed # v4.3.0
+        uses: codecov/codecov-action@5ecb98a3c6b747ed38dc09f787459979aebb39be # v4.3.1
         with:
           file: lcov.info
           fail_ci_if_error: false

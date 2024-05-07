@@ -15,7 +15,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionParameters, Error, Output, State, StreamType, Version,
+    CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType, Version,
 };
 use test_fixture::{
     assertions, datagram, default_client,
@@ -463,13 +463,13 @@ fn bad_client_initial() {
     assert_ne!(delay, Duration::from_secs(0));
     assert!(matches!(
         *client.state(),
-        State::Draining { error: ConnectionError::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
+        State::Draining { error: CloseReason::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
     ));
 
     for server in server.active_connections() {
         assert_eq!(
             *server.borrow().state(),
-            State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+            State::Closed(CloseReason::Transport(Error::ProtocolViolation))
         );
     }
 
