@@ -218,13 +218,10 @@ impl SentPackets {
     }
 
     /// See `LossRecoverySpace::remove_old_lost` for details on `now` and `cd`.
-    pub fn remove_expired(
-        &mut self,
-        now: Instant,
-        cd: Duration,
-    ) -> impl Iterator<Item = SentPacket> {
+    /// Returns the number of ack-eliciting packets removed.
+    pub fn remove_expired(&mut self, now: Instant, cd: Duration) -> usize {
         let mut it = self.packets.iter();
-        // If the first item is not expired, do nothing.
+        // If the first item is not expired, do nothing (the most common case).
         if it.next().map_or(false, |(_, p)| p.expired(now, cd)) {
             // Find the index of the first unexpired packet.
             let to_remove = if let Some(first_keep) =
@@ -237,9 +234,12 @@ impl SentPackets {
                 // All packets are expired.
                 std::mem::take(&mut self.packets)
             };
-            to_remove.into_values()
+            to_remove
+                .into_values()
+                .filter(SentPacket::ack_eliciting)
+                .count()
         } else {
-            BTreeMap::new().into_values()
+            0
         }
     }
 }

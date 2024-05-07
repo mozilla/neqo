@@ -237,13 +237,17 @@ impl LossRecoverySpace {
             .map_or(false, |t| now > t + (pto * n_pto))
     }
 
+    fn remove_outstanding(&mut self, count: usize) {
+        debug_assert!(self.in_flight_outstanding >= count);
+        self.in_flight_outstanding -= count;
+        if self.in_flight_outstanding == 0 {
+            qtrace!("remove_packet outstanding == 0 for space {}", self.space);
+        }
+    }
+
     fn remove_packet(&mut self, p: &SentPacket) {
         if p.ack_eliciting() {
-            debug_assert!(self.in_flight_outstanding > 0);
-            self.in_flight_outstanding -= 1;
-            if self.in_flight_outstanding == 0 {
-                qtrace!("remove_packet outstanding == 0 for space {}", self.space);
-            }
+            self.remove_outstanding(1);
         }
     }
 
@@ -291,11 +295,9 @@ impl LossRecoverySpace {
     /// We try to keep these around until a probe is sent for them, so it is
     /// important that `cd` is set to at least the current PTO time; otherwise we
     /// might remove all in-flight packets and stop sending probes.
-    #[allow(clippy::option_if_let_else)] // Hard enough to read as-is.
     fn remove_old_lost(&mut self, now: Instant, cd: Duration) {
-        for p in self.sent_packets.remove_expired(now, cd) {
-            self.remove_packet(&p);
-        }
+        let removed = self.sent_packets.remove_expired(now, cd);
+        self.remove_outstanding(removed);
     }
 
     /// Detect lost packets.
