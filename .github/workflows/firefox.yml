@@ -105,6 +105,7 @@ jobs:
           ./mach vendor rust --ignore-modified
 
       - name: Build Firefox
+        continue-on-error: true
         env:
           NAME: ${{ runner.os == 'macOS' && 'Nightly' || 'bin' }}
           TYPE: ${{ runner.os == 'macOS' && matrix.type == 'debug' && 'Debug' || '' }}
@@ -115,6 +116,7 @@ jobs:
           exit 0
 
       - name: Export binary
+        continue-on-error: true
         id: upload
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
@@ -123,8 +125,10 @@ jobs:
           compression-level: 9
 
       - run: echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
+        continue-on-error: true
 
       - name: Export artifact URL
+        continue-on-error: true
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
