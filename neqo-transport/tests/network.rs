@@ -221,7 +221,7 @@ fn unlimited_bandwidth_50ms_delay_connection() {
     // TODO: Shouldn't matter. No packet loss. Ideally no randomness in delay.
     sim.seed_str("117f65d90ee5c1a7fb685f3af502c7730ba5d31866b758d98f5e3c2117cf9b86");
 
-    let simulated_time = sim.setup().run_sim_time();
+    let simulated_time = sim.setup().run();
     let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
 
     assert!(

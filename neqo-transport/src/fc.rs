@@ -386,8 +386,7 @@ impl ReceiverFlowControl<StreamId> {
         // TODO: Should one also auto-tune down?
         if self
             .max_allowed_sent_at
-            .map(|at| now - at < rtt * 2)
-            .unwrap_or(false)
+            .is_some_and(|at| now - at < rtt * 2)
             && self.max_active < STREAM_MAX_ACTIVE_LIMIT
         {
             let prev_max_active = self.max_active;
