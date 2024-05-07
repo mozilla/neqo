@@ -2249,134 +2249,130 @@ mod tests {
         assert_eq!(res, (15, None));
     }
 
-    // #[test]
-    // #[allow(clippy::cognitive_complexity)]
-    // fn tx_buffer_next_bytes_1() {
-    //     let mut txb = TxBuffer::new();
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn tx_buffer_next_bytes_1() {
+        let mut txb = TxBuffer::new();
 
-    //     assert_eq!(txb.avail(), INITIAL_SEND_BUFFER_SIZE);
+        // Fill the buffer
+        let big_buf = vec![1; INITIAL_SEND_BUFFER_SIZE];
+        assert_eq!(txb.send(&big_buf), INITIAL_SEND_BUFFER_SIZE);
+        assert!(matches!(txb.next_bytes(),
+                         Some((0, x)) if x.len() == INITIAL_SEND_BUFFER_SIZE
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     // Fill the buffer
-    //     let big_buf = vec![1; INITIAL_SEND_BUFFER_SIZE * 2];
-    //     assert_eq!(txb.send(&big_buf), INITIAL_SEND_BUFFER_SIZE);
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((0, x)) if x.len() == INITIAL_SEND_BUFFER_SIZE
-    //                      && x.iter().all(|ch| *ch == 1)));
+        // Mark almost all as sent. Get what's left
+        let one_byte_from_end = INITIAL_SEND_BUFFER_SIZE as u64 - 1;
+        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 1
+                         && start == one_byte_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     // Mark almost all as sent. Get what's left
-    //     let one_byte_from_end = INITIAL_SEND_BUFFER_SIZE as u64 - 1;
-    //     txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 1
-    //                      && start == one_byte_from_end
-    //                      && x.iter().all(|ch| *ch == 1)));
+        // Mark all as sent. Get nothing
+        txb.mark_as_sent(0, INITIAL_SEND_BUFFER_SIZE);
+        assert!(txb.next_bytes().is_none());
 
-    //     // Mark all as sent. Get nothing
-    //     txb.mark_as_sent(0, INITIAL_SEND_BUFFER_SIZE);
-    //     assert!(txb.next_bytes().is_none());
+        // Mark as lost. Get it again
+        txb.mark_as_lost(one_byte_from_end, 1);
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 1
+                         && start == one_byte_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     // Mark as lost. Get it again
-    //     txb.mark_as_lost(one_byte_from_end, 1);
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 1
-    //                      && start == one_byte_from_end
-    //                      && x.iter().all(|ch| *ch == 1)));
+        // Mark a larger range lost, including beyond what's in the buffer even.
+        // Get a little more
+        let five_bytes_from_end = INITIAL_SEND_BUFFER_SIZE as u64 - 5;
+        txb.mark_as_lost(five_bytes_from_end, 100);
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 5
+                         && start == five_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     // Mark a larger range lost, including beyond what's in the buffer even.
-    //     // Get a little more
-    //     let five_bytes_from_end = INITIAL_SEND_BUFFER_SIZE as u64 - 5;
-    //     txb.mark_as_lost(five_bytes_from_end, 100);
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 5
-    //                      && start == five_bytes_from_end
-    //                      && x.iter().all(|ch| *ch == 1)));
+        // Contig acked range at start means it can be removed from buffer
+        // Impl of vecdeque should now result in a split buffer when more data
+        // is sent
+        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
+        assert_eq!(txb.send(&[2; 30]), 30);
+        // Just get 5 even though there is more
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 5
+                         && start == five_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
+        assert_eq!(txb.retired(), five_bytes_from_end);
+        assert_eq!(txb.buffered(), 35);
 
-    //     // Contig acked range at start means it can be removed from buffer
-    //     // Impl of vecdeque should now result in a split buffer when more data
-    //     // is sent
-    //     txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
-    //     assert_eq!(txb.send(&[2; 30]), 30);
-    //     // Just get 5 even though there is more
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 5
-    //                      && start == five_bytes_from_end
-    //                      && x.iter().all(|ch| *ch == 1)));
-    //     assert_eq!(txb.retired(), five_bytes_from_end);
-    //     assert_eq!(txb.buffered(), 35);
+        // Marking that bit as sent should let the last contig bit be returned
+        // when called again
+        txb.mark_as_sent(five_bytes_from_end, 5);
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 30
+                         && start == INITIAL_SEND_BUFFER_SIZE as u64
+                         && x.iter().all(|ch| *ch == 2)));
+    }
 
-    //     // Marking that bit as sent should let the last contig bit be returned
-    //     // when called again
-    //     txb.mark_as_sent(five_bytes_from_end, 5);
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 30
-    //                      && start == INITIAL_SEND_BUFFER_SIZE as u64
-    //                      && x.iter().all(|ch| *ch == 2)));
-    // }
+    #[test]
+    fn tx_buffer_next_bytes_2() {
+        let mut txb = TxBuffer::new();
 
-    // #[test]
-    // fn tx_buffer_next_bytes_2() {
-    //     let mut txb = TxBuffer::new();
+        // Fill the buffer
+        let big_buf = vec![1; INITIAL_SEND_BUFFER_SIZE];
+        assert_eq!(txb.send(&big_buf), INITIAL_SEND_BUFFER_SIZE);
+        assert!(matches!(txb.next_bytes(),
+                         Some((0, x)) if x.len()==INITIAL_SEND_BUFFER_SIZE
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     assert_eq!(txb.avail(), INITIAL_SEND_BUFFER_SIZE);
+        // As above
+        let forty_bytes_from_end = INITIAL_SEND_BUFFER_SIZE as u64 - 40;
 
-    //     // Fill the buffer
-    //     let big_buf = vec![1; INITIAL_SEND_BUFFER_SIZE * 2];
-    //     assert_eq!(txb.send(&big_buf), INITIAL_SEND_BUFFER_SIZE);
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((0, x)) if x.len()==INITIAL_SEND_BUFFER_SIZE
-    //                      && x.iter().all(|ch| *ch == 1)));
+        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
+        assert!(matches!(txb.next_bytes(),
+                 Some((start, x)) if x.len() == 40
+                 && start == forty_bytes_from_end
+        ));
 
-    //     // As above
-    //     let forty_bytes_from_end = INITIAL_SEND_BUFFER_SIZE as u64 - 40;
+        // Valid new data placed in split locations
+        assert_eq!(txb.send(&[2; 100]), 100);
 
-    //     txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
-    //     assert!(matches!(txb.next_bytes(),
-    //              Some((start, x)) if x.len() == 40
-    //              && start == forty_bytes_from_end
-    //     ));
+        // Mark a little more as sent
+        txb.mark_as_sent(forty_bytes_from_end, 10);
+        let thirty_bytes_from_end = forty_bytes_from_end + 10;
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 30
+                         && start == thirty_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     // Valid new data placed in split locations
-    //     assert_eq!(txb.send(&[2; 100]), 100);
+        // Mark a range 'A' in second slice as sent. Should still return the same
+        let range_a_start = INITIAL_SEND_BUFFER_SIZE as u64 + 30;
+        let range_a_end = range_a_start + 10;
+        txb.mark_as_sent(range_a_start, 10);
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 30
+                         && start == thirty_bytes_from_end
+                         && x.iter().all(|ch| *ch == 1)));
 
-    //     // Mark a little more as sent
-    //     txb.mark_as_sent(forty_bytes_from_end, 10);
-    //     let thirty_bytes_from_end = forty_bytes_from_end + 10;
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 30
-    //                      && start == thirty_bytes_from_end
-    //                      && x.iter().all(|ch| *ch == 1)));
+        // Ack entire first slice and into second slice
+        let ten_bytes_past_end = INITIAL_SEND_BUFFER_SIZE as u64 + 10;
+        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
 
-    //     // Mark a range 'A' in second slice as sent. Should still return the same
-    //     let range_a_start = INITIAL_SEND_BUFFER_SIZE as u64 + 30;
-    //     let range_a_end = range_a_start + 10;
-    //     txb.mark_as_sent(range_a_start, 10);
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 30
-    //                      && start == thirty_bytes_from_end
-    //                      && x.iter().all(|ch| *ch == 1)));
+        // Get up to marked range A
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 20
+                         && start == ten_bytes_past_end
+                         && x.iter().all(|ch| *ch == 2)));
 
-    //     // Ack entire first slice and into second slice
-    //     let ten_bytes_past_end = INITIAL_SEND_BUFFER_SIZE as u64 + 10;
-    //     txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
+        txb.mark_as_sent(ten_bytes_past_end, 20);
 
-    //     // Get up to marked range A
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 20
-    //                      && start == ten_bytes_past_end
-    //                      && x.iter().all(|ch| *ch == 2)));
+        // Get bit after earlier marked range A
+        assert!(matches!(txb.next_bytes(),
+                         Some((start, x)) if x.len() == 60
+                         && start == range_a_end
+                         && x.iter().all(|ch| *ch == 2)));
 
-    //     txb.mark_as_sent(ten_bytes_past_end, 20);
-
-    //     // Get bit after earlier marked range A
-    //     assert!(matches!(txb.next_bytes(),
-    //                      Some((start, x)) if x.len() == 60
-    //                      && start == range_a_end
-    //                      && x.iter().all(|ch| *ch == 2)));
-
-    //     // No more bytes.
-    //     txb.mark_as_sent(range_a_end, 60);
-    //     assert!(txb.next_bytes().is_none());
-    // }
+        // No more bytes.
+        txb.mark_as_sent(range_a_end, 60);
+        assert!(txb.next_bytes().is_none());
+    }
 
     #[test]
     fn stream_tx() {
@@ -2478,17 +2474,8 @@ mod tests {
         conn_fc.borrow_mut().update(1_000_000_000);
         assert_eq!(conn_events.events().count(), 0);
 
-        // Unblocking both by a large amount will cause avail() to be limited by
-        // tx buffer size.
-        assert_eq!(s.avail(), INITIAL_SEND_BUFFER_SIZE - 4);
-
         let big_buf = vec![b'a'; INITIAL_SEND_BUFFER_SIZE];
-        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_SEND_BUFFER_SIZE - 4);
-
-        // No event because still blocked by tx buffer full
-        s.set_max_stream_data(2_000_000_000);
-        assert_eq!(conn_events.events().count(), 0);
-        assert_eq!(s.send(b"hello").unwrap(), 0);
+        assert_eq!(s.send(&big_buf).unwrap(), INITIAL_SEND_BUFFER_SIZE);
     }
 
     #[test]
