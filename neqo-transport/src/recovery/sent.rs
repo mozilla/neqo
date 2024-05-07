@@ -199,11 +199,13 @@ impl SentPackets {
         // Remove all packets. We will add them back as we don't need them.
         let mut packets = std::mem::take(&mut self.packets);
         for range in acked_ranges {
-            // Split off any unacknowledged tail, then any acknowledged part.
-            // Note: `BTreeMap::split_off` can be invoked for a key that doesn't exist.
-            let keep = packets.split_off(&(*range.end() + 1));
+            // For each acked range, split off the acknowledged part,
+            // then split off the part that hasn't been acknowledged.
+            // This order works better when processing ranges that
+            // have already been processed, which is common.
+            let mut acked = packets.split_off(range.start());
+            let keep = acked.split_off(&(*range.end() + 1));
             self.packets.extend(keep);
-            let acked = packets.split_off(range.start());
             result.extend(acked.into_values().rev());
         }
         self.packets.extend(packets);
