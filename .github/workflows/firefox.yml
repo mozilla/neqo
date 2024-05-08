@@ -61,9 +61,6 @@ jobs:
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          # Make some more space
-          # rm -rf .git
-          # df -h
           {
             echo "mk_add_options MOZ_OBJDIR=../$FIREFOX"
             echo "ac_add_options --with-ccache=sccache"
