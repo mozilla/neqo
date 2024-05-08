@@ -38,34 +38,21 @@ jobs:
       - name: Maximize build space
         if: runner.os == 'Linux'
         run: |
-          mount
           df -h
           sudo rm -rf /usr/local/lib/android || true
-          df -h
           sudo rm -rf /usr/share/dotnet || true
-          df -h
           sudo rm -rf /opt/ghc || true
           sudo rm -rf /usr/local/.ghcup || true
-          df -h
-          sudo apt-get remove -y '^aspnetcore-.*' || true
-          sudo apt-get remove -y '^dotnet-.*' --fix-missing || true
-          sudo apt-get remove -y '^llvm-.*' --fix-missing || true
-          sudo apt-get remove -y 'php.*' --fix-missing || true
-          sudo apt-get remove -y '^mongodb-.*' --fix-missing || true
-          sudo apt-get remove -y '^mysql-.*' --fix-missing || true
-          sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri --fix-missing || true
-          sudo apt-get remove -y google-cloud-sdk --fix-missing || true
-          sudo apt-get remove -y google-cloud-cli --fix-missing || true
+          sudo apt-get remove -y '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' '^mongodb-.*' '^mysql-.*' \
+            azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri google-cloud-sdk \
+            google-cloud-cli --fix-missing --quiet || true
           sudo apt-get autoremove -y || true
           sudo apt-get clean || true
-          df -h
           sudo docker image prune --all --force || true
-          df -h
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-          df -h
-          sudo swapoff -a || true
-          sudo rm -f /mnt/swapfile || true
-          free -h
+          # sudo swapoff -a || true
+          # sudo rm -f /mnt/swapfile || true
+          # free -h
           df -h
 
       - name: Check out Firefox
@@ -82,8 +69,8 @@ jobs:
         run: |
           cd mozilla-unified
           # Make some more space
-          rm -rf .git
-          df -h
+          # rm -rf .git
+          # df -h
           {
             echo "mk_add_options MOZ_OBJDIR=../$FIREFOX"
             echo "ac_add_options --with-ccache=sccache"
