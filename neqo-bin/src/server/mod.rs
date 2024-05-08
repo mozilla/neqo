@@ -21,12 +21,12 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use neqo_common::{hex, qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
 };
-use neqo_transport::{server::ValidateAddress, Output, RandomConnectionIdGenerator, Version};
+use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
 use tokio::time::Sleep;
 
 use crate::{udp, SharedArgs};
@@ -182,81 +182,34 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
-trait HttpServer: Display {
+#[allow(clippy::module_name_repetitions)]
+pub trait HttpServer: Display {
     fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
-    fn process_events(&mut self, args: &Args, now: Instant);
+    fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
-    fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
-    fn set_ciphers(&mut self, ciphers: &[Cipher]);
-    fn validate_address(&mut self, when: ValidateAddress);
-    fn enable_ech(&mut self) -> &[u8];
 }
 
-struct ServersRunner {
-    args: Args,
+#[allow(clippy::module_name_repetitions)]
+pub struct ServerRunner {
+    now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, udp::Socket)>,
 }
 
-impl ServersRunner {
-    pub fn new(args: Args) -> Result<Self, io::Error> {
-        let hosts = args.listen_addresses();
-        if hosts.is_empty() {
-            qerror!("No valid hosts defined");
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
-        }
-        let sockets = hosts
-            .into_iter()
-            .map(|host| {
-                let socket = udp::Socket::bind(host)?;
-                let local_addr = socket.local_addr()?;
-                qinfo!("Server waiting for connection on: {local_addr:?}");
-
-                Ok((host, socket))
-            })
-            .collect::<Result<_, io::Error>>()?;
-        let server = Self::create_server(&args);
-
-        Ok(Self {
-            args,
+impl ServerRunner {
+    #[must_use]
+    pub fn new(
+        now: Box<dyn Fn() -> Instant>,
+        server: Box<dyn HttpServer>,
+        sockets: Vec<(SocketAddr, udp::Socket)>,
+    ) -> Self {
+        Self {
+            now,
             server,
             timeout: None,
             sockets,
-        })
-    }
-
-    fn create_server(args: &Args) -> Box<dyn HttpServer> {
-        // Note: this is the exception to the case where we use `Args::now`.
-        let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
-            .expect("unable to setup anti-replay");
-        let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
-
-        let mut svr: Box<dyn HttpServer> = if args.shared.use_old_http {
-            Box::new(
-                http09::HttpServer::new(
-                    args.now(),
-                    &[args.key.clone()],
-                    &[args.shared.alpn.clone()],
-                    anti_replay,
-                    cid_mgr,
-                    args.shared.quic_parameters.get(&args.shared.alpn),
-                )
-                .expect("We cannot make a server!"),
-            )
-        } else {
-            Box::new(http3::HttpServer::new(args, anti_replay, cid_mgr))
-        };
-        svr.set_ciphers(&args.get_ciphers());
-        svr.set_qlog_dir(args.shared.qlog_dir.clone());
-        if args.retry {
-            svr.validate_address(ValidateAddress::Always);
         }
-        if args.ech {
-            let cfg = svr.enable_ech();
-            qinfo!("ECHConfigList: {}", hex(cfg));
-        }
-        svr
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
@@ -275,7 +228,7 @@ impl ServersRunner {
 
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
         loop {
-            match self.server.process(dgram.take(), self.args.now()) {
+            match self.server.process(dgram.take(), (self.now)()) {
                 Output::Datagram(dgram) => {
                     let socket = self.find_socket(dgram.source());
                     socket.writable().await?;
@@ -313,9 +266,9 @@ impl ServersRunner {
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
-    async fn run(&mut self) -> Res<()> {
+    pub async fn run(mut self) -> Res<()> {
         loop {
-            self.server.process_events(&self.args, self.args.now());
+            self.server.process_events((self.now)());
 
             self.process(None).await?;
 
@@ -402,6 +355,36 @@ pub async fn server(mut args: Args) -> Res<()> {
         }
     }
 
-    let mut servers_runner = ServersRunner::new(args)?;
-    servers_runner.run().await
+    let hosts = args.listen_addresses();
+    if hosts.is_empty() {
+        qerror!("No valid hosts defined");
+        Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
+    }
+    let sockets = hosts
+        .into_iter()
+        .map(|host| {
+            let socket = udp::Socket::bind(host)?;
+            let local_addr = socket.local_addr()?;
+            qinfo!("Server waiting for connection on: {local_addr:?}");
+
+            Ok((host, socket))
+        })
+        .collect::<Result<_, io::Error>>()?;
+
+    // Note: this is the exception to the case where we use `Args::now`.
+    let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
+        .expect("unable to setup anti-replay");
+    let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
+
+    let server: Box<dyn HttpServer> = if args.shared.use_old_http {
+        Box::new(
+            http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
+        )
+    } else {
+        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
+    };
+
+    ServerRunner::new(Box::new(move || args.now()), server, sockets)
+        .run()
+        .await
 }
