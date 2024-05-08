@@ -1,0 +1,43 @@
+name: GCP
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  PROJECT_ID: neqo-408614
+
+  concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  check:
+    # Add 'id-token' with the intended permissions for workload identity federation
+    permissions:
+      contents: read
+      id-token: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+
+    - id: auth
+      uses: google-github-actions/auth@55bd3a7c6e2ae7cf1877fd1ccb9d54c0503c457c # v2.1.2
+      with:
+        project_id: neqo
+        workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+
+    - uses: google-github-actions/setup-gcloud@98ddc00a17442e89a24bbf282954a3b65ce6d200 # v2.1.0
+      with:
+        project_id: '${{ env.PROJECT_ID }}'
+
+    - run: gcloud info
