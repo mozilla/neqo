@@ -742,3 +742,25 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     assert!(matches!(out, Output::None));
     assert!(matches!(client.state(), State::Closed(_)));
 }
+
+#[test]
+fn keep_alive_with_unresponsive_server() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let mut now = now();
+    let client_stream = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_keep_alive(client_stream, true).unwrap();
+
+    for _ in 0..100 {
+        if client.stream_send(client_stream, &[0x0; 500]).is_err() {
+            break;
+        }
+        if let Output::Callback(t) = client.process_output(now) {
+            now += t;
+        }
+    }
+    // Connection should be closed due to idle timeout.
+    assert!(matches!(client.state(), State::Closed(_)));
+}
