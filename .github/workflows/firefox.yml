@@ -27,20 +27,46 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
+      CARGO_HOME: ${{ github.workspace }}/cargo
 
     steps:
       - name: Check out Neqo
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
-      - name: Use /mnt
+      - name: Maximize build space
         if: runner.os == 'Linux'
         run: |
+          mount
           df -h
-          {
-            echo "MOZBUILD_STATE_PATH=/mnt/mozbuild"
-            echo "CARGO_HOME=/mnt/cargo"
-            echo "GITHUB_WORKSPACE=/mnt/workspace"
-          } >> "$GITHUB_ENV"
+          sudo rm -rf /usr/local/lib/android || true
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          df -h
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/.ghcup || true
+          df -h
+          sudo apt-get remove -y '^aspnetcore-.*' || true
+          sudo apt-get remove -y '^dotnet-.*' --fix-missing || true
+          sudo apt-get remove -y '^llvm-.*' --fix-missing || true
+          sudo apt-get remove -y 'php.*' --fix-missing || true
+          sudo apt-get remove -y '^mongodb-.*' --fix-missing || true
+          sudo apt-get remove -y '^mysql-.*' --fix-missing || true
+          sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri --fix-missing || true
+          sudo apt-get remove -y google-cloud-sdk --fix-missing || true
+          sudo apt-get remove -y google-cloud-cli --fix-missing || true
+          sudo apt-get autoremove -y || true
+          sudo apt-get clean || true
+          df -h
+          sudo docker image prune --all --force || true
+          df -h
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          df -h
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile || true
+          free -h
+          df -h
 
       - name: Check out Firefox
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
@@ -55,7 +81,6 @@ jobs:
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
-          df -h
           # Make some more space
           rm -rf .git
           df -h
