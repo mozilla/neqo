@@ -29,27 +29,24 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/cargo
 
     steps:
-      # We need to check out Neqo first, because the maximize-build-space action
-      # is vendored in.
       - name: Check out Neqo
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
 
       - name: Maximize build space
         if: runner.os == 'Linux'
-        uses: ./.github/actions/maximize-build-space
-        with:
-          root-reserve-mb: 2048
-          temp-reserve-mb: 2048
-          swap-size-mb: 4096
-          remove-dotnet: true
-          remove-android: true
-          remove-haskell: true
-          remove-docker-images: true
-
-      # The previous step blew it away, so we need to check it out again.
-      - name: Check out Neqo again
-        if: runner.os == 'Linux'
-        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/.ghcup || true
+          sudo apt-get remove -y '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' '^mongodb-.*' '^mysql-.*' \
+            azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri google-cloud-sdk \
+            google-cloud-cli --fix-missing --quiet || true
+          sudo apt-get autoremove -y || true
+          sudo apt-get clean || true
+          sudo docker image prune --all --force || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          df -h
 
       - name: Check out Firefox
         uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4.1.3
