@@ -38,7 +38,6 @@ jobs:
       - name: Maximize build space
         if: runner.os == 'Linux'
         run: |
-          df -h
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /opt/ghc || true
@@ -50,9 +49,6 @@ jobs:
           sudo apt-get clean || true
           sudo docker image prune --all --force || true
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-          # sudo swapoff -a || true
-          # sudo rm -f /mnt/swapfile || true
-          # free -h
           df -h
 
       - name: Check out Firefox
