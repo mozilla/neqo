@@ -7,7 +7,7 @@
 use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::{version::WireVersion, Version};
+use neqo_transport::{version::WireVersion, Version, MIN_INITIAL_PACKET_SIZE};
 
 use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
 
@@ -62,7 +62,7 @@ pub fn assert_vn(payload: &[u8]) {
 ///
 /// If the tests fail.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
-    assert!(payload.len() >= 1200);
+    assert!(payload.len() >= MIN_INITIAL_PACKET_SIZE);
     let mut dec = Decoder::from(payload);
     let initial_type = dec.decode_byte().unwrap(); // Initial
     let version = assert_default_version(&mut dec);
