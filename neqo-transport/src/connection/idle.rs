@@ -46,17 +46,18 @@ impl IdleTimeout {
         self.timeout = min(self.timeout, peer_timeout);
     }
 
-    pub fn expiry(&self, now: Instant, pto: Duration) -> Instant {
-        let start = match self.state {
+    fn start(&self, now: Instant) -> Instant {
+        match self.state {
             IdleTimeoutState::Init => now,
             IdleTimeoutState::PacketReceived(t) | IdleTimeoutState::AckElicitingPacketSent(t) => t,
-        };
+        }
+    }
+
+    pub fn expiry(&self, now: Instant, pto: Duration) -> Instant {
         let delay = max(self.timeout, pto * 3);
-        qtrace!(
-            "IdleTimeout::expiry@{now:?} pto={pto:?} => {t:?}",
-            t = start + delay
-        );
-        start + delay
+        let t = self.start(now) + delay;
+        qtrace!("IdleTimeout::expiry@{now:?} pto={pto:?} => {t:?}");
+        t
     }
 
     pub fn on_packet_sent(&mut self, now: Instant) {
@@ -90,13 +91,9 @@ impl IdleTimeout {
     }
 
     fn keep_alive_timeout(&self, now: Instant, pto: Duration) -> Instant {
-        let start = match self.state {
-            IdleTimeoutState::Init => now,
-            IdleTimeoutState::PacketReceived(t) | IdleTimeoutState::AckElicitingPacketSent(t) => t,
-        };
         // For a keep-alive timer, wait for half the timeout interval, but be sure
         // not to wait too little or we will send many unnecessary probes.
-        start + max(self.timeout / 2, pto)
+        self.start(now) + max(self.timeout / 2, pto)
     }
 
     pub fn send_keep_alive(
