@@ -232,7 +232,7 @@ impl ServerRunner {
                 Output::Datagram(dgram) => {
                     let socket = self.find_socket(dgram.source());
                     socket.writable().await?;
-                    socket.send(dgram)?;
+                    socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {:?}", new_timeout);
