@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        os: [ubuntu-24.04, macos-14, windows-latest]
         type: [debug, release]
     runs-on: ${{ matrix.os }}
     defaults:
@@ -129,7 +129,7 @@ jobs:
     name: Comment on PR
     if: always()
     needs: firefox
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@44c2b7a8a4ea60a981eaca3cf939b5f4305c123b # v4.1.5
 
