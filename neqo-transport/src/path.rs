@@ -663,8 +663,10 @@ impl Path {
     }
 
     /// Get the path MTU.  This is currently fixed based on IP version.
+    #[allow(clippy::unused_self)]
     pub fn mtu(&self) -> usize {
-        Self::mtu_by_addr(self.remote.ip())
+        // TODO: This should be based on the path MTU discovery.
+        9202
     }
 
     /// Get the first local connection ID.
