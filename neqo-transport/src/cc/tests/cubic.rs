@@ -181,11 +181,11 @@ fn tcp_phase() {
 
     // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
     // calculates from: W_cubic(elapsed_time + t_to_increase) - W_cubis(elapsed_time) =
-    // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 *
-    // MAX_DATAGRAM_SIZE + CWND_INITIAL -     CUBIC_C * elapsed_time^3 *
-    // MAX_DATAGRAM_SIZE + CWND_INITIAL = MAX_DATAGRAM_SIZE => t_to_increase =
-    // cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) - elapsed_time (t_to_increase is in
-    // seconds) number of ack needed is t_to_increase / time_increase.
+    // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
+    // CWND_INITIAL -     CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
+    // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) -
+    // elapsed_time (t_to_increase is in seconds)
+    // number of ack needed is t_to_increase / time_increase.
     let expected_ack_cubic_increase =
         ((((1.0 + CUBIC_C * (elapsed_time).as_secs_f64().powi(3)) / CUBIC_C).cbrt()
             - elapsed_time.as_secs_f64())
