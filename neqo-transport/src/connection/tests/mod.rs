@@ -20,15 +20,16 @@ use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 use super::{CloseReason, Connection, ConnectionId, Output, State};
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
-    cc::{CWND_INITIAL_PKTS, CWND_MIN},
+    cc::CWND_INITIAL_PKTS,
     cid::ConnectionIdRef,
     events::ConnectionEvent,
     frame::FRAME_TYPE_PING,
     packet::PacketBuilder,
+    pmtud::PmtudState,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
-    Version, MIN_INITIAL_PACKET_SIZE,
+    Version,
 };
 
 // All the tests.
@@ -374,24 +375,19 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
 /// pacing, this looks at the congestion window to tell when to stop.
 /// Returns a list of datagrams and the new time.
 fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Datagram>, Instant) {
-    // Train wreck function to get the remaining congestion window on the primary path.
-    fn cwnd(c: &Connection) -> usize {
-        c.paths.primary().unwrap().borrow().sender().cwnd_avail()
-    }
-
-    qtrace!("fill_cwnd starting cwnd: {}", cwnd(c));
+    qtrace!("fill_cwnd starting cwnd: {}", cwnd_avail(c));
     fill_stream(c, stream);
 
     let mut total_dgrams = Vec::new();
     loop {
         let pkt = c.process_output(now);
-        qtrace!("fill_cwnd cwnd remaining={}, output: {:?}", cwnd(c), pkt);
+        qtrace!("fill_cwnd cwnd remaining={}, output: {:?}", cwnd_avail(c), pkt);
         match pkt {
             Output::Datagram(dgram) => {
                 total_dgrams.push(dgram);
             }
             Output::Callback(t) => {
-                if cwnd(c) < ACK_ONLY_SIZE_LIMIT {
+                if cwnd_avail(c) < ACK_ONLY_SIZE_LIMIT {
                     break;
                 }
                 now += t;
@@ -476,8 +472,13 @@ where
 fn cwnd(c: &Connection) -> usize {
     c.paths.primary().unwrap().borrow().sender().cwnd()
 }
+
 fn cwnd_avail(c: &Connection) -> usize {
     c.paths.primary().unwrap().borrow().sender().cwnd_avail()
+}
+
+fn cwnd_min(c: &Connection) -> usize {
+    c.paths.primary().unwrap().borrow().sender().cwnd_min()
 }
 
 fn induce_persistent_congestion(
@@ -525,7 +526,7 @@ fn induce_persistent_congestion(
     // An ACK for the third PTO causes persistent congestion.
     let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
     client.process_input(&s_ack, now);
-    assert_eq!(cwnd(client), CWND_MIN);
+    assert_eq!(cwnd(client), cwnd_min(client));
     now
 }
 
@@ -538,30 +539,30 @@ fn induce_persistent_congestion(
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = MIN_INITIAL_PACKET_SIZE * CWND_INITIAL_PKTS;
+const POST_HANDSHAKE_CWND: usize = PmtudState::default_mtu(DEFAULT_ADDR.ip()) * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
-const fn cwnd_packets(data: usize) -> usize {
+const fn cwnd_packets(data: usize, mtu: usize) -> usize {
     // Add one if the last chunk is >= ACK_ONLY_SIZE_LIMIT.
-    (data + MIN_INITIAL_PACKET_SIZE - ACK_ONLY_SIZE_LIMIT) / MIN_INITIAL_PACKET_SIZE
+    (data + mtu - ACK_ONLY_SIZE_LIMIT) / mtu
 }
 
 /// Determine the size of the last packet.
 /// The minimal size of a packet is `ACK_ONLY_SIZE_LIMIT`.
-fn last_packet(cwnd: usize) -> usize {
-    if (cwnd % MIN_INITIAL_PACKET_SIZE) > ACK_ONLY_SIZE_LIMIT {
-        cwnd % MIN_INITIAL_PACKET_SIZE
+fn last_packet(cwnd: usize, mtu: usize) -> usize {
+    if (cwnd % mtu) > ACK_ONLY_SIZE_LIMIT {
+        cwnd % mtu
     } else {
-        MIN_INITIAL_PACKET_SIZE
+        mtu
     }
 }
 
 /// Assert that the set of packets fill the CWND.
-fn assert_full_cwnd(packets: &[Datagram], cwnd: usize) {
-    assert_eq!(packets.len(), cwnd_packets(cwnd));
+fn assert_full_cwnd(packets: &[Datagram], cwnd: usize, mtu: usize) {
+    assert_eq!(packets.len(), cwnd_packets(cwnd, mtu));
     let (last, rest) = packets.split_last().unwrap();
-    assert!(rest.iter().all(|d| d.len() == MIN_INITIAL_PACKET_SIZE));
-    assert_eq!(last.len(), last_packet(cwnd));
+    assert!(rest.iter().all(|d| d.len() == mtu));
+    assert_eq!(last.len(), last_packet(cwnd, mtu));
 }
 
 /// Send something on a stream from `sender` to `receiver`, maybe allowing for pacing.

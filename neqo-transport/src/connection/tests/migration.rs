@@ -28,9 +28,10 @@ use crate::{
     connection::tests::send_something_paced,
     frame::FRAME_TYPE_NEW_CONNECTION_ID,
     packet::PacketBuilder,
+    pmtud::PmtudState,
     tparams::{self, PreferredAddress, TransportParameter},
     CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
-    ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
+    ConnectionParameters, EmptyConnectionIdGenerator, Error,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -469,7 +470,7 @@ fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Da
 }
 
 fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: SocketAddr) {
-    let mtu = MIN_INITIAL_PACKET_SIZE;
+    let mtu = PmtudState::default_mtu(hs_client.ip());
     let assert_orig_path = |d: &Datagram, full_mtu: bool| {
         assert_eq!(
             d.destination(),

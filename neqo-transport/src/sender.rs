@@ -47,7 +47,7 @@ impl PacketSender {
         pmtud: Rc<PmtudState>,
         now: Instant,
     ) -> Self {
-        let max_datagram_size = pmtud.max_datagram_size();
+        let max_datagram_size = pmtud.mtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
@@ -78,6 +78,11 @@ impl PacketSender {
     #[must_use]
     pub fn cwnd_avail(&self) -> usize {
         self.cc.cwnd_avail()
+    }
+
+    #[must_use]
+    pub fn cwnd_min(&self) -> usize {
+        self.cc.cwnd_min()
     }
 
     pub fn on_packets_acked(

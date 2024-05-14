@@ -35,7 +35,6 @@ use crate::{
     tparams::{TransportParameter, MIN_ACK_DELAY},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
-    MIN_INITIAL_PACKET_SIZE,
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -47,13 +46,13 @@ fn full_handshake() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(out.as_dgram_ref().unwrap().len(), client.mtu());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let out = server.process(out.as_dgram_ref(), now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(out.as_dgram_ref().unwrap().len(), server.mtu());
 
     qdebug!("---- client: cert verification");
     let out = client.process(out.as_dgram_ref(), now());
@@ -143,7 +142,7 @@ fn dup_server_flight1() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(out.as_dgram_ref().unwrap().len(), client.mtu());
     qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
@@ -267,7 +266,7 @@ fn send_05rtt() {
     let c1 = client.process(None, now()).dgram();
     assert!(c1.is_some());
     let s1 = server.process(c1.as_ref(), now()).dgram().unwrap();
-    assert_eq!(s1.len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(s1.len(), server.mtu());
 
     // The server should accept writes at this point.
     let s2 = send_something(&mut server, now());
@@ -437,7 +436,7 @@ fn coalesce_05rtt() {
     let s2 = server.process(c2.as_ref(), now).dgram();
     // Even though there is a 1-RTT packet at the end of the datagram, the
     // flight should be padded to full size.
-    assert_eq!(s2.as_ref().unwrap().len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(s2.as_ref().unwrap().len(), server.mtu());
 
     // The client should process the datagram.  It can't process the 1-RTT
     // packet until authentication completes though.  So it saves it.
@@ -628,7 +627,7 @@ fn corrupted_initial() {
 }
 
 #[test]
-// Absent path PTU discovery, max v6 packet size should be MIN_INITIAL_PACKET_SIZE.
+// Absent path PTU discovery, max v6 packet size should be PATH_MTU_V6.
 fn verify_pkt_honors_mtu() {
     let mut client = default_client();
     let mut server = default_server();
@@ -645,7 +644,7 @@ fn verify_pkt_honors_mtu() {
     assert_eq!(client.stream_send(stream_id, &[0xbb; 2000]).unwrap(), 2000);
     let pkt0 = client.process(None, now);
     assert!(matches!(pkt0, Output::Datagram(_)));
-    assert_eq!(pkt0.as_dgram_ref().unwrap().len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(pkt0.as_dgram_ref().unwrap().len(), client.mtu());
 }
 
 #[test]
@@ -759,15 +758,15 @@ fn anti_amplification() {
 
     // With a gigantic transport parameter, the server is unable to complete
     // the handshake within the amplification limit.
-    let very_big = TransportParameter::Bytes(vec![0; MIN_INITIAL_PACKET_SIZE * 3]);
+    let very_big = TransportParameter::Bytes(vec![0; server.mtu() * 3]);
     server.set_local_tparam(0xce16, very_big).unwrap();
 
     let c_init = client.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
     let s_init1 = server.process(c_init.as_ref(), now).dgram().unwrap();
-    assert_eq!(s_init1.len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(s_init1.len(), client.mtu());
     let s_init2 = server.process_output(now).dgram().unwrap();
-    assert_eq!(s_init2.len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(s_init2.len(), server.mtu());
 
     // Skip the gap for pacing here.
     let s_pacing = server.process_output(now).callback();
@@ -775,7 +774,7 @@ fn anti_amplification() {
     now += s_pacing;
 
     let s_init3 = server.process_output(now).dgram().unwrap();
-    assert_eq!(s_init3.len(), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(s_init3.len(), server.mtu());
     let cb = server.process_output(now).callback();
     assert_ne!(cb, Duration::new(0, 0));
 
@@ -790,7 +789,7 @@ fn anti_amplification() {
     // The client sends a padded datagram, with just ACK for Handshake.
     assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
     assert_eq!(client.stats().frame_tx.all, frame_count + 1);
-    assert_ne!(ack.len(), MIN_INITIAL_PACKET_SIZE); // Not padded (it includes Handshake).
+    assert_ne!(ack.len(), client.mtu()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
     let remainder = server.process(Some(&ack), now).dgram();

@@ -554,7 +554,7 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let pmtud = PmtudState::new();
+        let pmtud = PmtudState::new(remote.ip());
         let mut sender = PacketSender::new(cc, pacing, pmtud.clone(), now);
         sender.set_qlog(qlog.clone());
         Self {
@@ -654,7 +654,7 @@ impl Path {
     /// Get the path MTU.  This is currently fixed based on IP version.
     #[allow(clippy::unused_self)]
     pub fn mtu(&self) -> usize {
-        self.pmtud.max_datagram_size()
+        self.pmtud.mtu()
     }
 
     /// Get the first local connection ID.
