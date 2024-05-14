@@ -24,7 +24,7 @@ workspace = true
 
 [dependencies]
 # neqo-bin is not used in Firefox, so we can be liberal with dependency versions
-clap = { version = "4.4", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive"] }
+clap = { version = "4.4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
 clap-verbosity-flag = { version = "2.2", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = { version = "0.4", default-features = false, features = ["std"] }
@@ -35,7 +35,7 @@ neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
-quinn-udp = { git = "https://github.com/quinn-rs/quinn/", rev = "a947962131aba8a6521253d03cc948b20098a2d6" }
+quinn-udp = { version = "0.5.0", default-features = false }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }

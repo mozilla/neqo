@@ -33,7 +33,7 @@ use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
-    packet::{PacketBuilder, PacketType, PublicPacket},
+    packet::{PacketBuilder, PacketType, PublicPacket, MIN_INITIAL_PACKET_SIZE},
     ConnectionParameters, Res, Version,
 };
 
@@ -43,9 +43,6 @@ pub enum InitialResult {
     Retry(Vec<u8>),
 }
 
-/// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
-/// a new connection across all QUIC versions this server supports.
-const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 /// The size of timer buckets.  This is higher than the actual timer granularity
 /// as this depends on there being some distribution of events.
 const TIMER_GRANULARITY: Duration = Duration::from_millis(4);
