@@ -47,7 +47,7 @@ impl PacketSender {
         pmtud: Rc<PmtudState>,
         now: Instant,
     ) -> Self {
-        let max_datagram_size = pmtud.mtu();
+        let mtu = pmtud.mtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
@@ -57,12 +57,7 @@ impl PacketSender {
                     Box::new(ClassicCongestionControl::new(Cubic::default(), pmtud))
                 }
             },
-            pacer: Pacer::new(
-                pacing_enabled,
-                now,
-                max_datagram_size * PACING_BURST_SIZE,
-                max_datagram_size,
-            ),
+            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
         }
     }
 

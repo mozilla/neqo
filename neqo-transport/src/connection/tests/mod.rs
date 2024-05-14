@@ -381,7 +381,11 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
     let mut total_dgrams = Vec::new();
     loop {
         let pkt = c.process_output(now);
-        qtrace!("fill_cwnd cwnd remaining={}, output: {:?}", cwnd_avail(c), pkt);
+        qtrace!(
+            "fill_cwnd cwnd remaining={}, output: {:?}",
+            cwnd_avail(c),
+            pkt
+        );
         match pkt {
             Output::Datagram(dgram) => {
                 total_dgrams.push(dgram);
