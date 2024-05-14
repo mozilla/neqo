@@ -215,7 +215,7 @@ where
 {
     /// The thing that we're counting for.
     subject: T,
-    // TODO: Update, the receive buffer is no longer relevant.
+    // TODO: Update. The receive buffer is no longer relevant.
     /// The maximum amount of items that can be active (e.g., the size of the receive buffer).
     max_active: u64,
     /// Last max allowed sent.
@@ -361,6 +361,8 @@ impl Default for ReceiverFlowControl<()> {
 }
 
 impl ReceiverFlowControl<StreamId> {
+    // TODO: Should as well apply to Connection flow control? Currently just using a huge limit.
+    // https://github.com/mozilla/neqo/blob/e44c472487b663ea4892bd2ff2786919d20329a2/neqo-transport/src/connection/params.rs#L21
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -385,9 +387,12 @@ impl ReceiverFlowControl<StreamId> {
         // Auto-tune max_active.
         //
         // TODO: Should one also auto-tune down?
-        if self
-            .max_allowed_sent_at
-            .is_some_and(|at| now - at < rtt * 2)
+        //
+        // TODO: Deduplicate the /2 logic. Used in other places as well.
+        if self.retired + self.max_active / 2 > self.max_allowed
+            && self
+                .max_allowed_sent_at
+                .is_some_and(|at| now - at < rtt * 2)
             && self.max_active < STREAM_MAX_ACTIVE_LIMIT
         {
             let prev_max_active = self.max_active;
