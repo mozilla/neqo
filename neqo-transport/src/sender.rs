@@ -80,6 +80,7 @@ impl PacketSender {
         self.cc.cwnd_avail()
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn cwnd_min(&self) -> usize {
         self.cc.cwnd_min()

@@ -155,6 +155,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         self.congestion_window
     }
 
+    #[cfg(test)]
     #[must_use]
     fn cwnd_initial(&self) -> usize {
         cwnd_initial(self.pmtud.mtu())
@@ -172,6 +173,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
+    #[cfg(test)]
     #[must_use]
     fn cwnd_min(&self) -> usize {
         self.max_datagram_size() * 2
