@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     mem,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -25,6 +25,7 @@ use crate::{
     ecn::{EcnCount, EcnInfo},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
+    pmtud::PmtudState,
     recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
@@ -33,14 +34,6 @@ use crate::{
     Stats,
 };
 
-/// This is the MTU that we assume when using IPv6.
-/// We use this size for Initial packets, so we don't need to worry about probing for support.
-/// If the path doesn't support this MTU, we will assume that it doesn't support QUIC.
-///
-/// This is a multiple of 16 greater than the largest possible short header (1 + 20 + 4).
-pub const PATH_MTU_V6: usize = 1337;
-/// The path MTU for IPv4 can be 20 bytes larger than for v6.
-pub const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 /// The number of times that a path will be probed before it is considered failed.
 const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
@@ -547,6 +540,7 @@ pub struct Path {
     ecn_info: EcnInfo,
     /// For logging of events.
     qlog: NeqoQlog,
+    pmtud: PmtudState,
 }
 
 impl Path {
@@ -560,7 +554,8 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, pacing, Self::mtu_by_addr(remote.ip()), now);
+        let pmtud = PmtudState::default();
+        let mut sender = PacketSender::new(cc, pacing, &pmtud, now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -578,6 +573,7 @@ impl Path {
             sent_bytes: 0,
             ecn_info: EcnInfo::default(),
             qlog,
+            pmtud,
         }
     }
 
@@ -655,18 +651,10 @@ impl Path {
         }
     }
 
-    fn mtu_by_addr(addr: IpAddr) -> usize {
-        match addr {
-            IpAddr::V4(_) => PATH_MTU_V4,
-            IpAddr::V6(_) => PATH_MTU_V6,
-        }
-    }
-
     /// Get the path MTU.  This is currently fixed based on IP version.
     #[allow(clippy::unused_self)]
     pub fn mtu(&self) -> usize {
-        // TODO: This should be based on the path MTU discovery.
-        9202
+        self.pmtud.max_datagram_size()
     }
 
     /// Get the first local connection ID.

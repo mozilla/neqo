@@ -18,6 +18,7 @@ use neqo_common::qlog::NeqoQlog;
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
+    pmtud::PmtudState,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
@@ -42,19 +43,24 @@ impl PacketSender {
     pub fn new(
         alg: CongestionControlAlgorithm,
         pacing_enabled: bool,
-        mtu: usize,
+        pmtud: &PmtudState,
         now: Instant,
     ) -> Self {
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
-                    Box::new(ClassicCongestionControl::new(NewReno::default()))
+                    Box::new(ClassicCongestionControl::new(NewReno::default(), pmtud))
                 }
                 CongestionControlAlgorithm::Cubic => {
-                    Box::new(ClassicCongestionControl::new(Cubic::default()))
+                    Box::new(ClassicCongestionControl::new(Cubic::default(), pmtud))
                 }
             },
-            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
+            pacer: Pacer::new(
+                pacing_enabled,
+                now,
+                pmtud.max_datagram_size() * PACING_BURST_SIZE,
+                pmtud.max_datagram_size(),
+            ),
         }
     }
 

@@ -33,8 +33,8 @@ use crate::{
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
-    packet::{PacketBuilder, PacketType, PublicPacket},
-    ConnectionParameters, Res, Version, MIN_INITIAL_PACKET_SIZE,
+    packet::{PacketBuilder, PacketType, PublicPacket, MIN_INITIAL_PACKET_SIZE},
+    ConnectionParameters, Res, Version,
 };
 
 pub enum InitialResult {

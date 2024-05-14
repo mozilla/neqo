@@ -14,12 +14,12 @@ use super::{
     CLIENT_HANDSHAKE_1RTT_PACKETS, DEFAULT_RTT, POST_HANDSHAKE_CWND,
 };
 use crate::{
-    cc::MAX_DATAGRAM_SIZE,
     packet::PacketNumber,
     recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD},
     sender::PACING_BURST_SIZE,
     stream_id::StreamType,
     tracking::DEFAULT_ACK_PACKET_TOLERANCE,
+    MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -267,7 +267,7 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
         now = next_now;
         next_c_tx_dgrams.append(&mut new_pkts);
 
-        expected_cwnd += MAX_DATAGRAM_SIZE;
+        expected_cwnd += MIN_INITIAL_PACKET_SIZE;
         assert_eq!(cwnd(&client), expected_cwnd);
         c_tx_dgrams = next_c_tx_dgrams;
     }

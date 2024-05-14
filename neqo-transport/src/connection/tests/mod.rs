@@ -25,11 +25,10 @@ use crate::{
     events::ConnectionEvent,
     frame::FRAME_TYPE_PING,
     packet::PacketBuilder,
-    path::PATH_MTU_V6,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
-    Version,
+    Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 // All the tests.
@@ -539,21 +538,21 @@ fn induce_persistent_congestion(
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * CWND_INITIAL_PKTS;
+const POST_HANDSHAKE_CWND: usize = MIN_INITIAL_PACKET_SIZE * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
 const fn cwnd_packets(data: usize) -> usize {
     // Add one if the last chunk is >= ACK_ONLY_SIZE_LIMIT.
-    (data + PATH_MTU_V6 - ACK_ONLY_SIZE_LIMIT) / PATH_MTU_V6
+    (data + MIN_INITIAL_PACKET_SIZE - ACK_ONLY_SIZE_LIMIT) / MIN_INITIAL_PACKET_SIZE
 }
 
 /// Determine the size of the last packet.
 /// The minimal size of a packet is `ACK_ONLY_SIZE_LIMIT`.
 fn last_packet(cwnd: usize) -> usize {
-    if (cwnd % PATH_MTU_V6) > ACK_ONLY_SIZE_LIMIT {
-        cwnd % PATH_MTU_V6
+    if (cwnd % MIN_INITIAL_PACKET_SIZE) > ACK_ONLY_SIZE_LIMIT {
+        cwnd % MIN_INITIAL_PACKET_SIZE
     } else {
-        PATH_MTU_V6
+        MIN_INITIAL_PACKET_SIZE
     }
 }
 
@@ -561,7 +560,7 @@ fn last_packet(cwnd: usize) -> usize {
 fn assert_full_cwnd(packets: &[Datagram], cwnd: usize) {
     assert_eq!(packets.len(), cwnd_packets(cwnd));
     let (last, rest) = packets.split_last().unwrap();
-    assert!(rest.iter().all(|d| d.len() == PATH_MTU_V6));
+    assert!(rest.iter().all(|d| d.len() == MIN_INITIAL_PACKET_SIZE));
     assert_eq!(last.len(), last_packet(cwnd));
 }
 

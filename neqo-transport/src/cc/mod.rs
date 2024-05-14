@@ -14,7 +14,7 @@ use std::{
 
 use neqo_common::qlog::NeqoQlog;
 
-use crate::{path::PATH_MTU_V6, recovery::SentPacket, rtt::RttEstimate, Error};
+use crate::{recovery::SentPacket, rtt::RttEstimate, Error};
 
 mod classic_cc;
 mod cubic;
@@ -26,9 +26,9 @@ pub use classic_cc::{CWND_INITIAL, CWND_INITIAL_PKTS, CWND_MIN};
 pub use cubic::Cubic;
 pub use new_reno::NewReno;
 
-pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
+// pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 #[allow(clippy::cast_precision_loss)]
-pub const MAX_DATAGRAM_SIZE_F64: f64 = MAX_DATAGRAM_SIZE as f64;
+// pub const MAX_DATAGRAM_SIZE_F64: f64 = MAX_DATAGRAM_SIZE as f64;
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: NeqoQlog);

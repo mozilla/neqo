@@ -24,7 +24,6 @@ use super::{
 };
 use crate::{
     cc::CWND_MIN,
-    path::PATH_MTU_V6,
     recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
     },
@@ -32,7 +31,7 @@ use crate::{
     stats::MAX_PTO_COUNTS,
     tparams::TransportParameter,
     tracking::DEFAULT_ACK_DELAY,
-    StreamType,
+    StreamType, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -89,7 +88,7 @@ fn pto_works_full_cwnd() {
     // Two packets in the PTO.
     // The first should be full sized; the second might be small.
     assert_eq!(dgrams.len(), 2);
-    assert_eq!(dgrams[0].len(), PATH_MTU_V6);
+    assert_eq!(dgrams[0].len(), MIN_INITIAL_PACKET_SIZE);
 
     // Both datagrams contain one or more STREAM frames.
     for d in dgrams {
@@ -168,7 +167,7 @@ fn pto_initial() {
     let mut client = default_client();
     let pkt1 = client.process(None, now).dgram();
     assert!(pkt1.is_some());
-    assert_eq!(pkt1.clone().unwrap().len(), PATH_MTU_V6);
+    assert_eq!(pkt1.clone().unwrap().len(), MIN_INITIAL_PACKET_SIZE);
 
     let delay = client.process(None, now).callback();
     assert_eq!(delay, INITIAL_PTO);
@@ -177,7 +176,7 @@ fn pto_initial() {
     now += delay;
     let pkt2 = client.process(None, now).dgram();
     assert!(pkt2.is_some());
-    assert_eq!(pkt2.unwrap().len(), PATH_MTU_V6);
+    assert_eq!(pkt2.unwrap().len(), MIN_INITIAL_PACKET_SIZE);
 
     let delay = client.process(None, now).callback();
     // PTO has doubled.
@@ -382,7 +381,7 @@ fn handshake_ack_pto() {
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
-    let big = TransportParameter::Bytes(vec![0; PATH_MTU_V6]);
+    let big = TransportParameter::Bytes(vec![0; MIN_INITIAL_PACKET_SIZE]);
     server.set_local_tparam(0xce16, big).unwrap();
 
     let c1 = client.process(None, now).dgram();
