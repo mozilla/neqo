@@ -3294,7 +3294,6 @@ impl Connection {
     /// Basically never, because that unwrap won't fail.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_dgram_size = self.quic_datagrams.remote_datagram_size();
-        qdebug!([self], "XXX max_datagram_size={}", max_dgram_size);
         if max_dgram_size == 0 {
             return Err(Error::NotAvailable);
         }
@@ -3328,12 +3327,6 @@ impl Connection {
 
         let data_len_possible =
             u64::try_from(mtu.saturating_sub(tx.expansion() + builder.len() + 1)).unwrap();
-        qdebug!(
-            [self],
-            "XXX max_datagram_size={} data_len_possible={}",
-            max_dgram_size,
-            data_len_possible
-        );
         Ok(min(data_len_possible, max_dgram_size))
     }
 

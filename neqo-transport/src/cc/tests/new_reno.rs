@@ -35,7 +35,7 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 
 #[test]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), &PmtudState::default());
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), PmtudState::new());
     let time_now = now();
     let time_before = time_now.checked_sub(Duration::from_millis(100)).unwrap();
     let time_after = time_now + Duration::from_millis(150);
@@ -146,9 +146,10 @@ fn issue_876() {
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), &PmtudState::default());
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), PmtudState::new());
     let mut pn = 0;
     let mut now = now();
+    let max_datagram_size = cc.max_datagram_size();
     let mut next_packet = |now| {
         let p = SentPacket::new(
             PacketType::Short,
@@ -157,7 +158,7 @@ fn issue_1465() {
             now,
             true,
             Vec::new(),
-            cc.max_datagram_size(),
+            max_datagram_size,
         );
         pn += 1;
         p

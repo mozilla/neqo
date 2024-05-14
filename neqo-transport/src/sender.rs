@@ -10,6 +10,7 @@
 
 use std::{
     fmt::{self, Debug, Display},
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -43,9 +44,10 @@ impl PacketSender {
     pub fn new(
         alg: CongestionControlAlgorithm,
         pacing_enabled: bool,
-        pmtud: &PmtudState,
+        pmtud: Rc<PmtudState>,
         now: Instant,
     ) -> Self {
+        let max_datagram_size = pmtud.max_datagram_size();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
@@ -58,8 +60,8 @@ impl PacketSender {
             pacer: Pacer::new(
                 pacing_enabled,
                 now,
-                pmtud.max_datagram_size() * PACING_BURST_SIZE,
-                pmtud.max_datagram_size(),
+                max_datagram_size * PACING_BURST_SIZE,
+                max_datagram_size,
             ),
         }
     }

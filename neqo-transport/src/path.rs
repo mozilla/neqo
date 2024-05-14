@@ -540,7 +540,7 @@ pub struct Path {
     ecn_info: EcnInfo,
     /// For logging of events.
     qlog: NeqoQlog,
-    pmtud: PmtudState,
+    pmtud: Rc<PmtudState>,
 }
 
 impl Path {
@@ -554,8 +554,8 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let pmtud = PmtudState::default();
-        let mut sender = PacketSender::new(cc, pacing, &pmtud, now);
+        let pmtud = PmtudState::new();
+        let mut sender = PacketSender::new(cc, pacing, pmtud.clone(), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,

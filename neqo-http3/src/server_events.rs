@@ -378,7 +378,6 @@ impl WebTransportRequest {
     /// This cannot panic. The max varint length is 8.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
-        qdebug!("XXX max_datagram_size={}.", max_size);
         Ok(max_size
             - u64::try_from(Encoder::varint_len(
                 self.stream_handler.stream_id().as_u64(),

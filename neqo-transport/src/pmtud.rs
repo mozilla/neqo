@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::rc::Rc;
+
 use crate::MIN_INITIAL_PACKET_SIZE;
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
@@ -19,9 +21,9 @@ use crate::MIN_INITIAL_PACKET_SIZE;
 //     Error,
 // }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub enum PmtudState {
-    #[default]
+    // #[default]
     Disabled,
     // Base,
     // Searching,
@@ -30,6 +32,10 @@ pub enum PmtudState {
 }
 
 impl PmtudState {
+    pub fn new() -> Rc<PmtudState> {
+        Rc::new(Self::Disabled)
+    }
+
     #[allow(clippy::unused_self)]
     pub fn max_datagram_size(&self) -> usize {
         MIN_INITIAL_PACKET_SIZE
