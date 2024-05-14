@@ -8,6 +8,7 @@
 // into flow control frames needing to be sent to the remote.
 
 use std::{
+    cmp::min,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
     time::{Duration, Instant},
@@ -396,9 +397,9 @@ impl ReceiverFlowControl<StreamId> {
             && self.max_active < STREAM_MAX_ACTIVE_LIMIT
         {
             let prev_max_active = self.max_active;
-            self.max_active *= 2;
+            self.max_active = min(self.max_active * 2, STREAM_MAX_ACTIVE_LIMIT);
             qdebug!(
-                "Doubling max stream receive window: previous max_active: {} MiB new max_active: {} MiB now: {now:?} rtt: {rtt:?} stream_id: {}",
+                "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB now: {now:?} rtt: {rtt:?} stream_id: {}",
                 prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024, self.subject,
             );
         }
