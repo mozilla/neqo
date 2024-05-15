@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::{self, Debug},
     ops::Range,
     time::{Duration, Instant},
@@ -98,5 +98,58 @@ impl Node for Delay {
 impl Debug for Delay {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("delay")
+    }
+}
+
+// TODO: Consider renaming Delay to RandomDelay and NonRandomDelay to Delay.
+pub struct NonRandomDelay {
+    delay: Duration,
+    queue: BTreeMap<Instant, VecDeque<Datagram>>,
+}
+
+impl NonRandomDelay {
+    #[must_use]
+    pub fn new(delay: Duration) -> Self {
+        Self {
+            delay,
+            queue: BTreeMap::default(),
+        }
+    }
+
+    fn insert(&mut self, d: Datagram, now: Instant) {
+        self.queue.entry(now + self.delay).or_default().push_back(d);
+    }
+}
+
+impl Node for NonRandomDelay {
+    fn init(&mut self, _rng: Rng, _now: Instant) {}
+
+    fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output {
+        if let Some(dgram) = d {
+            self.insert(dgram, now);
+        }
+
+        while let Some((&k, _)) = self.queue.range(..=now).next() {
+            let same_time_queue = self.queue.get_mut(&k).unwrap();
+            if let Some(d) = same_time_queue.pop_front() {
+                if same_time_queue.is_empty() {
+                    self.queue.remove(&k);
+                }
+
+                return Output::Datagram(d);
+            }
+        }
+
+        if let Some(&t) = self.queue.keys().next() {
+            Output::Callback(t - now)
+        } else {
+            Output::None
+        }
+    }
+}
+
+impl Debug for NonRandomDelay {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("non_random_delay")
     }
 }

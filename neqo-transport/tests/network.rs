@@ -11,7 +11,7 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Delay, Drop, TailDrop},
+        network::{Delay, Drop, NonRandomDelay, TailDrop},
         Simulator,
     },
     simulate,
@@ -205,17 +205,14 @@ fn unlimited_bandwidth_50ms_delay_connection() {
     const TRANSFER_AMOUNT: usize = 10 * 1024 * 1024 * 1024;
     // One way delay of 25ms, thus RTT of 50ms.
     const DELAY: Duration = Duration::from_millis(25);
-    // TODO: We actually always want 25ms here. Hack for a range including 25ms
-    // only. Better use RangeInclusive.
-    const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_nanos(25_000_002);
 
     let mut sim = Simulator::new(
         "unlimited_bandwidth_50ms_delay_connection",
         boxed![
             ConnectionNode::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
-            Delay::new(DELAY_RANGE.clone()),
+            NonRandomDelay::new(DELAY),
             ConnectionNode::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
-            Delay::new(DELAY_RANGE),
+            NonRandomDelay::new(DELAY),
         ],
     );
     // TODO: Shouldn't matter. No packet loss. Ideally no randomness in delay.
