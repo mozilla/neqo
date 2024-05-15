@@ -243,10 +243,12 @@ tasks:
                                         ln -s /builds/worker/artifacts artifacts &&
                                         pip3 install -r requirements/base.txt &&
                                         ~/.local/bin/taskgraph action-callback
+                                        --root .taskcluster
                                     else: >
                                         cd /builds/worker/checkouts/src &&
                                         ln -s /builds/worker/artifacts artifacts &&
                                         ~/.local/bin/taskgraph decision
+                                        --root .taskcluster
                                         --pushlog-id='0'
                                         --pushdate='0'
                                         --project='${project}'
