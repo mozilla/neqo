@@ -22,7 +22,7 @@ use neqo_transport::{
 
 pub mod client;
 pub mod server;
-mod udp;
+pub mod udp;
 
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
