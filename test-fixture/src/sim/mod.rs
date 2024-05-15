@@ -28,7 +28,11 @@ use NodeState::{Active, Idle, Waiting};
 use crate::now;
 
 pub mod network {
-    pub use super::{delay::Delay, drop::Drop, taildrop::TailDrop};
+    pub use super::{
+        delay::{Delay, NonRandomDelay},
+        drop::Drop,
+        taildrop::TailDrop,
+    };
 }
 
 type Rng = Rc<RefCell<Random>>;

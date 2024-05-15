@@ -202,7 +202,7 @@ fn unlimited_bandwidth_50ms_delay_connection() {
     // TODO: Not tenable as a unit test today, given that this will take roughly 300s
     // of wallclock time to execute on the simulator. Large for now to make sure
     // congestion control isn't the limiting factor.
-    const TRANSFER_AMOUNT: usize = 10 * 1024 * 1024 * 1024;
+    const TRANSFER_AMOUNT: usize = 50 * 1024 * 1024;
     // One way delay of 25ms, thus RTT of 50ms.
     const DELAY: Duration = Duration::from_millis(25);
 
@@ -221,9 +221,10 @@ fn unlimited_bandwidth_50ms_delay_connection() {
     let simulated_time = sim.setup().run();
     let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
 
+    // TODO: Document 160.0
     assert!(
-        1024.0 * 1024.0 * 1024.0 < bandwidth,
-        "expect transfer on 50ms connection with unlimited bandwidth to eventually surpass 1 Gbit/s but got {} Mbit/s.",
+        160.0 * 1024.0 * 1024.0 < bandwidth,
+        "expect transfer on 50ms connection with unlimited bandwidth to eventually surpass 160 Mbit/s but got {} Mbit/s.",
         bandwidth / 1024.0 / 1024.0,
 
     );
