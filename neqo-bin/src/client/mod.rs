@@ -418,7 +418,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             match self.client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
-                    self.socket.send(dgram)?;
+                    self.socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {:?}", new_timeout);

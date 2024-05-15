@@ -58,21 +58,18 @@ impl Socket {
     }
 
     /// Send the UDP datagram on the specified socket.
-    pub fn send(&self, d: Datagram) -> io::Result<()> {
+    pub fn send(&self, d: &Datagram) -> io::Result<()> {
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-            contents: Vec::from(d).into(),
+            contents: d,
             segment_size: None,
             src_ip: None,
         };
 
-        let n = self.socket.try_io(Interest::WRITABLE, || {
-            self.state
-                .send((&self.socket).into(), slice::from_ref(&transmit))
+        self.socket.try_io(Interest::WRITABLE, || {
+            self.state.send((&self.socket).into(), &transmit)
         })?;
-
-        assert_eq!(n, 1, "only passed one slice");
 
         Ok(())
     }
@@ -149,7 +146,7 @@ mod tests {
         );
 
         sender.writable().await?;
-        sender.send(datagram.clone())?;
+        sender.send(&datagram)?;
 
         receiver.readable().await?;
         let received_datagram = receiver
@@ -189,17 +186,14 @@ mod tests {
                 IpTosDscp::Le,
                 IpTosEcn::Ect1,
             )))),
-            contents: msg.clone().into(),
+            contents: &msg,
             segment_size: Some(SEGMENT_SIZE),
             src_ip: None,
         };
         sender.writable().await?;
-        let n = sender.socket.try_io(Interest::WRITABLE, || {
-            sender
-                .state
-                .send((&sender.socket).into(), slice::from_ref(&transmit))
+        sender.socket.try_io(Interest::WRITABLE, || {
+            sender.state.send((&sender.socket).into(), &transmit)
         })?;
-        assert_eq!(n, 1, "only passed one slice");
 
         // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
         let mut num_received = 0;
