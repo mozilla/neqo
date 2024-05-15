@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    cmp::min,
     mem,
     time::{Duration, Instant},
 };
@@ -706,13 +705,8 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     let retransmit = client.process_output(now).dgram();
     assert!(retransmit.is_some());
 
-    // The timeout is the smaller of:
-    // * the idle timeout, less the time we've already waited (one PTO)
-    // * twice the PTO, because we've already sent one probe
-    assert_eq!(
-        client.process_output(now).callback(),
-        min(IDLE_TIMEOUT - pto, pto * 2),
-    );
+    // The timeout is the twice the PTO, because we've already sent one probe.
+    assert_eq!(client.process_output(now).callback(), pto * 2,);
 
     // Wait for half the idle timeout (less the PTO we've already waited)
     // so that we get a keep-alive. The actual timeout is the smaller of this
@@ -723,13 +717,8 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     assert!(ping.is_some());
     assert_eq!(client.stats().frame_tx.ping, pings_before + 1);
 
-    // The timeout is the smaller of:
-    // * the idle timeout, less the time we've already waited (IDLE_TIMEOUT / 2)
-    // * twice the PTO, because we've already sent one probe
-    assert_eq!(
-        client.process_output(now).callback(),
-        min(IDLE_TIMEOUT / 2, pto * 2),
-    );
+    // The next callback is for a PTO, the PTO timer is 2 * pto now.
+    assert_eq!(client.process_output(now).callback(), pto * 2,);
     now += pto * 2;
     // Now we will retransmit stream data.
     let retransmit = client.process_output(now).dgram();
