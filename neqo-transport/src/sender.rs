@@ -49,14 +49,16 @@ impl PacketSender {
         let mtu = pmtud.borrow().mtu();
         Self {
             cc: match alg {
-                CongestionControlAlgorithm::NewReno => {
-                    Box::new(ClassicCongestionControl::new(NewReno::default(), pmtud))
-                }
-                CongestionControlAlgorithm::Cubic => {
-                    Box::new(ClassicCongestionControl::new(Cubic::default(), pmtud))
-                }
+                CongestionControlAlgorithm::NewReno => Box::new(ClassicCongestionControl::new(
+                    NewReno::default(),
+                    pmtud.clone(),
+                )),
+                CongestionControlAlgorithm::Cubic => Box::new(ClassicCongestionControl::new(
+                    Cubic::default(),
+                    pmtud.clone(),
+                )),
             },
-            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
+            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, pmtud),
         }
     }
 
