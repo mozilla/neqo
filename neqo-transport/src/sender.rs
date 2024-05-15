@@ -9,8 +9,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::{
-    fmt::{self, Debug, Display},
-    rc::Rc,
+    fmt::{self, Display},
     time::{Duration, Instant},
 };
 
@@ -19,7 +18,7 @@ use neqo_common::qlog::NeqoQlog;
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
-    pmtud::PmtudState,
+    pmtud::PmtudStateRef,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
@@ -44,10 +43,10 @@ impl PacketSender {
     pub fn new(
         alg: CongestionControlAlgorithm,
         pacing_enabled: bool,
-        pmtud: Rc<PmtudState>,
+        pmtud: PmtudStateRef,
         now: Instant,
     ) -> Self {
-        let mtu = pmtud.mtu();
+        let mtu = pmtud.borrow().mtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {

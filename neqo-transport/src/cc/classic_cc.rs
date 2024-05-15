@@ -9,14 +9,13 @@
 use std::{
     cmp::{max, min},
     fmt::{self, Debug, Display},
-    rc::Rc,
     time::{Duration, Instant},
 };
 
 use super::CongestionControl;
 use crate::{
     packet::PacketNumber,
-    pmtud::PmtudState,
+    pmtud::PmtudStateRef,
     qlog::{self, QlogMetric},
     recovery::SentPacket,
     rtt::RttEstimate,
@@ -123,14 +122,14 @@ pub struct ClassicCongestionControl<T> {
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.8
     first_app_limited: PacketNumber,
-    pmtud: Rc<PmtudState>,
+    pmtud: PmtudStateRef,
 
     qlog: NeqoQlog,
 }
 
 impl<T> ClassicCongestionControl<T> {
     pub fn max_datagram_size(&self) -> usize {
-        self.pmtud.mtu()
+        self.pmtud.borrow().mtu()
     }
 }
 
@@ -158,7 +157,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     #[cfg(test)]
     #[must_use]
     fn cwnd_initial(&self) -> usize {
-        cwnd_initial(self.pmtud.mtu())
+        cwnd_initial(self.pmtud.borrow().mtu())
     }
 
     #[must_use]
@@ -385,11 +384,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 }
 
 impl<T: WindowAdjustment> ClassicCongestionControl<T> {
-    pub fn new(cc_algorithm: T, pmtud: Rc<PmtudState>) -> Self {
+    pub fn new(cc_algorithm: T, pmtud: PmtudStateRef) -> Self {
+        let cwnd_initial = cwnd_initial(pmtud.borrow().mtu());
         Self {
             cc_algorithm,
             state: State::SlowStart,
-            congestion_window: cwnd_initial(pmtud.mtu()),
+            congestion_window: cwnd_initial,
             bytes_in_flight: 0,
             acked_bytes: 0,
             ssthresh: usize::MAX,

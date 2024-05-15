@@ -25,7 +25,7 @@ use crate::{
     ecn::{EcnCount, EcnInfo},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
-    pmtud::PmtudState,
+    pmtud::{PmtudState, PmtudStateRef},
     recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
@@ -540,7 +540,7 @@ pub struct Path {
     ecn_info: EcnInfo,
     /// For logging of events.
     qlog: NeqoQlog,
-    pmtud: Rc<PmtudState>,
+    pmtud: PmtudStateRef,
 }
 
 impl Path {
@@ -654,7 +654,7 @@ impl Path {
     /// Get the path MTU.  This is currently fixed based on IP version.
     #[allow(clippy::unused_self)]
     pub fn mtu(&self) -> usize {
-        self.pmtud.mtu()
+        self.pmtud.borrow().mtu()
     }
 
     /// Get the first local connection ID.

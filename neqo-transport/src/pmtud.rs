@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{net::IpAddr, rc::Rc};
+use std::{cell::RefCell, net::IpAddr, rc::Rc};
 
 use neqo_common::const_max;
 
@@ -30,6 +30,8 @@ const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 //     Error,
 // }
 
+pub(crate) type PmtudStateRef = Rc<RefCell<PmtudState>>;
+
 #[derive(Debug)]
 pub enum PmtudState {
     // #[default]
@@ -41,8 +43,8 @@ pub enum PmtudState {
 }
 
 impl PmtudState {
-    pub fn new(remote_ip: IpAddr) -> Rc<PmtudState> {
-        Rc::new(Self::Disabled(remote_ip))
+    pub fn new(remote_ip: IpAddr) -> PmtudStateRef {
+        Rc::new(RefCell::new(Self::Disabled(remote_ip)))
     }
 
     pub fn mtu(&self) -> usize {
