@@ -205,6 +205,7 @@ jobs:
                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
                    -e 's/^<details>(.*Performance has.*)/<details open>\1/gi' >> results.md
           {
+            echo
             echo "### Client/server transfer results"
             cat comparison.md
           } >> results.md
