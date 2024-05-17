@@ -208,7 +208,7 @@ impl EcnInfo {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.state = EcnValidationState::Failed;
         } else {
-            qinfo!("ECN validation succeeded, path is capable",);
+            qinfo!("ECN validation succeeded, path is capable");
             self.state = EcnValidationState::Capable;
         }
         self.baseline = ack_ecn;
