@@ -14,7 +14,7 @@ use std::{
 
 use neqo_common::qtrace;
 
-use crate::pmtud::PmtudStateRef;
+use crate::pmtud::PmtudRef;
 
 /// This value determines how much faster the pacer operates than the
 /// congestion window.
@@ -38,7 +38,7 @@ pub struct Pacer {
     c: usize,
     /// The packet size or minimum capacity for sending, in bytes.
     // p: usize,
-    pmtud: PmtudStateRef,
+    pmtud: PmtudRef,
 }
 
 impl Pacer {
@@ -52,7 +52,7 @@ impl Pacer {
     /// The value of `p` is the packet size in bytes, which determines the minimum
     /// credit needed before a packet is sent.  This should be a substantial
     /// fraction of the maximum packet size, if not the packet size.
-    pub fn new(enabled: bool, now: Instant, m: usize, pmtud: PmtudStateRef) -> Self {
+    pub fn new(enabled: bool, now: Instant, m: usize, pmtud: PmtudRef) -> Self {
         assert!(
             m >= pmtud.borrow().mtu(),
             "maximum capacity has to be at least one packet"
@@ -140,7 +140,7 @@ mod tests {
     use test_fixture::now;
 
     use super::Pacer;
-    use crate::pmtud::PmtudState;
+    use crate::pmtud::Pmtud;
 
     const RTT: Duration = Duration::from_millis(1000);
     const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn even() {
         let n = now();
-        let pmtud = PmtudState::new(IP_ADDR);
+        let pmtud = Pmtud::new(IP_ADDR);
         let mtu = pmtud.borrow().mtu();
         let cwnd = mtu * 10;
         let mut p = Pacer::new(true, n, mtu, pmtud);
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn backwards_in_time() {
         let n = now();
-        let pmtud = PmtudState::new(IP_ADDR);
+        let pmtud = Pmtud::new(IP_ADDR);
         let mtu = pmtud.borrow().mtu();
         let cwnd = mtu * 10;
         let mut p = Pacer::new(true, n + RTT, mtu, pmtud);
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn pacing_disabled() {
         let n = now();
-        let pmtud = PmtudState::new(IP_ADDR);
+        let pmtud = Pmtud::new(IP_ADDR);
         let mtu = pmtud.borrow().mtu();
         let cwnd = mtu * 10;
         let mut p = Pacer::new(false, n, mtu, pmtud);

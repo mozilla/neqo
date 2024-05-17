@@ -18,7 +18,7 @@ use neqo_common::qlog::NeqoQlog;
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
-    pmtud::PmtudStateRef,
+    pmtud::PmtudRef,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
@@ -43,7 +43,7 @@ impl PacketSender {
     pub fn new(
         alg: CongestionControlAlgorithm,
         pacing_enabled: bool,
-        pmtud: PmtudStateRef,
+        pmtud: PmtudRef,
         now: Instant,
     ) -> Self {
         let mtu = pmtud.borrow().mtu();

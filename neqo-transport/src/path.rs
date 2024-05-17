@@ -25,7 +25,7 @@ use crate::{
     ecn::{EcnCount, EcnInfo},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
-    pmtud::{PmtudState, PmtudStateRef},
+    pmtud::{Pmtud, PmtudRef},
     recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
@@ -540,7 +540,7 @@ pub struct Path {
     ecn_info: EcnInfo,
     /// For logging of events.
     qlog: NeqoQlog,
-    pmtud: PmtudStateRef,
+    pmtud: PmtudRef,
 }
 
 impl Path {
@@ -554,7 +554,7 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let pmtud = PmtudState::new(remote.ip());
+        let pmtud = Pmtud::new(remote.ip());
         let mut sender = PacketSender::new(cc, pacing, pmtud.clone(), now);
         sender.set_qlog(qlog.clone());
         Self {

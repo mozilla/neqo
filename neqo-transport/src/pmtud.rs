@@ -23,34 +23,37 @@ const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 // const MAX_PLPMTU: usize = 9202; // TODO: Get from interface.
 // const BASE_PLPMTU: usize = MIN_PLPMTU;
 
-// enum PmtudPhase {
-//     Base,
-//     Search,
-//     SearchComplete,
-//     Error,
-// }
-
-pub(crate) type PmtudStateRef = Rc<RefCell<PmtudState>>;
-
 #[derive(Debug)]
-pub enum PmtudState {
-    // #[default]
-    Disabled(IpAddr),
+pub(crate) enum PmtudState {
+    Disabled,
     // Base,
-    // Searching,
+    Searching,
     // SearchComplete,
     // Error,
 }
 
-impl PmtudState {
-    pub fn new(remote_ip: IpAddr) -> PmtudStateRef {
-        Rc::new(RefCell::new(Self::Disabled(remote_ip)))
+#[derive(Debug)]
+pub(crate) struct Pmtud {
+    remote_ip: IpAddr,
+    state: PmtudState,
+    probed_size: usize,
+    probed_count: usize,
+}
+
+pub(crate) type PmtudRef = Rc<RefCell<Pmtud>>;
+
+impl Pmtud {
+    pub(crate) fn new(remote_ip: IpAddr) -> PmtudRef {
+        Rc::new(RefCell::new(Pmtud {
+            remote_ip,
+            state: PmtudState::Disabled,
+            probed_size: Pmtud::default_mtu(remote_ip),
+            probed_count: 0,
+        }))
     }
 
-    pub fn mtu(&self) -> usize {
-        match self {
-            PmtudState::Disabled(remote_ip) => Self::default_mtu(*remote_ip),
-        }
+    pub(crate) fn mtu(&self) -> usize {
+        self.probed_size
     }
 
     pub const fn default_mtu(remote_ip: IpAddr) -> usize {

@@ -17,7 +17,7 @@ use test_fixture::now;
 use crate::{
     cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl},
     packet::PacketType,
-    pmtud::PmtudState,
+    pmtud::Pmtud,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
@@ -39,7 +39,7 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 
 #[test]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), PmtudState::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
     let time_now = now();
     let time_before = time_now.checked_sub(Duration::from_millis(100)).unwrap();
     let time_after = time_now + Duration::from_millis(150);
@@ -150,7 +150,7 @@ fn issue_876() {
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), PmtudState::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
     let mut pn = 0;
     let mut now = now();
     let max_datagram_size = cc.max_datagram_size();

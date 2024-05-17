@@ -44,7 +44,7 @@ use crate::{
     },
     packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
     path::{Path, PathRef, Paths},
-    pmtud::PmtudState,
+    pmtud::Pmtud,
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
@@ -3351,7 +3351,7 @@ impl Connection {
     pub fn mtu(&self) -> usize {
         self.paths
             .primary()
-            .map_or(PmtudState::max_default_mtu(), |path| path.borrow().mtu())
+            .map_or(Pmtud::max_default_mtu(), |path| path.borrow().mtu())
     }
 }
 
