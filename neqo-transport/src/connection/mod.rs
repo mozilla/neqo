@@ -44,7 +44,7 @@ use crate::{
     },
     packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
     path::{Path, PathRef, Paths},
-    pmtud::Pmtud,
+    pmtud::{Pmtud, PmtudState},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
@@ -2861,6 +2861,14 @@ impl Connection {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
+                self.paths
+                    .primary()
+                    .ok_or(Error::InternalError)?
+                    .borrow_mut()
+                    .sender()
+                    .pmtud()
+                    .borrow_mut()
+                    .set_state(PmtudState::Searching);
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
@@ -3035,6 +3043,14 @@ impl Connection {
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
             self.set_state(State::Confirmed);
+            self.paths
+                .primary()
+                .ok_or(Error::InternalError)?
+                .borrow_mut()
+                .sender()
+                .pmtud()
+                .borrow_mut()
+                .set_state(PmtudState::Searching);
         }
         qinfo!([self], "Connection established");
         Ok(())

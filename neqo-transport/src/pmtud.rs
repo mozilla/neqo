@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, net::IpAddr, rc::Rc};
 
-use neqo_common::const_max;
+use neqo_common::{const_max, qdebug};
 
 /// This is the MTU that we assume when using IPv6.
 /// We use this size for Initial packets, so we don't need to worry about probing for support.
@@ -33,7 +33,7 @@ pub(crate) enum PmtudState {
 }
 
 #[derive(Debug)]
-pub(crate) struct Pmtud {
+pub struct Pmtud {
     remote_ip: IpAddr,
     state: PmtudState,
     probed_size: usize,
@@ -56,6 +56,18 @@ impl Pmtud {
         self.probed_size
     }
 
+    pub(crate) fn set_state(&mut self, state: PmtudState) {
+        qdebug!("PMTUD state now {:?}", state);
+        self.state = state;
+        match self.state {
+            PmtudState::Searching => {
+                self.probed_count = 0;
+            }
+            _ => {}
+        }
+    }
+
+    #[must_use]
     pub const fn default_mtu(remote_ip: IpAddr) -> usize {
         match remote_ip {
             IpAddr::V4(_) => PATH_MTU_V4,
@@ -63,6 +75,7 @@ impl Pmtud {
         }
     }
 
+    #[must_use]
     pub const fn max_default_mtu() -> usize {
         const_max(PATH_MTU_V4, PATH_MTU_V6)
     }

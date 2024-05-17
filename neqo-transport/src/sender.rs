@@ -30,6 +30,7 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionControl>,
     pacer: Pacer,
+    pmtud: PmtudRef,
 }
 
 impl Display for PacketSender {
@@ -58,12 +59,17 @@ impl PacketSender {
                     pmtud.clone(),
                 )),
             },
-            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, pmtud),
+            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, pmtud.clone()),
+            pmtud,
         }
     }
 
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
         self.cc.set_qlog(qlog);
+    }
+
+    pub fn pmtud(&self) -> &PmtudRef {
+        &self.pmtud
     }
 
     #[must_use]
