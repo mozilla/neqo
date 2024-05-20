@@ -38,6 +38,7 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn issue_876() {
     let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
     let time_now = now();
@@ -53,6 +54,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size() - 1,
+            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -62,6 +64,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size() - 2,
+            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -71,6 +74,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -80,6 +84,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -89,6 +94,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -98,6 +104,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -107,6 +114,7 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size() - 3,
+            16,
         ),
     ];
 
@@ -163,6 +171,7 @@ fn issue_1465() {
             true,
             Vec::new(),
             max_datagram_size,
+            16,
         );
         pn += 1;
         p

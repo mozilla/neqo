@@ -1522,6 +1522,7 @@ impl Connection {
                         payload.pn(),
                         &payload[..],
                         d.tos(),
+                        d.len(),
                     );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
@@ -2116,11 +2117,13 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut PacketBuilder,
+        coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
+        let frames_start = builder.len();
 
         if primary {
             let stats = &mut self.stats.borrow_mut().frame_tx;
@@ -2145,6 +2148,7 @@ impl Connection {
                 builder,
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
+                !coalesced && ack_end == frames_start,
                 now,
             ) {
                 builder.enable_padding(true);
@@ -2156,20 +2160,26 @@ impl Connection {
             return (tokens, false, false);
         }
 
-        if primary {
-            if space == PacketNumberSpace::ApplicationData {
-                self.write_appdata_frames(builder, &mut tokens);
-            } else {
-                let stats = &mut self.stats.borrow_mut().frame_tx;
-                self.crypto.write_frame(space, builder, &mut tokens, stats);
+        if path.borrow().pmtud().borrow().is_probe_prepared() {
+            // If this is a PMTUD probe, don't include any other frames and record it as sent.
+            ack_eliciting |= path.borrow_mut().pmtud().borrow_mut().probe_sent(&mut self.stats.borrow_mut());
+        } else {
+            if primary {
+                if space == PacketNumberSpace::ApplicationData {
+                    self.write_appdata_frames(builder, &mut tokens);
+                } else {
+                    let stats = &mut self.stats.borrow_mut().frame_tx;
+                    self.crypto.write_frame(space, builder, &mut tokens, stats);
+                }
             }
-        }
 
-        // Maybe send a probe now, either to probe for losses or to keep the connection live.
-        let force_probe = profile.should_probe(space);
-        ack_eliciting |= self.maybe_probe(path, force_probe, builder, ack_end, &mut tokens, now);
-        // If this is not the primary path, this should be ack-eliciting.
-        debug_assert!(primary || ack_eliciting);
+            // Maybe send a probe now, either to probe for losses or to keep the connection live.
+            let force_probe = profile.should_probe(space);
+            ack_eliciting |=
+                self.maybe_probe(path, force_probe, builder, ack_end, &mut tokens, now);
+            // If this is not the primary path, this should be ack-eliciting.
+            debug_assert!(primary || ack_eliciting);
+        }
 
         // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
         // And avoid padding packets that otherwise only contain ACK because adding PADDING
@@ -2275,7 +2285,6 @@ impl Connection {
             let aead_expansion = tx.expansion();
             builder.set_limit(profile.limit() - aead_expansion);
             builder.enable_padding(needs_padding);
-            debug_assert!(builder.limit() <= 2048);
             if builder.is_full() {
                 encoder = builder.abort();
                 break;
@@ -2288,7 +2297,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, *space, &profile, &mut builder, now);
+                    self.write_frames(path, *space, &profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2304,6 +2313,7 @@ impl Connection {
                 pn,
                 &builder.as_ref()[payload_start..],
                 path.borrow().tos(),
+                builder.len(),
             );
             qlog::packet_sent(
                 &mut self.qlog,
@@ -2316,7 +2326,6 @@ impl Connection {
             self.stats.borrow_mut().packets_tx += 1;
             let tx = self.crypto.states.tx_mut(self.version, cspace).unwrap();
             encoder = builder.build(tx)?;
-            debug_assert!(encoder.len() <= mtu);
             self.crypto.states.auto_update()?;
 
             if ack_eliciting {
@@ -2330,6 +2339,7 @@ impl Connection {
                 ack_eliciting,
                 tokens,
                 encoder.len() - header_start,
+                aead_expansion,
             );
             if padded {
                 needs_padding = false;

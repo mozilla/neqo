@@ -53,6 +53,7 @@ fn fill_cwnd(cc: &mut ClassicCongestionControl<Cubic>, mut next_pn: u64, now: In
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         );
         cc.on_packet_sent(&sent);
         next_pn += 1;
@@ -69,6 +70,7 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
         true,
         Vec::new(),
         cc.max_datagram_size(),
+        16,
     );
     cc.on_packets_acked(&[acked], &RTT_ESTIMATE, now);
 }
@@ -83,6 +85,7 @@ fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {
         true,
         Vec::new(),
         cc.max_datagram_size(),
+        16,
     );
     cc.on_packets_lost(None, None, PTO, &[p_lost]);
 }

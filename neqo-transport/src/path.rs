@@ -23,7 +23,10 @@ use crate::{
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn::{EcnCount, EcnInfo},
-    frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
+    frame::{
+        FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_PING,
+        FRAME_TYPE_RETIRE_CONNECTION_ID,
+    },
     packet::PacketBuilder,
     pmtud::{Pmtud, PmtudRef},
     recovery::{RecoveryToken, SentPacket},
@@ -657,6 +660,11 @@ impl Path {
         self.pmtud.borrow().mtu()
     }
 
+    /// Get a reference to the PMTUD state.
+    pub fn pmtud(&self) -> &PmtudRef {
+        &self.pmtud
+    }
+
     /// Get the first local connection ID.
     /// Only do this for the primary path during the handshake.
     pub fn local_cid(&self) -> &ConnectionId {
@@ -766,11 +774,22 @@ impl Path {
         &mut self,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
-        mtu: bool, // Whether the packet we're writing into will be a full MTU.
+        mtu: bool,       // Whether the packet we're writing into will be a full MTU.
+        empty_pkt: bool, // False packet is coalesced behind another one or already has frames.
         now: Instant,
     ) -> bool {
         if builder.remaining() < 9 {
             return false;
+        }
+
+        // Only send PMTUD probes using empty, non-coalesced packets.
+        if self.pmtud.borrow().needs_probe() && empty_pkt && mtu {
+            builder.set_limit(self.pmtud.borrow().probe_size());
+            builder.encode_varint(FRAME_TYPE_PING);
+            stats.ping += 1;
+            stats.all += 1;
+            self.pmtud.borrow_mut().probe_prepared();
+            return true;
         }
 
         // Send PATH_RESPONSE.
@@ -965,6 +984,7 @@ impl Path {
         acked_pkts: &[SentPacket],
         ack_ecn: Option<EcnCount>,
         now: Instant,
+        stats: &mut Stats,
     ) {
         debug_assert!(self.is_primary());
 
@@ -978,7 +998,8 @@ impl Path {
             }
         }
 
-        self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
+        self.sender
+            .on_packets_acked(acked_pkts, &self.rtt, now, stats);
     }
 
     /// Record packets as lost with the sender.
@@ -987,6 +1008,7 @@ impl Path {
         prev_largest_acked_sent: Option<Instant>,
         space: PacketNumberSpace,
         lost_packets: &[SentPacket],
+        stats: &mut Stats,
     ) {
         debug_assert!(self.is_primary());
         let cwnd_reduced = self.sender.on_packets_lost(
@@ -994,6 +1016,7 @@ impl Path {
             prev_largest_acked_sent,
             self.rtt.pto(space), // Important: the base PTO, not adjusted.
             lost_packets,
+            stats,
         );
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());

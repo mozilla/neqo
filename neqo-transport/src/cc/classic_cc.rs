@@ -301,12 +301,22 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
 
+        // Lost PMTUD probes do not elicit a congestion control reaction.
+        let lost_packets: Vec<SentPacket> = lost_packets
+            .iter()
+            .filter(|pkt| !self.pmtud.borrow().is_pmtud_probe(pkt))
+            .cloned()
+            .collect();
+        if lost_packets.is_empty() {
+            return false;
+        }
+
         let congestion = self.on_congestion_event(lost_packets.last().unwrap());
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
-            lost_packets,
+            &lost_packets,
         );
         qdebug!(
             "on_packets_lost this={:p}, bytes_in_flight={}, cwnd={}, state={:?}",
@@ -628,6 +638,7 @@ mod tests {
             ack_eliciting,
             Vec::new(),
             100,
+            16,
         )
     }
 
@@ -843,6 +854,7 @@ mod tests {
                     true,
                     Vec::new(),
                     1000,
+                    16,
                 )
             })
             .collect::<Vec<_>>()
@@ -964,6 +976,7 @@ mod tests {
             false,
             Vec::new(),
             lost[0].len(),
+            lost[0].aead_expansion(),
         );
         assert!(!persistent_congestion_by_pto(
             ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
@@ -1066,6 +1079,7 @@ mod tests {
                     true,
                     Vec::new(),
                     cc.max_datagram_size(),
+                    16,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1094,6 +1108,7 @@ mod tests {
                 true,
                 Vec::new(),
                 cc.max_datagram_size(),
+                16,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1127,6 +1142,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn app_limited_congestion_avoidance() {
         const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS / 2;
         const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - 2;
@@ -1145,6 +1161,7 @@ mod tests {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         );
         cc.on_packet_sent(&p_lost);
         cwnd_is_default(&cc);
@@ -1159,6 +1176,7 @@ mod tests {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         );
         cc.on_packet_sent(&p_not_lost);
         now += RTT;
@@ -1183,6 +1201,7 @@ mod tests {
                     true,
                     Vec::new(),
                     cc.max_datagram_size(),
+                    16,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1217,6 +1236,7 @@ mod tests {
                 true,
                 Vec::new(),
                 cc.max_datagram_size(),
+                16,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1256,6 +1276,7 @@ mod tests {
             true,
             Vec::new(),
             cc.max_datagram_size(),
+            16,
         );
         cc.on_packet_sent(&p_ce);
         cwnd_is_default(&cc);

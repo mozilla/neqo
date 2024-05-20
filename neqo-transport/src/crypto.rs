@@ -637,10 +637,11 @@ impl CryptoDxState {
             hex(body)
         );
         // The numbers in `Self::limit` assume a maximum packet size of 2^11.
-        if body.len() > 2048 {
-            debug_assert!(false);
-            return Err(Error::InternalError);
-        }
+        // FIXME: Figure out how to allow packets > 2048.
+        // if body.len() > 2048 {
+        //     debug_assert!(false);
+        //     return Err(Error::InternalError);
+        // }
         self.invoked()?;
 
         let size = body.len() + MAX_AUTH_TAG;

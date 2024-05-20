@@ -21,6 +21,7 @@ use crate::{
     pmtud::PmtudRef,
     recovery::SentPacket,
     rtt::RttEstimate,
+    Stats,
 };
 
 /// The number of packets we allow to burst from the pacer.
@@ -93,8 +94,10 @@ impl PacketSender {
         acked_pkts: &[SentPacket],
         rtt_est: &RttEstimate,
         now: Instant,
+        stats: &mut Stats,
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
+        self.pmtud.borrow_mut().on_packets_acked(acked_pkts, stats);
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.
@@ -104,13 +107,18 @@ impl PacketSender {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
+        stats: &mut Stats,
     ) -> bool {
-        self.cc.on_packets_lost(
+        let ret = self.cc.on_packets_lost(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
             lost_packets,
-        )
+        );
+        // Call below may change the size of MTU probes, so it needs to happen after the CC
+        // reaction above, which needs to ignore probes based on their size.
+        self.pmtud.borrow_mut().on_packets_lost(lost_packets, stats);
+        ret
     }
 
     /// Called when ECN CE mark received.  Returns true if the congestion window was reduced.
