@@ -268,7 +268,7 @@ fn overflow_crypto() {
         client.process_input(&dgram, now());
         if let State::Closing { error, .. } = client.state() {
             assert!(
-                matches!(error, CloseReason::Transport(Error::CryptoBufferExceeded),),
+                matches!(error, CloseReason::Transport(Error::CryptoBufferExceeded)),
                 "the connection need to abort on crypto buffer"
             );
             assert!(pn > 64, "at least 64000 bytes of data is buffered");
