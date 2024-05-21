@@ -44,7 +44,6 @@ use crate::{
     },
     packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket},
     path::{Path, PathRef, Paths},
-    pmtud::{Pmtud, PmtudState},
     qlog,
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
@@ -2111,6 +2110,7 @@ impl Connection {
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
+    #[allow(clippy::too_many_arguments)]
     fn write_frames(
         &mut self,
         path: &PathRef,
@@ -2118,6 +2118,7 @@ impl Connection {
         profile: &SendProfile,
         builder: &mut PacketBuilder,
         coalesced: bool, // Whether this packet is coalesced behind another one.
+        aead_expansion: usize,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
@@ -2140,7 +2141,7 @@ impl Connection {
 
         // Avoid sending probes until the handshake completes,
         // but send them even when we don't have space.
-        let full_mtu = profile.limit() == path.borrow().mtu();
+        let full_mtu = profile.limit() == path.borrow().plpmtu();
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
@@ -2149,6 +2150,7 @@ impl Connection {
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
                 !coalesced && ack_end == frames_start,
+                aead_expansion,
                 now,
             ) {
                 builder.enable_padding(true);
@@ -2162,7 +2164,11 @@ impl Connection {
 
         if path.borrow().pmtud().borrow().is_probe_prepared() {
             // If this is a PMTUD probe, don't include any other frames and record it as sent.
-            ack_eliciting |= path.borrow_mut().pmtud().borrow_mut().probe_sent(&mut self.stats.borrow_mut());
+            ack_eliciting |= path
+                .borrow_mut()
+                .pmtud()
+                .borrow_mut()
+                .probe_sent(&mut self.stats.borrow_mut());
         } else {
             if primary {
                 if space == PacketNumberSpace::ApplicationData {
@@ -2247,7 +2253,6 @@ impl Connection {
         let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
-        let mtu = path.borrow().mtu();
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
@@ -2296,8 +2301,15 @@ impl Connection {
             if let Some(ref close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {
-                (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, *space, &profile, &mut builder, header_start != 0, now);
+                (tokens, ack_eliciting, padded) = self.write_frames(
+                    path,
+                    *space,
+                    &profile,
+                    &mut builder,
+                    header_start != 0,
+                    aead_expansion,
+                    now,
+                );
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2313,7 +2325,7 @@ impl Connection {
                 pn,
                 &builder.as_ref()[payload_start..],
                 path.borrow().tos(),
-                builder.len(),
+                builder.len() + aead_expansion,
             );
             qlog::packet_sent(
                 &mut self.qlog,
@@ -2339,7 +2351,6 @@ impl Connection {
                 ack_eliciting,
                 tokens,
                 encoder.len() - header_start,
-                aead_expansion,
             );
             if padded {
                 needs_padding = false;
@@ -2376,14 +2387,14 @@ impl Connection {
                 if needs_padding {
                     qdebug!(
                         [self],
-                        "pad Initial from {} to path MTU {}",
+                        "pad Initial from {} to PLPMTU {}",
                         packets.len(),
-                        mtu
+                        profile.limit()
                     );
-                    initial.track_padding(mtu - packets.len());
+                    initial.track_padding(profile.limit() - packets.len());
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
-                    packets.resize(mtu, 0);
+                    packets.resize(profile.limit(), 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
             }
@@ -2871,14 +2882,16 @@ impl Connection {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
-                self.paths
-                    .primary()
-                    .ok_or(Error::InternalError)?
-                    .borrow_mut()
-                    .sender()
-                    .pmtud()
-                    .borrow_mut()
-                    .set_state(PmtudState::Searching);
+                if self.conn_params.pmtud_enabled() {
+                    self.paths
+                        .primary()
+                        .ok_or(Error::InternalError)?
+                        .borrow_mut()
+                        .sender()
+                        .pmtud()
+                        .borrow_mut()
+                        .start_pmtud();
+                }
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
@@ -3053,14 +3066,16 @@ impl Connection {
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
             self.set_state(State::Confirmed);
-            self.paths
-                .primary()
-                .ok_or(Error::InternalError)?
-                .borrow_mut()
-                .sender()
-                .pmtud()
-                .borrow_mut()
-                .set_state(PmtudState::Searching);
+            if self.conn_params.pmtud_enabled() {
+                self.paths
+                    .primary()
+                    .ok_or(Error::InternalError)?
+                    .borrow_mut()
+                    .sender()
+                    .pmtud()
+                    .borrow_mut()
+                    .start_pmtud();
+            }
         }
         qinfo!([self], "Connection established");
         Ok(())
@@ -3332,7 +3347,7 @@ impl Connection {
             return Err(Error::NotAvailable);
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
-        let mtu = path.borrow().mtu();
+        let mtu = path.borrow().plpmtu();
         let encoder = Encoder::with_capacity(mtu);
 
         let (_, mut builder) = Self::build_packet_header(
@@ -3373,11 +3388,16 @@ impl Connection {
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }
 
-    #[must_use]
-    pub fn mtu(&self) -> usize {
-        self.paths
-            .primary()
-            .map_or(Pmtud::max_default_mtu(), |path| path.borrow().mtu())
+    /// Return the PLMTU of the primary path.
+    ///
+    /// # Errors
+    ///
+    /// The function returns `InternalError` if there is no primary path.
+    #[cfg(test)]
+    pub fn plpmtu(&self) -> Res<usize> {
+        let path = self.paths.primary().ok_or(Error::InternalError)?;
+        let plpmtu = path.borrow().plpmtu();
+        Ok(plpmtu)
     }
 }
 

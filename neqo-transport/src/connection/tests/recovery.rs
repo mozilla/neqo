@@ -20,7 +20,8 @@ use super::{
     super::{Connection, ConnectionParameters, Output, State},
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
     default_client, default_server, fill_cwnd, maybe_authenticate, new_client, send_and_receive,
-    send_something, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
+    send_something, AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    POST_HANDSHAKE_CWND,
 };
 use crate::{
     connection::tests::cwnd_min,
@@ -31,7 +32,7 @@ use crate::{
     stats::MAX_PTO_COUNTS,
     tparams::TransportParameter,
     tracking::DEFAULT_ACK_DELAY,
-    StreamType,
+    Pmtud, StreamType,
 };
 
 #[test]
@@ -81,14 +82,14 @@ fn pto_works_full_cwnd() {
     // Send lots of data.
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     let (dgrams, now) = fill_cwnd(&mut client, stream_id, now);
-    assert_full_cwnd(&dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
 
     // Fill the CWND after waiting for a PTO.
     let (dgrams, now) = fill_cwnd(&mut client, stream_id, now + AT_LEAST_PTO);
     // Two packets in the PTO.
     // The first should be full sized; the second might be small.
     assert_eq!(dgrams.len(), 2);
-    assert_eq!(dgrams[0].len(), client.mtu());
+    assert_eq!(dgrams[0].len(), client.plpmtu().unwrap());
 
     // Both datagrams contain one or more STREAM frames.
     for d in dgrams {
@@ -167,7 +168,7 @@ fn pto_initial() {
     let mut client = default_client();
     let pkt1 = client.process(None, now).dgram();
     assert!(pkt1.is_some());
-    assert_eq!(pkt1.clone().unwrap().len(), client.mtu());
+    assert_eq!(pkt1.clone().unwrap().len(), client.plpmtu().unwrap());
 
     let delay = client.process(None, now).callback();
     assert_eq!(delay, INITIAL_PTO);
@@ -176,7 +177,7 @@ fn pto_initial() {
     now += delay;
     let pkt2 = client.process(None, now).dgram();
     assert!(pkt2.is_some());
-    assert_eq!(pkt2.unwrap().len(), client.mtu());
+    assert_eq!(pkt2.unwrap().len(), client.plpmtu().unwrap());
 
     let delay = client.process(None, now).callback();
     // PTO has doubled.
@@ -381,7 +382,7 @@ fn handshake_ack_pto() {
     let mut server = default_server();
     // This is a greasing transport parameter, and large enough that the
     // server needs to send two Handshake packets.
-    let big = TransportParameter::Bytes(vec![0; server.mtu()]);
+    let big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
     server.set_local_tparam(0xce16, big).unwrap();
 
     let c1 = client.process(None, now).dgram();
@@ -727,7 +728,11 @@ fn expected_pto(rtt: Duration) -> Duration {
 
 #[test]
 fn fast_pto() {
-    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE / 2));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .fast_pto(FAST_PTO_SCALE / 2),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
@@ -764,7 +769,11 @@ fn fast_pto() {
 /// based on the "true" value of the timer.
 #[test]
 fn fast_pto_persistent_congestion() {
-    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE * 2));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .fast_pto(FAST_PTO_SCALE * 2),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 

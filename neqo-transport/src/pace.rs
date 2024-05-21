@@ -54,7 +54,7 @@ impl Pacer {
     /// fraction of the maximum packet size, if not the packet size.
     pub fn new(enabled: bool, now: Instant, m: usize, pmtud: PmtudRef) -> Self {
         assert!(
-            m >= pmtud.borrow().mtu(),
+            m >= pmtud.borrow().plpmtu(),
             "maximum capacity has to be at least one packet"
         );
         Self {
@@ -71,7 +71,7 @@ impl Pacer {
     /// This returns a time, which could be in the past (this object doesn't know what
     /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
-        let p = self.pmtud.borrow().mtu();
+        let p = self.pmtud.borrow().plpmtu();
         if self.c >= p {
             qtrace!([self], "next {}/{:?} no wait = {:?}", cwnd, rtt, self.t);
             self.t
@@ -118,14 +118,14 @@ impl Pacer {
 
 impl Display for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let p = self.pmtud.borrow().mtu();
+        let p = self.pmtud.borrow().plpmtu();
         write!(f, "Pacer {}/{}", self.c, p)
     }
 }
 
 impl Debug for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let p = self.pmtud.borrow().mtu();
+        let p = self.pmtud.borrow().plpmtu();
         write!(f, "Pacer@{:?} {}/{}..{}", self.t, self.c, p, self.m)
     }
 }
@@ -149,7 +149,7 @@ mod tests {
     fn even() {
         let n = now();
         let pmtud = Pmtud::new(IP_ADDR);
-        let mtu = pmtud.borrow().mtu();
+        let mtu = pmtud.borrow().plpmtu();
         let cwnd = mtu * 10;
         let mut p = Pacer::new(true, n, mtu, pmtud);
         assert_eq!(p.next(RTT, cwnd), n);
@@ -161,7 +161,7 @@ mod tests {
     fn backwards_in_time() {
         let n = now();
         let pmtud = Pmtud::new(IP_ADDR);
-        let mtu = pmtud.borrow().mtu();
+        let mtu = pmtud.borrow().plpmtu();
         let cwnd = mtu * 10;
         let mut p = Pacer::new(true, n + RTT, mtu, pmtud);
         assert_eq!(p.next(RTT, cwnd), n + RTT);
@@ -174,7 +174,7 @@ mod tests {
     fn pacing_disabled() {
         let n = now();
         let pmtud = Pmtud::new(IP_ADDR);
-        let mtu = pmtud.borrow().mtu();
+        let mtu = pmtud.borrow().plpmtu();
         let cwnd = mtu * 10;
         let mut p = Pacer::new(false, n, mtu, pmtud);
         assert_eq!(p.next(RTT, cwnd), n);

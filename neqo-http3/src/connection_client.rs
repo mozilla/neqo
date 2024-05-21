@@ -1291,8 +1291,8 @@ mod tests {
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, Output, Pmtud, State, StreamId,
-        StreamType, Version, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
+        Version, MIN_INITIAL_PACKET_SIZE, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use test_fixture::{
         anti_replay, default_server_h3, fixture_init, new_server, now,
@@ -1336,6 +1336,7 @@ mod tests {
                 .connection_parameters(
                     // Disable compatible upgrade, which complicates tests.
                     ConnectionParameters::default()
+                        .pmtud(false)
                         .versions(Version::default(), vec![Version::default()]),
                 )
                 .max_table_size_encoder(max_table_size)
@@ -7157,9 +7158,8 @@ mod tests {
     #[test]
     fn priority_update_during_full_buffer() {
         // set a lower MAX_DATA on the server side to restrict the data the client can send
-        let mtu = Pmtud::default_mtu(DEFAULT_ADDR.ip());
         let (mut client, mut server) = connect_with_connection_parameters(
-            ConnectionParameters::default().max_data(mtu.try_into().unwrap()),
+            ConnectionParameters::default().max_data(MIN_INITIAL_PACKET_SIZE.try_into().unwrap()),
         );
 
         let request_stream_id = make_request_and_exchange_pkts(&mut client, &mut server, false);

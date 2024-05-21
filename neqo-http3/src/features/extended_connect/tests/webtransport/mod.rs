@@ -26,7 +26,7 @@ use crate::{
 };
 
 // Leave space for large QUIC header.
-const DATAGRAM_SIZE: u64 = Pmtud::default_mtu(DEFAULT_ADDR.ip()) as u64 - 40;
+const DATAGRAM_SIZE: u64 = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) as u64 - 40;
 
 pub fn wt_default_parameters() -> Http3Parameters {
     Http3Parameters::default()

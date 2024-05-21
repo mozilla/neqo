@@ -116,7 +116,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 }
 
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default())
+    new_client(ConnectionParameters::default().pmtud(false))
 }
 
 pub fn new_server(params: ConnectionParameters) -> Connection {
@@ -135,7 +135,7 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
     c
 }
 pub fn default_server() -> Connection {
-    new_server(ConnectionParameters::default())
+    new_server(ConnectionParameters::default().pmtud(false))
 }
 pub fn resumed_server(client: &Connection) -> Connection {
     new_server(ConnectionParameters::default().versions(client.version(), Version::all()))
@@ -543,7 +543,7 @@ fn induce_persistent_congestion(
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = Pmtud::default_mtu(DEFAULT_ADDR.ip()) * CWND_INITIAL_PKTS;
+const POST_HANDSHAKE_CWND: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
 const fn cwnd_packets(data: usize, mtu: usize) -> usize {

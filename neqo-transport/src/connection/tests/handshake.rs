@@ -34,7 +34,8 @@ use crate::{
     server::ValidateAddress,
     tparams::{TransportParameter, MIN_ACK_DELAY},
     tracking::DEFAULT_ACK_DELAY,
-    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType, Version,
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
+    Version,
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -46,13 +47,13 @@ fn full_handshake() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), client.mtu());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let out = server.process(out.as_dgram_ref(), now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), server.mtu());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu().unwrap());
 
     qdebug!("---- client: cert verification");
     let out = client.process(out.as_dgram_ref(), now());
@@ -142,7 +143,7 @@ fn dup_server_flight1() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), client.mtu());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
     qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
@@ -249,7 +250,7 @@ fn chacha20poly1305() {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
         now(),
     )
     .expect("create a default client");
@@ -266,7 +267,7 @@ fn send_05rtt() {
     let c1 = client.process(None, now()).dgram();
     assert!(c1.is_some());
     let s1 = server.process(c1.as_ref(), now()).dgram().unwrap();
-    assert_eq!(s1.len(), server.mtu());
+    assert_eq!(s1.len(), server.plpmtu().unwrap());
 
     // The server should accept writes at this point.
     let s2 = send_something(&mut server, now());
@@ -436,7 +437,7 @@ fn coalesce_05rtt() {
     let s2 = server.process(c2.as_ref(), now).dgram();
     // Even though there is a 1-RTT packet at the end of the datagram, the
     // flight should be padded to full size.
-    assert_eq!(s2.as_ref().unwrap().len(), server.mtu());
+    assert_eq!(s2.as_ref().unwrap().len(), server.plpmtu().unwrap());
 
     // The client should process the datagram.  It can't process the 1-RTT
     // packet until authentication completes though.  So it saves it.
@@ -644,7 +645,7 @@ fn verify_pkt_honors_mtu() {
     assert_eq!(client.stream_send(stream_id, &[0xbb; 2000]).unwrap(), 2000);
     let pkt0 = client.process(None, now);
     assert!(matches!(pkt0, Output::Datagram(_)));
-    assert_eq!(pkt0.as_dgram_ref().unwrap().len(), client.mtu());
+    assert_eq!(pkt0.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
 }
 
 #[test]
@@ -728,7 +729,9 @@ fn connect_one_version() {
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             DEFAULT_ADDR,
             DEFAULT_ADDR,
-            ConnectionParameters::default().versions(version, vec![version]),
+            ConnectionParameters::default()
+                .pmtud(false)
+                .versions(version, vec![version]),
             now(),
         )
         .unwrap();
@@ -736,7 +739,9 @@ fn connect_one_version() {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            ConnectionParameters::default().versions(version, vec![version]),
+            ConnectionParameters::default()
+                .pmtud(false)
+                .versions(version, vec![version]),
         )
         .unwrap();
         connect_force_idle(&mut client, &mut server);
@@ -758,15 +763,15 @@ fn anti_amplification() {
 
     // With a gigantic transport parameter, the server is unable to complete
     // the handshake within the amplification limit.
-    let very_big = TransportParameter::Bytes(vec![0; server.mtu() * 3]);
+    let very_big = TransportParameter::Bytes(vec![0; Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * 3]);
     server.set_local_tparam(0xce16, very_big).unwrap();
 
     let c_init = client.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
     let s_init1 = server.process(c_init.as_ref(), now).dgram().unwrap();
-    assert_eq!(s_init1.len(), client.mtu());
+    assert_eq!(s_init1.len(), client.plpmtu().unwrap());
     let s_init2 = server.process_output(now).dgram().unwrap();
-    assert_eq!(s_init2.len(), server.mtu());
+    assert_eq!(s_init2.len(), server.plpmtu().unwrap());
 
     // Skip the gap for pacing here.
     let s_pacing = server.process_output(now).callback();
@@ -774,7 +779,7 @@ fn anti_amplification() {
     now += s_pacing;
 
     let s_init3 = server.process_output(now).dgram().unwrap();
-    assert_eq!(s_init3.len(), server.mtu());
+    assert_eq!(s_init3.len(), server.plpmtu().unwrap());
     let cb = server.process_output(now).callback();
     assert_ne!(cb, Duration::new(0, 0));
 
@@ -789,7 +794,7 @@ fn anti_amplification() {
     // The client sends a padded datagram, with just ACK for Handshake.
     assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
     assert_eq!(client.stats().frame_tx.all, frame_count + 1);
-    assert_ne!(ack.len(), client.mtu()); // Not padded (it includes Handshake).
+    assert_ne!(ack.len(), client.plpmtu().unwrap()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
     let remainder = server.process(Some(&ack), now).dgram();

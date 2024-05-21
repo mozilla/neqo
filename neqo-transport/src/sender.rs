@@ -48,7 +48,7 @@ impl PacketSender {
         pmtud: PmtudRef,
         now: Instant,
     ) -> Self {
-        let mtu = pmtud.borrow().mtu();
+        let mtu = pmtud.borrow().plpmtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => Box::new(ClassicCongestionControl::new(

@@ -599,6 +599,7 @@ mod tests {
             new_server(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
+                    .pmtud(false)
                     .max_stream_data(StreamType::UniDi, true, max)
                     .max_stream_data(StreamType::BiDi, true, max)
                     .max_stream_data(StreamType::BiDi, false, max),

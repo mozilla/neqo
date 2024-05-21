@@ -54,7 +54,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size() - 1,
-            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -64,7 +63,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size() - 2,
-            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -74,7 +72,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -84,7 +81,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -94,7 +90,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -104,7 +99,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -114,7 +108,6 @@ fn issue_876() {
             true,
             Vec::new(),
             cc.max_datagram_size() - 3,
-            16,
         ),
     ];
 
@@ -171,7 +164,6 @@ fn issue_1465() {
             true,
             Vec::new(),
             max_datagram_size,
-            16,
         );
         pn += 1;
         p

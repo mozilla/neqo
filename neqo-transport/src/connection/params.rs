@@ -79,6 +79,8 @@ pub struct ConnectionParameters {
     fast_pto: u8,
     grease: bool,
     pacing: bool,
+    /// Whether the connection performs PLPMTUD.
+    pmtud: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -101,6 +103,7 @@ impl Default for ConnectionParameters {
             fast_pto: FAST_PTO_SCALE,
             grease: true,
             pacing: true,
+            pmtud: true,
         }
     }
 }
@@ -341,6 +344,17 @@ impl ConnectionParameters {
     #[must_use]
     pub fn pacing(mut self, pacing: bool) -> Self {
         self.pacing = pacing;
+        self
+    }
+
+    #[must_use]
+    pub fn pmtud_enabled(&self) -> bool {
+        self.pmtud
+    }
+
+    #[must_use]
+    pub fn pmtud(mut self, pmtud: bool) -> Self {
+        self.pmtud = pmtud;
         self
     }
 

@@ -6,33 +6,32 @@
 
 use std::{cell::RefCell, net::IpAddr, rc::Rc};
 
-use neqo_common::{const_max, qdebug, qtrace};
+use neqo_common::{qdebug, qtrace};
 
 use crate::{recovery::SentPacket, Stats};
 
-/// This is the MTU that we assume when using IPv6.
-/// We use this size for Initial packets, so we don't need to worry about probing for support.
-/// If the path doesn't support this MTU, we will assume that it doesn't support QUIC.
-///
-/// This is a multiple of 16 greater than the largest possible short header (1 + 20 + 4).
-const PATH_MTU_V6: usize = 1337;
-/// The path MTU for IPv4 can be 20 bytes larger than for v6.
-const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
+// From https://datatracker.ietf.org/doc/html/rfc1191#section-7.1, with a few modifications.
+const MTU_SIZES: [usize; 13] = [
+    65536, // Official maximum MTU          RFC 791
+    65535, // Hyperchannel                  RFC 1044
+    17914, // 16Mb IBM Token Ring           ref. [6]
+    16384, // macOS loopback
+    8166,  // IEEE 802.4                    RFC 1042
+    4464,  // IEEE 802.5 (4Mb max)          RFC 1042
+    4352,  // FDDI (Revised)                RFC 1188
+    2048,  // Wideband Network              RFC 907
+    2002,  // IEEE 802.5 (4Mb recommended)  RFC 1042
+    1536,  // Exp. Ethernet Nets            RFC 895
+    1500,  // Ethernet Networks             RFC 894
+    1492,  // IEEE 802.3                    RFC 1042
+    1280,  // IPv6 minimum MTU              RFC 2460
+];
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
-const MAX_PROBES: usize = 1;
-// const MIN_PLPMTU: usize = MIN_INITIAL_PACKET_SIZE;
-const MAX_PLPMTU: usize = 16384; // TODO: Get from interface.
-                                 // const BASE_PLPMTU: usize = MIN_PLPMTU;
+const MAX_PROBES: usize = 3;
 
-#[derive(Debug, PartialEq)]
-pub enum PmtudState {
-    Disabled,
-    // Base,
-    Searching,
-    // SearchComplete,
-    // Error,
-}
+// const PATH_MTU_V6: usize = 1337;
+// const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 
 #[derive(Debug, PartialEq)]
 pub enum Probe {
@@ -44,14 +43,11 @@ pub enum Probe {
 
 #[derive(Debug)]
 pub struct Pmtud {
-    // remote_ip: IpAddr,
-    state: PmtudState,
+    header_size: usize,
     mtu: usize,
-    probed_size: usize,
+    probed_index: usize,
     probe_count: usize,
     probe_state: Probe,
-    low: usize,
-    high: usize,
 }
 
 pub type PmtudRef = Rc<RefCell<Pmtud>>;
@@ -60,28 +56,22 @@ impl Pmtud {
     #[must_use]
     pub fn new(remote_ip: IpAddr) -> PmtudRef {
         Rc::new(RefCell::new(Pmtud {
-            // remote_ip,
-            state: PmtudState::Disabled,
-            mtu: Pmtud::default_mtu(remote_ip),
-            probed_size: 0,
+            header_size: Self::header_size(remote_ip),
+            mtu: MTU_SIZES[MTU_SIZES.len() - 1],
+            probed_index: MTU_SIZES.len() - 1,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
-            low: Pmtud::default_mtu(remote_ip),
-            high: MAX_PLPMTU,
         }))
     }
 
     #[must_use]
-    pub fn mtu(&self) -> usize {
-        self.mtu
+    pub fn plpmtu(&self) -> usize {
+        self.mtu - self.header_size
     }
 
     #[must_use]
     pub fn needs_probe(&self) -> bool {
-        match self.state {
-            PmtudState::Searching => self.probe_state == Probe::Needed,
-            PmtudState::Disabled => false,
-        }
+        self.probe_state == Probe::Needed
     }
 
     #[must_use]
@@ -91,7 +81,10 @@ impl Pmtud {
 
     pub fn probe_prepared(&mut self) {
         self.probe_state = Probe::Prepared;
-        qtrace!("PMTUD probe of size {} prepared", self.probed_size);
+        qtrace!(
+            "PMTUD probe of size {} prepared",
+            MTU_SIZES[self.probed_index]
+        );
     }
 
     pub fn probe_sent(&mut self, stats: &mut Stats) -> bool {
@@ -100,7 +93,7 @@ impl Pmtud {
         stats.pmtud_tx += 1;
         qdebug!(
             "PMTUD probe of size {} sent, count {}",
-            self.probed_size,
+            MTU_SIZES[self.probed_index],
             self.probe_count
         );
         true
@@ -108,98 +101,80 @@ impl Pmtud {
 
     #[must_use]
     pub fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
-        p.len() == self.probed_size + p.aead_expansion()
+        self.probe_state == Probe::Sent
+            && p.len() == MTU_SIZES[self.probed_index] - self.header_size
     }
 
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], stats: &mut Stats) {
-        if self.state != PmtudState::Searching || acked_pkts.is_empty() {
+        if self.probe_state != Probe::Sent
+            || acked_pkts.is_empty()
+            || !acked_pkts.iter().any(|p| self.is_pmtud_probe(p))
+        {
             return;
         }
-        if !acked_pkts.iter().any(|p| self.is_pmtud_probe(p)) {
-            return;
-        }
-        qdebug!(
-            "PMTUD probe of size {} succeeded, setting as new MTU",
-            self.probed_size
-        );
         stats.pmtud_ack += 1;
-        self.mtu = self.probed_size;
-        self.low = self.probed_size;
-        self.set_state(PmtudState::Searching);
+        self.mtu = MTU_SIZES[self.probed_index];
+        qdebug!(
+            "PMTUD probe of size {} succeeded",
+            MTU_SIZES[self.probed_index]
+        );
+        self.start_pmtud();
     }
 
     pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
-        if self.state != PmtudState::Searching || lost_packets.is_empty() {
-            return;
-        }
-        if !lost_packets.iter().any(|p| self.is_pmtud_probe(p)) {
+        if self.probe_state != Probe::Sent
+            || lost_packets.is_empty()
+            || !lost_packets.iter().any(|p| self.is_pmtud_probe(p))
+        {
             return;
         }
         stats.pmtud_lost += 1;
         if self.probe_count < MAX_PROBES {
             self.probe_state = Probe::Needed;
-            qdebug!("PMTUD probe of size {} lost, retrying", self.probed_size);
-            return;
+            qdebug!(
+                "PMTUD probe of size {} lost, retrying",
+                MTU_SIZES[self.probed_index]
+            );
+        } else {
+            self.probe_state = Probe::NotNeeded;
+            qdebug!(
+                "PMTUD probe of size {} lost {} times, stopping PMTUD, PLPMTU is {}",
+                MTU_SIZES[self.probed_index],
+                self.probe_count,
+                self.plpmtu()
+            );
         }
-        qdebug!(
-            "PMTUD probe of size {} lost {} times",
-            self.probed_size,
-            self.probe_count
-        );
-        self.high = self.probed_size;
-        self.set_state(PmtudState::Searching);
     }
 
     #[must_use]
     pub fn probe_size(&self) -> usize {
-        self.probed_size
+        MTU_SIZES[self.probed_index] - self.header_size
     }
 
-    pub fn set_state(&mut self, state: PmtudState) {
-        qdebug!(
-            "PMTUD state {:?} -> {:?}, current MTU {}",
-            self.state,
-            state,
-            self.mtu
-        );
-        self.state = state;
-        match self.state {
-            PmtudState::Searching => {
-                if self.probed_size == 0 {
-                    self.probe_state = Probe::Needed;
-                    self.probe_count = 0;
-                    self.probed_size = MAX_PLPMTU;
-                } else if self.low == self.high {
-                    self.set_state(PmtudState::Disabled);
-                    return;
-                } else {
-                    self.probe_state = Probe::Needed;
-                    self.probe_count = 0;
-                    self.probed_size = self.low + (self.high - self.low) / 2;
-                }
-                qdebug!(
-                    "PMTUD search started in range [{}..{}], probed_size={}",
-                    self.low,
-                    self.high,
-                    self.probed_size
-                );
-            }
-            PmtudState::Disabled => {
-                self.probe_state = Probe::NotNeeded;
-            }
+    pub fn start_pmtud(&mut self) {
+        if self.probed_index > 0 {
+            self.probe_state = Probe::Needed;
+            self.probe_count = 0;
+            self.probed_index -= 1;
+            qdebug!(
+                "PMTUD started with probe size {}",
+                MTU_SIZES[self.probed_index],
+            );
+        } else {
+            self.probe_state = Probe::NotNeeded;
+            qdebug!("PMTUD already completed, MTU is {}", self.mtu);
         }
     }
 
-    #[must_use]
-    pub const fn default_mtu(remote_ip: IpAddr) -> usize {
+    const fn header_size(remote_ip: IpAddr) -> usize {
         match remote_ip {
-            IpAddr::V4(_) => PATH_MTU_V4,
-            IpAddr::V6(_) => PATH_MTU_V6,
+            IpAddr::V4(_) => 20 + 8,
+            IpAddr::V6(_) => 40 + 8,
         }
     }
 
     #[must_use]
-    pub const fn max_default_mtu() -> usize {
-        const_max(PATH_MTU_V4, PATH_MTU_V6)
+    pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
+        MTU_SIZES[MTU_SIZES.len() - 1] - Self::header_size(remote_ip)
     }
 }

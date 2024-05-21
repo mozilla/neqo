@@ -37,7 +37,7 @@ pub fn new_server(params: ConnectionParameters) -> Server {
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
 pub fn default_server() -> Server {
-    new_server(ConnectionParameters::default())
+    new_server(ConnectionParameters::default().pmtud(false))
 }
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.

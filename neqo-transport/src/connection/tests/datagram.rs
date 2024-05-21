@@ -26,7 +26,7 @@ use crate::{
 };
 
 // FIXME: The 27 here is a magic constant that the original code also (implicitly) had.
-const DATAGRAM_LEN_MTU: usize = Pmtud::default_mtu(DEFAULT_ADDR.ip()) - 27;
+const DATAGRAM_LEN_MTU: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - 27;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
@@ -71,8 +71,11 @@ fn datagram_disabled_both() {
 
 #[test]
 fn datagram_enabled_on_client() {
-    let mut client =
-        new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU),
+    );
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
@@ -100,8 +103,11 @@ fn datagram_enabled_on_client() {
 #[test]
 fn datagram_enabled_on_server() {
     let mut client = default_client();
-    let mut server =
-        new_server(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU),
+    );
     connect_force_idle(&mut client, &mut server);
 
     assert_eq!(
@@ -128,10 +134,15 @@ fn datagram_enabled_on_server() {
 fn connect_datagram() -> (Connection, Connection) {
     let mut client = new_client(
         ConnectionParameters::default()
+            .pmtud(false)
             .datagram_size(MAX_QUIC_DATAGRAM)
             .outgoing_datagram_queue(OUTGOING_QUEUE),
     );
-    let mut server = new_server(ConnectionParameters::default().datagram_size(MAX_QUIC_DATAGRAM));
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .datagram_size(MAX_QUIC_DATAGRAM),
+    );
     connect_force_idle(&mut client, &mut server);
     (client, server)
 }
@@ -390,8 +401,11 @@ fn dgram_no_allowed() {
 #[test]
 #[allow(clippy::assertions_on_constants)] // this is a static assert, thanks
 fn dgram_too_big() {
-    let mut client =
-        new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU),
+    );
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
@@ -471,6 +485,7 @@ fn multiple_datagram_events() {
 
     let mut client = new_client(
         ConnectionParameters::default()
+            .pmtud(false)
             .datagram_size(u64::try_from(DATA_SIZE).unwrap())
             .incoming_datagram_queue(MAX_QUEUE),
     );
@@ -517,6 +532,7 @@ fn too_many_datagram_events() {
 
     let mut client = new_client(
         ConnectionParameters::default()
+            .pmtud(false)
             .datagram_size(u64::try_from(DATA_SIZE).unwrap())
             .incoming_datagram_queue(MAX_QUEUE),
     );
@@ -607,7 +623,7 @@ fn datagram_fill() {
         let path = p.borrow();
         // Minimum overhead is connection ID length, 1 byte short header, 1 byte packet number,
         // 1 byte for the DATAGRAM frame type, and 16 bytes for the AEAD.
-        path.mtu() - path.remote_cid().len() - 19
+        path.plpmtu() - path.remote_cid().len() - 19
     };
     assert!(space >= 64); // Unlikely, but this test depends on the datagram being this large.
 

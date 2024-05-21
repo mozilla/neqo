@@ -62,7 +62,11 @@ fn idle_timeout() {
 #[test]
 fn idle_timeout_custom_client() {
     const IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-    let mut client = new_client(ConnectionParameters::default().idle_timeout(IDLE_TIMEOUT));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .idle_timeout(IDLE_TIMEOUT),
+    );
     let mut server = default_server();
     test_idle_timeout(&mut client, &mut server, IDLE_TIMEOUT);
 }
@@ -71,7 +75,11 @@ fn idle_timeout_custom_client() {
 fn idle_timeout_custom_server() {
     const IDLE_TIMEOUT: Duration = Duration::from_secs(5);
     let mut client = default_client();
-    let mut server = new_server(ConnectionParameters::default().idle_timeout(IDLE_TIMEOUT));
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .idle_timeout(IDLE_TIMEOUT),
+    );
     test_idle_timeout(&mut client, &mut server, IDLE_TIMEOUT);
 }
 
@@ -79,8 +87,16 @@ fn idle_timeout_custom_server() {
 fn idle_timeout_custom_both() {
     const LOWER_TIMEOUT: Duration = Duration::from_secs(5);
     const HIGHER_TIMEOUT: Duration = Duration::from_secs(10);
-    let mut client = new_client(ConnectionParameters::default().idle_timeout(HIGHER_TIMEOUT));
-    let mut server = new_server(ConnectionParameters::default().idle_timeout(LOWER_TIMEOUT));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .idle_timeout(HIGHER_TIMEOUT),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .idle_timeout(LOWER_TIMEOUT),
+    );
     test_idle_timeout(&mut client, &mut server, LOWER_TIMEOUT);
 }
 
@@ -680,7 +696,11 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     //  - Idle time out  will trigger (at the timeout + IDLE_TIMEOUT)
     const IDLE_TIMEOUT: Duration = Duration::from_millis(6000);
 
-    let mut client = new_client(ConnectionParameters::default().idle_timeout(IDLE_TIMEOUT));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .idle_timeout(IDLE_TIMEOUT),
+    );
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
     // connect_rtt_idle increase now by RTT / 2;

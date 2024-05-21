@@ -653,16 +653,22 @@ impl LossRecovery {
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
         // backoff, so that we can determine persistent congestion.
-        primary_path
-            .borrow_mut()
-            .on_packets_lost(prev_largest_acked, pn_space, &lost, &mut self.stats.borrow_mut());
+        primary_path.borrow_mut().on_packets_lost(
+            prev_largest_acked,
+            pn_space,
+            &lost,
+            &mut self.stats.borrow_mut(),
+        );
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
-        primary_path
-            .borrow_mut()
-            .on_packets_acked(&acked_packets, ack_ecn, now, &mut self.stats.borrow_mut());
+        primary_path.borrow_mut().on_packets_acked(
+            &acked_packets,
+            ack_ecn,
+            now,
+            &mut self.stats.borrow_mut(),
+        );
 
         self.pto_state = None;
 
@@ -895,7 +901,7 @@ impl LossRecovery {
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qdebug!([self], "get send profile {:?}", now);
         let sender = path.sender();
-        let mtu = path.mtu();
+        let mtu = path.plpmtu();
         if let Some(profile) = self
             .pto_state
             .as_mut()
@@ -1136,7 +1142,6 @@ mod tests {
                 true,
                 Vec::new(),
                 ON_SENT_SIZE,
-                16,
             ));
         }
     }
@@ -1164,7 +1169,6 @@ mod tests {
                 true,
                 Vec::new(),
                 ON_SENT_SIZE,
-                16,
             ));
         }
     }
@@ -1289,7 +1293,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
@@ -1299,7 +1302,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         let (_, lost) = lr.on_ack_received(
             PacketNumberSpace::ApplicationData,
@@ -1407,7 +1409,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         lr.on_packet_sent(SentPacket::new(
             PacketType::Handshake,
@@ -1417,7 +1418,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
@@ -1427,7 +1427,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
 
         // Now put all spaces on the LR timer so we can see them.
@@ -1444,7 +1443,6 @@ mod tests {
                 true,
                 Vec::new(),
                 ON_SENT_SIZE,
-                16,
             );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
             lr.on_packet_sent(sent_pkt);
@@ -1482,7 +1480,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
     }
@@ -1498,7 +1495,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         // Set the RTT to the initial value so that discarding doesn't
         // alter the estimate.
@@ -1520,7 +1516,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
@@ -1530,7 +1525,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
 
         assert_eq!(lr.pto_time(PacketNumberSpace::ApplicationData), None);
@@ -1569,7 +1563,6 @@ mod tests {
             true,
             Vec::new(),
             ON_SENT_SIZE,
-            16,
         ));
 
         let handshake_pto = RttEstimate::default().pto(PacketNumberSpace::Handshake);

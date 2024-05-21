@@ -34,11 +34,9 @@ pub struct SentPacket {
     pto: bool,
 
     len: usize,
-    aead_expansion: usize,
 }
 
 impl SentPacket {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pt: PacketType,
         pn: PacketNumber,
@@ -47,7 +45,6 @@ impl SentPacket {
         ack_eliciting: bool,
         tokens: Vec<RecoveryToken>,
         len: usize,
-        aead_expansion: usize,
     ) -> Self {
         Self {
             pt,
@@ -60,7 +57,6 @@ impl SentPacket {
             time_declared_lost: None,
             pto: false,
             len,
-            aead_expansion,
         }
     }
 
@@ -97,11 +93,6 @@ impl SentPacket {
     /// The length of the packet that was sent.
     pub fn len(&self) -> usize {
         self.len
-    }
-
-    /// The length of the AEAD expansion that was used.
-    pub fn aead_expansion(&self) -> usize {
-        self.aead_expansion
     }
 
     /// Access the recovery tokens that this holds.
@@ -281,7 +272,6 @@ mod tests {
             true,
             Vec::new(),
             100,
-            16,
         )
     }
 

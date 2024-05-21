@@ -59,7 +59,7 @@ fn discarded_initial_keys() {
     let mut client = default_client();
     let init_pkt_c = client.process(None, now()).dgram();
     assert!(init_pkt_c.is_some());
-    assert_eq!(init_pkt_c.as_ref().unwrap().len(), client.mtu());
+    assert_eq!(init_pkt_c.as_ref().unwrap().len(), client.plpmtu().unwrap());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();

@@ -654,10 +654,10 @@ impl Path {
         }
     }
 
-    /// Get the path MTU.  This is currently fixed based on IP version.
+    /// Get the PL MTU.
     #[allow(clippy::unused_self)]
-    pub fn mtu(&self) -> usize {
-        self.pmtud.borrow().mtu()
+    pub fn plpmtu(&self) -> usize {
+        self.pmtud.borrow().plpmtu()
     }
 
     /// Get a reference to the PMTUD state.
@@ -776,6 +776,7 @@ impl Path {
         stats: &mut FrameStats,
         mtu: bool,       // Whether the packet we're writing into will be a full MTU.
         empty_pkt: bool, // False packet is coalesced behind another one or already has frames.
+        aead_expansion: usize,
         now: Instant,
     ) -> bool {
         if builder.remaining() < 9 {
@@ -784,7 +785,7 @@ impl Path {
 
         // Only send PMTUD probes using empty, non-coalesced packets.
         if self.pmtud.borrow().needs_probe() && empty_pkt && mtu {
-            builder.set_limit(self.pmtud.borrow().probe_size());
+            builder.set_limit(self.pmtud.borrow().probe_size() - aead_expansion);
             builder.encode_varint(FRAME_TYPE_PING);
             stats.ping += 1;
             stats.all += 1;
@@ -921,7 +922,7 @@ impl Path {
                     m,
                     ack_ratio,
                     self.sender.cwnd(),
-                    self.mtu(),
+                    self.plpmtu(),
                     self.rtt.estimate(),
                 )
             },
@@ -994,7 +995,7 @@ impl Path {
                 .sender
                 .on_ecn_ce_received(acked_pkts.first().expect("must be there"));
             if cwnd_reduced {
-                self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
+                self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
             }
         }
 
@@ -1019,7 +1020,7 @@ impl Path {
             stats,
         );
         if cwnd_reduced {
-            self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
+            self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
         }
     }
 
@@ -1037,7 +1038,7 @@ impl Path {
                         // If we have received absolutely nothing thus far, then this endpoint
                         // is the one initiating communication on this path.  Allow enough space for
                         // probing.
-                        self.mtu() * 5
+                        self.plpmtu() * 5
                     } else {
                         limit
                     };

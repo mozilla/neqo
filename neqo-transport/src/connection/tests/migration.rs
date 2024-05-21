@@ -451,7 +451,7 @@ fn migration_client_empty_cid() {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
         now(),
     )
     .unwrap();
@@ -470,7 +470,7 @@ fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Da
 }
 
 fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: SocketAddr) {
-    let mtu = Pmtud::default_mtu(hs_client.ip());
+    let mtu = Pmtud::default_plpmtu(hs_client.ip());
     let assert_orig_path = |d: &Datagram, full_mtu: bool| {
         assert_eq!(
             d.destination(),
@@ -509,7 +509,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         hs_client,
         hs_server,
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
         now(),
     )
     .unwrap();
@@ -518,7 +518,11 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
         SocketAddr::V6(v6) => PreferredAddress::new(None, Some(v6)),
         SocketAddr::V4(v4) => PreferredAddress::new(Some(v4), None),
     };
-    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .preferred_address(spa),
+    );
 
     let dgram = fast_handshake(&mut client, &mut server);
 
@@ -606,7 +610,11 @@ fn expect_no_migration(client: &mut Connection, server: &mut Connection) {
 
 fn preferred_address_ignored(spa: PreferredAddress) {
     let mut client = default_client();
-    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .preferred_address(spa),
+    );
 
     expect_no_migration(&mut client, &mut server);
 }
@@ -627,11 +635,19 @@ fn preferred_address_ignore_different_family() {
 /// good preferred address.
 #[test]
 fn preferred_address_disabled_client() {
-    let mut client = new_client(ConnectionParameters::default().disable_preferred_address());
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .disable_preferred_address(),
+    );
     let mut preferred = DEFAULT_ADDR;
     preferred.set_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)));
     let spa = PreferredAddress::new_any(None, Some(preferred));
-    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(false)
+            .preferred_address(spa),
+    );
 
     expect_no_migration(&mut client, &mut server);
 }
@@ -645,7 +661,9 @@ fn preferred_address_empty_cid() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        ConnectionParameters::default().preferred_address(spa),
+        ConnectionParameters::default()
+            .pmtud(false)
+            .preferred_address(spa),
     );
     assert_eq!(res.unwrap_err(), Error::ConnectionIdsExhausted);
 }
@@ -658,7 +676,7 @@ fn preferred_address_server_empty_cid() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
     )
     .unwrap();
 
@@ -815,7 +833,7 @@ fn retire_all() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::clone(&cid_gen),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
     )
     .unwrap();
     connect_force_idle(&mut client, &mut server);
@@ -853,7 +871,7 @@ fn retire_prior_to_migration_failure() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::clone(&cid_gen),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
     )
     .unwrap();
     connect_force_idle(&mut client, &mut server);
@@ -908,7 +926,7 @@ fn retire_prior_to_migration_success() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::clone(&cid_gen),
-        ConnectionParameters::default(),
+        ConnectionParameters::default().pmtud(false),
     )
     .unwrap();
     connect_force_idle(&mut client, &mut server);

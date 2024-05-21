@@ -129,7 +129,7 @@ pub struct ClassicCongestionControl<T> {
 
 impl<T> ClassicCongestionControl<T> {
     pub fn max_datagram_size(&self) -> usize {
-        self.pmtud.borrow().mtu()
+        self.pmtud.borrow().plpmtu()
     }
 }
 
@@ -157,7 +157,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     #[cfg(test)]
     #[must_use]
     fn cwnd_initial(&self) -> usize {
-        cwnd_initial(self.pmtud.borrow().mtu())
+        cwnd_initial(self.pmtud.borrow().plpmtu())
     }
 
     #[must_use]
@@ -395,7 +395,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
 impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     pub fn new(cc_algorithm: T, pmtud: PmtudRef) -> Self {
-        let cwnd_initial = cwnd_initial(pmtud.borrow().mtu());
+        let cwnd_initial = cwnd_initial(pmtud.borrow().plpmtu());
         Self {
             cc_algorithm,
             state: State::SlowStart,
@@ -638,7 +638,6 @@ mod tests {
             ack_eliciting,
             Vec::new(),
             100,
-            16,
         )
     }
 
@@ -854,7 +853,6 @@ mod tests {
                     true,
                     Vec::new(),
                     1000,
-                    16,
                 )
             })
             .collect::<Vec<_>>()
@@ -976,7 +974,6 @@ mod tests {
             false,
             Vec::new(),
             lost[0].len(),
-            lost[0].aead_expansion(),
         );
         assert!(!persistent_congestion_by_pto(
             ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
@@ -1079,7 +1076,6 @@ mod tests {
                     true,
                     Vec::new(),
                     cc.max_datagram_size(),
-                    16,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1108,7 +1104,6 @@ mod tests {
                 true,
                 Vec::new(),
                 cc.max_datagram_size(),
-                16,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1161,7 +1156,6 @@ mod tests {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         );
         cc.on_packet_sent(&p_lost);
         cwnd_is_default(&cc);
@@ -1176,7 +1170,6 @@ mod tests {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         );
         cc.on_packet_sent(&p_not_lost);
         now += RTT;
@@ -1201,7 +1194,6 @@ mod tests {
                     true,
                     Vec::new(),
                     cc.max_datagram_size(),
-                    16,
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p);
@@ -1236,7 +1228,6 @@ mod tests {
                 true,
                 Vec::new(),
                 cc.max_datagram_size(),
-                16,
             );
             next_pn += 1;
             cc.on_packet_sent(&p);
@@ -1276,7 +1267,6 @@ mod tests {
             true,
             Vec::new(),
             cc.max_datagram_size(),
-            16,
         );
         cc.on_packet_sent(&p_ce);
         cwnd_is_default(&cc);

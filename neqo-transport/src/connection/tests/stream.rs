@@ -842,6 +842,7 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
 
     let mut client = new_client(
         ConnectionParameters::default()
+            .pmtud(false)
             .max_stream_data(StreamType::BiDi, true, RECV_BUFFER_START)
             .max_stream_data(StreamType::UniDi, true, RECV_BUFFER_START),
     );

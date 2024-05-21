@@ -178,19 +178,22 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 /// Create a transport client with default configuration.
 #[must_use]
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default())
+    new_client(ConnectionParameters::default().pmtud(false))
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server(DEFAULT_ALPN, ConnectionParameters::default().pmtud(false))
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(DEFAULT_ALPN_H3, ConnectionParameters::default())
+    new_server(
+        DEFAULT_ALPN_H3,
+        ConnectionParameters::default().pmtud(false),
+    )
 }
 
 /// Create a transport server with a configuration.
@@ -266,12 +269,17 @@ pub fn connect() -> (Connection, Connection) {
 #[must_use]
 pub fn default_http3_client() -> Http3Client {
     fixture_init();
+    let cp = Http3Parameters::default()
+        .get_connection_parameters()
+        .clone()
+        .pmtud(false);
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
         Http3Parameters::default()
+            .connection_parameters(cp)
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
             .max_blocked_streams(100)
@@ -308,6 +316,10 @@ pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
 #[must_use]
 pub fn default_http3_server() -> Http3Server {
     fixture_init();
+    let cp = Http3Parameters::default()
+        .get_connection_parameters()
+        .clone()
+        .pmtud(false);
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
@@ -315,6 +327,7 @@ pub fn default_http3_server() -> Http3Server {
         anti_replay(),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         Http3Parameters::default()
+            .connection_parameters(cp)
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
             .max_blocked_streams(100)

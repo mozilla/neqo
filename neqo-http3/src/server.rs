@@ -347,6 +347,7 @@ mod tests {
     }
 
     pub fn create_server(conn_params: Http3Parameters) -> Http3Server {
+        let cp = conn_params.get_connection_parameters().clone().pmtud(false);
         fixture_init();
         Http3Server::new(
             now(),
@@ -354,7 +355,7 @@ mod tests {
             DEFAULT_ALPN,
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            conn_params,
+            conn_params.connection_parameters(cp),
             None,
         )
         .expect("create a server")

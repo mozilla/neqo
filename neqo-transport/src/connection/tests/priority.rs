@@ -386,7 +386,7 @@ fn low() {
     // Send a session ticket and make it big enough to require a whole packet.
     // The resulting CRYPTO frame beats out the stream data.
     let stats_before = server.stats().frame_tx;
-    server.send_ticket(now, &vec![0; server.mtu()]).unwrap();
+    let _ = server.send_ticket(now, &vec![0; server.plpmtu().unwrap()]);
     mem::drop(server.process_output(now));
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto + 1);

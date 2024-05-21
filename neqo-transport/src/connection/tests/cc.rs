@@ -31,7 +31,7 @@ fn cc_slow_start() {
     // Try to send a lot of data
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     let (c_tx_dgrams, _) = fill_cwnd(&mut client, stream_id, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
     assert!(cwnd_avail(&client) < ACK_ONLY_SIZE_LIMIT);
 }
 
@@ -52,7 +52,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
 
     // Buffer up lot of data and generate packets
     let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream_id, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
     // Predict the packet number of the last packet sent.
     // We have already sent packets in `connect_rtt_idle`,
     // so include a fudge factor.
@@ -78,7 +78,11 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
 
     // Client: send more
     let (mut c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream_id, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND * 2, client.mtu());
+    assert_full_cwnd(
+        &c_tx_dgrams,
+        POST_HANDSHAKE_CWND * 2,
+        client.plpmtu().unwrap(),
+    );
     let flight2_largest = flight1_largest + u64::try_from(c_tx_dgrams.len()).unwrap();
 
     // Server: Receive and generate ack again, but this time add congestion
@@ -134,7 +138,7 @@ fn cc_cong_avoidance_recovery_period_unchanged() {
 
     // Buffer up lot of data and generate packets
     let (mut c_tx_dgrams, now) = fill_cwnd(&mut client, stream_id, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
 
     // Drop 0th packet. When acked, this should put client into CARP.
     c_tx_dgrams.remove(0);
@@ -266,7 +270,7 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
         now = next_now;
         next_c_tx_dgrams.append(&mut new_pkts);
 
-        expected_cwnd += client.mtu();
+        expected_cwnd += client.plpmtu().unwrap();
         assert_eq!(cwnd(&client), expected_cwnd);
         c_tx_dgrams = next_c_tx_dgrams;
     }
@@ -283,7 +287,7 @@ fn cc_slow_start_to_persistent_congestion_no_acks() {
 
     // Buffer up lot of data and generate packets
     let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
 
     // Server: Receive and generate ack
     now += DEFAULT_RTT / 2;
@@ -305,7 +309,7 @@ fn cc_slow_start_to_persistent_congestion_some_acks() {
 
     // Buffer up lot of data and generate packets
     let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
 
     // Server: Receive and generate ack
     now += Duration::from_millis(100);
@@ -334,7 +338,7 @@ fn cc_persistent_congestion_to_slow_start() {
 
     // Buffer up lot of data and generate packets
     let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
 
     // Server: Receive and generate ack
     now += Duration::from_millis(10);
@@ -377,7 +381,7 @@ fn ack_are_not_cc() {
 
     // Buffer up lot of data and generate packets, so that cc window is filled.
     let (c_tx_dgrams, now) = fill_cwnd(&mut client, stream, now);
-    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.mtu());
+    assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
 
     // The server hasn't received any of these packets yet, the server
     // won't ACK, but if it sends an ack-eliciting packet instead.
@@ -430,7 +434,7 @@ fn pace() {
     }
     let gap = client.process_output(now).callback();
     assert_ne!(gap, Duration::new(0, 0));
-    for _ in (1 + PACING_BURST_SIZE)..cwnd_packets(POST_HANDSHAKE_CWND, client.mtu()) {
+    for _ in (1 + PACING_BURST_SIZE)..cwnd_packets(POST_HANDSHAKE_CWND, client.plpmtu().unwrap()) {
         match client.process_output(now) {
             Output::Callback(t) => assert_eq!(t, gap),
             Output::Datagram(_) => {
@@ -447,7 +451,10 @@ fn pace() {
     }
     let dgram = client.process_output(now).dgram();
     assert!(dgram.is_none());
-    assert_eq!(count, cwnd_packets(POST_HANDSHAKE_CWND, client.mtu()));
+    assert_eq!(
+        count,
+        cwnd_packets(POST_HANDSHAKE_CWND, client.plpmtu().unwrap())
+    );
     let fin = client.process_output(now).callback();
     assert_ne!(fin, Duration::new(0, 0));
     assert_ne!(fin, gap);
