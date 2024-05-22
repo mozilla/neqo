@@ -6,41 +6,38 @@
 
 // Congestion control
 
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    time::Duration,
-};
+use std::time::Duration;
 
 use neqo_common::IpTosEcn;
 use test_fixture::now;
 
 use crate::{
-    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl},
+    cc::{
+        new_reno::NewReno, ClassicCongestionControl, CongestionControl, CWND_INITIAL,
+        MAX_DATAGRAM_SIZE,
+    },
     packet::PacketType,
-    pmtud::Pmtud,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
 
-const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const PTO: Duration = Duration::from_millis(100);
 const RTT: Duration = Duration::from_millis(98);
 const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(Duration::from_millis(98));
 
 fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
-    assert_eq!(cc.cwnd(), cc.cwnd_initial());
+    assert_eq!(cc.cwnd(), CWND_INITIAL);
     assert_eq!(cc.ssthresh(), usize::MAX);
 }
 
 fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
-    assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
-    assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
+    assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
+    assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
 }
 
 #[test]
-#[allow(clippy::too_many_lines)]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default());
     let time_now = now();
     let time_before = time_now.checked_sub(Duration::from_millis(100)).unwrap();
     let time_after = time_now + Duration::from_millis(150);
@@ -53,7 +50,7 @@ fn issue_876() {
             time_before,
             true,
             Vec::new(),
-            cc.max_datagram_size() - 1,
+            MAX_DATAGRAM_SIZE - 1,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -62,7 +59,7 @@ fn issue_876() {
             time_before,
             true,
             Vec::new(),
-            cc.max_datagram_size() - 2,
+            MAX_DATAGRAM_SIZE - 2,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -71,7 +68,7 @@ fn issue_876() {
             time_before,
             true,
             Vec::new(),
-            cc.max_datagram_size(),
+            MAX_DATAGRAM_SIZE,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -80,7 +77,7 @@ fn issue_876() {
             time_before,
             true,
             Vec::new(),
-            cc.max_datagram_size(),
+            MAX_DATAGRAM_SIZE,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -89,7 +86,7 @@ fn issue_876() {
             time_before,
             true,
             Vec::new(),
-            cc.max_datagram_size(),
+            MAX_DATAGRAM_SIZE,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -98,7 +95,7 @@ fn issue_876() {
             time_before,
             true,
             Vec::new(),
-            cc.max_datagram_size(),
+            MAX_DATAGRAM_SIZE,
         ),
         SentPacket::new(
             PacketType::Short,
@@ -107,7 +104,7 @@ fn issue_876() {
             time_after,
             true,
             Vec::new(),
-            cc.max_datagram_size() - 3,
+            MAX_DATAGRAM_SIZE - 3,
         ),
     ];
 
@@ -117,7 +114,7 @@ fn issue_876() {
     }
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_default(&cc);
-    assert_eq!(cc.bytes_in_flight(), 6 * cc.max_datagram_size() - 3);
+    assert_eq!(cc.bytes_in_flight(), 6 * MAX_DATAGRAM_SIZE - 3);
 
     cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[0..1]);
 
@@ -125,36 +122,35 @@ fn issue_876() {
     assert!(cc.recovery_packet());
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_halved(&cc);
-    assert_eq!(cc.bytes_in_flight(), 5 * cc.max_datagram_size() - 2);
+    assert_eq!(cc.bytes_in_flight(), 5 * MAX_DATAGRAM_SIZE - 2);
 
     // Send a packet after recovery starts
     cc.on_packet_sent(&sent_packets[6]);
     assert!(!cc.recovery_packet());
     cwnd_is_halved(&cc);
     assert_eq!(cc.acked_bytes(), 0);
-    assert_eq!(cc.bytes_in_flight(), 6 * cc.max_datagram_size() - 5);
+    assert_eq!(cc.bytes_in_flight(), 6 * MAX_DATAGRAM_SIZE - 5);
 
     // and ack it. cwnd increases slightly
     cc.on_packets_acked(&sent_packets[6..], &RTT_ESTIMATE, time_now);
     assert_eq!(cc.acked_bytes(), sent_packets[6].len());
     cwnd_is_halved(&cc);
-    assert_eq!(cc.bytes_in_flight(), 5 * cc.max_datagram_size() - 2);
+    assert_eq!(cc.bytes_in_flight(), 5 * MAX_DATAGRAM_SIZE - 2);
 
     // Packet from before is lost. Should not hurt cwnd.
     cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[1..2]);
     assert!(!cc.recovery_packet());
     assert_eq!(cc.acked_bytes(), sent_packets[6].len());
     cwnd_is_halved(&cc);
-    assert_eq!(cc.bytes_in_flight(), 4 * cc.max_datagram_size());
+    assert_eq!(cc.bytes_in_flight(), 4 * MAX_DATAGRAM_SIZE);
 }
 
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default());
     let mut pn = 0;
     let mut now = now();
-    let max_datagram_size = cc.max_datagram_size();
     let mut next_packet = |now| {
         let p = SentPacket::new(
             PacketType::Short,
@@ -163,7 +159,7 @@ fn issue_1465() {
             now,
             true,
             Vec::new(),
-            max_datagram_size,
+            MAX_DATAGRAM_SIZE,
         );
         pn += 1;
         p
@@ -180,7 +176,7 @@ fn issue_1465() {
 
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_default(&cc);
-    assert_eq!(cc.bytes_in_flight(), 3 * cc.max_datagram_size());
+    assert_eq!(cc.bytes_in_flight(), 3 * MAX_DATAGRAM_SIZE);
 
     // advance one rtt to detect lost packet there this simplifies the timers, because
     // on_packet_loss would only be called after RTO, but that is not relevant to the problem
@@ -191,13 +187,13 @@ fn issue_1465() {
     assert!(cc.recovery_packet());
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_halved(&cc);
-    assert_eq!(cc.bytes_in_flight(), 2 * cc.max_datagram_size());
+    assert_eq!(cc.bytes_in_flight(), 2 * MAX_DATAGRAM_SIZE);
 
     // Don't reduce the cwnd again on second packet loss
     cc.on_packets_lost(Some(now), None, PTO, &[p3]);
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_halved(&cc); // still the same as after first packet loss
-    assert_eq!(cc.bytes_in_flight(), cc.max_datagram_size());
+    assert_eq!(cc.bytes_in_flight(), MAX_DATAGRAM_SIZE);
 
     // the acked packets before on_packet_sent were the cause of
     // https://github.com/mozilla/neqo/pull/1465
@@ -223,7 +219,7 @@ fn issue_1465() {
     assert!(cc.recovery_packet());
     assert_eq!(cc.cwnd(), cur_cwnd / 2);
     assert_eq!(cc.acked_bytes(), 0);
-    assert_eq!(cc.bytes_in_flight(), 2 * cc.max_datagram_size());
+    assert_eq!(cc.bytes_in_flight(), 2 * MAX_DATAGRAM_SIZE);
 
     // this shouldn't introduce further cwnd reduction, but it did before https://github.com/mozilla/neqo/pull/1465
     cc.on_packets_lost(Some(now), None, PTO, &[p6]);

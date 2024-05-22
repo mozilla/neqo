@@ -100,8 +100,7 @@ impl Pmtud {
 
     #[must_use]
     pub fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
-        self.probe_state == Probe::Sent
-            && p.len() == self.probe_size()
+        self.probe_state == Probe::Sent && p.len() == self.probe_size()
     }
 
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], stats: &mut Stats) {
@@ -172,6 +171,7 @@ impl Pmtud {
         }
     }
 
+    #[must_use]
     pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
         MTU_SIZES[MTU_SIZES.len() - 1] - Self::header_size(remote_ip)
     }

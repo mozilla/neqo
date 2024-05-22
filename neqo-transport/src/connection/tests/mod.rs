@@ -20,7 +20,7 @@ use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 use super::{CloseReason, Connection, ConnectionId, Output, State};
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
-    cc::CWND_INITIAL_PKTS,
+    cc::{CWND_INITIAL_PKTS, CWND_MIN},
     cid::ConnectionIdRef,
     events::ConnectionEvent,
     frame::FRAME_TYPE_PING,
@@ -481,10 +481,6 @@ fn cwnd_avail(c: &Connection) -> usize {
     c.paths.primary().unwrap().borrow().sender().cwnd_avail()
 }
 
-fn cwnd_min(c: &Connection) -> usize {
-    c.paths.primary().unwrap().borrow().sender().cwnd_min()
-}
-
 fn induce_persistent_congestion(
     client: &mut Connection,
     server: &mut Connection,
@@ -530,7 +526,7 @@ fn induce_persistent_congestion(
     // An ACK for the third PTO causes persistent congestion.
     let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
     client.process_input(&s_ack, now);
-    assert_eq!(cwnd(client), cwnd_min(client));
+    assert_eq!(cwnd(client), CWND_MIN);
     now
 }
 
