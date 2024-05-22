@@ -157,6 +157,7 @@ jobs:
           file: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
   bench:
