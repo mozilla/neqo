@@ -2164,10 +2164,10 @@ impl Connection {
 
         if path.borrow().pmtud().is_probe_prepared() {
             // If this is a PMTUD probe, don't include any other frames and record it as sent.
-            ack_eliciting |= path
-                .borrow_mut()
+            path.borrow_mut()
                 .pmtud_mut()
                 .probe_sent(&mut self.stats.borrow_mut());
+            ack_eliciting = true;
         } else {
             if primary {
                 if space == PacketNumberSpace::ApplicationData {

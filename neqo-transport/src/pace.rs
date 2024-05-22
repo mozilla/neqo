@@ -44,18 +44,16 @@ impl Pacer {
     /// Create a new `Pacer`.  This takes the current time, the maximum burst size,
     /// and the packet size.
     ///
-    /// The value of `m` is the maximum capacity in bytes.  `m` primes the pacer
-    /// with credit and determines the burst size.  `m` must not exceed
+    /// The value of `m` is the maximum capacity in MTUs.  `m` primes the pacer
+    /// with credit and determines the burst size.  `m` * MTU must not exceed
     /// the initial congestion window, but it should probably be lower.
     ///
     /// The value of `p` is the packet size in bytes, which determines the minimum
     /// credit needed before a packet is sent.  This should be a substantial
     /// fraction of the maximum packet size, if not the packet size.
     pub fn new(enabled: bool, now: Instant, m: usize, pmtud: Pmtud) -> Self {
-        assert!(
-            m >= pmtud.plpmtu(),
-            "maximum capacity has to be at least one packet"
-        );
+        assert!(m >= 1, "maximum capacity has to be at least one packet");
+        let m = m * pmtud.plpmtu();
         Self {
             enabled,
             t: now,
@@ -151,35 +149,39 @@ mod tests {
     use crate::Pmtud;
 
     const RTT: Duration = Duration::from_millis(1000);
-    const PACKET: usize = 1000;
-    const CWND: usize = PACKET * 10;
     const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 
     #[test]
     fn even() {
         let n = now();
-        let mut p = Pacer::new(true, n, PACKET, Pmtud::new(IP_ADDR));
-        assert_eq!(p.next(RTT, CWND), n);
-        p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
+        let mut p = Pacer::new(true, n, 1, Pmtud::new(IP_ADDR));
+        let mtu = p.pmtud().plpmtu();
+        let cwnd = mtu * 10;
+        assert_eq!(p.next(RTT, cwnd), n);
+        p.spend(n, RTT, cwnd, mtu);
+        assert_eq!(p.next(RTT, cwnd), n + (RTT / 20));
     }
 
     #[test]
     fn backwards_in_time() {
         let n = now();
-        let mut p = Pacer::new(true, n + RTT, PACKET, Pmtud::new(IP_ADDR));
-        assert_eq!(p.next(RTT, CWND), n + RTT);
+        let mut p = Pacer::new(true, n + RTT, 1, Pmtud::new(IP_ADDR));
+        let mtu = p.pmtud().plpmtu();
+        let cwnd = mtu * 10;
+        assert_eq!(p.next(RTT, cwnd), n + RTT);
         // Now spend some credit in the past using a time machine.
-        p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
+        p.spend(n, RTT, cwnd, mtu);
+        assert_eq!(p.next(RTT, cwnd), n + (RTT / 20));
     }
 
     #[test]
     fn pacing_disabled() {
         let n = now();
-        let mut p = Pacer::new(false, n, PACKET, Pmtud::new(IP_ADDR));
-        assert_eq!(p.next(RTT, CWND), n);
-        p.spend(n, RTT, CWND, PACKET);
-        assert_eq!(p.next(RTT, CWND), n);
+        let mut p = Pacer::new(false, n, 1, Pmtud::new(IP_ADDR));
+        let mtu = p.pmtud().plpmtu();
+        let cwnd = mtu * 10;
+        assert_eq!(p.next(RTT, cwnd), n);
+        p.spend(n, RTT, cwnd, mtu);
+        assert_eq!(p.next(RTT, cwnd), n);
     }
 }

@@ -23,10 +23,7 @@ use crate::{
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn::{EcnCount, EcnInfo},
-    frame::{
-        FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_PING,
-        FRAME_TYPE_RETIRE_CONNECTION_ID,
-    },
+    frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
     pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
@@ -781,11 +778,8 @@ impl Path {
 
         // Only send PMTUD probes using empty, non-coalesced packets.
         if self.pmtud().needs_probe() && empty_pkt && mtu {
-            builder.set_limit(self.pmtud().probe_size() - aead_expansion);
-            builder.encode_varint(FRAME_TYPE_PING);
-            stats.ping += 1;
-            stats.all += 1;
-            self.pmtud_mut().probe_prepared();
+            self.pmtud_mut()
+                .prepare_probe(builder, stats, aead_expansion);
             return true;
         }
 

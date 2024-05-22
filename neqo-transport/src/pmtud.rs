@@ -8,7 +8,9 @@ use std::net::IpAddr;
 
 use neqo_common::{qdebug, qtrace};
 
-use crate::{recovery::SentPacket, Stats};
+use crate::{
+    frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, stats::FrameStats, Stats,
+};
 
 // From https://datatracker.ietf.org/doc/html/rfc1191#section-7.1, with a few modifications.
 const MTU_SIZES: [usize; 12] = [
@@ -78,7 +80,17 @@ impl Pmtud {
         self.probe_state == Probe::Prepared
     }
 
-    pub fn probe_prepared(&mut self) {
+    pub fn prepare_probe(
+        &mut self,
+        builder: &mut PacketBuilder,
+        stats: &mut FrameStats,
+        aead_expansion: usize,
+    ) {
+        builder.set_limit(self.probe_size() - aead_expansion);
+        builder.encode_varint(FRAME_TYPE_PING);
+        stats.ping += 1;
+        stats.all += 1;
+
         self.probe_state = Probe::Prepared;
         qtrace!(
             "PMTUD probe of size {} prepared",
@@ -86,7 +98,7 @@ impl Pmtud {
         );
     }
 
-    pub fn probe_sent(&mut self, stats: &mut Stats) -> bool {
+    pub fn probe_sent(&mut self, stats: &mut Stats) {
         self.probe_state = Probe::Sent;
         self.probe_count += 1;
         stats.pmtud_tx += 1;
@@ -95,12 +107,10 @@ impl Pmtud {
             MTU_SIZES[self.probed_index],
             self.probe_count
         );
-        true
     }
 
-    #[must_use]
-    pub fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
-        self.probe_state == Probe::Sent && p.len() == self.probe_size()
+    fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
+        p.len() == self.probe_size()
     }
 
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], stats: &mut Stats) {
@@ -164,6 +174,7 @@ impl Pmtud {
         }
     }
 
+    /// Size of the IPv4/IPv6 and UDP headers, in bytes.
     const fn header_size(remote_ip: IpAddr) -> usize {
         match remote_ip {
             IpAddr::V4(_) => 20 + 8,

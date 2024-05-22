@@ -47,7 +47,6 @@ impl PacketSender {
         pmtud: Pmtud,
         now: Instant,
     ) -> Self {
-        let mtu = pmtud.plpmtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
@@ -57,7 +56,7 @@ impl PacketSender {
                     Box::new(ClassicCongestionControl::new(Cubic::default()))
                 }
             },
-            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, pmtud),
+            pacer: Pacer::new(pacing_enabled, now, PACING_BURST_SIZE, pmtud),
         }
     }
 
