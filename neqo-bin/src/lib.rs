@@ -142,6 +142,7 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             congestion_control: CongestionControlAlgorithm::NewReno,
             no_pacing: false,
+            no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
         }
