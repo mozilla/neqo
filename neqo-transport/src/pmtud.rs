@@ -11,8 +11,7 @@ use neqo_common::{qdebug, qtrace};
 use crate::{recovery::SentPacket, Stats};
 
 // From https://datatracker.ietf.org/doc/html/rfc1191#section-7.1, with a few modifications.
-const MTU_SIZES: [usize; 13] = [
-    65536, // Official maximum MTU          RFC 791
+const MTU_SIZES: [usize; 12] = [
     65535, // Hyperchannel                  RFC 1044
     17914, // 16Mb IBM Token Ring           ref. [6]
     16384, // macOS loopback
@@ -173,7 +172,6 @@ impl Pmtud {
         }
     }
 
-    #[must_use]
     pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
         MTU_SIZES[MTU_SIZES.len() - 1] - Self::header_size(remote_ip)
     }

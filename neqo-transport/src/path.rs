@@ -774,7 +774,7 @@ impl Path {
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
         mtu: bool,       // Whether the packet we're writing into will be a full MTU.
-        empty_pkt: bool, // False packet is coalesced behind another one or already has frames.
+        empty_pkt: bool, // False if packet is coalesced behind another one or already has frames.
         aead_expansion: usize,
         now: Instant,
     ) -> bool {
