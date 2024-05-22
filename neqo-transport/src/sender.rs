@@ -18,7 +18,7 @@ use neqo_common::qlog::NeqoQlog;
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
     pace::Pacer,
-    pmtud::PmtudRef,
+    pmtud::Pmtud,
     recovery::SentPacket,
     rtt::RttEstimate,
     Stats,
@@ -31,7 +31,6 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionControl>,
     pacer: Pacer,
-    pmtud: PmtudRef,
 }
 
 impl Display for PacketSender {
@@ -45,10 +44,10 @@ impl PacketSender {
     pub fn new(
         alg: CongestionControlAlgorithm,
         pacing_enabled: bool,
-        pmtud: PmtudRef,
+        pmtud: Pmtud,
         now: Instant,
     ) -> Self {
-        let mtu = pmtud.borrow().plpmtu();
+        let mtu = pmtud.plpmtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
@@ -58,8 +57,7 @@ impl PacketSender {
                     Box::new(ClassicCongestionControl::new(Cubic::default()))
                 }
             },
-            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, pmtud.clone()),
-            pmtud,
+            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, pmtud),
         }
     }
 
@@ -67,8 +65,12 @@ impl PacketSender {
         self.cc.set_qlog(qlog);
     }
 
-    pub fn pmtud(&self) -> &PmtudRef {
-        &self.pmtud
+    pub fn pmtud(&self) -> &Pmtud {
+        self.pacer.pmtud()
+    }
+
+    pub fn pmtud_mut(&mut self) -> &mut Pmtud {
+        self.pacer.pmtud_mut()
     }
 
     #[must_use]
@@ -89,7 +91,7 @@ impl PacketSender {
         stats: &mut Stats,
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
-        self.pmtud.borrow_mut().on_packets_acked(acked_pkts, stats);
+        self.pmtud_mut().on_packets_acked(acked_pkts, stats);
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.
@@ -109,7 +111,7 @@ impl PacketSender {
         );
         // Call below may change the size of MTU probes, so it needs to happen after the CC
         // reaction above, which needs to ignore probes based on their size.
-        self.pmtud.borrow_mut().on_packets_lost(lost_packets, stats);
+        self.pmtud_mut().on_packets_lost(lost_packets, stats);
         ret
     }
 

@@ -2162,12 +2162,11 @@ impl Connection {
             return (tokens, false, false);
         }
 
-        if path.borrow().pmtud().borrow().is_probe_prepared() {
+        if path.borrow().pmtud().is_probe_prepared() {
             // If this is a PMTUD probe, don't include any other frames and record it as sent.
             ack_eliciting |= path
                 .borrow_mut()
-                .pmtud()
-                .borrow_mut()
+                .pmtud_mut()
                 .probe_sent(&mut self.stats.borrow_mut());
         } else {
             if primary {
@@ -2887,9 +2886,7 @@ impl Connection {
                         .primary()
                         .ok_or(Error::InternalError)?
                         .borrow_mut()
-                        .sender()
-                        .pmtud()
-                        .borrow_mut()
+                        .pmtud_mut()
                         .start_pmtud();
                 }
                 self.discard_keys(PacketNumberSpace::Handshake, now);
@@ -3071,9 +3068,7 @@ impl Connection {
                     .primary()
                     .ok_or(Error::InternalError)?
                     .borrow_mut()
-                    .sender()
-                    .pmtud()
-                    .borrow_mut()
+                    .pmtud_mut()
                     .start_pmtud();
             }
         }

@@ -14,7 +14,7 @@ use std::{
 
 use neqo_common::qtrace;
 
-use crate::pmtud::PmtudRef;
+use crate::Pmtud;
 
 /// This value determines how much faster the pacer operates than the
 /// congestion window.
@@ -36,9 +36,8 @@ pub struct Pacer {
     m: usize,
     /// The current capacity, in bytes.
     c: usize,
-    /// The packet size or minimum capacity for sending, in bytes.
-    // p: usize,
-    pmtud: PmtudRef,
+    /// The PMTUD state
+    pmtud: Pmtud,
 }
 
 impl Pacer {
@@ -52,9 +51,9 @@ impl Pacer {
     /// The value of `p` is the packet size in bytes, which determines the minimum
     /// credit needed before a packet is sent.  This should be a substantial
     /// fraction of the maximum packet size, if not the packet size.
-    pub fn new(enabled: bool, now: Instant, m: usize, pmtud: PmtudRef) -> Self {
+    pub fn new(enabled: bool, now: Instant, m: usize, pmtud: Pmtud) -> Self {
         assert!(
-            m >= pmtud.borrow().plpmtu(),
+            m >= pmtud.plpmtu(),
             "maximum capacity has to be at least one packet"
         );
         Self {
@@ -66,20 +65,27 @@ impl Pacer {
         }
     }
 
+    pub fn pmtud(&self) -> &Pmtud {
+        &self.pmtud
+    }
+
+    pub fn pmtud_mut(&mut self) -> &mut Pmtud {
+        &mut self.pmtud
+    }
+
     /// Determine when the next packet will be available based on the provided RTT
     /// and congestion window.  This doesn't update state.
     /// This returns a time, which could be in the past (this object doesn't know what
     /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
-        let p = self.pmtud.borrow().plpmtu();
-        if self.c >= p {
+        if self.c >= self.pmtud.plpmtu() {
             qtrace!([self], "next {}/{:?} no wait = {:?}", cwnd, rtt, self.t);
             self.t
         } else {
             // This is the inverse of the function in `spend`:
-            // self.t + rtt * (self.p - self.c) / (PACER_SPEEDUP * cwnd)
+            // self.t + rtt * (self.pmtud.plpmtu() - self.c) / (PACER_SPEEDUP * cwnd)
             let r = rtt.as_nanos();
-            let d = r.saturating_mul(u128::try_from(p - self.c).unwrap());
+            let d = r.saturating_mul(u128::try_from(self.pmtud.plpmtu() - self.c).unwrap());
             let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
             let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
             let nxt = self.t + w;
@@ -118,15 +124,20 @@ impl Pacer {
 
 impl Display for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let p = self.pmtud.borrow().plpmtu();
-        write!(f, "Pacer {}/{}", self.c, p)
+        write!(f, "Pacer {}/{}", self.c, self.pmtud.plpmtu())
     }
 }
 
 impl Debug for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let p = self.pmtud.borrow().plpmtu();
-        write!(f, "Pacer@{:?} {}/{}..{}", self.t, self.c, p, self.m)
+        write!(
+            f,
+            "Pacer@{:?} {}/{}..{}",
+            self.t,
+            self.c,
+            self.pmtud.plpmtu(),
+            self.m
+        )
     }
 }
 
@@ -139,46 +150,40 @@ mod tests {
 
     use test_fixture::now;
 
+    use crate::Pmtud;
+
     use super::Pacer;
-    use crate::pmtud::Pmtud;
 
     const RTT: Duration = Duration::from_millis(1000);
+    const PACKET: usize = 1000;
+    const CWND: usize = PACKET * 10;
     const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 
     #[test]
     fn even() {
         let n = now();
-        let pmtud = Pmtud::new(IP_ADDR);
-        let mtu = pmtud.borrow().plpmtu();
-        let cwnd = mtu * 10;
-        let mut p = Pacer::new(true, n, mtu, pmtud);
-        assert_eq!(p.next(RTT, cwnd), n);
-        p.spend(n, RTT, cwnd, mtu);
-        assert_eq!(p.next(RTT, cwnd), n + (RTT / 20));
+        let mut p = Pacer::new(true, n, PACKET, Pmtud::new(IP_ADDR));
+        assert_eq!(p.next(RTT, CWND), n);
+        p.spend(n, RTT, CWND, PACKET);
+        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
     #[test]
     fn backwards_in_time() {
         let n = now();
-        let pmtud = Pmtud::new(IP_ADDR);
-        let mtu = pmtud.borrow().plpmtu();
-        let cwnd = mtu * 10;
-        let mut p = Pacer::new(true, n + RTT, mtu, pmtud);
-        assert_eq!(p.next(RTT, cwnd), n + RTT);
+        let mut p = Pacer::new(true, n + RTT, PACKET, Pmtud::new(IP_ADDR));
+        assert_eq!(p.next(RTT, CWND), n + RTT);
         // Now spend some credit in the past using a time machine.
-        p.spend(n, RTT, cwnd, mtu);
-        assert_eq!(p.next(RTT, cwnd), n + (RTT / 20));
+        p.spend(n, RTT, CWND, PACKET);
+        assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
     #[test]
     fn pacing_disabled() {
         let n = now();
-        let pmtud = Pmtud::new(IP_ADDR);
-        let mtu = pmtud.borrow().plpmtu();
-        let cwnd = mtu * 10;
-        let mut p = Pacer::new(false, n, mtu, pmtud);
-        assert_eq!(p.next(RTT, cwnd), n);
-        p.spend(n, RTT, cwnd, mtu);
-        assert_eq!(p.next(RTT, cwnd), n);
+        let mut p = Pacer::new(false, n, PACKET, Pmtud::new(IP_ADDR));
+        assert_eq!(p.next(RTT, CWND), n);
+        p.spend(n, RTT, CWND, PACKET);
+        assert_eq!(p.next(RTT, CWND), n);
     }
 }

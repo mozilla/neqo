@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, net::IpAddr, rc::Rc};
+use std::net::IpAddr;
 
 use neqo_common::{qdebug, qtrace};
 
@@ -49,18 +49,18 @@ pub struct Pmtud {
     probe_state: Probe,
 }
 
-pub type PmtudRef = Rc<RefCell<Pmtud>>;
+// pub type Pmtud = Rc<RefCell<Pmtud>>;
 
 impl Pmtud {
     #[must_use]
-    pub fn new(remote_ip: IpAddr) -> PmtudRef {
-        Rc::new(RefCell::new(Pmtud {
+    pub fn new(remote_ip: IpAddr) -> Self {
+        Self {
             header_size: Self::header_size(remote_ip),
             mtu: MTU_SIZES[MTU_SIZES.len() - 1],
             probed_index: MTU_SIZES.len() - 1,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
-        }))
+        }
     }
 
     #[must_use]

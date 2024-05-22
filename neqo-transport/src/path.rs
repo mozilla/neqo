@@ -28,7 +28,7 @@ use crate::{
         FRAME_TYPE_RETIRE_CONNECTION_ID,
     },
     packet::PacketBuilder,
-    pmtud::{Pmtud, PmtudRef},
+    pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
@@ -543,7 +543,6 @@ pub struct Path {
     ecn_info: EcnInfo,
     /// For logging of events.
     qlog: NeqoQlog,
-    pmtud: PmtudRef,
 }
 
 impl Path {
@@ -557,8 +556,7 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let pmtud = Pmtud::new(remote.ip());
-        let mut sender = PacketSender::new(cc, pacing, pmtud.clone(), now);
+        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -576,7 +574,6 @@ impl Path {
             sent_bytes: 0,
             ecn_info: EcnInfo::default(),
             qlog,
-            pmtud,
         }
     }
 
@@ -656,12 +653,12 @@ impl Path {
 
     /// Get the PL MTU.
     pub fn plpmtu(&self) -> usize {
-        self.pmtud.borrow().plpmtu()
+        self.sender.pmtud().plpmtu()
     }
 
     /// Get a reference to the PMTUD state.
-    pub fn pmtud(&self) -> &PmtudRef {
-        &self.pmtud
+    pub fn pmtud(&self) -> &Pmtud {
+        self.sender.pmtud()
     }
 
     /// Get the first local connection ID.
@@ -783,12 +780,12 @@ impl Path {
         }
 
         // Only send PMTUD probes using empty, non-coalesced packets.
-        if self.pmtud.borrow().needs_probe() && empty_pkt && mtu {
-            builder.set_limit(self.pmtud.borrow().probe_size() - aead_expansion);
+        if self.pmtud().needs_probe() && empty_pkt && mtu {
+            builder.set_limit(self.pmtud().probe_size() - aead_expansion);
             builder.encode_varint(FRAME_TYPE_PING);
             stats.ping += 1;
             stats.all += 1;
-            self.pmtud.borrow_mut().probe_prepared();
+            self.pmtud_mut().probe_prepared();
             return true;
         }
 
@@ -898,6 +895,11 @@ impl Path {
     /// Mutably borrow the RTT estimator for this path.
     pub fn rtt_mut(&mut self) -> &mut RttEstimate {
         &mut self.rtt
+    }
+
+    /// Mutably borrow the PMTUD discoverer for this path.
+    pub fn pmtud_mut(&mut self) -> &mut Pmtud {
+        self.sender.pmtud_mut()
     }
 
     /// Read-only access to the owned sender.
