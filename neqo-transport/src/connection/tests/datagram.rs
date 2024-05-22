@@ -154,9 +154,6 @@ fn mtu_limit() {
 fn limit_data_size() {
     let (mut client, mut server) = connect_datagram();
 
-    assert!(
-        u64::try_from(DATA_BIGGER_THAN_MTU.len()).unwrap() > DATAGRAM_LEN_MTU.try_into().unwrap()
-    );
     // Datagram can be queued because they are smaller than allowed by the peer,
     // but they cannot be sent.
     assert_eq!(server.send_datagram(DATA_BIGGER_THAN_MTU, Some(1)), Ok(()));
@@ -189,9 +186,6 @@ fn limit_data_size() {
 fn after_dgram_dropped_continue_writing_frames() {
     let (mut client, _) = connect_datagram();
 
-    assert!(
-        u64::try_from(DATA_BIGGER_THAN_MTU.len()).unwrap() > DATAGRAM_LEN_MTU.try_into().unwrap()
-    );
     // Datagram can be queued because they are smaller than allowed by the peer,
     // but they cannot be sent.
     assert_eq!(client.send_datagram(DATA_BIGGER_THAN_MTU, Some(1)), Ok(()));
@@ -395,7 +389,6 @@ fn dgram_too_big() {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    assert!(DATAGRAM_LEN_MTU > DATAGRAM_LEN_SMALLER_THAN_MTU.try_into().unwrap());
     server.test_frame_writer = Some(Box::new(InsertDatagram { data: DATA_MTU }));
     let out = server.process_output(now()).dgram().unwrap();
     server.test_frame_writer = None;

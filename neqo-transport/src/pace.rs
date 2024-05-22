@@ -150,9 +150,8 @@ mod tests {
 
     use test_fixture::now;
 
-    use crate::Pmtud;
-
     use super::Pacer;
+    use crate::Pmtud;
 
     const RTT: Duration = Duration::from_millis(1000);
     const PACKET: usize = 1000;
