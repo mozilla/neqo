@@ -653,7 +653,7 @@ impl Path {
 
     /// Get the PL MTU.
     pub fn plpmtu(&self) -> usize {
-        self.sender.pmtud().plpmtu()
+        self.pmtud().plpmtu()
     }
 
     /// Get a reference to the PMTUD state.

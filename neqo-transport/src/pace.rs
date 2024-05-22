@@ -36,7 +36,7 @@ pub struct Pacer {
     m: usize,
     /// The current capacity, in bytes.
     c: usize,
-    /// The PMTUD state
+    /// The PMTUD state.
     pmtud: Pmtud,
 }
 
@@ -73,19 +73,23 @@ impl Pacer {
         &mut self.pmtud
     }
 
+    fn p(&self) -> usize {
+        self.pmtud.plpmtu()
+    }
+
     /// Determine when the next packet will be available based on the provided RTT
     /// and congestion window.  This doesn't update state.
     /// This returns a time, which could be in the past (this object doesn't know what
     /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
-        if self.c >= self.pmtud.plpmtu() {
+        if self.c >= self.p() {
             qtrace!([self], "next {}/{:?} no wait = {:?}", cwnd, rtt, self.t);
             self.t
         } else {
             // This is the inverse of the function in `spend`:
-            // self.t + rtt * (self.pmtud.plpmtu() - self.c) / (PACER_SPEEDUP * cwnd)
+            // self.t + rtt * (self.p() - self.c) / (PACER_SPEEDUP * cwnd)
             let r = rtt.as_nanos();
-            let d = r.saturating_mul(u128::try_from(self.pmtud.plpmtu() - self.c).unwrap());
+            let d = r.saturating_mul(u128::try_from(self.p() - self.c).unwrap());
             let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
             let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
             let nxt = self.t + w;
@@ -124,20 +128,13 @@ impl Pacer {
 
 impl Display for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Pacer {}/{}", self.c, self.pmtud.plpmtu())
+        write!(f, "Pacer {}/{}", self.c, self.p())
     }
 }
 
 impl Debug for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "Pacer@{:?} {}/{}..{}",
-            self.t,
-            self.c,
-            self.pmtud.plpmtu(),
-            self.m
-        )
+        write!(f, "Pacer@{:?} {}/{}..{}", self.t, self.c, self.p(), self.m)
     }
 }
 
