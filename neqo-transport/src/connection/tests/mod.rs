@@ -116,7 +116,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 }
 
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default().pmtud(false))
+    new_client(ConnectionParameters::default())
 }
 
 pub fn new_server(params: ConnectionParameters) -> Connection {
@@ -135,7 +135,7 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
     c
 }
 pub fn default_server() -> Connection {
-    new_server(ConnectionParameters::default().pmtud(false))
+    new_server(ConnectionParameters::default())
 }
 pub fn resumed_server(client: &Connection) -> Connection {
     new_server(ConnectionParameters::default().versions(client.version(), Version::all()))

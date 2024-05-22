@@ -178,22 +178,19 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
 /// Create a transport client with default configuration.
 #[must_use]
 pub fn default_client() -> Connection {
-    new_client(ConnectionParameters::default().pmtud(false))
+    new_client(ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server(DEFAULT_ALPN, ConnectionParameters::default().pmtud(false))
+    new_server(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server(
-        DEFAULT_ALPN_H3,
-        ConnectionParameters::default().pmtud(false),
-    )
+    new_server(DEFAULT_ALPN_H3, ConnectionParameters::default())
 }
 
 /// Create a transport server with a configuration.
@@ -271,8 +268,7 @@ pub fn default_http3_client() -> Http3Client {
     fixture_init();
     let cp = Http3Parameters::default()
         .get_connection_parameters()
-        .clone()
-        .pmtud(false);
+        .clone();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
@@ -318,8 +314,7 @@ pub fn default_http3_server() -> Http3Server {
     fixture_init();
     let cp = Http3Parameters::default()
         .get_connection_parameters()
-        .clone()
-        .pmtud(false);
+        .clone();
     Http3Server::new(
         now(),
         DEFAULT_KEYS,

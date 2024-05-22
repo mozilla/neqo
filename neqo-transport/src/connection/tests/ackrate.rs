@@ -83,11 +83,7 @@ fn ack_rate_persistent_congestion() {
     // Use a configuration that results in the value being set after exiting
     // the handshake.
     const RTT: Duration = Duration::from_millis(3);
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .ack_ratio(ACK_RATIO_SCALE),
-    );
+    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
     let mut server = default_server();
     let now = connect_rtt_idle(&mut client, &mut server, RTT);
 
@@ -116,11 +112,7 @@ fn ack_rate_client_one_rtt() {
     // maximum ACK delay is 25ms and an ACK_FREQUENCY frame won't be sent when the
     // change to the maximum ACK delay is too small.
     const RTT: Duration = Duration::from_millis(3);
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .ack_ratio(ACK_RATIO_SCALE),
-    );
+    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
 
@@ -144,11 +136,7 @@ fn ack_rate_client_one_rtt() {
 fn ack_rate_server_half_rtt() {
     const RTT: Duration = Duration::from_millis(10);
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .ack_ratio(ACK_RATIO_SCALE * 2),
-    );
+    let mut server = new_server(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE * 2));
     let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
 
     // The server now sends something.
@@ -171,11 +159,7 @@ fn ack_rate_server_half_rtt() {
 #[test]
 fn migrate_ack_delay() {
     // Have the client send ACK_FREQUENCY frames at a normal-ish rate.
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .ack_ratio(ACK_RATIO_SCALE),
-    );
+    let mut client = new_client(ConnectionParameters::default().ack_ratio(ACK_RATIO_SCALE));
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 

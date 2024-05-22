@@ -436,15 +436,14 @@ fn no_compatible_version() {
 #[test]
 fn compatible_upgrade_0rtt_rejected() {
     // This is the baseline configuration where v1 is attempted and v2 preferred.
-    let prefer_v2 = ConnectionParameters::default().pmtud(false).versions(
+    let prefer_v2 = ConnectionParameters::default().versions(
         Version::Version1,
         vec![Version::Version2, Version::Version1],
     );
     let mut client = new_client(prefer_v2.clone());
     // The server will start with this so that the client resumes with v1.
-    let just_v1 = ConnectionParameters::default()
-        .pmtud(false)
-        .versions(Version::Version1, vec![Version::Version1]);
+    let just_v1 =
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]);
     let mut server = new_server(just_v1);
 
     connect(&mut client, &mut server);

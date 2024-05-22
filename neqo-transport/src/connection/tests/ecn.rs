@@ -98,16 +98,8 @@ pub fn migration_with_modifiers(
     burst: usize,
 ) -> (IpTos, IpTos, bool) {
     fixture_init();
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .max_streams(StreamType::UniDi, 64),
-    );
-    let mut server = new_server(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .max_streams(StreamType::UniDi, 64),
-    );
+    let mut client = new_client(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
+    let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 64));
 
     connect_force_idle_with_modifier(&mut client, &mut server, orig_path_modifier);
     let mut now = now();

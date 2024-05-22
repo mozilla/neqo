@@ -250,7 +250,7 @@ fn chacha20poly1305() {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
-        ConnectionParameters::default().pmtud(false),
+        ConnectionParameters::default(),
         now(),
     )
     .expect("create a default client");
@@ -729,9 +729,7 @@ fn connect_one_version() {
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             DEFAULT_ADDR,
             DEFAULT_ADDR,
-            ConnectionParameters::default()
-                .pmtud(false)
-                .versions(version, vec![version]),
+            ConnectionParameters::default().versions(version, vec![version]),
             now(),
         )
         .unwrap();
@@ -739,9 +737,7 @@ fn connect_one_version() {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            ConnectionParameters::default()
-                .pmtud(false)
-                .versions(version, vec![version]),
+            ConnectionParameters::default().versions(version, vec![version]),
         )
         .unwrap();
         connect_force_idle(&mut client, &mut server);

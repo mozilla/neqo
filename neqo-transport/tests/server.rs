@@ -66,9 +66,7 @@ fn single_client() {
 #[test]
 fn connect_single_version_both() {
     fn connect_one_version(version: Version) {
-        let params = ConnectionParameters::default()
-            .pmtud(false)
-            .versions(version, vec![version]);
+        let params = ConnectionParameters::default().versions(version, vec![version]);
         let mut server = new_server(params.clone());
 
         let mut client = new_client(params);
@@ -88,11 +86,8 @@ fn connect_single_version_client() {
     fn connect_one_version(version: Version) {
         let mut server = default_server();
 
-        let mut client = new_client(
-            ConnectionParameters::default()
-                .pmtud(false)
-                .versions(version, vec![version]),
-        );
+        let mut client =
+            new_client(ConnectionParameters::default().versions(version, vec![version]));
         let server_conn = connect(&mut client, &mut server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
@@ -670,7 +665,7 @@ fn compatible_upgrade_resumption_and_vn() {
     const COMPAT_VERSION: Version = Version::Version2;
     const RESUMPTION_VERSION: Version = Version::Draft29;
 
-    let client_params = ConnectionParameters::default().pmtud(false).versions(
+    let client_params = ConnectionParameters::default().versions(
         ORIG_VERSION,
         vec![COMPAT_VERSION, ORIG_VERSION, RESUMPTION_VERSION],
     );
@@ -800,7 +795,6 @@ fn max_streams_after_0rtt_rejection() {
         Box::new(RejectZeroRtt {}),
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default()
-            .pmtud(false)
             .max_streams(StreamType::BiDi, MAX_STREAMS_BIDI)
             .max_streams(StreamType::UniDi, MAX_STREAMS_UNIDI),
     )

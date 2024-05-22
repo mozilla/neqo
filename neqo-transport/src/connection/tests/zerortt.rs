@@ -209,7 +209,6 @@ fn zero_rtt_update_flow_control() {
     let mut client = default_client();
     let mut server = new_server(
         ConnectionParameters::default()
-            .pmtud(false)
             .max_stream_data(StreamType::UniDi, true, LOW)
             .max_stream_data(StreamType::BiDi, true, LOW),
     );
@@ -222,7 +221,6 @@ fn zero_rtt_update_flow_control() {
         .expect("should set token");
     let mut server = new_server(
         ConnectionParameters::default()
-            .pmtud(false)
             .max_stream_data(StreamType::UniDi, true, HIGH)
             .max_stream_data(StreamType::BiDi, true, HIGH)
             .versions(client.version, Version::all()),

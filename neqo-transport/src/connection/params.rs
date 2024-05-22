@@ -103,7 +103,7 @@ impl Default for ConnectionParameters {
             fast_pto: FAST_PTO_SCALE,
             grease: true,
             pacing: true,
-            pmtud: true,
+            pmtud: false,
         }
     }
 }

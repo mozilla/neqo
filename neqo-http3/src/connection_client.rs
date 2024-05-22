@@ -1336,7 +1336,6 @@ mod tests {
                 .connection_parameters(
                     // Disable compatible upgrade, which complicates tests.
                     ConnectionParameters::default()
-                        .pmtud(false)
                         .versions(Version::default(), vec![Version::default()]),
                 )
                 .max_table_size_encoder(max_table_size)

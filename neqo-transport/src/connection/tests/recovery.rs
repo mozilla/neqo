@@ -728,11 +728,7 @@ fn expected_pto(rtt: Duration) -> Duration {
 
 #[test]
 fn fast_pto() {
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .fast_pto(FAST_PTO_SCALE / 2),
-    );
+    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE / 2));
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 
@@ -769,11 +765,7 @@ fn fast_pto() {
 /// based on the "true" value of the timer.
 #[test]
 fn fast_pto_persistent_congestion() {
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(false)
-            .fast_pto(FAST_PTO_SCALE * 2),
-    );
+    let mut client = new_client(ConnectionParameters::default().fast_pto(FAST_PTO_SCALE * 2));
     let mut server = default_server();
     let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
 

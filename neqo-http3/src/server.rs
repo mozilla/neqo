@@ -347,7 +347,7 @@ mod tests {
     }
 
     pub fn create_server(conn_params: Http3Parameters) -> Http3Server {
-        let cp = conn_params.get_connection_parameters().clone().pmtud(false);
+        let cp = conn_params.get_connection_parameters().clone();
         fixture_init();
         Http3Server::new(
             now(),
