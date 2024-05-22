@@ -65,21 +65,30 @@ impl Pmtud {
         }
     }
 
+    /// Returns the Packetization Layer Path MTU, i.e., the maximum UDP payload that can be sent.
     #[must_use]
     pub fn plpmtu(&self) -> usize {
         self.mtu - self.header_size
     }
 
+    /// Returns true if a PMTUD probe should be sent.
     #[must_use]
     pub fn needs_probe(&self) -> bool {
         self.probe_state == Probe::Needed
     }
 
+    /// Returns true if a PMTUD probe is prepared for sending.
     #[must_use]
     pub fn is_probe_prepared(&self) -> bool {
         self.probe_state == Probe::Prepared
     }
 
+    /// Returns the size of the current PMTUD probe.
+    fn probe_size(&self) -> usize {
+        MTU_SIZES[self.probed_index] - self.header_size
+    }
+
+    /// Prepares a PMTUD probe for sending.
     pub fn prepare_probe(
         &mut self,
         builder: &mut PacketBuilder,
@@ -98,6 +107,7 @@ impl Pmtud {
         );
     }
 
+    /// Records that a PMTUD probe has been sent.
     pub fn probe_sent(&mut self, stats: &mut Stats) {
         self.probe_state = Probe::Sent;
         self.probe_count += 1;
@@ -109,15 +119,22 @@ impl Pmtud {
         );
     }
 
+    /// Returns true if the packet is a PMTUD probe.
     fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
         p.len() == self.probe_size()
     }
 
+    /// Returns true if no PMTUD action is needed for the given packets.
+    fn no_pmtud_action_needed(&self, pkts: &[SentPacket]) -> bool {
+        self.probe_state != Probe::Sent
+            || pkts.is_empty()
+            || !pkts.iter().any(|p| self.is_pmtud_probe(p))
+    }
+
+    /// Checks whether a PMTUD probe has been acknowledged, and if so, updates the PMTUD state.
+    /// May also initiate a new probe process for a larger MTU.
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], stats: &mut Stats) {
-        if self.probe_state != Probe::Sent
-            || acked_pkts.is_empty()
-            || !acked_pkts.iter().any(|p| self.is_pmtud_probe(p))
-        {
+        if self.no_pmtud_action_needed(acked_pkts) {
             return;
         }
         stats.pmtud_ack += 1;
@@ -129,11 +146,10 @@ impl Pmtud {
         self.start_pmtud();
     }
 
+    /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
+    /// times, the PMTUD process is stopped.
     pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
-        if self.probe_state != Probe::Sent
-            || lost_packets.is_empty()
-            || !lost_packets.iter().any(|p| self.is_pmtud_probe(p))
-        {
+        if self.no_pmtud_action_needed(lost_packets) {
             return;
         }
         stats.pmtud_lost += 1;
@@ -154,11 +170,7 @@ impl Pmtud {
         }
     }
 
-    #[must_use]
-    pub fn probe_size(&self) -> usize {
-        MTU_SIZES[self.probed_index] - self.header_size
-    }
-
+    /// Starts the PMTUD process.
     pub fn start_pmtud(&mut self) {
         if self.probed_index > 0 {
             self.probe_state = Probe::Needed;
@@ -182,6 +194,7 @@ impl Pmtud {
         }
     }
 
+    /// Returns the default PLPMTU for the given remote IP address.
     #[must_use]
     pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
         MTU_SIZES[MTU_SIZES.len() - 1] - Self::header_size(remote_ip)
