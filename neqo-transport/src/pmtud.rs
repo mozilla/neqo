@@ -200,3 +200,94 @@ impl Pmtud {
         MTU_SIZES[MTU_SIZES.len() - 1] - Self::header_size(remote_ip)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use neqo_common::{Encoder, IpTosEcn};
+    use test_fixture::{fixture_init, now};
+
+    use crate::{
+        crypto::CryptoDxState,
+        packet::{PacketBuilder, PacketType},
+        recovery::SentPacket,
+        Pmtud, Stats,
+    };
+
+    const V4: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+    const V6: IpAddr = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0));
+
+    fn make_sentpacket(pn: u64, len: usize) -> SentPacket {
+        SentPacket::new(
+            PacketType::Short,
+            pn,
+            IpTosEcn::default(),
+            now(),
+            true,
+            Vec::new(),
+            len,
+        )
+    }
+
+    fn find_pmtu(addr: IpAddr, mtu: usize) {
+        fixture_init();
+        let mut pmtud = Pmtud::new(addr);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default();
+
+        pmtud.start_pmtud();
+        assert!(pmtud.needs_probe());
+
+        while pmtud.needs_probe() {
+            let stats_before = stats.clone();
+
+            // Fake a packet number, so the builder logic works.
+            let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+            let pn = prot.next_pn();
+            builder.pn(pn, 4);
+            pmtud.prepare_probe(&mut builder, &mut stats.frame_tx, prot.expansion());
+            // Add padding, which Connection::output_path normally does.
+            builder.enable_padding(true);
+            builder.pad();
+            let encoder = builder.build(&mut prot).unwrap();
+            assert_eq!(encoder.len(), pmtud.probe_size());
+            assert!(pmtud.is_probe_prepared());
+            assert!(!pmtud.needs_probe());
+
+            pmtud.probe_sent(&mut stats);
+            assert!(stats_before.pmtud_tx + 1 == stats.pmtud_tx);
+            assert!(!pmtud.needs_probe());
+
+            let packet = make_sentpacket(pn, encoder.len());
+            if encoder.len() + Pmtud::header_size(addr) <= mtu {
+                pmtud.on_packets_acked(&[packet], &mut stats);
+                assert!(stats_before.pmtud_ack + 1 == stats.pmtud_ack);
+            } else {
+                pmtud.on_packets_lost(&[packet], &mut stats);
+                assert!(stats_before.pmtud_lost + 1 == stats.pmtud_lost);
+            }
+        }
+        assert_eq!(mtu, pmtud.mtu);
+    }
+
+    #[test]
+    fn test_pmtud_v4_max() {
+        find_pmtu(V4, u16::MAX.into());
+    }
+
+    #[test]
+    fn test_pmtud_v6_max() {
+        find_pmtu(V6, u16::MAX.into());
+    }
+
+    #[test]
+    fn test_pmtud_v4_1500() {
+        find_pmtu(V4, 1500);
+    }
+
+    #[test]
+    fn test_pmtud_v6_1500() {
+        find_pmtu(V6, 1500);
+    }
+}
