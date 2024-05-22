@@ -655,7 +655,6 @@ impl Path {
     }
 
     /// Get the PL MTU.
-    #[allow(clippy::unused_self)]
     pub fn plpmtu(&self) -> usize {
         self.pmtud.borrow().plpmtu()
     }
