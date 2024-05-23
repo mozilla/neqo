@@ -12,30 +12,21 @@ use crate::{
     frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, stats::FrameStats, Stats,
 };
 
-// From https://datatracker.ietf.org/doc/html/rfc1191#section-7.1, with a few modifications.
-const MTU_SIZES: [usize; 12] = [
-    65535, // Hyperchannel                  RFC 1044
-    17914, // 16Mb IBM Token Ring           ref. [6]
-    16384, // macOS loopback
-    8166,  // IEEE 802.4                    RFC 1042
-    4464,  // IEEE 802.5 (4Mb max)          RFC 1042
-    4352,  // FDDI (Revised)                RFC 1188
-    2048,  // Wideband Network              RFC 907
-    2002,  // IEEE 802.5 (4Mb recommended)  RFC 1042
-    1536,  // Exp. Ethernet Nets            RFC 895
-    1500,  // Ethernet Networks             RFC 894
-    1492,  // IEEE 802.3                    RFC 1042
-    1280,  // IPv6 minimum MTU              RFC 2460
+// Based on: A. Custura, G. Fairhurst and I. Learmonth, "Exploring Usable Path MTU in the Internet,"
+// 2018 Network Traffic Measurement and Analysis Conference (TMA), Vienna, Austria, 2018, pp. 1-8,
+// doi: 10.23919/TMA.2018.8506538. keywords: {Servers;Probes;Tools;Clamps;Middleboxes;Standards},
+const MTU_SIZES_V4: [usize; 11] = [
+    1280, 1380, 1420, 1472, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
+];
+const MTU_SIZES_V6: [usize; 10] = [
+    1280, 1380, 1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
 const MAX_PROBES: usize = 3;
 
-// const PATH_MTU_V6: usize = 1337;
-// const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
-
 #[derive(Debug, PartialEq)]
-pub enum Probe {
+enum Probe {
     NotNeeded,
     Needed,
     Prepared,
@@ -44,6 +35,7 @@ pub enum Probe {
 
 #[derive(Debug)]
 pub struct Pmtud {
+    search_table: &'static [usize],
     header_size: usize,
     mtu: usize,
     probed_index: usize,
@@ -51,21 +43,39 @@ pub struct Pmtud {
     probe_state: Probe,
 }
 
-// pub type Pmtud = Rc<RefCell<Pmtud>>;
-
 impl Pmtud {
+    /// Returns the MTU search table for the given remote IP address family.
+    const fn search_table(remote_ip: IpAddr) -> &'static [usize] {
+        match remote_ip {
+            IpAddr::V4(_) => &MTU_SIZES_V4,
+            IpAddr::V6(_) => &MTU_SIZES_V6,
+        }
+    }
+
+    /// Size of the IPv4/IPv6 and UDP headers, in bytes.
+    const fn header_size(remote_ip: IpAddr) -> usize {
+        match remote_ip {
+            IpAddr::V4(_) => 20 + 8,
+            IpAddr::V6(_) => 40 + 8,
+        }
+    }
+
     #[must_use]
     pub fn new(remote_ip: IpAddr) -> Self {
+        let search_table = Self::search_table(remote_ip);
+        let probed_index = 0;
         Self {
+            search_table,
             header_size: Self::header_size(remote_ip),
-            mtu: MTU_SIZES[MTU_SIZES.len() - 1],
-            probed_index: MTU_SIZES.len() - 1,
+            mtu: search_table[probed_index],
+            probed_index,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
         }
     }
 
-    /// Returns the Packetization Layer Path MTU, i.e., the maximum UDP payload that can be sent.
+    /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
+    /// sent. During probing, this may be smaller than the actual path MTU.
     #[must_use]
     pub fn plpmtu(&self) -> usize {
         self.mtu - self.header_size
@@ -85,7 +95,7 @@ impl Pmtud {
 
     /// Returns the size of the current PMTUD probe.
     fn probe_size(&self) -> usize {
-        MTU_SIZES[self.probed_index] - self.header_size
+        self.search_table[self.probed_index] - self.header_size
     }
 
     /// Prepares a PMTUD probe for sending.
@@ -96,6 +106,8 @@ impl Pmtud {
         aead_expansion: usize,
     ) {
         builder.set_limit(self.probe_size() - aead_expansion);
+        // The packet may include ACK-elicitng data already, but rather than check for that, it
+        // seems OK to burn one byte here to simply include a PING.
         builder.encode_varint(FRAME_TYPE_PING);
         stats.ping += 1;
         stats.all += 1;
@@ -103,7 +115,7 @@ impl Pmtud {
         self.probe_state = Probe::Prepared;
         qtrace!(
             "PMTUD probe of size {} prepared",
-            MTU_SIZES[self.probed_index]
+            self.search_table[self.probed_index]
         );
     }
 
@@ -114,7 +126,7 @@ impl Pmtud {
         stats.pmtud_tx += 1;
         qdebug!(
             "PMTUD probe of size {} sent, count {}",
-            MTU_SIZES[self.probed_index],
+            self.search_table[self.probed_index],
             self.probe_count
         );
     }
@@ -124,24 +136,24 @@ impl Pmtud {
         p.len() == self.probe_size()
     }
 
-    /// Returns true if no PMTUD action is needed for the given packets.
-    fn no_pmtud_action_needed(&self, pkts: &[SentPacket]) -> bool {
-        self.probe_state != Probe::Sent
-            || pkts.is_empty()
-            || !pkts.iter().any(|p| self.is_pmtud_probe(p))
+    /// Returns true if any PMTUD probes are included in `pkts`.
+    fn has_pmtud_probes(&self, pkts: &[SentPacket]) -> bool {
+        self.probe_state == Probe::Sent
+            && !pkts.is_empty()
+            && pkts.iter().any(|p| self.is_pmtud_probe(p))
     }
 
     /// Checks whether a PMTUD probe has been acknowledged, and if so, updates the PMTUD state.
     /// May also initiate a new probe process for a larger MTU.
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], stats: &mut Stats) {
-        if self.no_pmtud_action_needed(acked_pkts) {
+        if !self.has_pmtud_probes(acked_pkts) {
             return;
         }
         stats.pmtud_ack += 1;
-        self.mtu = MTU_SIZES[self.probed_index];
+        self.mtu = self.search_table[self.probed_index];
         qdebug!(
             "PMTUD probe of size {} succeeded",
-            MTU_SIZES[self.probed_index]
+            self.search_table[self.probed_index]
         );
         self.start_pmtud();
     }
@@ -149,7 +161,7 @@ impl Pmtud {
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
     /// times, the PMTUD process is stopped.
     pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
-        if self.no_pmtud_action_needed(lost_packets) {
+        if !self.has_pmtud_probes(lost_packets) {
             return;
         }
         stats.pmtud_lost += 1;
@@ -157,13 +169,13 @@ impl Pmtud {
             self.probe_state = Probe::Needed;
             qdebug!(
                 "PMTUD probe of size {} lost, retrying",
-                MTU_SIZES[self.probed_index]
+                self.search_table[self.probed_index]
             );
         } else {
             self.probe_state = Probe::NotNeeded;
             qdebug!(
                 "PMTUD probe of size {} lost {} times, stopping PMTUD, PLPMTU is {}",
-                MTU_SIZES[self.probed_index],
+                self.search_table[self.probed_index],
                 self.probe_count,
                 self.plpmtu()
             );
@@ -172,13 +184,13 @@ impl Pmtud {
 
     /// Starts the PMTUD process.
     pub fn start_pmtud(&mut self) {
-        if self.probed_index > 0 {
+        if self.probed_index < self.search_table.len() - 1 {
             self.probe_state = Probe::Needed;
             self.probe_count = 0;
-            self.probed_index -= 1;
+            self.probed_index += 1;
             qdebug!(
                 "PMTUD started with probe size {}",
-                MTU_SIZES[self.probed_index],
+                self.search_table[self.probed_index],
             );
         } else {
             self.probe_state = Probe::NotNeeded;
@@ -186,18 +198,11 @@ impl Pmtud {
         }
     }
 
-    /// Size of the IPv4/IPv6 and UDP headers, in bytes.
-    const fn header_size(remote_ip: IpAddr) -> usize {
-        match remote_ip {
-            IpAddr::V4(_) => 20 + 8,
-            IpAddr::V6(_) => 40 + 8,
-        }
-    }
-
     /// Returns the default PLPMTU for the given remote IP address.
     #[must_use]
     pub const fn default_plpmtu(remote_ip: IpAddr) -> usize {
-        MTU_SIZES[MTU_SIZES.len() - 1] - Self::header_size(remote_ip)
+        let search_table = Self::search_table(remote_ip);
+        search_table[0] - Self::header_size(remote_ip)
     }
 }
 
