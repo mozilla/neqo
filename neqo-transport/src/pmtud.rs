@@ -155,6 +155,7 @@ impl Pmtud {
         if acked == 0 {
             return;
         }
+        // A probe was ACKed, confir, the new MTU and try to probe upwards further.
         stats.pmtud_ack += acked;
         self.mtu = self.search_table[self.probe_index];
         qdebug!("PMTUD probe of size {} succeeded", self.mtu);
@@ -163,20 +164,22 @@ impl Pmtud {
 
     /// Stops the PMTUD process, setting the MTU to the largest successful probe size.
     fn stop_pmtud(&mut self, idx: usize) {
-        self.probe_state = Probe::NotNeeded;
-        self.probe_index = idx;
-        self.mtu = self.search_table[idx];
-        self.probe_count = 0;
-        self.loss_counts = vec![0; self.search_table.len()];
+        self.probe_state = Probe::NotNeeded; // We don't need to send any more probes
+        self.probe_index = idx; // Index of the last successful probe
+        self.mtu = self.search_table[idx]; // Leading to this MTU
+        self.probe_count = 0; // Reset the count
+        self.loss_counts = vec![0; self.search_table.len()]; // Reset the loss counts
         qdebug!("PMTUD stopped, PLPMTU is now {}", self.mtu,);
     }
 
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
     /// times, the PMTUD process is stopped.
     pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
+        // Track lost probes
         let lost = self.count_pmtud_probes(lost_packets);
         stats.pmtud_lost += lost;
 
+        // Increase loss counts for all sizes included in the lost packets.
         for (count, inc) in self.loss_counts.iter_mut().zip(
             self.search_table
                 .iter()
@@ -184,7 +187,10 @@ impl Pmtud {
         ) {
             *count += inc;
         }
+
+        // Check if any packet of size > MTU has been lost MAX_PROBES times or more.
         let Some(last_good) = self.loss_counts.iter().rposition(|&c| c >= MAX_PROBES) else {
+            // If not, keep going.
             if lost > 0 {
                 // Don't stop the PMTUD process.
                 self.probe_state = Probe::Needed;
@@ -199,10 +205,9 @@ impl Pmtud {
     /// Starts the next upward PMTUD probe.
     pub fn start_pmtud(&mut self) {
         if self.probe_index < self.search_table.len() - 1 {
-            //< self.search_table.len() - 1 {
-            self.probe_state = Probe::Needed;
-            self.probe_count = 0;
-            self.probe_index += 1;
+            self.probe_state = Probe::Needed; // We need to send a probe
+            self.probe_count = 0; // For the first time
+            self.probe_index += 1; // At this size
             qdebug!(
                 "PMTUD started with probe size {}",
                 self.search_table[self.probe_index],
