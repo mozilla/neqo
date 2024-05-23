@@ -12,9 +12,10 @@ use crate::{
     frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, stats::FrameStats, Stats,
 };
 
-// Based on: A. Custura, G. Fairhurst and I. Learmonth, "Exploring Usable Path MTU in the Internet,"
-// 2018 Network Traffic Measurement and Analysis Conference (TMA), Vienna, Austria, 2018, pp. 1-8,
-// doi: 10.23919/TMA.2018.8506538. keywords: {Servers;Probes;Tools;Clamps;Middleboxes;Standards},
+// Values <= 1500 based on: A. Custura, G. Fairhurst and I. Learmonth, "Exploring Usable Path MTU in
+// the Internet," 2018 Network Traffic Measurement and Analysis Conference (TMA), Vienna, Austria,
+// 2018, pp. 1-8, doi: 10.23919/TMA.2018.8506538. keywords:
+// {Servers;Probes;Tools;Clamps;Middleboxes;Standards},
 const MTU_SIZES_V4: [usize; 11] = [
     1280, 1380, 1420, 1472, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
@@ -38,9 +39,10 @@ pub struct Pmtud {
     search_table: &'static [usize],
     header_size: usize,
     mtu: usize,
-    probed_index: usize,
+    probe_index: usize,
     probe_count: usize,
     probe_state: Probe,
+    loss_counts: Vec<usize>,
 }
 
 impl Pmtud {
@@ -63,14 +65,15 @@ impl Pmtud {
     #[must_use]
     pub fn new(remote_ip: IpAddr) -> Self {
         let search_table = Self::search_table(remote_ip);
-        let probed_index = 0;
+        let probe_index = 0;
         Self {
             search_table,
             header_size: Self::header_size(remote_ip),
-            mtu: search_table[probed_index],
-            probed_index,
+            mtu: search_table[probe_index],
+            probe_index,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
+            loss_counts: vec![0; search_table.len()],
         }
     }
 
@@ -95,7 +98,7 @@ impl Pmtud {
 
     /// Returns the size of the current PMTUD probe.
     fn probe_size(&self) -> usize {
-        self.search_table[self.probed_index] - self.header_size
+        self.search_table[self.probe_index] - self.header_size
     }
 
     /// Prepares a PMTUD probe for sending.
@@ -106,7 +109,7 @@ impl Pmtud {
         aead_expansion: usize,
     ) {
         builder.set_limit(self.probe_size() - aead_expansion);
-        // The packet may include ACK-elicitng data already, but rather than check for that, it
+        // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_varint(FRAME_TYPE_PING);
         stats.ping += 1;
@@ -115,7 +118,7 @@ impl Pmtud {
         self.probe_state = Probe::Prepared;
         qtrace!(
             "PMTUD probe of size {} prepared",
-            self.search_table[self.probed_index]
+            self.search_table[self.probe_index]
         );
     }
 
@@ -126,7 +129,7 @@ impl Pmtud {
         stats.pmtud_tx += 1;
         qdebug!(
             "PMTUD probe of size {} sent, count {}",
-            self.search_table[self.probed_index],
+            self.search_table[self.probe_index],
             self.probe_count
         );
     }
@@ -136,65 +139,77 @@ impl Pmtud {
         p.len() == self.probe_size()
     }
 
-    /// Returns true if any PMTUD probes are included in `pkts`.
-    fn has_pmtud_probes(&self, pkts: &[SentPacket]) -> bool {
-        self.probe_state == Probe::Sent
-            && !pkts.is_empty()
-            && pkts.iter().any(|p| self.is_pmtud_probe(p))
+    /// Count the PMTUD probes included in `pkts`.
+    fn count_pmtud_probes(&self, pkts: &[SentPacket]) -> usize {
+        if self.probe_state == Probe::Sent && !pkts.is_empty() {
+            pkts.iter().filter(|p| self.is_pmtud_probe(p)).count()
+        } else {
+            0
+        }
     }
 
     /// Checks whether a PMTUD probe has been acknowledged, and if so, updates the PMTUD state.
     /// May also initiate a new probe process for a larger MTU.
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], stats: &mut Stats) {
-        if !self.has_pmtud_probes(acked_pkts) {
+        let acked = self.count_pmtud_probes(acked_pkts);
+        if acked == 0 {
             return;
         }
-        stats.pmtud_ack += 1;
-        self.mtu = self.search_table[self.probed_index];
-        qdebug!(
-            "PMTUD probe of size {} succeeded",
-            self.search_table[self.probed_index]
-        );
+        stats.pmtud_ack += acked;
+        self.mtu = self.search_table[self.probe_index];
+        qdebug!("PMTUD probe of size {} succeeded", self.mtu);
         self.start_pmtud();
+    }
+
+    /// Stops the PMTUD process, setting the MTU to the largest successful probe size.
+    fn stop_pmtud(&mut self, idx: usize) {
+        self.probe_state = Probe::NotNeeded;
+        self.probe_index = idx;
+        self.mtu = self.search_table[idx];
+        self.probe_count = 0;
+        self.loss_counts = vec![0; self.search_table.len()];
+        qdebug!("PMTUD stopped, PLPMTU is now {}", self.mtu,);
     }
 
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
     /// times, the PMTUD process is stopped.
     pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
-        if !self.has_pmtud_probes(lost_packets) {
+        let lost = self.count_pmtud_probes(lost_packets);
+        stats.pmtud_lost += lost;
+
+        for (count, inc) in self.loss_counts.iter_mut().zip(
+            self.search_table
+                .iter()
+                .map(|len| lost_packets.iter().filter(|p| p.len() > *len).count()),
+        ) {
+            *count += inc;
+        }
+        let Some(last_good) = self.loss_counts.iter().rposition(|&c| c >= MAX_PROBES) else {
+            if lost > 0 {
+                // Don't stop the PMTUD process.
+                self.probe_state = Probe::Needed;
+            }
             return;
-        }
-        stats.pmtud_lost += 1;
-        if self.probe_count < MAX_PROBES {
-            self.probe_state = Probe::Needed;
-            qdebug!(
-                "PMTUD probe of size {} lost, retrying",
-                self.search_table[self.probed_index]
-            );
-        } else {
-            self.probe_state = Probe::NotNeeded;
-            qdebug!(
-                "PMTUD probe of size {} lost {} times, stopping PMTUD, PLPMTU is {}",
-                self.search_table[self.probed_index],
-                self.probe_count,
-                self.plpmtu()
-            );
-        }
+        };
+
+        qdebug!("Packet of size > {} lost {} times", self.mtu, MAX_PROBES);
+        self.stop_pmtud(last_good);
     }
 
-    /// Starts the PMTUD process.
+    /// Starts the next upward PMTUD probe.
     pub fn start_pmtud(&mut self) {
-        if self.probed_index < self.search_table.len() - 1 {
+        if self.probe_index < self.search_table.len() - 1 {
+            //< self.search_table.len() - 1 {
             self.probe_state = Probe::Needed;
             self.probe_count = 0;
-            self.probed_index += 1;
+            self.probe_index += 1;
             qdebug!(
                 "PMTUD started with probe size {}",
-                self.search_table[self.probed_index],
+                self.search_table[self.probe_index],
             );
         } else {
+            // If we're at the end of the search table, we're done.
             self.probe_state = Probe::NotNeeded;
-            qdebug!("PMTUD already completed, MTU is {}", self.mtu);
         }
     }
 
@@ -210,7 +225,7 @@ impl Pmtud {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    use neqo_common::{Encoder, IpTosEcn};
+    use neqo_common::{qdebug, Encoder, IpTosEcn};
     use test_fixture::{fixture_init, now};
 
     use crate::{
@@ -235,6 +250,54 @@ mod tests {
         )
     }
 
+    fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
+        assert!(pmtud.mtu <= mtu);
+        let idx = pmtud
+            .search_table
+            .iter()
+            .position(|x| *x == pmtud.mtu)
+            .unwrap();
+        if idx > 0 {
+            assert!(pmtud.mtu >= pmtud.search_table[idx - 1]);
+        }
+    }
+
+    fn pmtud_step(
+        pmtud: &mut Pmtud,
+        stats: &mut Stats,
+        prot: &mut CryptoDxState,
+        addr: IpAddr,
+        mtu: usize,
+    ) {
+        let stats_before = stats.clone();
+
+        // Fake a packet number, so the builder logic works.
+        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let pn = prot.next_pn();
+        builder.pn(pn, 4);
+        pmtud.prepare_probe(&mut builder, &mut stats.frame_tx, prot.expansion());
+        // Add padding, which Connection::output_path normally does.
+        builder.enable_padding(true);
+        builder.pad();
+        let encoder = builder.build(prot).unwrap();
+        assert_eq!(encoder.len(), pmtud.probe_size());
+        assert!(pmtud.is_probe_prepared());
+        assert!(!pmtud.needs_probe());
+
+        pmtud.probe_sent(stats);
+        assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
+        assert!(!pmtud.needs_probe());
+
+        let packet = make_sentpacket(pn, encoder.len());
+        if encoder.len() + Pmtud::header_size(addr) <= mtu {
+            pmtud.on_packets_acked(&[packet], stats);
+            assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
+        } else {
+            pmtud.on_packets_lost(&[packet], stats);
+            assert_eq!(stats_before.pmtud_lost + 1, stats.pmtud_lost);
+        }
+    }
+
     fn find_pmtu(addr: IpAddr, mtu: usize) {
         fixture_init();
         let mut pmtud = Pmtud::new(addr);
@@ -245,35 +308,9 @@ mod tests {
         assert!(pmtud.needs_probe());
 
         while pmtud.needs_probe() {
-            let stats_before = stats.clone();
-
-            // Fake a packet number, so the builder logic works.
-            let mut builder = PacketBuilder::short(Encoder::new(), false, []);
-            let pn = prot.next_pn();
-            builder.pn(pn, 4);
-            pmtud.prepare_probe(&mut builder, &mut stats.frame_tx, prot.expansion());
-            // Add padding, which Connection::output_path normally does.
-            builder.enable_padding(true);
-            builder.pad();
-            let encoder = builder.build(&mut prot).unwrap();
-            assert_eq!(encoder.len(), pmtud.probe_size());
-            assert!(pmtud.is_probe_prepared());
-            assert!(!pmtud.needs_probe());
-
-            pmtud.probe_sent(&mut stats);
-            assert!(stats_before.pmtud_tx + 1 == stats.pmtud_tx);
-            assert!(!pmtud.needs_probe());
-
-            let packet = make_sentpacket(pn, encoder.len());
-            if encoder.len() + Pmtud::header_size(addr) <= mtu {
-                pmtud.on_packets_acked(&[packet], &mut stats);
-                assert!(stats_before.pmtud_ack + 1 == stats.pmtud_ack);
-            } else {
-                pmtud.on_packets_lost(&[packet], &mut stats);
-                assert!(stats_before.pmtud_lost + 1 == stats.pmtud_lost);
-            }
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu);
         }
-        assert_eq!(mtu, pmtud.mtu);
+        assert_mtu(&pmtud, mtu);
     }
 
     #[test]
@@ -294,5 +331,51 @@ mod tests {
     #[test]
     fn test_pmtud_v6_1500() {
         find_pmtu(V6, 1500);
+    }
+
+    fn find_pmtu_with_reduction(addr: IpAddr, mtu: usize, smaller_mtu: usize) {
+        assert!(mtu > smaller_mtu);
+
+        fixture_init();
+        let mut pmtud = Pmtud::new(addr);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default();
+
+        assert!(smaller_mtu >= pmtud.search_table[0]);
+        pmtud.start_pmtud();
+        assert!(pmtud.needs_probe());
+
+        while pmtud.needs_probe() {
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu);
+        }
+        assert_mtu(&pmtud, mtu);
+
+        qdebug!("Reducing MTU to {}", smaller_mtu);
+        while pmtud.mtu > smaller_mtu {
+            let pn = prot.next_pn();
+            let packet = make_sentpacket(pn, pmtud.mtu);
+            pmtud.on_packets_lost(&[packet], &mut stats);
+        }
+        assert_mtu(&pmtud, smaller_mtu);
+    }
+
+    #[test]
+    fn test_pmtud_v4_max_1300() {
+        find_pmtu_with_reduction(V4, u16::MAX.into(), 1300);
+    }
+
+    #[test]
+    fn test_pmtud_v6_max_1280() {
+        find_pmtu_with_reduction(V6, u16::MAX.into(), 1300);
+    }
+
+    #[test]
+    fn test_pmtud_v4_1500_1300() {
+        find_pmtu_with_reduction(V4, 1500, 1300);
+    }
+
+    #[test]
+    fn test_pmtud_v6_1500_1280() {
+        find_pmtu_with_reduction(V6, 1500, 1280);
     }
 }
