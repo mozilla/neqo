@@ -418,7 +418,7 @@ pub struct CryptoDxState {
     /// The total number of operations that are remaining before the keys
     /// become exhausted and can't be used any more.
     invocations: PacketNumber,
-    /// The largest body we have encrypted.
+    /// The basis of the invocation limits in `invocations`.
     invocations_base: u32,
 }
 
