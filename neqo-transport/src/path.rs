@@ -768,7 +768,7 @@ impl Path {
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
         mtu: bool,       // Whether the packet we're writing into will be a full MTU.
-        empty_pkt: bool, // False if packet is coalesced behind another one or already has frames.
+        coalesced: bool, // Whether the packet is coalesced behind another one.
         aead_expansion: usize,
         now: Instant,
     ) -> bool {
@@ -776,8 +776,8 @@ impl Path {
             return false;
         }
 
-        // Only send PMTUD probes using empty, non-coalesced packets.
-        if self.pmtud().needs_probe() && empty_pkt && mtu {
+        // Only send PMTUD probes using non-coalesced packets.
+        if self.pmtud().needs_probe() && !coalesced && mtu {
             self.pmtud_mut()
                 .prepare_probe(builder, stats, aead_expansion);
             return true;
