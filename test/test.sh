@@ -36,6 +36,5 @@ tmux -CC \
         split-window -h "$server" \; \
         split-window -v -f "\
                 until [ -e $tmp/done ]; do sleep 1; done && \
-                echo $tmp && ls -l $tmp && echo && \
                 tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
         set remain-on-exit on
