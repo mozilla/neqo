@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::net::IpAddr;
+use std::{
+    net::IpAddr,
+    time::{Duration, Instant},
+};
 
 use neqo_common::{qdebug, qtrace};
 
@@ -23,8 +26,9 @@ const MTU_SIZES_V6: [usize; 10] = [
     1280, 1380, 1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 
-// From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
+// From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
 const MAX_PROBES: usize = 3;
+const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
 
 #[derive(Debug, PartialEq)]
 enum Probe {
@@ -43,6 +47,7 @@ pub struct Pmtud {
     probe_count: usize,
     probe_state: Probe,
     loss_counts: Vec<usize>,
+    raise_timer: Option<Instant>,
 }
 
 impl Pmtud {
@@ -74,6 +79,17 @@ impl Pmtud {
             probe_count: 0,
             probe_state: Probe::NotNeeded,
             loss_counts: vec![0; search_table.len()],
+            raise_timer: None,
+        }
+    }
+
+    /// Checks whether the PMTUD raise timer should be fired, and does so if needed.
+    pub fn maybe_fire_pmtud_raise_timer(&mut self, now: Instant) {
+        if let Some(raise_timer) = self.raise_timer {
+            if self.probe_state == Probe::NotNeeded && now >= raise_timer {
+                qdebug!("PMTUD raise timer fired");
+                self.start_pmtud();
+            }
         }
     }
 
@@ -163,18 +179,28 @@ impl Pmtud {
     }
 
     /// Stops the PMTUD process, setting the MTU to the largest successful probe size.
-    fn stop_pmtud(&mut self, idx: usize) {
+    fn stop_pmtud(&mut self, idx: usize, now: Instant) {
         self.probe_state = Probe::NotNeeded; // We don't need to send any more probes
         self.probe_index = idx; // Index of the last successful probe
         self.mtu = self.search_table[idx]; // Leading to this MTU
         self.probe_count = 0; // Reset the count
         self.loss_counts = vec![0; self.search_table.len()]; // Reset the loss counts
-        qdebug!("PMTUD stopped, PLPMTU is now {}", self.mtu,);
+        self.raise_timer = Some(now + PMTU_RAISE_TIMER);
+        qdebug!(
+            "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
+            self.mtu,
+            self.raise_timer.unwrap()
+        );
     }
 
     /// Checks whether a PMTUD probe has been lost. If it has been lost more than `MAX_PROBES`
     /// times, the PMTUD process is stopped.
-    pub fn on_packets_lost(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) {
+    pub fn on_packets_lost(
+        &mut self,
+        lost_packets: &[SentPacket],
+        stats: &mut Stats,
+        now: Instant,
+    ) {
         // Track lost probes
         let lost = self.count_pmtud_probes(lost_packets);
         stats.pmtud_lost += lost;
@@ -199,7 +225,7 @@ impl Pmtud {
         };
 
         qdebug!("Packet of size > {} lost {} times", self.mtu, MAX_PROBES);
-        self.stop_pmtud(last_good);
+        self.stop_pmtud(last_good, now);
     }
 
     /// Starts the next upward PMTUD probe.
@@ -228,7 +254,10 @@ impl Pmtud {
 
 #[cfg(all(not(feature = "disable-encryption"), test))]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::{
+        net::{IpAddr, Ipv4Addr, Ipv6Addr},
+        time::Instant,
+    };
 
     use neqo_common::{qdebug, Encoder, IpTosEcn};
     use test_fixture::{fixture_init, now};
@@ -236,6 +265,7 @@ mod tests {
     use crate::{
         crypto::CryptoDxState,
         packet::{PacketBuilder, PacketType},
+        pmtud::PMTU_RAISE_TIMER,
         recovery::SentPacket,
         Pmtud, Stats,
     };
@@ -243,12 +273,12 @@ mod tests {
     const V4: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
     const V6: IpAddr = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0));
 
-    fn make_sentpacket(pn: u64, len: usize) -> SentPacket {
+    fn make_sentpacket(pn: u64, now: Instant, len: usize) -> SentPacket {
         SentPacket::new(
             PacketType::Short,
             pn,
             IpTosEcn::default(),
-            now(),
+            now,
             true,
             Vec::new(),
             len,
@@ -256,14 +286,14 @@ mod tests {
     }
 
     fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
-        assert!(pmtud.mtu <= mtu);
         let idx = pmtud
             .search_table
             .iter()
             .position(|x| *x == pmtud.mtu)
             .unwrap();
-        if idx > 0 {
-            assert!(pmtud.mtu >= pmtud.search_table[idx - 1]);
+        assert!(mtu >= pmtud.search_table[idx]);
+        if idx < pmtud.search_table.len() - 1 {
+            assert!(mtu < pmtud.search_table[idx + 1]);
         }
     }
 
@@ -273,6 +303,7 @@ mod tests {
         prot: &mut CryptoDxState,
         addr: IpAddr,
         mtu: usize,
+        now: Instant,
     ) {
         let stats_before = stats.clone();
 
@@ -293,18 +324,19 @@ mod tests {
         assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
         assert!(!pmtud.needs_probe());
 
-        let packet = make_sentpacket(pn, encoder.len());
+        let packet = make_sentpacket(pn, now, encoder.len());
         if encoder.len() + Pmtud::header_size(addr) <= mtu {
             pmtud.on_packets_acked(&[packet], stats);
             assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
         } else {
-            pmtud.on_packets_lost(&[packet], stats);
+            pmtud.on_packets_lost(&[packet], stats, now);
             assert_eq!(stats_before.pmtud_lost + 1, stats.pmtud_lost);
         }
     }
 
     fn find_pmtu(addr: IpAddr, mtu: usize) {
         fixture_init();
+        let now = now();
         let mut pmtud = Pmtud::new(addr);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
@@ -313,7 +345,7 @@ mod tests {
         assert!(pmtud.needs_probe());
 
         while pmtud.needs_probe() {
-            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu);
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu, now);
         }
         assert_mtu(&pmtud, mtu);
     }
@@ -342,6 +374,7 @@ mod tests {
         assert!(mtu > smaller_mtu);
 
         fixture_init();
+        let now = now();
         let mut pmtud = Pmtud::new(addr);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
@@ -351,15 +384,15 @@ mod tests {
         assert!(pmtud.needs_probe());
 
         while pmtud.needs_probe() {
-            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu);
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu, now);
         }
         assert_mtu(&pmtud, mtu);
 
         qdebug!("Reducing MTU to {}", smaller_mtu);
         while pmtud.mtu > smaller_mtu {
             let pn = prot.next_pn();
-            let packet = make_sentpacket(pn, pmtud.mtu);
-            pmtud.on_packets_lost(&[packet], &mut stats);
+            let packet = make_sentpacket(pn, now, pmtud.mtu);
+            pmtud.on_packets_lost(&[packet], &mut stats, now);
         }
         assert_mtu(&pmtud, smaller_mtu);
     }
@@ -382,5 +415,51 @@ mod tests {
     #[test]
     fn test_pmtud_v6_1500_1280() {
         find_pmtu_with_reduction(V6, 1500, 1280);
+    }
+    fn find_pmtu_with_increase(addr: IpAddr, mtu: usize, larger_mtu: usize) {
+        assert!(mtu < larger_mtu);
+
+        fixture_init();
+        let now = now();
+        let mut pmtud = Pmtud::new(addr);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default();
+
+        assert!(larger_mtu >= pmtud.search_table[0]);
+        pmtud.start_pmtud();
+        assert!(pmtud.needs_probe());
+
+        while pmtud.needs_probe() {
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, mtu, now);
+        }
+        assert_mtu(&pmtud, mtu);
+
+        qdebug!("Increasing MTU to {}", larger_mtu);
+        let now = now + PMTU_RAISE_TIMER;
+        pmtud.maybe_fire_pmtud_raise_timer(now);
+        while pmtud.needs_probe() {
+            pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, larger_mtu, now);
+        }
+        assert_mtu(&pmtud, larger_mtu);
+    }
+
+    #[test]
+    fn test_pmtud_v4_1300_max() {
+        find_pmtu_with_increase(V4, 1300, u16::MAX.into());
+    }
+
+    #[test]
+    fn test_pmtud_v6_1280_max() {
+        find_pmtu_with_increase(V6, 1280, u16::MAX.into());
+    }
+
+    #[test]
+    fn test_pmtud_v4_1300_1500() {
+        find_pmtu_with_increase(V4, 1300, 1500);
+    }
+
+    #[test]
+    fn test_pmtud_v6_1280_1500() {
+        find_pmtu_with_increase(V6, 1280, 1500);
     }
 }

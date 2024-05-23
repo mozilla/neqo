@@ -658,6 +658,7 @@ impl LossRecovery {
             pn_space,
             &lost,
             &mut self.stats.borrow_mut(),
+            now,
         );
 
         // This must happen after on_packets_lost. If in recovery, this could
@@ -887,6 +888,7 @@ impl LossRecovery {
                 space.space(),
                 &lost_packets[first..],
                 &mut self.stats.borrow_mut(),
+                now,
             );
         }
         self.stats.borrow_mut().lost += lost_packets.len();

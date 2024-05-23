@@ -284,6 +284,12 @@ impl Paths {
                 false
             }
         } else {
+            // See if the PMTUD raise timer wants to fire.
+            if let Some(path) = self.primary() {
+                path.borrow_mut()
+                    .pmtud_mut()
+                    .maybe_fire_pmtud_raise_timer(now);
+            }
             true
         }
     }
@@ -1005,6 +1011,7 @@ impl Path {
         space: PacketNumberSpace,
         lost_packets: &[SentPacket],
         stats: &mut Stats,
+        now: Instant,
     ) {
         debug_assert!(self.is_primary());
         let cwnd_reduced = self.sender.on_packets_lost(
@@ -1013,6 +1020,7 @@ impl Path {
             self.rtt.pto(space), // Important: the base PTO, not adjusted.
             lost_packets,
             stats,
+            now,
         );
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());

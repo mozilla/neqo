@@ -101,6 +101,7 @@ impl PacketSender {
         pto: Duration,
         lost_packets: &[SentPacket],
         stats: &mut Stats,
+        now: Instant,
     ) -> bool {
         let ret = self.cc.on_packets_lost(
             first_rtt_sample_time,
@@ -110,7 +111,7 @@ impl PacketSender {
         );
         // Call below may change the size of MTU probes, so it needs to happen after the CC
         // reaction above, which needs to ignore probes based on their size.
-        self.pmtud_mut().on_packets_lost(lost_packets, stats);
+        self.pmtud_mut().on_packets_lost(lost_packets, stats, now);
         ret
     }
 
