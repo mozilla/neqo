@@ -201,7 +201,7 @@ impl Pmtud {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(not(feature = "disable-encryption"), test))]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
