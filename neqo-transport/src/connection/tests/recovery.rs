@@ -24,15 +24,9 @@ use super::{
     POST_HANDSHAKE_CWND,
 };
 use crate::{
-    cc::CWND_MIN,
-    recovery::{
+    connection::tests::cwnd_min, recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
-    },
-    rtt::GRANULARITY,
-    stats::MAX_PTO_COUNTS,
-    tparams::TransportParameter,
-    tracking::DEFAULT_ACK_DELAY,
-    Pmtud, StreamType,
+    }, rtt::GRANULARITY, stats::MAX_PTO_COUNTS, tparams::TransportParameter, tracking::DEFAULT_ACK_DELAY, Pmtud, StreamType
 };
 
 #[test]
@@ -800,5 +794,5 @@ fn fast_pto_persistent_congestion() {
     let ack = server.process(Some(&dgram), now).dgram();
     now += DEFAULT_RTT / 2;
     client.process_input(&ack.unwrap(), now);
-    assert_eq!(cwnd(&client), CWND_MIN);
+    assert_eq!(cwnd(&client), cwnd_min(&client));
 }

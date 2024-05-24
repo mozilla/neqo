@@ -151,17 +151,14 @@ impl Pmtud {
     }
 
     /// Returns true if the packet is a PMTUD probe.
-    fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
-        p.len() == self.probe_size()
+    #[must_use]
+    pub fn is_pmtud_probe(&self, p: &SentPacket) -> bool {
+        self.probe_state == Probe::Sent && p.len() == self.probe_size()
     }
 
     /// Count the PMTUD probes included in `pkts`.
     fn count_pmtud_probes(&self, pkts: &[SentPacket]) -> usize {
-        if self.probe_state == Probe::Sent && !pkts.is_empty() {
-            pkts.iter().filter(|p| self.is_pmtud_probe(p)).count()
-        } else {
-            0
-        }
+        pkts.iter().filter(|p| self.is_pmtud_probe(p)).count()
     }
 
     /// Checks whether a PMTUD probe has been acknowledged, and if so, updates the PMTUD state.

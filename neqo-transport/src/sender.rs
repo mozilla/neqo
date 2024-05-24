@@ -47,16 +47,17 @@ impl PacketSender {
         pmtud: Pmtud,
         now: Instant,
     ) -> Self {
+        let mtu = pmtud.plpmtu();
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
-                    Box::new(ClassicCongestionControl::new(NewReno::default()))
+                    Box::new(ClassicCongestionControl::new(NewReno::default(), pmtud))
                 }
                 CongestionControlAlgorithm::Cubic => {
-                    Box::new(ClassicCongestionControl::new(Cubic::default()))
+                    Box::new(ClassicCongestionControl::new(Cubic::default(), pmtud))
                 }
             },
-            pacer: Pacer::new(pacing_enabled, now, PACING_BURST_SIZE, pmtud),
+            pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
         }
     }
 
@@ -65,11 +66,11 @@ impl PacketSender {
     }
 
     pub fn pmtud(&self) -> &Pmtud {
-        self.pacer.pmtud()
+        self.cc.pmtud()
     }
 
     pub fn pmtud_mut(&mut self) -> &mut Pmtud {
-        self.pacer.pmtud_mut()
+        self.cc.pmtud_mut()
     }
 
     #[must_use]
@@ -80,6 +81,12 @@ impl PacketSender {
     #[must_use]
     pub fn cwnd_avail(&self) -> usize {
         self.cc.cwnd_avail()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn cwnd_min(&self) -> usize {
+        self.cc.cwnd_min()
     }
 
     pub fn on_packets_acked(
