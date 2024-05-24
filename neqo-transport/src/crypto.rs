@@ -85,7 +85,7 @@ impl Crypto {
                     TLS_GRP_EC_SECP256R1,
                     TLS_GRP_EC_SECP384R1,
                     TLS_GRP_EC_SECP521R1,
-                ])?
+                ])?;
             }
             Agent::Client(c) => {
                 c.set_groups(&[
