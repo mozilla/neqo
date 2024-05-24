@@ -10,7 +10,6 @@
 
 set -e
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
 
 cargo build --bin neqo-client --bin neqo-server
 
@@ -29,12 +28,14 @@ server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
 tcpdump_pid=$!
+trap 'rm -rf "$tmp"; kill -USR2 $tcpdump_pid' EXIT
 
 tmux -CC \
         set-option -g default-shell "$(which bash)" \; \
-        new-session "$client && kill -USR2 $tcpdump_pid && touch $tmp/done" \; \
+        new-session "$client; kill -USR2 $tcpdump_pid; touch $tmp/done" \; \
         split-window -h "$server" \; \
         split-window -v -f "\
-                until [ -e $tmp/done ]; do sleep 1; done && \
+                until [ -e $tmp/done ]; do sleep 1; done; \
+                echo $tmp; ls -l $tmp; echo; \
                 tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
         set remain-on-exit on
