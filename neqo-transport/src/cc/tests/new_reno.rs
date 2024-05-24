@@ -25,7 +25,7 @@ use crate::{
 const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const PTO: Duration = Duration::from_millis(100);
 const RTT: Duration = Duration::from_millis(98);
-const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(Duration::from_millis(98));
+const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
 
 fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial());

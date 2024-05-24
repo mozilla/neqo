@@ -33,7 +33,6 @@ use crate::{
 
 const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const RTT: Duration = Duration::from_millis(100);
-const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(Duration::from_millis(100));
 
 fn cwnd_after_loss(cwnd: usize) -> usize {
     cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
@@ -70,7 +69,7 @@ fn ack_packet(cc: &mut ClassicCongestionControl<Cubic>, pn: u64, now: Instant) {
         Vec::new(),
         cc.max_datagram_size(),
     );
-    cc.on_packets_acked(&[acked], &RTT_ESTIMATE, now);
+    cc.on_packets_acked(&[acked], &RttEstimate::from_duration(RTT), now);
 }
 
 fn packet_lost(cc: &mut ClassicCongestionControl<Cubic>, pn: u64) {

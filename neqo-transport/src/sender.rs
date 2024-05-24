@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qlog::NeqoQlog;
+use neqo_common::{qdebug, qlog::NeqoQlog};
 
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
@@ -31,6 +31,7 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionControl>,
     pacer: Pacer,
+    mtu: usize,
 }
 
 impl Display for PacketSender {
@@ -58,6 +59,7 @@ impl PacketSender {
                 }
             },
             pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
+            mtu,
         }
     }
 
@@ -89,6 +91,19 @@ impl PacketSender {
         self.cc.cwnd_min()
     }
 
+    fn maybe_update_pacer_mtu(&mut self) {
+        let current_mtu = self.pmtud().plpmtu();
+        if current_mtu != self.mtu {
+            qdebug!(
+                "PLPMTU changed from {} to {}, updating pacer",
+                self.mtu,
+                current_mtu
+            );
+            self.mtu = current_mtu;
+            self.pacer.set_mtu(current_mtu);
+        }
+    }
+
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
@@ -98,6 +113,7 @@ impl PacketSender {
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
         self.pmtud_mut().on_packets_acked(acked_pkts, stats);
+        self.maybe_update_pacer_mtu();
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.
@@ -119,6 +135,7 @@ impl PacketSender {
         // Call below may change the size of MTU probes, so it needs to happen after the CC
         // reaction above, which needs to ignore probes based on their size.
         self.pmtud_mut().on_packets_lost(lost_packets, stats, now);
+        self.maybe_update_pacer_mtu();
         ret
     }
 
