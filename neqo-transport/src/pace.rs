@@ -60,6 +60,10 @@ impl Pacer {
         }
     }
 
+    pub fn mtu(&self) -> usize {
+        self.m
+    }
+
     pub fn set_mtu(&mut self, mtu: usize) {
         self.m = mtu;
     }

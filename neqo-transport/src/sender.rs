@@ -31,7 +31,6 @@ pub const PACING_BURST_SIZE: usize = 2;
 pub struct PacketSender {
     cc: Box<dyn CongestionControl>,
     pacer: Pacer,
-    mtu: usize,
 }
 
 impl Display for PacketSender {
@@ -59,7 +58,6 @@ impl PacketSender {
                 }
             },
             pacer: Pacer::new(pacing_enabled, now, mtu * PACING_BURST_SIZE, mtu),
-            mtu,
         }
     }
 
@@ -92,15 +90,13 @@ impl PacketSender {
     }
 
     fn maybe_update_pacer_mtu(&mut self) {
-        let current_mtu = self.pmtud().plpmtu();
-        if current_mtu != self.mtu {
+        if self.pmtud().plpmtu() != self.pacer.mtu() {
             qdebug!(
                 "PLPMTU changed from {} to {}, updating pacer",
-                self.mtu,
-                current_mtu
+                self.pacer.mtu(),
+                self.pmtud().plpmtu()
             );
-            self.mtu = current_mtu;
-            self.pacer.set_mtu(current_mtu);
+            self.pacer.set_mtu(self.pmtud().plpmtu());
         }
     }
 
