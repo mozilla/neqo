@@ -61,11 +61,11 @@ impl Pacer {
     }
 
     pub fn mtu(&self) -> usize {
-        self.m
+        self.p
     }
 
     pub fn set_mtu(&mut self, mtu: usize) {
-        self.m = mtu;
+        self.p = mtu;
     }
 
     /// Determine when the next packet will be available based on the provided RTT

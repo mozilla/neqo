@@ -24,9 +24,15 @@ use super::{
     POST_HANDSHAKE_CWND,
 };
 use crate::{
-    connection::tests::cwnd_min, recovery::{
+    connection::tests::cwnd_min,
+    recovery::{
         FAST_PTO_SCALE, MAX_OUTSTANDING_UNACK, MAX_PTO_PACKET_COUNT, MIN_OUTSTANDING_UNACK,
-    }, rtt::GRANULARITY, stats::MAX_PTO_COUNTS, tparams::TransportParameter, tracking::DEFAULT_ACK_DELAY, Pmtud, StreamType
+    },
+    rtt::GRANULARITY,
+    stats::MAX_PTO_COUNTS,
+    tparams::TransportParameter,
+    tracking::DEFAULT_ACK_DELAY,
+    Pmtud, StreamType,
 };
 
 #[test]

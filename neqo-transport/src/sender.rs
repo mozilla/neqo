@@ -90,13 +90,14 @@ impl PacketSender {
     }
 
     fn maybe_update_pacer_mtu(&mut self) {
-        if self.pmtud().plpmtu() != self.pacer.mtu() {
+        let current_mtu = self.pmtud().plpmtu();
+        if current_mtu != self.pacer.mtu() {
             qdebug!(
                 "PLPMTU changed from {} to {}, updating pacer",
                 self.pacer.mtu(),
-                self.pmtud().plpmtu()
+                current_mtu
             );
-            self.pacer.set_mtu(self.pmtud().plpmtu());
+            self.pacer.set_mtu(current_mtu);
         }
     }
 
