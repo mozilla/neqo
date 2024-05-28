@@ -26,10 +26,10 @@ jobs:
 
     steps:
       - name: Checkout neqo
-        uses: actions/checkout@44c2b7a8a4ea60a981eaca3cf939b5f4305c123b # v4.1.5
+        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
 
       - name: Checkout msquic
-        uses: actions/checkout@44c2b7a8a4ea60a981eaca3cf939b5f4305c123b # v4.1.5
+        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
         with:
           repository: microsoft/msquic
           ref: main
@@ -88,7 +88,7 @@ jobs:
         env:
           HOST: 127.0.0.1
           PORT: 4433
-          SIZE: 134217728 # 128 MB
+          SIZE: 33554432 # 32 MB
         run: |
           TMP=$(mktemp -d)
           # Make a cert and key for msquic.
@@ -197,14 +197,15 @@ jobs:
               echo
             } >> results.md
           fi
-          grep -Ev 'ignored|running \d+ tests|%\)' results.txt |\
-            sed -E  -e 's/(Performance has regressed.)/:broken_heart: **\1**/gi' \
-                    -e 's/(Performance has improved.)/:green_heart: **\1**/gi' \
-                    -e 's/^ +/   /gi' \
-                    -e 's/^([a-z0-9].*)$/* **\1**/gi' \
-                    -e 's/(change:[^%]*% )([^%]*%)(.*)/\1**\2**\3/gi' \
-              >> results.md
+          sed -E -e 's/^                 //gi' \
+                 -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
+            perl -p -0777 -e 's/(.*?)\n(.*?)((No change|Change within|Performance has).*?)\n(.*?)\n\n/<details><summary>$1: $3<\/summary><pre>\n$2$5<\/pre><\/details>\n/gs' |\
+            sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
+                   -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
+                   -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
+                   -e 's/^<details>(.*Performance has.*)/<details open>\1/gi' >> results.md
           {
+            echo
             echo "### Client/server transfer results"
             cat comparison.md
           } >> results.md
