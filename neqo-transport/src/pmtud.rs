@@ -221,7 +221,7 @@ impl Pmtud {
             return;
         };
 
-        qdebug!("Packet of size > {} lost {} times", self.mtu, MAX_PROBES);
+        qdebug!("Packet of size > {} lost >= {} times", self.mtu, MAX_PROBES);
         self.stop_pmtud(last_good, now);
     }
 
