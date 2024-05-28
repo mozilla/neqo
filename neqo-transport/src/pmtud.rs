@@ -168,7 +168,7 @@ impl Pmtud {
         if acked == 0 {
             return;
         }
-        // A probe was ACKed, confir, the new MTU and try to probe upwards further.
+        // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         stats.pmtud_ack += acked;
         self.mtu = self.search_table[self.probe_index];
         qdebug!("PMTUD probe of size {} succeeded", self.mtu);
