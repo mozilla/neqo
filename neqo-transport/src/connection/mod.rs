@@ -2161,13 +2161,6 @@ impl Connection {
             return (tokens, false, false);
         }
 
-        if path.borrow().pmtud().is_probe_prepared() {
-            path.borrow_mut()
-                .pmtud_mut()
-                .probe_sent(&mut self.stats.borrow_mut());
-            ack_eliciting = true;
-        }
-
         if primary {
             if space == PacketNumberSpace::ApplicationData {
                 self.write_appdata_frames(builder, &mut tokens);
@@ -2175,6 +2168,13 @@ impl Connection {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(space, builder, &mut tokens, stats);
             }
+        }
+
+        if path.borrow().pmtud().is_probe_prepared() {
+            path.borrow_mut()
+                .pmtud_mut()
+                .probe_sent(&mut self.stats.borrow_mut());
+            ack_eliciting = true;
         }
 
         // Maybe send a probe now, either to probe for losses or to keep the connection live.
