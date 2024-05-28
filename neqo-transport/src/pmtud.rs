@@ -181,7 +181,7 @@ impl Pmtud {
         self.probe_index = idx; // Index of the last successful probe
         self.mtu = self.search_table[idx]; // Leading to this MTU
         self.probe_count = 0; // Reset the count
-        self.loss_counts = vec![0; self.search_table.len()]; // Reset the loss counts
+        self.loss_counts.fill(0); // Reset the loss counts
         self.raise_timer = Some(now + PMTU_RAISE_TIMER);
         qdebug!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
