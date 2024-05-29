@@ -309,12 +309,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         );
 
         // Lost PMTUD probes do not elicit a congestion control reaction.
-        let lost_packets = lost_packets
+        let lost_packets: Vec<SentPacket> = lost_packets
             .iter()
             .filter(|pkt| !self.pmtud.is_pmtud_probe(pkt))
             .cloned()
-            .peekable();
-        if lost_packets.peek().is_none() {
+            .collect();
+        if lost_packets.is_empty() {
             return false;
         }
 
