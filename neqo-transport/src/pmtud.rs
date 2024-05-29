@@ -9,11 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qtrace};
+use neqo_common::qdebug;
 
-use crate::{
-    frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, stats::FrameStats, Stats,
-};
+use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, Stats};
 
 // Values <= 1500 based on: A. Custura, G. Fairhurst and I. Learmonth, "Exploring Usable Path MTU in
 // the Internet," 2018 Network Traffic Measurement and Analysis Conference (TMA), Vienna, Austria,
@@ -34,7 +32,6 @@ const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
 enum Probe {
     NotNeeded,
     Needed,
-    Prepared,
     Sent,
 }
 
@@ -106,45 +103,30 @@ impl Pmtud {
         self.probe_state == Probe::Needed
     }
 
-    /// Returns true if a PMTUD probe is prepared for sending.
-    #[must_use]
-    pub fn is_probe_prepared(&self) -> bool {
-        self.probe_state == Probe::Prepared
-    }
-
     /// Returns the size of the current PMTUD probe.
     fn probe_size(&self) -> usize {
         self.search_table[self.probe_index] - self.header_size
     }
 
-    /// Prepares a PMTUD probe for sending.
-    pub fn prepare_probe(
+    /// Sends a PMTUD probe.
+    pub fn send_probe(
         &mut self,
         builder: &mut PacketBuilder,
-        stats: &mut FrameStats,
+        stats: &mut Stats,
         aead_expansion: usize,
     ) {
         builder.set_limit(self.probe_size() - aead_expansion);
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_varint(FRAME_TYPE_PING);
-        stats.ping += 1;
-        stats.all += 1;
-
-        self.probe_state = Probe::Prepared;
-        qtrace!(
-            "PMTUD probe of size {} prepared",
-            self.search_table[self.probe_index]
-        );
-    }
-
-    /// Records that a PMTUD probe has been sent.
-    pub fn probe_sent(&mut self, stats: &mut Stats) {
-        self.probe_state = Probe::Sent;
-        self.probe_count += 1;
+        builder.enable_padding(true);
+        stats.frame_tx.ping += 1;
+        stats.frame_tx.all += 1;
         stats.pmtud_tx += 1;
+        self.probe_count += 1;
+        self.probe_state = Probe::Sent;
         qdebug!(
-            "PMTUD probe of size {} sent, count {}",
+            "Sending PMTUD probe of size {}, count {}",
             self.search_table[self.probe_index],
             self.probe_count
         );
@@ -221,7 +203,7 @@ impl Pmtud {
             return;
         };
 
-        qdebug!("Packet of size > {} lost >= {} times", self.mtu, MAX_PROBES);
+        qdebug!("PMTUD probe of size > {} lost >= {} times", self.mtu, MAX_PROBES);
         self.stop_pmtud(last_good, now);
     }
 
@@ -308,18 +290,12 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
-        pmtud.prepare_probe(&mut builder, &mut stats.frame_tx, prot.expansion());
-        // Add padding, which Connection::output_path normally does.
-        builder.enable_padding(true);
+        pmtud.send_probe(&mut builder, stats, prot.expansion());
         builder.pad();
         let encoder = builder.build(prot).unwrap();
         assert_eq!(encoder.len(), pmtud.probe_size());
-        assert!(pmtud.is_probe_prepared());
         assert!(!pmtud.needs_probe());
-
-        pmtud.probe_sent(stats);
         assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
-        assert!(!pmtud.needs_probe());
 
         let packet = make_sentpacket(pn, now, encoder.len());
         if encoder.len() + Pmtud::header_size(addr) <= mtu {

@@ -2148,8 +2148,6 @@ impl Connection {
                 builder,
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
-                coalesced,
-                aead_expansion,
                 now,
             ) {
                 builder.enable_padding(true);
@@ -2163,18 +2161,24 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
+                if self.state.connected()
+                    && path.borrow().pmtud().needs_probe()
+                    && !coalesced
+                    && full_mtu
+                {
+                    // Only send PMTUD probes using non-coalesced packets.
+                    path.borrow_mut().pmtud_mut().send_probe(
+                        builder,
+                        &mut self.stats.borrow_mut(),
+                        aead_expansion,
+                    );
+                    ack_eliciting = true;
+                }
                 self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(space, builder, &mut tokens, stats);
             }
-        }
-
-        if path.borrow().pmtud().is_probe_prepared() {
-            path.borrow_mut()
-                .pmtud_mut()
-                .probe_sent(&mut self.stats.borrow_mut());
-            ack_eliciting = true;
         }
 
         // Maybe send a probe now, either to probe for losses or to keep the connection live.

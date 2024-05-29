@@ -777,22 +777,12 @@ impl Path {
         &mut self,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
-        mtu: bool,       // Whether the packet we're writing into will be a full MTU.
-        coalesced: bool, // Whether the packet is coalesced behind another one.
-        aead_expansion: usize,
+        mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
     ) -> bool {
         if builder.remaining() < 9 {
             return false;
         }
-
-        // Only send PMTUD probes using non-coalesced packets.
-        if self.pmtud().needs_probe() && !coalesced && mtu {
-            self.pmtud_mut()
-                .prepare_probe(builder, stats, aead_expansion);
-            return true;
-        }
-
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!([self], "Responding to path challenge {}", hex(challenge));
