@@ -203,7 +203,11 @@ impl Pmtud {
             return;
         };
 
-        qdebug!("PMTUD probe of size > {} lost >= {} times", self.mtu, MAX_PROBES);
+        qdebug!(
+            "PMTUD probe of size > {} lost >= {} times",
+            self.mtu,
+            MAX_PROBES
+        );
         self.stop_pmtud(last_good, now);
     }
 
