@@ -51,6 +51,7 @@ jobs:
           NEEDRESTART_MODE: l
         run: |
           sudo apt-get update
+          sudo apt remove needrestart
           sudo apt-get dist-upgrade -y
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
