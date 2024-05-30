@@ -85,6 +85,7 @@ impl Pmtud {
         if let Some(raise_timer) = self.raise_timer {
             if self.probe_state == Probe::NotNeeded && now >= raise_timer {
                 qdebug!("PMTUD raise timer fired");
+                self.raise_timer = None;
                 self.start_pmtud();
             }
         }
