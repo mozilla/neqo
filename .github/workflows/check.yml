@@ -47,11 +47,11 @@ jobs:
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         env:
-          NEEDRESTART_MODE: l
+          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-          find /etc -ls
+          cat /etc/ssl/openssl.cnf
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
