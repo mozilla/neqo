@@ -15,15 +15,16 @@ cargo build --bin neqo-client --bin neqo-server
 
 addr=127.0.0.1
 port=4433
-path=/200000
-flags="--verbose --verbose --verbose --qlog-dir $tmp --use-old-http --alpn hq-interop --quic-version 1"
+path=/1
+flags="--verbose --verbose --verbose --no-pacing --quic-version 1"
 if [ "$(uname -s)" != "Linux" ]; then
         iface=lo0
 else
         iface=lo
 fi
 
-client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
+u="https://$addr:$port/$path"
+client="./target/debug/neqo-client $flags --output-dir $tmp --stats $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u $u "
 server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
