@@ -326,7 +326,7 @@ enum Ready {
 
 // Wait for the socket to be readable or the timeout to fire.
 async fn ready(
-    socket: &udp::Socket,
+    socket: &udp::Socket<tokio::net::UdpSocket>,
     mut timeout: Option<&mut Pin<Box<Sleep>>>,
 ) -> Result<Ready, io::Error> {
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
@@ -367,7 +367,7 @@ trait Client {
 
 struct Runner<'a, H: Handler> {
     local_addr: SocketAddr,
-    socket: &'a mut udp::Socket,
+    socket: &'a mut udp::Socket<tokio::net::UdpSocket>,
     client: H::Client,
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,

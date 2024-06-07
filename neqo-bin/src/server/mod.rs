@@ -194,7 +194,7 @@ pub struct ServerRunner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, udp::Socket)>,
+    sockets: Vec<(SocketAddr, udp::Socket<tokio::net::UdpSocket>)>,
 }
 
 impl ServerRunner {
@@ -202,7 +202,7 @@ impl ServerRunner {
     pub fn new(
         now: Box<dyn Fn() -> Instant>,
         server: Box<dyn HttpServer>,
-        sockets: Vec<(SocketAddr, udp::Socket)>,
+        sockets: Vec<(SocketAddr, udp::Socket<tokio::net::UdpSocket>)>,
     ) -> Self {
         Self {
             now,
@@ -213,7 +213,7 @@ impl ServerRunner {
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(&mut self, addr: SocketAddr) -> &mut udp::Socket {
+    fn find_socket(&mut self, addr: SocketAddr) -> &mut udp::Socket<tokio::net::UdpSocket> {
         let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
         rest.iter_mut()
             .map(|(_host, socket)| socket)
