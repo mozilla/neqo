@@ -90,7 +90,6 @@ impl<S: AsFd> Socket<S> {
             eprintln!("Might have received more than {} bytes", recv_buf.len());
         }
 
-        qinfo!("received {} datagrams", meta.stride,);
         let dgrams: Vec<_> = recv_buf[0..meta.len]
             .chunks(meta.stride.min(recv_buf.len()))
             .map(|d| {
