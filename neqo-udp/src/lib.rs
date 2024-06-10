@@ -9,14 +9,13 @@
 
 use std::{
     io::{self, IoSliceMut},
-    net::{SocketAddr, ToSocketAddrs},
+    net::SocketAddr,
     os::fd::AsFd,
     slice,
 };
 
-use neqo_common::{Datagram, IpTos};
+use neqo_common::{qinfo, Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
-use tokio::io::Interest;
 
 /// Socket receive buffer size.
 ///
@@ -37,36 +36,49 @@ impl<S: AsFd> Socket<S> {
     pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            // TODO: Firefox creates one UDP socket per connection. Seems like a
+            // large allocation per connection. Maybe move to thread local
+            // variable?
             recv_buf: vec![0; RECV_BUF_SIZE],
             socket,
         })
     }
 
+    // TODO: Better name than inner.
     fn send_inner(&self, d: &Datagram) -> io::Result<()> {
-        log::info!(
-            "client sending from {:?} to {:?}",
-            d.source(),
-            d.destination()
-        );
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
             contents: d,
             segment_size: None,
+            // TODO: ?
             src_ip: None,
         };
 
         self.state.send((&self.socket).into(), &transmit)?;
 
+        qinfo!(
+            "sent {} bytes from {} to {}",
+            d.len(),
+            d.source(),
+            d.destination()
+        );
+
         Ok(())
     }
 
-    fn recv_inner(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    // TODO: Better name than inner.
+    fn recv_inner(
+        local_address: &SocketAddr,
+        state: &UdpSocketState,
+        recv_buf: &mut [u8],
+        socket: &S,
+    ) -> Result<Vec<Datagram>, io::Error> {
         let mut meta = RecvMeta::default();
 
-        self.state.recv(
-            (&self.socket).into(),
-            &mut [IoSliceMut::new(&mut self.recv_buf)],
+        state.recv(
+            (&socket).into(),
+            &mut [IoSliceMut::new(recv_buf)],
             slice::from_mut(&mut meta),
         )?;
 
@@ -74,20 +86,19 @@ impl<S: AsFd> Socket<S> {
             eprintln!("zero length datagram received?");
             return Ok(vec![]);
         }
-        if meta.len == self.recv_buf.len() {
-            eprintln!(
-                "Might have received more than {} bytes",
-                self.recv_buf.len()
-            );
+        if meta.len == recv_buf.len() {
+            eprintln!("Might have received more than {} bytes", recv_buf.len());
         }
 
-        Ok(self.recv_buf[0..meta.len]
-            .chunks(meta.stride.min(self.recv_buf.len()))
+        qinfo!("received {} datagrams", meta.stride,);
+        let dgrams: Vec<_> = recv_buf[0..meta.len]
+            .chunks(meta.stride.min(recv_buf.len()))
             .map(|d| {
-                log::info!(
-                    "client received from {:?} to {:?}",
+                qinfo!(
+                    "received {} bytes from {} to {}",
+                    d.len(),
+                    meta.addr,
                     local_address,
-                    meta.addr
                 );
                 Datagram::new(
                     meta.addr,
@@ -97,7 +108,15 @@ impl<S: AsFd> Socket<S> {
                     d,
                 )
             })
-            .collect())
+            .collect();
+
+        qinfo!(
+            "received {} datagrams ({:?})",
+            dgrams.len(),
+            dgrams.iter().map(|d| d.len()).collect::<Vec<_>>(),
+        );
+
+        Ok(dgrams)
     }
 }
 
@@ -107,7 +126,7 @@ impl Socket<std::os::fd::BorrowedFd<'_>> {
     }
 
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        let res = self.recv_inner(local_address);
+        let res = Self::recv_inner(local_address, &self.state, &mut self.recv_buf, &self.socket);
         // TODO: Is this even needed? We ignore wouldblock in Firefox anyways.
         if matches!(res, Err(ref err) if err.kind() == io::ErrorKind::WouldBlock) {
             return Ok(vec![]);
@@ -116,9 +135,10 @@ impl Socket<std::os::fd::BorrowedFd<'_>> {
     }
 }
 
+#[cfg(feature = "tokio")]
 impl Socket<tokio::net::UdpSocket> {
     /// Calls [`std::net::UdpSocket::bind`] and instantiates [`quinn_udp::UdpSocketState`].
-    pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
+    pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         let socket = std::net::UdpSocket::bind(addr)?;
 
         Ok(Self {
@@ -146,26 +166,18 @@ impl Socket<tokio::net::UdpSocket> {
     /// Send the UDP datagram.
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
         self.socket
-            .try_io(Interest::WRITABLE, || self.send_inner(d))
+            .try_io(tokio::io::Interest::WRITABLE, || self.send_inner(d))
     }
 
     /// Receive a UDP datagram.
-    // TODO: deduplicate with recv_inner.
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        let mut meta = RecvMeta::default();
-
-        match self.socket.try_io(Interest::READABLE, || {
-            self.state.recv(
-                (&self.socket).into(),
-                &mut [IoSliceMut::new(&mut self.recv_buf)],
-                slice::from_mut(&mut meta),
-            )
+        match self.socket.try_io(tokio::io::Interest::READABLE, || {
+            Self::recv_inner(local_address, &self.state, &mut self.recv_buf, &self.socket)
         }) {
-            Ok(n) => {
-                assert_eq!(n, 1, "only passed one slice");
-            }
+            Ok(datagrams) => return Ok(datagrams),
             Err(ref err)
                 if err.kind() == io::ErrorKind::WouldBlock
+                // TODO: Interrupted too?
                     || err.kind() == io::ErrorKind::Interrupted =>
             {
                 return Ok(vec![])
@@ -174,30 +186,6 @@ impl Socket<tokio::net::UdpSocket> {
                 return Err(err);
             }
         };
-
-        if meta.len == 0 {
-            eprintln!("zero length datagram received?");
-            return Ok(vec![]);
-        }
-        if meta.len == self.recv_buf.len() {
-            eprintln!(
-                "Might have received more than {} bytes",
-                self.recv_buf.len()
-            );
-        }
-
-        Ok(self.recv_buf[0..meta.len]
-            .chunks(meta.stride.min(self.recv_buf.len()))
-            .map(|d| {
-                Datagram::new(
-                    meta.addr,
-                    *local_address,
-                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                    None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
-                    d,
-                )
-            })
-            .collect())
     }
 }
 
@@ -267,7 +255,7 @@ mod tests {
             src_ip: None,
         };
         sender.writable().await?;
-        sender.socket.try_io(Interest::WRITABLE, || {
+        sender.socket.try_io(tokio::io::Interest::WRITABLE, || {
             sender.state.send((&sender.socket).into(), &transmit)
         })?;
 

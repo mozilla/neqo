@@ -50,7 +50,7 @@ fn since_start() -> Duration {
     START_TIME.get_or_init(Instant::now).elapsed()
 }
 
-pub fn init(level_filter: Option<log::LevelFilter>) {
+pub fn init(level_filter: Option<::log::LevelFilter>) {
     static INIT_ONCE: Once = Once::new();
 
     if ::log::STATIC_MAX_LEVEL == ::log::LevelFilter::Off {
