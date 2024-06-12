@@ -8,6 +8,7 @@
 #![allow(clippy::missing_panics_doc)] // Functions simply delegate to tokio and quinn-udp.
 
 use std::{
+    cell::RefCell,
     io::{self, IoSliceMut},
     net::SocketAddr,
     os::fd::AsFd,
@@ -15,16 +16,22 @@ use std::{
 };
 
 use neqo_common::{qinfo, Datagram, IpTos};
+
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Socket receive buffer size.
 ///
 /// Allows reading multiple datagrams in a single [`Socket::recv`] call.
+// TODO: Reconsider value for Firefox.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
+
+// TODO: Cleanest way? We now no longer need to do buffer management in neqo_glue nor Necko.
+std::thread_local! {
+    static RECEIVE_BUFFER: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
+}
 
 pub struct Socket<S> {
     state: UdpSocketState,
-    recv_buf: Vec<u8>,
     #[allow(unknown_lints)] // available with Rust v1.75
     #[allow(clippy::struct_field_names)]
     socket: S,
@@ -36,10 +43,6 @@ impl<S: AsFd> Socket<S> {
     pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
-            // TODO: Firefox creates one UDP socket per connection. Seems like a
-            // large allocation per connection. Maybe move to thread local
-            // variable?
-            recv_buf: vec![0; RECV_BUF_SIZE],
             socket,
         })
     }
@@ -125,7 +128,9 @@ impl Socket<std::os::fd::BorrowedFd<'_>> {
     }
 
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        let res = Self::recv_inner(local_address, &self.state, &mut self.recv_buf, &self.socket);
+        // TODO: Can this be cleaner without the nesting?
+        let res = RECEIVE_BUFFER
+            .with_borrow_mut(|buf| Self::recv_inner(local_address, &self.state, buf, &self.socket));
         // TODO: Is this even needed? We ignore wouldblock in Firefox anyways.
         if matches!(res, Err(ref err) if err.kind() == io::ErrorKind::WouldBlock) {
             return Ok(vec![]);
@@ -143,7 +148,6 @@ impl Socket<tokio::net::UdpSocket> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
             socket: tokio::net::UdpSocket::from_std(socket)?,
-            recv_buf: vec![0; RECV_BUF_SIZE],
         })
     }
 
@@ -171,7 +175,10 @@ impl Socket<tokio::net::UdpSocket> {
     /// Receive a UDP datagram.
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         match self.socket.try_io(tokio::io::Interest::READABLE, || {
-            Self::recv_inner(local_address, &self.state, &mut self.recv_buf, &self.socket)
+            // TODO: Can this be cleaner without the nesting?
+            RECEIVE_BUFFER.with_borrow_mut(|buf| {
+                Self::recv_inner(local_address, &self.state, buf, &self.socket)
+            })
         }) {
             Ok(datagrams) => return Ok(datagrams),
             Err(ref err)
