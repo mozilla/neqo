@@ -11,7 +11,6 @@ use std::{
     cell::RefCell,
     io::{self, IoSliceMut},
     net::SocketAddr,
-    os::fd::AsFd,
     slice,
 };
 
@@ -37,18 +36,13 @@ pub struct Socket<S> {
     socket: S,
 }
 
-impl<S: AsFd> Socket<S> {
-    /// Calls [`std::net::UdpSocket::bind`] and instantiates [`quinn_udp::UdpSocketState`].
-    // TODO: Would need AsFile on Windows.
-    pub fn new(socket: S) -> Result<Self, io::Error> {
-        Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
-            socket,
-        })
-    }
-
+// TODO: lifetimes!
+impl<'a, S: 'a> Socket<S>
+where
+    &'a S: Into<quinn_udp::UdpSockRef<'a>>,
+{
     // TODO: Better name than inner.
-    fn send_inner(&self, d: &Datagram) -> io::Result<()> {
+    fn send_inner(&'a self, d: &Datagram) -> io::Result<()> {
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
@@ -58,7 +52,10 @@ impl<S: AsFd> Socket<S> {
             src_ip: None,
         };
 
-        self.state.send((&self.socket).into(), &transmit)?;
+        // TODO:
+        let socket: quinn_udp::UdpSockRef<'_> = (&self.socket).into();
+
+        self.state.send(socket, &transmit)?;
 
         qinfo!(
             "sent {} bytes from {} to {}",
@@ -75,12 +72,12 @@ impl<S: AsFd> Socket<S> {
         local_address: &SocketAddr,
         state: &UdpSocketState,
         recv_buf: &mut [u8],
-        socket: &S,
+        socket: &'a S,
     ) -> Result<Vec<Datagram>, io::Error> {
         let mut meta = RecvMeta::default();
 
         state.recv(
-            (&socket).into(),
+            (socket).into(),
             &mut [IoSliceMut::new(recv_buf)],
             slice::from_mut(&mut meta),
         )?;
@@ -122,7 +119,19 @@ impl<S: AsFd> Socket<S> {
     }
 }
 
-impl Socket<std::os::fd::BorrowedFd<'_>> {
+#[cfg(unix)]
+type BorrowedSocket = std::os::fd::BorrowedFd<'static>;
+#[cfg(windows)]
+type BorrowedSocket = std::os::windows::io::BorrowedSocket<'static>;
+
+impl Socket<BorrowedSocket> {
+    pub fn new(socket: BorrowedSocket) -> Result<Self, io::Error> {
+        Ok(Self {
+            state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            socket,
+        })
+    }
+
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
         self.send_inner(d)
     }
