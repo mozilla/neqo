@@ -14,17 +14,15 @@ use std::{
     slice,
 };
 
-use neqo_common::{qinfo, Datagram, IpTos};
+use neqo_common::{qdebug, Datagram, IpTos};
 
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Socket receive buffer size.
 ///
 /// Allows reading multiple datagrams in a single [`Socket::recv`] call.
-// TODO: Reconsider value for Firefox.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
-// TODO: Cleanest way? We now no longer need to do buffer management in neqo_glue nor Necko.
 std::thread_local! {
     static RECEIVE_BUFFER: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
 }
@@ -36,28 +34,23 @@ pub struct Socket<S> {
     socket: S,
 }
 
-// TODO: lifetimes!
-impl<'a, S: 'a> Socket<S>
-where
-    &'a S: Into<quinn_udp::UdpSockRef<'a>>,
-{
-    // TODO: Better name than inner.
-    fn send_inner(&'a self, d: &Datagram) -> io::Result<()> {
+impl<S> Socket<S> {
+    fn send_inner(
+        state: &UdpSocketState,
+        socket: quinn_udp::UdpSockRef<'_>,
+        d: &Datagram,
+    ) -> io::Result<()> {
         let transmit = Transmit {
             destination: d.destination(),
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
             contents: d,
             segment_size: None,
-            // TODO: ?
             src_ip: None,
         };
 
-        // TODO:
-        let socket: quinn_udp::UdpSockRef<'_> = (&self.socket).into();
+        state.send(socket, &transmit)?;
 
-        self.state.send(socket, &transmit)?;
-
-        qinfo!(
+        qdebug!(
             "sent {} bytes from {} to {}",
             d.len(),
             d.source(),
@@ -67,49 +60,42 @@ where
         Ok(())
     }
 
-    // TODO: Better name than inner.
     fn recv_inner(
         local_address: &SocketAddr,
         state: &UdpSocketState,
-        recv_buf: &mut [u8],
-        socket: &'a S,
+        socket: quinn_udp::UdpSockRef<'_>,
     ) -> Result<Vec<Datagram>, io::Error> {
         let mut meta = RecvMeta::default();
 
-        state.recv(
-            (socket).into(),
-            &mut [IoSliceMut::new(recv_buf)],
-            slice::from_mut(&mut meta),
-        )?;
+        let dgrams =
+            RECEIVE_BUFFER.with_borrow_mut(|recv_buf| -> Result<Vec<Datagram>, io::Error> {
+                state.recv(
+                    socket,
+                    &mut [IoSliceMut::new(recv_buf)],
+                    slice::from_mut(&mut meta),
+                )?;
 
-        if meta.len == 0 {
-            eprintln!("zero length datagram received?");
-            return Ok(vec![]);
-        }
-        if meta.len == recv_buf.len() {
-            eprintln!("Might have received more than {} bytes", recv_buf.len());
-        }
+                Ok(recv_buf[0..meta.len]
+                    .chunks(meta.stride.min(recv_buf.len()))
+                    .map(|d| {
+                        qdebug!(
+                            "received {} bytes from {} to {}",
+                            d.len(),
+                            meta.addr,
+                            local_address,
+                        );
+                        Datagram::new(
+                            meta.addr,
+                            *local_address,
+                            meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+                            None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
+                            d,
+                        )
+                    })
+                    .collect())
+            })?;
 
-        let dgrams: Vec<_> = recv_buf[0..meta.len]
-            .chunks(meta.stride.min(recv_buf.len()))
-            .map(|d| {
-                qinfo!(
-                    "received {} bytes from {} to {}",
-                    d.len(),
-                    meta.addr,
-                    local_address,
-                );
-                Datagram::new(
-                    meta.addr,
-                    *local_address,
-                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                    None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
-                    d,
-                )
-            })
-            .collect();
-
-        qinfo!(
+        qdebug!(
             "received {} datagrams ({:?})",
             dgrams.len(),
             dgrams.iter().map(|d| d.len()).collect::<Vec<_>>(),
@@ -133,18 +119,18 @@ impl Socket<BorrowedSocket> {
     }
 
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        self.send_inner(d)
+        Self::send_inner(&self.state, (&self.socket).into(), d)
     }
 
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        // TODO: Can this be cleaner without the nesting?
-        let res = RECEIVE_BUFFER
-            .with_borrow_mut(|buf| Self::recv_inner(local_address, &self.state, buf, &self.socket));
-        // TODO: Is this even needed? We ignore wouldblock in Firefox anyways.
-        if matches!(res, Err(ref err) if err.kind() == io::ErrorKind::WouldBlock) {
-            return Ok(vec![]);
-        }
-        res
+        Self::recv_inner(local_address, &self.state, (&self.socket).into()).or_else(|e| {
+            // TODO: Handle in Firefox instead?
+            if e.kind() == io::ErrorKind::WouldBlock {
+                Ok(vec![])
+            } else {
+                Err(e)
+            }
+        })
     }
 }
 
@@ -177,30 +163,24 @@ impl Socket<tokio::net::UdpSocket> {
 
     /// Send the UDP datagram.
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        self.socket
-            .try_io(tokio::io::Interest::WRITABLE, || self.send_inner(d))
+        self.socket.try_io(tokio::io::Interest::WRITABLE, || {
+            Self::send_inner(&self.state, (&self.socket).into(), d)
+        })
     }
 
     /// Receive a UDP datagram.
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        match self.socket.try_io(tokio::io::Interest::READABLE, || {
-            // TODO: Can this be cleaner without the nesting?
-            RECEIVE_BUFFER.with_borrow_mut(|buf| {
-                Self::recv_inner(local_address, &self.state, buf, &self.socket)
+        self.socket
+            .try_io(tokio::io::Interest::READABLE, || {
+                Self::recv_inner(local_address, &self.state, (&self.socket).into())
             })
-        }) {
-            Ok(datagrams) => return Ok(datagrams),
-            Err(ref err)
-                if err.kind() == io::ErrorKind::WouldBlock
-                // TODO: Interrupted too?
-                    || err.kind() == io::ErrorKind::Interrupted =>
-            {
-                return Ok(vec![])
-            }
-            Err(err) => {
-                return Err(err);
-            }
-        };
+            .or_else(|e| {
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    Ok(vec![])
+                } else {
+                    Err(e)
+                }
+            })
     }
 }
 
