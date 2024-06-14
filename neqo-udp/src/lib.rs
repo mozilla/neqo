@@ -15,7 +15,6 @@ use std::{
 };
 
 use neqo_common::{qdebug, Datagram, IpTos};
-
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Socket receive buffer size.
