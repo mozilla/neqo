@@ -178,6 +178,7 @@ impl Socket<tokio::net::UdpSocket> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "tokio")]
 mod tests {
     use neqo_common::{IpTosDscp, IpTosEcn};
 
