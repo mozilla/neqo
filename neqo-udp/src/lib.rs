@@ -123,14 +123,7 @@ impl Socket<BorrowedSocket> {
     }
 
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        Self::recv_inner(local_address, &self.state, (&self.socket).into()).or_else(|e| {
-            // TODO: Handle in Firefox instead?
-            if e.kind() == io::ErrorKind::WouldBlock {
-                Ok(vec![])
-            } else {
-                Err(e)
-            }
-        })
+        Self::recv_inner(local_address, &self.state, (&self.socket).into())
     }
 }
 
