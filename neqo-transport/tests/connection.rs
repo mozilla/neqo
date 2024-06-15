@@ -277,3 +277,26 @@ fn overflow_crypto() {
     }
     panic!("Was not able to overflow the crypto buffer");
 }
+
+#[test]
+fn test_handshake_xyber() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    client
+        .set_groups(&[neqo_crypto::TLS_GRP_KEM_XYBER768D00])
+        .ok();
+    client.send_additional_key_shares(0).ok();
+
+    test_fixture::handshake(&mut client, &mut server);
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(*server.state(), State::Confirmed);
+    assert_eq!(
+        client.tls_info().unwrap().key_exchange(),
+        neqo_crypto::TLS_GRP_KEM_XYBER768D00
+    );
+    assert_eq!(
+        server.tls_info().unwrap().key_exchange(),
+        neqo_crypto::TLS_GRP_KEM_XYBER768D00
+    );
+}
