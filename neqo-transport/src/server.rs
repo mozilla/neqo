@@ -669,7 +669,7 @@ impl Server {
                 qtrace!([self], "Send packet: {:?}", d);
                 Output::Datagram(d)
             })
-            .or_else(|| self.wake_at.take().map(|c| Output::Callback(c - now)))
+            .or_else(|| self.wake_at.map(|c| Output::Callback(c - now)))
             .unwrap_or_else(|| {
                 qtrace!([self], "Go dormant");
                 Output::None
