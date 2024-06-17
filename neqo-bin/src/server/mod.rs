@@ -118,6 +118,7 @@ pub struct Args {
 
 #[cfg(feature = "bench")]
 impl Args {
+    #[must_use]
     pub fn new(port: u16) -> Self {
         use std::str::FromStr;
         Self {
