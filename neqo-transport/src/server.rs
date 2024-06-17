@@ -8,7 +8,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fs::OpenOptions,
     mem,
     net::SocketAddr,
@@ -50,21 +50,6 @@ type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 pub struct ServerConnectionState {
     c: Connection,
     active_attempt: Option<AttemptKey>,
-    wake_at: Option<Instant>,
-}
-
-impl ServerConnectionState {
-    fn set_wake_at(&mut self, at: Instant) {
-        self.wake_at = Some(at);
-    }
-
-    fn needs_waking(&self, now: Instant) -> bool {
-        self.wake_at.map_or(false, |t| t <= now)
-    }
-
-    fn woken(&mut self) {
-        self.wake_at = None;
-    }
 }
 
 impl Deref for ServerConnectionState {
@@ -175,10 +160,6 @@ pub struct Server {
     connections: ConnectionTableRef,
     /// The connections that have new events.
     active: HashSet<ActiveConnectionRef>,
-    /// The set of connections that need immediate processing.
-    waiting: VecDeque<StateRef>,
-    /// The latest [`Output::Callback`] returned from [`Server::process`].
-    wake_at: Option<Instant>,
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
@@ -221,11 +202,9 @@ impl Server {
             active_attempts: HashMap::default(),
             connections: Rc::default(),
             active: HashSet::default(),
-            waiting: VecDeque::default(),
             address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
             ech_config: None,
-            wake_at: None,
         })
     }
 
@@ -268,23 +247,9 @@ impl Server {
         c: &StateRef,
         dgram: Option<&Datagram>,
         now: Instant,
-    ) -> Option<Datagram> {
+    ) -> Output {
         qtrace!([self], "Process connection {:?}", c);
         let out = c.borrow_mut().process(dgram, now);
-        match out {
-            Output::Datagram(_) => {
-                qtrace!([self], "Sending packet, added to waiting connections");
-                self.waiting.push_back(Rc::clone(c));
-            }
-            Output::Callback(delay) => {
-                let next = now + delay;
-                c.borrow_mut().set_wake_at(next);
-                if self.wake_at.map_or(true, |c| c > next) {
-                    self.wake_at = Some(next);
-                }
-            }
-            Output::None => {}
-        }
         if c.borrow().has_events() {
             qtrace!([self], "Connection active: {:?}", c);
             self.active.insert(ActiveConnectionRef { c: Rc::clone(c) });
@@ -303,7 +268,7 @@ impl Server {
                 .borrow_mut()
                 .retain(|_, v| !Rc::ptr_eq(v, c));
         }
-        out.dgram()
+        out
     }
 
     fn connection(&self, cid: ConnectionIdRef) -> Option<StateRef> {
@@ -315,14 +280,14 @@ impl Server {
         initial: InitialDetails,
         dgram: &Datagram,
         now: Instant,
-    ) -> Option<Datagram> {
+    ) -> Output {
         qdebug!([self], "Handle initial");
         let res = self
             .address_validation
             .borrow()
             .validate(&initial.token, dgram.source(), now);
         match res {
-            AddressValidationResult::Invalid => None,
+            AddressValidationResult::Invalid => Output::None,
             AddressValidationResult::Pass => self.connection_attempt(initial, dgram, None, now),
             AddressValidationResult::ValidRetry(orig_dcid) => {
                 self.connection_attempt(initial, dgram, Some(orig_dcid), now)
@@ -337,7 +302,7 @@ impl Server {
                 );
                 let Ok(token) = res else {
                     qerror!([self], "unable to generate token, dropping packet");
-                    return None;
+                    return Output::None;
                 };
                 if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
                     let packet = PacketBuilder::retry(
@@ -355,14 +320,14 @@ impl Server {
                             dgram.ttl(),
                             p,
                         );
-                        Some(retry)
+                        Output::Datagram(retry)
                     } else {
                         qerror!([self], "unable to encode retry, dropping packet");
-                        None
+                        Output::None
                     }
                 } else {
                     qerror!([self], "no connection ID for retry, dropping packet");
-                    None
+                    Output::None
                 }
             }
         }
@@ -374,7 +339,7 @@ impl Server {
         dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) -> Option<Datagram> {
+    ) -> Output {
         let attempt_key = AttemptKey {
             remote_address: dgram.source(),
             odcid: orig_dcid.as_ref().unwrap_or(&initial.dst_cid).clone(),
@@ -475,7 +440,7 @@ impl Server {
         dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) -> Option<Datagram> {
+    ) -> Output {
         qinfo!([self], "Accept connection {:?}", attempt_key);
         // The internal connection ID manager that we use is not used directly.
         // Instead, wrap it so that we can save connection IDs.
@@ -501,7 +466,6 @@ impl Server {
                 self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
                 let c = Rc::new(RefCell::new(ServerConnectionState {
                     c,
-                    wake_at: None,
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
@@ -518,7 +482,7 @@ impl Server {
                         initial.version.wire_version(),
                     );
                 }
-                None
+                Output::None
             }
         }
     }
@@ -526,12 +490,7 @@ impl Server {
     /// Handle 0-RTT packets that were sent with the client's choice of connection ID.
     /// Most 0-RTT will arrive this way.  A client can usually send 1-RTT after it
     /// receives a connection ID from the server.
-    fn handle_0rtt(
-        &mut self,
-        dgram: &Datagram,
-        dcid: ConnectionId,
-        now: Instant,
-    ) -> Option<Datagram> {
+    fn handle_0rtt(&mut self, dgram: &Datagram, dcid: ConnectionId, now: Instant) -> Output {
         let attempt_key = AttemptKey {
             remote_address: dgram.source(),
             odcid: dcid,
@@ -546,11 +505,11 @@ impl Server {
             self.process_connection(&c, Some(dgram), now)
         } else {
             qdebug!([self], "Dropping 0-RTT for unknown connection");
-            None
+            Output::None
         }
     }
 
-    fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Option<Datagram> {
+    fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Output {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -558,7 +517,7 @@ impl Server {
         let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!([self], "Discarding {:?}", dgram);
-            return None;
+            return Output::None;
         };
 
         // Finding an existing connection. Should be the most common case.
@@ -569,7 +528,7 @@ impl Server {
         if packet.packet_type() == PacketType::Short {
             // TODO send a stateless reset here.
             qtrace!([self], "Short header packet for an unknown connection");
-            return None;
+            return Output::None;
         }
 
         if packet.packet_type() == PacketType::OtherVersion
@@ -582,7 +541,7 @@ impl Server {
         {
             if dgram.len() < MIN_INITIAL_PACKET_SIZE {
                 qdebug!([self], "Unsupported version: too short");
-                return None;
+                return Output::None;
             }
 
             qdebug!([self], "Unsupported version: {:x}", packet.wire_version());
@@ -599,7 +558,7 @@ impl Server {
                 packet.wire_version(),
             );
 
-            return Some(Datagram::new(
+            return Output::Datagram(Datagram::new(
                 dgram.destination(),
                 dgram.source(),
                 dgram.tos(),
@@ -612,7 +571,7 @@ impl Server {
             PacketType::Initial => {
                 if dgram.len() < MIN_INITIAL_PACKET_SIZE {
                     qdebug!([self], "Drop initial: too short");
-                    return None;
+                    return Output::None;
                 }
                 // Copy values from `packet` because they are currently still borrowing from
                 // `dgram`.
@@ -626,54 +585,39 @@ impl Server {
             PacketType::OtherVersion => unreachable!(),
             _ => {
                 qtrace!([self], "Not an initial packet");
-                None
+                Output::None
             }
         }
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
-        qtrace!([self], "No packet to send, look at waiting connections");
-        while let Some(c) = self.waiting.pop_front() {
-            if let Some(d) = self.process_connection(&c, None, now) {
-                return Some(d);
+    fn process_next_output(&mut self, now: Instant) -> Output {
+        // TODO: Remove allocation.
+        let connections: Vec<_> = self.connections.borrow().values().cloned().collect();
+
+        let mut callback = None;
+
+        for connection in connections {
+            match self.process_connection(&connection, None, now) {
+                Output::None => {}
+                d @ Output::Datagram(_) => return d,
+                // TODO: Refactor
+                Output::Callback(new_callback) => match callback {
+                    Some(previous_callback) if previous_callback < new_callback => {}
+                    _ => callback = Some(new_callback),
+                },
             }
         }
 
-        qtrace!([self], "No packet to send still, check wake up times");
-        loop {
-            let connection = self
-                .connections
-                .borrow()
-                .values()
-                .find(|c| c.borrow().needs_waking(now))
-                .cloned()?;
-            let datagram = self.process_connection(&connection, None, now);
-            connection.borrow_mut().woken();
-            if datagram.is_some() {
-                return datagram;
-            }
-        }
+        callback.map(Output::Callback).unwrap_or(Output::None)
     }
 
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        if self.wake_at.map_or(false, |c| c <= now) {
-            self.wake_at = None;
-        }
-
         dgram
-            .and_then(|d| self.process_input(d, now))
+            .map(|d| self.process_input(d, now))
+            .unwrap_or(Output::None)
             .or_else(|| self.process_next_output(now))
-            .map(|d| {
-                qtrace!([self], "Send packet: {:?}", d);
-                Output::Datagram(d)
-            })
-            .or_else(|| self.wake_at.take().map(|c| Output::Callback(c - now)))
-            .unwrap_or_else(|| {
-                qtrace!([self], "Go dormant");
-                Output::None
-            })
     }
 
     /// This lists the connections that have received new events
@@ -689,8 +633,8 @@ impl Server {
         !self.active.is_empty()
     }
 
-    pub fn add_to_waiting(&mut self, c: &ActiveConnectionRef) {
-        self.waiting.push_back(c.connection());
+    pub fn add_to_waiting(&mut self, _c: &ActiveConnectionRef) {
+        // TODO: We always iterate all now.
     }
 }
 
