@@ -43,6 +43,8 @@ runs:
         fi
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        find ~/.pki || true
+        find /root/.pki || true
 
     # Ideally, we'd use this. But things are sufficiently flaky that we're better off
     # trying both hg and git. Leaving this here in case we want to re-try in the future.
