@@ -117,12 +117,12 @@ pub struct Args {
 }
 
 #[cfg(feature = "bench")]
-impl Default for Args {
-    fn default() -> Self {
+impl Args {
+    pub fn new(port: u16) -> Self {
         use std::str::FromStr;
         Self {
             shared: crate::SharedArgs::default(),
-            hosts: vec!["[::]:12345".to_string()],
+            hosts: vec![format!("[::]:{port}")],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
             key: "key".to_string(),
             retry: false,

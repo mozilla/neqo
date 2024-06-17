@@ -174,13 +174,13 @@ impl Args {
     #[must_use]
     #[cfg(feature = "bench")]
     #[allow(clippy::missing_panics_doc)]
-    pub fn new(requests: &[u64]) -> Self {
+    pub fn new(port: u16, requests: &[u64]) -> Self {
         use std::str::FromStr;
         Self {
             shared: crate::SharedArgs::default(),
             urls: requests
                 .iter()
-                .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())
+                .map(|r| Url::from_str(&format!("http://[::1]:{port}/{r}")).unwrap())
                 .collect(),
             method: "GET".into(),
             header: vec![],
