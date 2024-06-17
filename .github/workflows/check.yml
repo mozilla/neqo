@@ -104,7 +104,6 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
-          ldd target/${{ matrix.type}}/neqo-client
 
       - name: Run tests and determine coverage
         run: |
