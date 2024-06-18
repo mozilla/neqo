@@ -837,6 +837,9 @@ impl LossRecovery {
     /// we have to clone the `SentPacket` instance.
     fn maybe_fire_pto(&mut self, primary_path: &PathRef, now: Instant, lost: &mut Vec<SentPacket>) {
         let path = primary_path.borrow();
+        if !path.is_valid() {
+            return;
+        }
         let rtt = path.rtt();
         let mut pto_space = None;
         // The spaces in which we will allow probing.
