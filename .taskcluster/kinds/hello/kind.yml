@@ -1,0 +1,17 @@
+---
+transforms:
+  - neqo_taskgraph.transforms.hello:transforms
+
+task-defaults:
+  worker-type: t-linux-large
+  worker:
+    docker-image: {in-tree: linux}
+    max-run-time: 1800
+
+tasks:
+  world:
+    noun: world
+    run:
+      using: run-task
+      command: >-
+          echo "Hello $NOUN!"
