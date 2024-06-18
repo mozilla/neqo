@@ -54,7 +54,7 @@ impl HttpServer {
         )
         .expect("We cannot make a server!");
 
-        server.set_ciphers(&args.get_ciphers());
+        server.set_ciphers(args.get_ciphers());
         server.set_qlog_dir(args.shared.qlog_dir.clone());
         if args.retry {
             server.set_validation(ValidateAddress::Always);
