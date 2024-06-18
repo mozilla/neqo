@@ -200,8 +200,9 @@ are local or remote:
     - will be canceled if is an unknown stream type or
     - the connection will fail if it is unallowed stream type (receiveing HTTP request on the
       client-side).
-    The output is handled in `handle_new_stream`, for control,  qpack streams and partially
-    `WebTransport` streams, otherwise the output is handled by `Http3Client` and `Http3ServerHandler`.
+
+The output is handled in `handle_new_stream`, for control,  qpack streams and partially
+`WebTransport` streams, otherwise the output is handled by `Http3Client` and `Http3ServerHandler`.
 
 
 ### Receiving data
@@ -507,6 +508,7 @@ impl Http3Connection {
     /// 1) a `Push(_)`, `Htttp` or `WebTransportStream(_)` stream
     /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway` must
     ///    be handled by `Http3Client`/`Server`.
+    ///
     /// The function returns `ReceiveOutput`.
     pub fn handle_stream_readable(
         &mut self,
@@ -780,6 +782,7 @@ impl Http3Connection {
     ///  - an error occurred or
     ///  - the stream is done, i.e. the second value in `output` tuple is true if the stream is done
     ///    and can be removed from the `recv_streams`
+    ///
     /// How it is handling `output`:
     ///  - if the stream is done, it removes the stream from `recv_streams`
     ///  - if the stream is not done and there is no error, return `output` and the caller will

@@ -278,6 +278,7 @@ impl LiteralReader {
     ///  1) `NeedMoreData` if the reader needs more data,
     ///  2) `IntegerOverflow`
     ///  3) Any `ReadByte`'s error
+    ///
     /// It returns value if reading the literal is done or None if it needs more data.
     ///
     /// # Panics
