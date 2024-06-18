@@ -913,7 +913,7 @@ fn ech_retry() {
 
     let mut client = default_client();
     client
-        .client_enable_ech(&damaged_ech_config(server.ech_config()))
+        .client_enable_ech(damaged_ech_config(server.ech_config()))
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
@@ -968,7 +968,7 @@ fn ech_retry_fallback_rejected() {
 
     let mut client = default_client();
     client
-        .client_enable_ech(&damaged_ech_config(server.ech_config()))
+        .client_enable_ech(damaged_ech_config(server.ech_config()))
         .unwrap();
 
     let dgram = client.process_output(now()).dgram();
