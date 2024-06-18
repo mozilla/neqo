@@ -239,13 +239,13 @@ tasks:
                                 in:
                                     $if: 'tasks_for in ["action", "pr-action"]'
                                     then: >
-                                        cd /builds/worker/checkouts/src &&
+                                        cd /builds/worker/checkouts/src/neqo &&
                                         ln -s /builds/worker/artifacts artifacts &&
                                         pip3 install -r requirements/base.txt &&
                                         ~/.local/bin/taskgraph action-callback
                                         --root .taskcluster
                                     else: >
-                                        cd /builds/worker/checkouts/src &&
+                                        cd /builds/worker/checkouts/src/neqo &&
                                         ln -s /builds/worker/artifacts artifacts &&
                                         ~/.local/bin/taskgraph decision
                                         --root .taskcluster
