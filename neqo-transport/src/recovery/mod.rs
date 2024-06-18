@@ -735,7 +735,7 @@ impl LossRecovery {
 
     /// Calculate when the next timeout is likely to be.  This is the earlier of the loss timer
     /// and the PTO timer; either or both might be disabled, so this can return `None`.
-    pub fn next_timeout(&mut self, rtt: &RttEstimate) -> Option<Instant> {
+    pub fn next_timeout(&self, rtt: &RttEstimate) -> Option<Instant> {
         let loss_time = self.earliest_loss_time(rtt);
         let pto_time = self.earliest_pto(rtt);
         qtrace!(

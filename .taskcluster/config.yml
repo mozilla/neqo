@@ -1,0 +1,27 @@
+---
+trust-domain: "mozilla"
+task-priority: low
+
+taskgraph:
+  cached-task-prefix: "mozilla.v2.neqo"
+  repositories:
+    neqo:
+      name: "neqo"
+
+workers:
+  aliases:
+    b-linux:
+      provisioner: '{trust-domain}-{level}'
+      implementation: docker-worker
+      os: linux
+      worker-type: '{alias}-gcp'
+    images:
+      provisioner: '{trust-domain}-{level}'
+      implementation: docker-worker
+      os: linux
+      worker-type: '{alias}-gcp'
+    t-linux-large:
+      provisioner: '{trust-domain}-t'
+      implementation: docker-worker
+      os: linux
+      worker-type: '{alias}-gcp'
