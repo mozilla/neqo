@@ -577,8 +577,8 @@ fn loss_time_past_largest_acked() {
     // be much smaller than an RTT and so the server shouldn't see
     // time go backwards.
     let s_pto = server.process(None, now).callback();
-    assert_ne!(s_pto, Duration::from_secs(0));
-    assert!(s_pto < RTT);
+    // We are blocked by the amplification limit now.
+    assert_eq!(s_pto, DEFAULT_RTT * 3);
     let s_hs2 = server.process(None, now + s_pto).dgram();
     assert!(s_hs2.is_some());
 
