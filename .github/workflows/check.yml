@@ -49,7 +49,6 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo sed -i'' 's|^URIs:.*|URIs: http://ports.ubuntu.com/ubuntu-ports/|g' /etc/apt/sources.list.d/ubuntu.sources
           {
             echo 'Types: deb'
             echo 'URIs: http://ports.ubuntu.com/ubuntu-ports/'
@@ -61,7 +60,8 @@ jobs:
             echo 'Suites: noble-security'
             echo 'Components: main restricted universe multiverse'
             echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
-          } > /etc/apt/sources.list.d/ubuntu.sources
+          } > ubuntu.sources
+          sudo mv ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
