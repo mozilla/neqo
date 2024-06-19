@@ -49,10 +49,9 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          cat /etc/apt/sources.list.d/ubuntu.sources
-          sudo sed -i'' 's/azure\.//g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo sed -i'' 's/azure\.archive/ports/g' /etc/apt/sources.list.d/ubuntu.sources
+          tail -n 10 /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
-          cat /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
