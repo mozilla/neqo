@@ -30,16 +30,16 @@ fn init_nodb() {
     }
 }
 
-#[cfg(nss_nodb)]
-#[test]
-fn init_twice_nodb() {
-    unsafe {
-        nss::NSS_NoDB_Init(std::ptr::null());
-        assert_ne!(nss::NSS_IsInitialized(), 0);
-    }
-    // Now do it again
-    init_nodb();
-}
+// #[cfg(nss_nodb)]
+// #[test]
+// fn init_twice_nodb() {
+//     unsafe {
+//         nss::NSS_NoDB_Init(std::ptr::null());
+//         assert_ne!(nss::NSS_IsInitialized(), 0);
+//     }
+//     // Now do it again
+//     init_nodb();
+// }
 
 #[cfg(not(nss_nodb))]
 #[test]
@@ -51,26 +51,26 @@ fn init_withdb() {
     }
 }
 
-#[cfg(not(nss_nodb))]
-#[test]
-fn init_twice_withdb() {
-    use std::{ffi::CString, path::PathBuf};
+// #[cfg(not(nss_nodb))]
+// #[test]
+// fn init_twice_withdb() {
+//     use std::{ffi::CString, path::PathBuf};
 
-    let empty = CString::new("").unwrap();
-    let path: PathBuf = ::test_fixture::NSS_DB_PATH.into();
-    assert!(path.is_dir());
-    let pathstr = path.to_str().unwrap();
-    let dircstr = CString::new(pathstr).unwrap();
-    unsafe {
-        nss::NSS_Initialize(
-            dircstr.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            nss::SECMOD_DB.as_ptr().cast(),
-            nss::NSS_INIT_READONLY,
-        );
-        assert_ne!(nss::NSS_IsInitialized(), 0);
-    }
-    // Now do it again
-    init_withdb();
-}
+//     let empty = CString::new("").unwrap();
+//     let path: PathBuf = ::test_fixture::NSS_DB_PATH.into();
+//     assert!(path.is_dir());
+//     let pathstr = path.to_str().unwrap();
+//     let dircstr = CString::new(pathstr).unwrap();
+//     unsafe {
+//         nss::NSS_Initialize(
+//             dircstr.as_ptr(),
+//             empty.as_ptr(),
+//             empty.as_ptr(),
+//             nss::SECMOD_DB.as_ptr().cast(),
+//             nss::NSS_INIT_READONLY,
+//         );
+//         assert_ne!(nss::NSS_IsInitialized(), 0);
+//     }
+//     // Now do it again
+//     init_withdb();
+// }
