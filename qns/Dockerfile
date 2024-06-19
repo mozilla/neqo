@@ -1,5 +1,7 @@
 FROM martenseemann/quic-network-simulator-endpoint@sha256:91b21d42e23023e08c5ed63c1c08ec24d058c4b30edd52aa3bd74bee87096a5b AS buildimage
 
+RUN apt download --print-uris libnss3-dev
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git coreutils build-essential libclang-dev lld gyp ninja-build zlib1g-dev python \
     && apt-get autoremove -y && apt-get clean -y \
@@ -63,6 +65,8 @@ RUN set -eux; \
     cd /neqo; \
     RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo build --release \
     --bin neqo-client --bin neqo-server
+
+RUN cd /neqo && cargo test
 
 # Copy only binaries to the final image to keep it small.
 

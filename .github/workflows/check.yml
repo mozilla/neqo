@@ -49,7 +49,7 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt apt download --print-uris  libnss3-dev
+          sudo apt download --print-uris libnss3-dev
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
