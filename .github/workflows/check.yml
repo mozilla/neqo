@@ -63,9 +63,9 @@ jobs:
           # } > ubuntu.sources
           # sudo mv ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
           # sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
+          sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
           ls -l /var/cache/apt/archives
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          # echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Install dependencies (MacOS)
         if: runner.os == 'MacOS'
