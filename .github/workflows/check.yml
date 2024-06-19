@@ -49,7 +49,7 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo sed -i'' 's/azure\.archive/ports/g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo sed -i'' 's|^URIs:.*|URIs: http://ports.ubuntu.com/ubuntu-ports/|g' /etc/apt/sources.list.d/ubuntu.sources
           tail -n 10 /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
