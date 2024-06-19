@@ -49,21 +49,22 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          {
-            echo 'Types: deb'
-            echo 'URIs: http://ports.ubuntu.com/ubuntu-ports/'
-            echo 'Suites: noble noble-updates noble-backports'
-            echo 'Components: main restricted universe multiverse'
-            echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
-            echo 'Types: deb'
-            echo 'URIs: http://ports.ubuntu.com/ubuntu-ports/'
-            echo 'Suites: noble-security'
-            echo 'Components: main restricted universe multiverse'
-            echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
-          } > ubuntu.sources
-          sudo mv ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
-          sudo apt-get update
+          # {
+          #   echo 'Types: deb'
+          #   echo 'URIs: http://ports.ubuntu.com/ubuntu-ports/'
+          #   echo 'Suites: noble noble-updates noble-backports'
+          #   echo 'Components: main restricted universe multiverse'
+          #   echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
+          #   echo 'Types: deb'
+          #   echo 'URIs: http://ports.ubuntu.com/ubuntu-ports/'
+          #   echo 'Suites: noble-security'
+          #   echo 'Components: main restricted universe multiverse'
+          #   echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
+          # } > ubuntu.sources
+          # sudo mv ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
+          # sudo apt-get update
           sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
+          ls -l /var/cache/apt/archives
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
 
       - name: Install dependencies (MacOS)
