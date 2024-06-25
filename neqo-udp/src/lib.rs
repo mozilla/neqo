@@ -14,7 +14,7 @@ use std::{
     slice,
 };
 
-use neqo_common::{qdebug, Datagram, IpTos};
+use neqo_common::{qtrace, Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Socket receive buffer size.
@@ -47,7 +47,7 @@ impl<S> Socket<S> {
 
         state.send(socket, &transmit)?;
 
-        qdebug!(
+        qtrace!(
             "sent {} bytes from {} to {}",
             d.len(),
             d.source(),
@@ -75,7 +75,7 @@ impl<S> Socket<S> {
                 Ok(recv_buf[0..meta.len]
                     .chunks(meta.stride.min(recv_buf.len()))
                     .map(|d| {
-                        qdebug!(
+                        qtrace!(
                             "received {} bytes from {} to {}",
                             d.len(),
                             meta.addr,
@@ -92,7 +92,7 @@ impl<S> Socket<S> {
                     .collect())
             })?;
 
-        qdebug!(
+        qtrace!(
             "received {} datagrams ({:?})",
             dgrams.len(),
             dgrams.iter().map(|d| d.len()).collect::<Vec<_>>(),
