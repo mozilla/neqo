@@ -28,9 +28,7 @@ std::thread_local! {
 
 pub struct Socket<S> {
     state: UdpSocketState,
-    #[allow(unknown_lints)] // available with Rust v1.75
-    #[allow(clippy::struct_field_names)]
-    socket: S,
+    inner: S,
 }
 
 impl<S> Socket<S> {
@@ -113,16 +111,16 @@ impl Socket<BorrowedSocket> {
     pub fn new(socket: BorrowedSocket) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
-            socket,
+            inner: socket,
         })
     }
 
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        Self::send_inner(&self.state, (&self.socket).into(), d)
+        Self::send_inner(&self.state, (&self.inner).into(), d)
     }
 
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        Self::recv_inner(local_address, &self.state, (&self.socket).into())
+        Self::recv_inner(local_address, &self.state, (&self.inner).into())
     }
 }
 
@@ -134,37 +132,37 @@ impl Socket<tokio::net::UdpSocket> {
 
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
-            socket: tokio::net::UdpSocket::from_std(socket)?,
+            inner: tokio::net::UdpSocket::from_std(socket)?,
         })
     }
 
     /// See [`tokio::net::UdpSocket::local_addr`].
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.socket.local_addr()
+        self.inner.local_addr()
     }
 
     /// See [`tokio::net::UdpSocket::writable`].
     pub async fn writable(&self) -> Result<(), io::Error> {
-        self.socket.writable().await
+        self.inner.writable().await
     }
 
     /// See [`tokio::net::UdpSocket::readable`].
     pub async fn readable(&self) -> Result<(), io::Error> {
-        self.socket.readable().await
+        self.inner.readable().await
     }
 
     /// Send the UDP datagram.
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        self.socket.try_io(tokio::io::Interest::WRITABLE, || {
-            Self::send_inner(&self.state, (&self.socket).into(), d)
+        self.inner.try_io(tokio::io::Interest::WRITABLE, || {
+            Self::send_inner(&self.state, (&self.inner).into(), d)
         })
     }
 
     /// Receive a UDP datagram.
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        self.socket
+        self.inner
             .try_io(tokio::io::Interest::READABLE, || {
-                Self::recv_inner(local_address, &self.state, (&self.socket).into())
+                Self::recv_inner(local_address, &self.state, (&self.inner).into())
             })
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::WouldBlock {
@@ -243,8 +241,8 @@ mod tests {
             src_ip: None,
         };
         sender.writable().await?;
-        sender.socket.try_io(tokio::io::Interest::WRITABLE, || {
-            sender.state.send((&sender.socket).into(), &transmit)
+        sender.inner.try_io(tokio::io::Interest::WRITABLE, || {
+            sender.state.send((&sender.inner).into(), &transmit)
         })?;
 
         // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
