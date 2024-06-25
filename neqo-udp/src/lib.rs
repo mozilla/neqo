@@ -26,6 +26,7 @@ std::thread_local! {
     static RECV_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
 }
 
+/// A UDP socket.
 pub struct Socket<S> {
     state: UdpSocketState,
     inner: S,
@@ -101,12 +102,15 @@ impl<S> Socket<S> {
     }
 }
 
+/// A borrowed socket, i.e. a socket managed externally.
 #[cfg(unix)]
 type BorrowedSocket = std::os::fd::BorrowedFd<'static>;
+/// A borrowed socket, i.e. a socket managed externally.
 #[cfg(windows)]
 type BorrowedSocket = std::os::windows::io::BorrowedSocket<'static>;
 
 impl Socket<BorrowedSocket> {
+    /// Create a new [`Socket`] given a [`BorrowedSocket`] managed externally.
     pub fn new(socket: BorrowedSocket) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
@@ -114,10 +118,13 @@ impl Socket<BorrowedSocket> {
         })
     }
 
+    /// Send a [`Datagram`] on the given [`Socket`].
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
         Self::send_inner(&self.state, (&self.inner).into(), d)
     }
 
+    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
+    /// the provided local address.
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         Self::recv_inner(local_address, &self.state, (&self.inner).into())
     }
@@ -125,7 +132,7 @@ impl Socket<BorrowedSocket> {
 
 #[cfg(feature = "tokio")]
 impl Socket<tokio::net::UdpSocket> {
-    /// Calls [`std::net::UdpSocket::bind`] and instantiates [`quinn_udp::UdpSocketState`].
+    /// Create a new [`Socket`] bound to the provided address, not managed externally.
     pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
         let socket = std::net::UdpSocket::bind(addr)?;
 
@@ -150,14 +157,15 @@ impl Socket<tokio::net::UdpSocket> {
         self.inner.readable().await
     }
 
-    /// Send the UDP datagram.
+    /// Send a [`Datagram`] on the given [`Socket`].
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             Self::send_inner(&self.state, (&self.inner).into(), d)
         })
     }
 
-    /// Receive a UDP datagram.
+    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
+    /// the provided local address.
     pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
