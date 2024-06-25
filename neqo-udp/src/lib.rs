@@ -23,7 +23,7 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
 std::thread_local! {
-    static RECEIVE_BUFFER: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
+    static RECV_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
 }
 
 pub struct Socket<S> {
@@ -62,35 +62,34 @@ impl<S> Socket<S> {
         state: &UdpSocketState,
         socket: quinn_udp::UdpSockRef<'_>,
     ) -> Result<Vec<Datagram>, io::Error> {
-        let mut meta = RecvMeta::default();
+        let dgrams = RECV_BUF.with_borrow_mut(|recv_buf| -> Result<Vec<Datagram>, io::Error> {
+            let mut meta = RecvMeta::default();
 
-        let dgrams =
-            RECEIVE_BUFFER.with_borrow_mut(|recv_buf| -> Result<Vec<Datagram>, io::Error> {
-                state.recv(
-                    socket,
-                    &mut [IoSliceMut::new(recv_buf)],
-                    slice::from_mut(&mut meta),
-                )?;
+            state.recv(
+                socket,
+                &mut [IoSliceMut::new(recv_buf)],
+                slice::from_mut(&mut meta),
+            )?;
 
-                Ok(recv_buf[0..meta.len]
-                    .chunks(meta.stride.min(recv_buf.len()))
-                    .map(|d| {
-                        qtrace!(
-                            "received {} bytes from {} to {}",
-                            d.len(),
-                            meta.addr,
-                            local_address,
-                        );
-                        Datagram::new(
-                            meta.addr,
-                            *local_address,
-                            meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                            None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
-                            d,
-                        )
-                    })
-                    .collect())
-            })?;
+            Ok(recv_buf[0..meta.len]
+                .chunks(meta.stride.min(recv_buf.len()))
+                .map(|d| {
+                    qtrace!(
+                        "received {} bytes from {} to {}",
+                        d.len(),
+                        meta.addr,
+                        local_address,
+                    );
+                    Datagram::new(
+                        meta.addr,
+                        *local_address,
+                        meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+                        None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
+                        d,
+                    )
+                })
+                .collect())
+        })?;
 
         qtrace!(
             "received {} datagrams ({:?})",
