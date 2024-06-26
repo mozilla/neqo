@@ -8,9 +8,8 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::OpenOptions,
-    mem,
     net::SocketAddr,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -158,8 +157,6 @@ pub struct Server {
     active_attempts: HashMap<AttemptKey, StateRef>,
     /// All connections, keyed by `ConnectionId`.
     connections: ConnectionTableRef,
-    /// The connections that have new events.
-    active: HashSet<ActiveConnectionRef>,
     /// Address validation logic, which determines whether we send a Retry.
     address_validation: Rc<RefCell<AddressValidation>>,
     /// Directory to create qlog traces in
@@ -201,7 +198,6 @@ impl Server {
             conn_params,
             active_attempts: HashMap::default(),
             connections: Rc::default(),
-            active: HashSet::default(),
             address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
             ech_config: None,
@@ -250,10 +246,6 @@ impl Server {
     ) -> Output {
         qtrace!([self], "Process connection {:?}", c);
         let out = c.borrow_mut().process(dgram, now);
-        if c.borrow().has_events() {
-            qtrace!([self], "Connection active: {:?}", c);
-            self.active.insert(ActiveConnectionRef { c: Rc::clone(c) });
-        }
 
         if *c.borrow().state() > State::Handshaking {
             // Remove any active connection attempt now that this is no longer handshaking.
@@ -622,15 +614,28 @@ impl Server {
 
     /// This lists the connections that have received new events
     /// as a result of calling `process()`.
+    // TODO: Why is this not an Iterator?
     pub fn active_connections(&mut self) -> Vec<ActiveConnectionRef> {
-        mem::take(&mut self.active).into_iter().collect()
+        self.connections
+            .borrow()
+            .values()
+            .filter_map(|c| {
+                c.borrow()
+                    .has_events()
+                    .then(|| ActiveConnectionRef { c: Rc::clone(c) })
+            })
+            .collect()
     }
 
     /// Whether any connections have received new events as a result of calling
     /// `process()`.
+    // TODO: Improve?
     #[must_use]
     pub fn has_active_connections(&self) -> bool {
-        !self.active.is_empty()
+        self.connections
+            .borrow()
+            .values()
+            .any(|c| c.borrow().has_events())
     }
 
     pub fn add_to_waiting(&mut self, _c: &ActiveConnectionRef) {
