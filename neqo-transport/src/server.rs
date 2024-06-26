@@ -151,10 +151,6 @@ pub struct Server {
     cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
     /// Connection parameters.
     conn_params: ConnectionParameters,
-    /// Active connection attempts, keyed by `AttemptKey`.  Initial packets with
-    /// the same key are routed to the connection that was first accepted.
-    /// This is cleared out when the connection is closed or established.
-    active_attempts: HashMap<AttemptKey, StateRef>,
     /// All connections, keyed by `ConnectionId`.
     connections: ConnectionTableRef,
     /// Address validation logic, which determines whether we send a Retry.
@@ -196,7 +192,6 @@ impl Server {
             zero_rtt_checker: ServerZeroRttChecker::new(zero_rtt_checker),
             cid_generator,
             conn_params,
-            active_attempts: HashMap::default(),
             connections: Rc::default(),
             address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
@@ -249,9 +244,7 @@ impl Server {
 
         if *c.borrow().state() > State::Handshaking {
             // Remove any active connection attempt now that this is no longer handshaking.
-            if let Some(k) = c.borrow_mut().active_attempt.take() {
-                self.active_attempts.remove(&k);
-            }
+            c.borrow_mut().active_attempt.take();
         }
 
         if matches!(c.borrow().state(), State::Closed(_)) {
@@ -336,13 +329,15 @@ impl Server {
             remote_address: dgram.source(),
             odcid: orig_dcid.as_ref().unwrap_or(&initial.dst_cid).clone(),
         };
-        if let Some(c) = self.active_attempts.get(&attempt_key) {
+        let connection = self.connections.borrow().values().find_map(|c| {
+            (c.borrow().active_attempt.as_ref() == Some(&attempt_key)).then(|| Rc::clone(c))
+        });
+        if let Some(c) = connection {
             qdebug!(
                 [self],
                 "Handle Initial for existing connection attempt {:?}",
                 attempt_key
             );
-            let c = Rc::clone(c);
             self.process_connection(&c, Some(dgram), now)
         } else {
             self.accept_connection(attempt_key, initial, dgram, orig_dcid, now)
@@ -461,8 +456,6 @@ impl Server {
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
-                let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
-                debug_assert!(previous_attempt.is_none());
                 self.process_connection(&c, Some(dgram), now)
             }
             Err(e) => {
@@ -487,13 +480,15 @@ impl Server {
             remote_address: dgram.source(),
             odcid: dcid,
         };
-        if let Some(c) = self.active_attempts.get(&attempt_key) {
+        let connection = self.connections.borrow().values().find_map(|c| {
+            (c.borrow().active_attempt.as_ref() == Some(&attempt_key)).then(|| Rc::clone(c))
+        });
+        if let Some(c) = connection {
             qdebug!(
                 [self],
                 "Handle 0-RTT for existing connection attempt {:?}",
                 attempt_key
             );
-            let c = Rc::clone(c);
             self.process_connection(&c, Some(dgram), now)
         } else {
             qdebug!([self], "Dropping 0-RTT for unknown connection");
