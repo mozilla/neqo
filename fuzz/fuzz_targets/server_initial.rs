@@ -63,13 +63,7 @@ fuzz_target!(|data: &[u8]| {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let fuzzed_si = Datagram::new(
-        si.source(),
-        si.destination(),
-        si.tos(),
-        si.ttl(),
-        ciphertext,
-    );
+    let fuzzed_si = Datagram::new(si.source(), si.destination(), si.tos(), ciphertext);
     let _response = client.process(Some(&fuzzed_si), now());
 });
 

@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: |
       github.event.workflow_run.event == 'pull_request' &&
-      (github.event.workflow_run.name != 'CI' || github.event.workflow_run.conclusion == 'success' )
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       - uses: ./.github/actions/pr-comment
