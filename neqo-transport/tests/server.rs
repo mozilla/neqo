@@ -261,7 +261,7 @@ fn drop_short_initial() {
 }
 
 /// Verify that the server can read 0-RTT properly.  A more robust server would buffer
-/// 0-RTT before the handshake begins and let 0-RTT arrive for a short periiod after
+/// 0-RTT before the handshake begins and let 0-RTT arrive for a short period after
 /// the handshake completes, but ours is for testing so it only allows 0-RTT while
 /// the handshake is running.
 #[test]

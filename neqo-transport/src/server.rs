@@ -8,7 +8,7 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::OpenOptions,
     net::SocketAddr,
     ops::{Deref, DerefMut},
@@ -616,7 +616,8 @@ impl Server {
     /// as a result of calling `process()`.
     // TODO: Why is this not an Iterator?
     pub fn active_connections(&mut self) -> Vec<ActiveConnectionRef> {
-        self.connections
+        let conns: HashSet<_> = self
+            .connections
             .borrow()
             .values()
             .filter_map(|c| {
@@ -624,7 +625,10 @@ impl Server {
                     .has_events()
                     .then(|| ActiveConnectionRef { c: Rc::clone(c) })
             })
-            .collect()
+            .collect();
+
+        // TODO: Do better deduplication.
+        conns.into_iter().collect()
     }
 
     /// Whether any connections have received new events as a result of calling
