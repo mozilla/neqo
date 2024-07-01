@@ -143,7 +143,7 @@ impl Output {
         F: FnOnce() -> Self,
     {
         match self {
-            x @ Self::Datagram(_) | x @ Self::Callback(_) => x,
+            x @ (Self::Datagram(_) | Self::Callback(_)) => x,
             Self::None => f(),
         }
     }

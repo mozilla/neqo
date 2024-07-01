@@ -331,7 +331,7 @@ impl Server {
             );
             c.borrow_mut().process(Some(dgram), now)
         } else {
-            self.accept_connection(attempt_key, initial, dgram, orig_dcid, now)
+            self.accept_connection(&attempt_key, initial, dgram, orig_dcid, now)
         }
     }
 
@@ -413,7 +413,7 @@ impl Server {
 
     fn accept_connection(
         &mut self,
-        attempt_key: AttemptKey,
+        attempt_key: &AttemptKey,
         initial: InitialDetails,
         dgram: &Datagram,
         orig_dcid: Option<ConnectionId>,
@@ -441,7 +441,7 @@ impl Server {
 
         match sconn {
             Ok(mut c) => {
-                self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
+                self.setup_connection(&mut c, attempt_key, initial, orig_dcid);
                 let c = Rc::new(RefCell::new(ServerConnectionState {
                     c,
                     active_attempt: Some(attempt_key.clone()),
@@ -586,13 +586,12 @@ impl Server {
             }
         }
 
-        callback.map(Output::Callback).unwrap_or(Output::None)
+        callback.map_or(Output::None, Output::Callback)
     }
 
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let out = dgram
-            .map(|d| self.process_input(d, now))
-            .unwrap_or(Output::None)
+            .map_or(Output::None, |d| self.process_input(d, now))
             .or_else(|| self.process_next_output(now));
 
         // Clean-up closed connections.
@@ -617,11 +616,8 @@ impl Server {
             .connections
             .borrow()
             .values()
-            .filter_map(|c| {
-                c.borrow()
-                    .has_events()
-                    .then(|| ActiveConnectionRef { c: Rc::clone(c) })
-            })
+            .filter(|c| c.borrow().has_events())
+            .map(|c| ActiveConnectionRef { c: Rc::clone(c) })
             .collect();
 
         // TODO: Do better deduplication.
