@@ -13,23 +13,15 @@ pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
     tos: IpTos,
-    ttl: Option<u8>,
     d: Vec<u8>,
 }
 
 impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(
-        src: SocketAddr,
-        dst: SocketAddr,
-        tos: IpTos,
-        ttl: Option<u8>,
-        d: V,
-    ) -> Self {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
         Self {
             src,
             dst,
             tos,
-            ttl,
             d: d.into(),
         }
     }
@@ -49,11 +41,6 @@ impl Datagram {
         self.tos
     }
 
-    #[must_use]
-    pub fn ttl(&self) -> Option<u8> {
-        self.ttl
-    }
-
     pub fn set_tos(&mut self, tos: IpTos) {
         self.tos = tos;
     }
@@ -71,9 +58,8 @@ impl std::fmt::Debug for Datagram {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "Datagram {:?} TTL {:?} {:?}->{:?}: {}",
+            "Datagram {:?} {:?}->{:?}: {}",
             self.tos,
-            self.ttl,
             self.src,
             self.dst,
             hex_with_len(&self.d)
@@ -89,6 +75,6 @@ fn fmt_datagram() {
     let d = datagram([0; 1].to_vec());
     assert_eq!(
         &format!("{d:?}"),
-        "Datagram IpTos(Cs0, Ect0) TTL Some(128) [fe80::1]:443->[fe80::1]:443: [1]: 00"
+        "Datagram IpTos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
     );
 }

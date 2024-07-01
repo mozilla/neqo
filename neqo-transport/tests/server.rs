@@ -158,7 +158,6 @@ fn duplicate_initial_new_path() {
         SocketAddr::new(initial.source().ip(), initial.source().port() ^ 23),
         initial.destination(),
         initial.tos(),
-        initial.ttl(),
         &initial[..],
     );
 
@@ -373,13 +372,7 @@ fn new_token_different_port() {
     // Now rewrite the source port, which should not change that the token is OK.
     let d = dgram.unwrap();
     let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
-    let dgram = Some(Datagram::new(
-        src,
-        d.destination(),
-        d.tos(),
-        d.ttl(),
-        &d[..],
-    ));
+    let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_initial(dgram.as_ref().unwrap(), false);
@@ -434,13 +427,7 @@ fn bad_client_initial() {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let bad_dgram = Datagram::new(
-        dgram.source(),
-        dgram.destination(),
-        dgram.tos(),
-        dgram.ttl(),
-        ciphertext,
-    );
+    let bad_dgram = Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), ciphertext);
 
     // The server should reject this.
     let response = server.process(Some(&bad_dgram), now());
@@ -522,13 +509,7 @@ fn bad_client_initial_connection_close() {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let bad_dgram = Datagram::new(
-        dgram.source(),
-        dgram.destination(),
-        dgram.tos(),
-        dgram.ttl(),
-        ciphertext,
-    );
+    let bad_dgram = Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), ciphertext);
 
     // The server should ignore this and go to Draining.
     let mut now = now();
@@ -551,7 +532,6 @@ fn version_negotiation_ignored() {
         dgram.source(),
         dgram.destination(),
         dgram.tos(),
-        dgram.ttl(),
         input.clone(),
     );
     let vn = server.process(Some(&damaged), now()).dgram();

@@ -1231,7 +1231,6 @@ impl Connection {
                 d.source(),
                 d.destination(),
                 d.tos(),
-                d.ttl(),
                 &d[d.len() - remaining..],
             )
         } else {
