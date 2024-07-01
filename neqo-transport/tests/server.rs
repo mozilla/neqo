@@ -210,15 +210,14 @@ fn same_initial_after_connected() {
     let server_initial = server.process(client_initial.as_dgram_ref(), now()).dgram();
     assert!(server_initial.is_some());
     complete_connection(&mut client, &mut server, server_initial);
-    // This removes the connection from the active set until something happens to it.
-    assert_eq!(server.active_connections().len(), 0);
+    assert_eq!(server.active_connections().len(), 1);
 
     // Now make a new connection using the exact same initial as before.
     // The server should respond to an attempt to connect with the same Initial.
     let dgram = server.process(client_initial.as_dgram_ref(), now()).dgram();
     assert!(dgram.is_some());
     // The server should make a new connection object.
-    assert_eq!(server.active_connections().len(), 1);
+    assert_eq!(server.active_connections().len(), 2);
 }
 
 #[test]
