@@ -51,6 +51,21 @@ pub struct ServerConnectionState {
     active_attempt: Option<AttemptKey>,
 }
 
+impl ServerConnectionState {
+    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+        qtrace!("Process connection {:?}", self.c);
+        let out = self.c.process(dgram, now);
+
+        if *self.c.state() > State::Handshaking {
+            // Remove any active connection attempt now that this is no longer handshaking.
+            self.active_attempt.take();
+        }
+
+        out
+    }
+}
+
+// TODO: Needed?
 impl Deref for ServerConnectionState {
     type Target = Connection;
     fn deref(&self) -> &Self::Target {
@@ -58,6 +73,7 @@ impl Deref for ServerConnectionState {
     }
 }
 
+// TODO: Needed?
 impl DerefMut for ServerConnectionState {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.c
@@ -233,29 +249,6 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
-    fn process_connection(
-        &mut self,
-        c: &StateRef,
-        dgram: Option<&Datagram>,
-        now: Instant,
-    ) -> Output {
-        qtrace!([self], "Process connection {:?}", c);
-        let out = c.borrow_mut().process(dgram, now);
-
-        if *c.borrow().state() > State::Handshaking {
-            // Remove any active connection attempt now that this is no longer handshaking.
-            c.borrow_mut().active_attempt.take();
-        }
-
-        if matches!(c.borrow().state(), State::Closed(_)) {
-            c.borrow_mut().set_qlog(NeqoQlog::disabled());
-            self.connections
-                .borrow_mut()
-                .retain(|_, v| !Rc::ptr_eq(v, c));
-        }
-        out
-    }
-
     fn connection(&self, cid: ConnectionIdRef) -> Option<StateRef> {
         self.connections.borrow().get(&cid[..]).cloned()
     }
@@ -338,7 +331,7 @@ impl Server {
                 "Handle Initial for existing connection attempt {:?}",
                 attempt_key
             );
-            self.process_connection(&c, Some(dgram), now)
+            c.borrow_mut().process(Some(dgram), now)
         } else {
             self.accept_connection(attempt_key, initial, dgram, orig_dcid, now)
         }
@@ -456,7 +449,9 @@ impl Server {
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
-                self.process_connection(&c, Some(dgram), now)
+                // TODO: Indirection with `out` still needed?
+                let out = c.borrow_mut().process(Some(dgram), now);
+                out
             }
             Err(e) => {
                 qwarn!([self], "Unable to create connection");
@@ -489,7 +484,7 @@ impl Server {
                 "Handle 0-RTT for existing connection attempt {:?}",
                 attempt_key
             );
-            self.process_connection(&c, Some(dgram), now)
+            c.borrow_mut().process(Some(dgram), now)
         } else {
             qdebug!([self], "Dropping 0-RTT for unknown connection");
             Output::None
@@ -509,7 +504,7 @@ impl Server {
 
         // Finding an existing connection. Should be the most common case.
         if let Some(c) = self.connection(packet.dcid()) {
-            return self.process_connection(&c, Some(dgram), now);
+            return c.borrow_mut().process(Some(dgram), now);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -580,13 +575,10 @@ impl Server {
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
     fn process_next_output(&mut self, now: Instant) -> Output {
-        // TODO: Remove allocation.
-        let connections: Vec<_> = self.connections.borrow().values().cloned().collect();
-
         let mut callback = None;
 
-        for connection in connections {
-            match self.process_connection(&connection, None, now) {
+        for connection in self.connections.borrow().values() {
+            match connection.borrow_mut().process(None, now) {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
                 // TODO: Refactor
@@ -601,10 +593,23 @@ impl Server {
     }
 
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        dgram
+        let out = dgram
             .map(|d| self.process_input(d, now))
             .unwrap_or(Output::None)
-            .or_else(|| self.process_next_output(now))
+            .or_else(|| self.process_next_output(now));
+
+        // Clean-up closed connections.
+        self.connections.borrow_mut().retain(|_, c| {
+            if matches!(c.borrow().state(), State::Closed(_)) {
+                // TODO: Is this still needed?
+                c.borrow_mut().set_qlog(NeqoQlog::disabled());
+                false
+            } else {
+                true
+            }
+        });
+
+        out
     }
 
     /// This lists the connections that have received new events
