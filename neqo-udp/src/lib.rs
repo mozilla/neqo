@@ -20,6 +20,8 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 /// Socket receive buffer size.
 ///
 /// Allows reading multiple datagrams in a single [`Socket::recv`] call.
+//
+// TODO: Experiment with different values across platforms.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
 std::thread_local! {
