@@ -57,13 +57,7 @@ fuzz_target!(|data: &[u8]| {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let fuzzed_ci = Datagram::new(
-        ci.source(),
-        ci.destination(),
-        ci.tos(),
-        ci.ttl(),
-        ciphertext,
-    );
+    let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext);
 
     let mut server = default_server();
     let _response = server.process(Some(&fuzzed_ci), now());

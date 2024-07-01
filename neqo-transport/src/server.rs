@@ -291,14 +291,12 @@ impl Server {
                         &initial.dst_cid,
                     );
                     if let Ok(p) = packet {
-                        let retry = Datagram::new(
+                        Output::Datagram(Datagram::new(
                             dgram.destination(),
                             dgram.source(),
                             dgram.tos(),
-                            dgram.ttl(),
                             p,
-                        );
-                        Output::Datagram(retry)
+                        ))
                     } else {
                         qerror!([self], "unable to encode retry, dropping packet");
                         Output::None
@@ -544,7 +542,6 @@ impl Server {
                 dgram.destination(),
                 dgram.source(),
                 dgram.tos(),
-                dgram.ttl(),
                 vn,
             ));
         }

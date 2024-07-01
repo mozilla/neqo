@@ -18,19 +18,13 @@ runs:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
-    - name: Install cargo-binstall (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
-
-    - name: Install cargo-binstall (Linux & MacOS)
-      if: runner.os != 'Windows'
+    - name: Install cargo-quickinstall
       shell: bash
-      run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+      run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
       shell: bash
-      run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine
+      run: cargo +${{ inputs.version }} quickinstall --no-binstall --no-fallback cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine
 
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.
