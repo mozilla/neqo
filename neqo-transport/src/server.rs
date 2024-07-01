@@ -575,9 +575,9 @@ impl Server {
             match connection.borrow_mut().process(None, now) {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
-                Output::Callback(new) => match callback {
-                    Some(previous) => callback = Some(min(previous, new)),
-                    None => callback = Some(new),
+                Output::Callback(next) => match callback {
+                    Some(previous) => callback = Some(min(previous, next)),
+                    None => callback = Some(next),
                 },
             }
         }
@@ -606,18 +606,13 @@ impl Server {
 
     /// This lists the connections that have received new events
     /// as a result of calling `process()`.
-    // TODO: Why is this not an Iterator?
-    pub fn active_connections(&mut self) -> Vec<ActiveConnectionRef> {
-        let conns: HashSet<_> = self
-            .connections
+    pub fn active_connections(&mut self) -> HashSet<ActiveConnectionRef> {
+        self.connections
             .borrow()
             .values()
             .filter(|c| c.borrow().has_events())
             .map(|c| ActiveConnectionRef { c: Rc::clone(c) })
-            .collect();
-
-        // TODO: Do better deduplication.
-        conns.into_iter().collect()
+            .collect()
     }
 
     /// Whether any connections have received new events as a result of calling
@@ -628,10 +623,6 @@ impl Server {
             .borrow()
             .values()
             .any(|c| c.borrow().has_events())
-    }
-
-    pub fn add_to_waiting(&mut self, _c: &ActiveConnectionRef) {
-        // TODO: We always iterate all now.
     }
 }
 

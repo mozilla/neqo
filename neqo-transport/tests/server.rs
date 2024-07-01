@@ -310,7 +310,17 @@ fn zero_rtt() {
     // The server will have received two STREAM frames now if it processed both packets.
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+    assert_eq!(
+        active
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .stats()
+            .frame_rx
+            .stream,
+        2
+    );
 
     // Complete the handshake.  As the client was pacing 0-RTT packets, extend the time
     // a little so that the pacer doesn't prevent the Finished from being sent.
@@ -322,7 +332,17 @@ fn zero_rtt() {
     mem::drop(server.process(Some(&c4), now));
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+    assert_eq!(
+        active
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .stats()
+            .frame_rx
+            .stream,
+        2
+    );
 }
 
 #[test]
