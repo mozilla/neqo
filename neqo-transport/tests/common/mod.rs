@@ -48,8 +48,6 @@ pub fn connected_server(server: &mut Server) -> ActiveConnectionRef {
         .iter()
         .filter(|c: &&ActiveConnectionRef| *c.borrow().state() == State::Confirmed);
     let c = confirmed.next().expect("one confirmed");
-    // TODO
-    // assert!(confirmed.next().is_none(), "only one confirmed");
     c.clone()
 }
 
