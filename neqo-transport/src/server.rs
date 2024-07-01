@@ -8,6 +8,7 @@
 
 use std::{
     cell::RefCell,
+    cmp::min,
     collections::{HashMap, HashSet},
     fs::OpenOptions,
     net::SocketAddr,
@@ -65,7 +66,6 @@ impl ServerConnectionState {
     }
 }
 
-// TODO: Needed?
 impl Deref for ServerConnectionState {
     type Target = Connection;
     fn deref(&self) -> &Self::Target {
@@ -73,7 +73,6 @@ impl Deref for ServerConnectionState {
     }
 }
 
-// TODO: Needed?
 impl DerefMut for ServerConnectionState {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.c
@@ -447,9 +446,7 @@ impl Server {
                     active_attempt: Some(attempt_key.clone()),
                 }));
                 cid_mgr.borrow_mut().set_connection(&c);
-                // TODO: Indirection with `out` still needed?
-                let out = c.borrow_mut().process(Some(dgram), now);
-                out
+                return c.borrow_mut().process(Some(dgram), now);
             }
             Err(e) => {
                 qwarn!([self], "Unable to create connection");
@@ -578,10 +575,9 @@ impl Server {
             match connection.borrow_mut().process(None, now) {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
-                // TODO: Refactor
-                Output::Callback(new_callback) => match callback {
-                    Some(previous_callback) if previous_callback < new_callback => {}
-                    _ => callback = Some(new_callback),
+                Output::Callback(new) => match callback {
+                    Some(previous) => callback = Some(min(previous, new)),
+                    None => callback = Some(new),
                 },
             }
         }
@@ -626,7 +622,6 @@ impl Server {
 
     /// Whether any connections have received new events as a result of calling
     /// `process()`.
-    // TODO: Improve?
     #[must_use]
     pub fn has_active_connections(&self) -> bool {
         self.connections
