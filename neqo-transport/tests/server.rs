@@ -210,15 +210,14 @@ fn same_initial_after_connected() {
     let server_initial = server.process(client_initial.as_dgram_ref(), now()).dgram();
     assert!(server_initial.is_some());
     complete_connection(&mut client, &mut server, server_initial);
-    // This removes the connection from the active set until something happens to it.
-    assert_eq!(server.active_connections().len(), 0);
+    assert_eq!(server.active_connections().len(), 1);
 
     // Now make a new connection using the exact same initial as before.
     // The server should respond to an attempt to connect with the same Initial.
     let dgram = server.process(client_initial.as_dgram_ref(), now()).dgram();
     assert!(dgram.is_some());
     // The server should make a new connection object.
-    assert_eq!(server.active_connections().len(), 1);
+    assert_eq!(server.active_connections().len(), 2);
 }
 
 #[test]
@@ -260,7 +259,7 @@ fn drop_short_initial() {
 }
 
 /// Verify that the server can read 0-RTT properly.  A more robust server would buffer
-/// 0-RTT before the handshake begins and let 0-RTT arrive for a short periiod after
+/// 0-RTT before the handshake begins and let 0-RTT arrive for a short period after
 /// the handshake completes, but ours is for testing so it only allows 0-RTT while
 /// the handshake is running.
 #[test]
@@ -273,7 +272,7 @@ fn zero_rtt() {
     let t = server.process(None, now).callback();
     now += t;
     assert_eq!(server.process(None, now), Output::None);
-    assert_eq!(server.active_connections().len(), 1);
+    assert_eq!(server.active_connections().len(), 0);
 
     let start_time = now;
     let mut client = default_client();
@@ -310,7 +309,17 @@ fn zero_rtt() {
     // The server will have received two STREAM frames now if it processed both packets.
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+    assert_eq!(
+        active
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .stats()
+            .frame_rx
+            .stream,
+        2
+    );
 
     // Complete the handshake.  As the client was pacing 0-RTT packets, extend the time
     // a little so that the pacer doesn't prevent the Finished from being sent.
@@ -322,7 +331,17 @@ fn zero_rtt() {
     mem::drop(server.process(Some(&c4), now));
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+    assert_eq!(
+        active
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .stats()
+            .frame_rx
+            .stream,
+        2
+    );
 }
 
 #[test]

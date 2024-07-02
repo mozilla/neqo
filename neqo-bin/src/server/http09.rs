@@ -190,7 +190,6 @@ impl HttpServer {
                         .unwrap();
                     qdebug!("Wrote {}", sent);
                     *offset += sent;
-                    self.server.add_to_waiting(conn);
                     if *offset == data.len() {
                         qinfo!("Sent {sent} on {stream_id}, closing");
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();
