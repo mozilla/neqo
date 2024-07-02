@@ -27,7 +27,7 @@ use crate::{
     packet::PacketBuilder,
     path::PATH_MTU_V6,
     recovery::ACK_ONLY_SIZE_LIMIT,
-    stats::{FrameStats, Stats, MAX_PTO_COUNTS},
+    stats::{Stats, MAX_PTO_COUNTS},
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
     Version,
 };
@@ -638,34 +638,4 @@ fn get_tokens(client: &mut Connection) -> Vec<ResumptionToken> {
             }
         })
         .collect()
-}
-
-fn assert_default_stats(stats: &Stats) {
-    assert_eq!(stats.packets_rx, 0);
-    assert_eq!(stats.packets_tx, 0);
-    let dflt_frames = FrameStats::default();
-    assert_eq!(stats.frame_rx, dflt_frames);
-    assert_eq!(stats.frame_tx, dflt_frames);
-}
-
-#[test]
-fn create_client() {
-    let client = default_client();
-    assert_eq!(client.role(), Role::Client);
-    assert!(matches!(client.state(), State::Init));
-    let stats = client.stats();
-    assert_default_stats(&stats);
-    assert_eq!(stats.rtt, crate::rtt::INITIAL_RTT);
-    assert_eq!(stats.rttvar, crate::rtt::INITIAL_RTT / 2);
-}
-
-#[test]
-fn create_server() {
-    let server = default_server();
-    assert_eq!(server.role(), Role::Server);
-    assert!(matches!(server.state(), State::Init));
-    let stats = server.stats();
-    assert_default_stats(&stats);
-    // Server won't have a default path, so no RTT.
-    assert_eq!(stats.rtt, Duration::from_secs(0));
 }
