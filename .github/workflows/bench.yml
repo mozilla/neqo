@@ -199,7 +199,7 @@ jobs:
           fi
           sed -E -e 's/^                 //gi' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-            perl -p -0777 -e 's/(.*?)\n(.*?)((No change|Change within|Performance has).*?)\n(.*?)\n\n/<details><summary>$1: $3<\/summary><pre>\n$2$5<\/pre><\/details>\n/gs' |\
+            perl -p -0777 -e 's/(.*?)\n(.*?)((No change|Change within|Performance has).*?)(\nFound .*?)?\n\n/<details><summary>$1: $3<\/summary><pre>\n$2$5<\/pre><\/details>\n/gs' |\
             sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
                    -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
