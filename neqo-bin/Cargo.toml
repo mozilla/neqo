@@ -34,6 +34,7 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
+neqo-udp = { path = "./../neqo-udp", default-features = false, features = ["tokio"] }
 qlog = { workspace = true }
 quinn-udp = { version = "0.5.0", default-features = false }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
