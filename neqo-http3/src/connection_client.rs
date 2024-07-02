@@ -1101,6 +1101,7 @@ impl Http3Client {
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    &mut self.conn,
                 )?;
                 let res = self
                     .base_handler
