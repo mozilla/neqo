@@ -136,6 +136,17 @@ impl Output {
             _ => Duration::new(0, 0),
         }
     }
+
+    #[must_use]
+    pub fn or_else<F>(self, f: F) -> Self
+    where
+        F: FnOnce() -> Self,
+    {
+        match self {
+            x @ (Self::Datagram(_) | Self::Callback(_)) => x,
+            Self::None => f(),
+        }
+    }
 }
 
 /// Used by inner functions like `Connection::output`.
@@ -1231,7 +1242,6 @@ impl Connection {
                 d.source(),
                 d.destination(),
                 d.tos(),
-                d.ttl(),
                 &d[d.len() - remaining..],
             )
         } else {

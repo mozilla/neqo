@@ -131,27 +131,14 @@ impl Http3Server {
     fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
         let mut active_conns = self.server.active_connections();
+        active_conns.extend(
+            self.http3_handlers
+                .iter()
+                .filter(|(_, handler)| handler.borrow_mut().should_be_processed())
+                .map(|(c, _)| c)
+                .cloned(),
+        );
 
-        // We need to find connections that needs to be process on http3 level.
-        let mut http3_active: Vec<ActiveConnectionRef> = self
-            .http3_handlers
-            .iter()
-            .filter_map(|(conn, handler)| {
-                if handler.borrow_mut().should_be_processed() && !active_conns.contains(conn) {
-                    Some(conn)
-                } else {
-                    None
-                }
-            })
-            .cloned()
-            .collect();
-        // For http_active connection we need to put them in neqo-transport's server
-        // waiting queue.
-        active_conns.append(&mut http3_active);
-        active_conns.dedup();
-        active_conns
-            .iter()
-            .for_each(|conn| self.server.add_to_waiting(conn));
         for mut conn in active_conns {
             self.process_events(&mut conn, now);
         }

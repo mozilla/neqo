@@ -53,7 +53,7 @@ fn loopback() -> SocketAddr {
 }
 
 fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
-    Datagram::new(a, a, d.tos(), d.ttl(), &d[..])
+    Datagram::new(a, a, d.tos(), &d[..])
 }
 
 fn new_port(a: SocketAddr) -> SocketAddr {
@@ -62,13 +62,7 @@ fn new_port(a: SocketAddr) -> SocketAddr {
 }
 
 fn change_source_port(d: &Datagram) -> Datagram {
-    Datagram::new(
-        new_port(d.source()),
-        d.destination(),
-        d.tos(),
-        d.ttl(),
-        &d[..],
-    )
+    Datagram::new(new_port(d.source()), d.destination(), d.tos(), &d[..])
 }
 
 /// As these tests use a new path, that path often has a non-zero RTT.
