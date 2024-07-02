@@ -1665,7 +1665,9 @@ impl Connection {
                     .clone(),
             ),
         );
-        path.borrow_mut().set_valid(now);
+        if self.role == Role::Client {
+            path.borrow_mut().set_valid(now);
+        }
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
