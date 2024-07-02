@@ -29,7 +29,10 @@ use super::{
     CountingConnectionIdGenerator, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
 };
 use crate::{
-    connection::AddressValidation,
+    connection::{
+        tests::{new_client, new_server},
+        AddressValidation,
+    },
     events::ConnectionEvent,
     server::ValidateAddress,
     tparams::{TransportParameter, MIN_ACK_DELAY},
@@ -41,16 +44,15 @@ use crate::{
 const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";
 
-#[test]
-fn full_handshake() {
+fn full_handshake(pmtud: bool) {
     qdebug!("---- client: generate CH");
-    let mut client = default_client();
+    let mut client = new_client(ConnectionParameters::default().pmtud(pmtud));
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
-    let mut server = default_server();
+    let mut server = new_server(ConnectionParameters::default().pmtud(pmtud));
     let out = server.process(out.as_dgram_ref(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu().unwrap());
@@ -76,8 +78,18 @@ fn full_handshake() {
 
     qdebug!("---- client: ACKS -> 0");
     let out = client.process(out.as_dgram_ref(), now());
-    assert!(out.as_dgram_ref().is_none());
+    assert!(out.as_dgram_ref().is_none() || pmtud); // PMTUD causes a PING probe to be sent here
     assert_eq!(*client.state(), State::Confirmed);
+}
+
+#[test]
+fn handshake_no_pmtud() {
+    full_handshake(false);
+}
+
+#[test]
+fn handshake_pmtud() {
+    full_handshake(true);
 }
 
 #[test]
