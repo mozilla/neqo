@@ -533,8 +533,6 @@ pub struct Path {
     rtt: RttEstimate,
     /// A packet sender for the path, which includes congestion control and a pacer.
     sender: PacketSender,
-    /// The IP TTL to use for outgoing packets on this path.
-    ttl: u8,
 
     /// The number of bytes received on this path.
     /// Note that this value might saturate on a long-lived connection,
@@ -572,7 +570,6 @@ impl Path {
             challenge: None,
             rtt: RttEstimate::default(),
             sender,
-            ttl: 64, // This is the default TTL on many OSes.
             received_bytes: 0,
             sent_bytes: 0,
             ecn_info: EcnInfo::default(),
@@ -708,7 +705,7 @@ impl Path {
         // with the current value.
         let tos = self.tos();
         self.ecn_info.on_packet_sent();
-        Datagram::new(self.local, self.remote, tos, Some(self.ttl), payload)
+        Datagram::new(self.local, self.remote, tos, payload)
     }
 
     /// Get local address as `SocketAddr`
