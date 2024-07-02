@@ -80,11 +80,9 @@ impl ConnectionNode {
     }
 
     pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
-        Self::new_client(
-            ConnectionParameters::default(),
-            boxed![ReachState::new(State::Confirmed)],
-            goals,
-        )
+        // TODO
+        let params = ConnectionParameters::default(); // .cc_algorithm(neqo_transport::CongestionControlAlgorithm::Cubic);
+        Self::new_client(params, boxed![ReachState::new(State::Confirmed)], goals)
     }
 
     pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
