@@ -78,7 +78,13 @@ fn full_handshake(pmtud: bool) {
 
     qdebug!("---- client: ACKS -> 0");
     let out = client.process(out.as_dgram_ref(), now());
-    assert!(out.as_dgram_ref().is_none() || pmtud); // PMTUD causes a PING probe to be sent here
+    if pmtud {
+        // PMTUD causes a PING probe to be sent here
+        let pkt = out.dgram().unwrap();
+        assert!(pkt.len() > client.plpmtu().unwrap());
+    } else {
+        assert!(out.as_dgram_ref().is_none());
+    }
     assert_eq!(*client.state(), State::Confirmed);
 }
 
