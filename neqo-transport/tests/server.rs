@@ -259,6 +259,23 @@ fn drop_short_initial() {
     assert!(server.process(Some(&bogus), now()).dgram().is_none());
 }
 
+#[test]
+fn drop_short_header_packet_for_unknown_connection() {
+    const CID: &[u8] = &[55; 8]; // not a real connection ID
+    let mut server = default_server();
+
+    let mut header = neqo_common::Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    header
+        .encode_byte(0x40) // short header
+        .encode_vec(1, CID)
+        .encode_byte(1);
+    let mut bogus_data: Vec<u8> = header.into();
+    bogus_data.resize(MIN_INITIAL_PACKET_SIZE, 66);
+
+    let bogus = datagram(bogus_data);
+    assert!(server.process(Some(&bogus), now()).dgram().is_none());
+}
+
 /// Verify that the server can read 0-RTT properly.  A more robust server would buffer
 /// 0-RTT before the handshake begins and let 0-RTT arrive for a short periiod after
 /// the handshake completes, but ours is for testing so it only allows 0-RTT while
