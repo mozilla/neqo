@@ -41,7 +41,8 @@ pub fn default_server() -> Server {
 }
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.
-pub fn connected_server(server: &mut Server) -> ActiveConnectionRef {
+pub fn connected_server(server: &Server) -> ActiveConnectionRef {
+    #[allow(clippy::mutable_key_type)]
     let server_connections = server.active_connections();
     // Find confirmed connections.  There should only be one.
     let mut confirmed = server_connections
@@ -52,7 +53,7 @@ pub fn connected_server(server: &mut Server) -> ActiveConnectionRef {
 }
 
 /// Connect.  This returns a reference to the server connection.
-pub fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
+pub fn connect(client: &mut Connection, server: &Server) -> ActiveConnectionRef {
     server.set_validation(ValidateAddress::Never);
 
     assert_eq!(*client.state(), State::Init);
@@ -98,7 +99,7 @@ pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
 }
 
 /// Connect to the server and have it generate a ticket.
-pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
+pub fn generate_ticket(server: &Server) -> ResumptionToken {
     let mut client = default_client();
     let mut server_conn = connect(&mut client, server);
 

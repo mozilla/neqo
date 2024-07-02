@@ -181,7 +181,7 @@ fn tcp_phase() {
     // elapsed_time (t_to_increase is in seconds)
     // number of ack needed is t_to_increase / time_increase.
     let expected_ack_cubic_increase =
-        ((((1.0 + CUBIC_C * (elapsed_time).as_secs_f64().powi(3)) / CUBIC_C).cbrt()
+        (((CUBIC_C.mul_add((elapsed_time).as_secs_f64().powi(3), 1.0) / CUBIC_C).cbrt()
             - elapsed_time.as_secs_f64())
             / time_increase.as_secs_f64())
         .ceil() as u64;
@@ -222,10 +222,9 @@ fn cubic_phase() {
             next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
         }
 
-        let expected =
-            (CUBIC_C * ((now - epoch_start).as_secs_f64() - k).powi(3) * MAX_DATAGRAM_SIZE_F64
-                + CWND_INITIAL_10_F64)
-                .round() as usize;
+        let expected = (CUBIC_C * ((now - epoch_start).as_secs_f64() - k).powi(3))
+            .mul_add(MAX_DATAGRAM_SIZE_F64, CWND_INITIAL_10_F64)
+            .round() as usize;
 
         assert_within(cubic.cwnd(), expected, MAX_DATAGRAM_SIZE);
     }

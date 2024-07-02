@@ -211,10 +211,9 @@ impl Paths {
     #[must_use]
     fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
         qdebug!([path.borrow()], "set as primary path");
-        let old_path = self
-            .primary
-            .replace(Rc::clone(path))
-            .inspect(|old| old.borrow_mut().set_primary(false));
+        let old_path = self.primary.replace(Rc::clone(path)).inspect(|old| {
+            old.borrow_mut().set_primary(false);
+        });
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
         let idx = self
@@ -276,6 +275,7 @@ impl Paths {
         if primary_failed {
             self.primary = None;
             // Find a valid path to fall back to.
+            #[allow(clippy::option_if_let_else)]
             if let Some(fallback) = self
                 .paths
                 .iter()
@@ -437,13 +437,13 @@ impl Paths {
         self.to_retire.retain(|&seqno| seqno != acked);
     }
 
-    pub fn lost_ack_frequency(&mut self, lost: &AckRate) {
+    pub fn lost_ack_frequency(&self, lost: &AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().lost_ack_frequency(lost);
         }
     }
 
-    pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
+    pub fn acked_ack_frequency(&self, acked: &AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().acked_ack_frequency(acked);
         }
@@ -494,7 +494,7 @@ enum ProbeState {
 
 impl ProbeState {
     /// Determine whether the current state requires probing.
-    fn probe_needed(&self) -> bool {
+    const fn probe_needed(&self) -> bool {
         matches!(self, Self::ProbeNeeded { .. })
     }
 }
@@ -588,12 +588,12 @@ impl Path {
     }
 
     /// Whether this path is the primary or current path for the connection.
-    pub fn is_primary(&self) -> bool {
+    pub const fn is_primary(&self) -> bool {
         self.primary
     }
 
     /// Whether this path is a temporary one.
-    pub fn is_temporary(&self) -> bool {
+    pub const fn is_temporary(&self) -> bool {
         self.remote_cid.is_none()
     }
 
@@ -652,7 +652,7 @@ impl Path {
         }
     }
 
-    fn mtu_by_addr(addr: IpAddr) -> usize {
+    const fn mtu_by_addr(addr: IpAddr) -> usize {
         match addr {
             IpAddr::V4(_) => PATH_MTU_V4,
             IpAddr::V6(_) => PATH_MTU_V6,
@@ -660,7 +660,7 @@ impl Path {
     }
 
     /// Get the path MTU.  This is currently fixed based on IP version.
-    pub fn mtu(&self) -> usize {
+    pub const fn mtu(&self) -> usize {
         Self::mtu_by_addr(self.remote.ip())
     }
 
@@ -712,17 +712,17 @@ impl Path {
     }
 
     /// Get local address as `SocketAddr`
-    pub fn local_address(&self) -> SocketAddr {
+    pub const fn local_address(&self) -> SocketAddr {
         self.local
     }
 
     /// Get remote address as `SocketAddr`
-    pub fn remote_address(&self) -> SocketAddr {
+    pub const fn remote_address(&self) -> SocketAddr {
         self.remote
     }
 
     /// Whether the path has been validated.
-    pub fn is_valid(&self) -> bool {
+    pub const fn is_valid(&self) -> bool {
         self.validated.is_some()
     }
 
@@ -769,7 +769,7 @@ impl Path {
     }
 
     /// Returns true if this path have any probing frames to send.
-    pub fn has_probe(&self) -> bool {
+    pub const fn has_probe(&self) -> bool {
         self.challenge.is_some() || self.state.probe_needed()
     }
 
@@ -852,13 +852,13 @@ impl Path {
                 self.probe();
             }
         }
-        if let ProbeState::Failed = self.state {
+        if matches!(self.state, ProbeState::Failed) {
             // Retire failed paths immediately.
             false
         } else if self.primary {
             // Keep valid primary paths otherwise.
             true
-        } else if let ProbeState::Valid = self.state {
+        } else if matches!(self.state, ProbeState::Valid) {
             // Retire validated, non-primary paths.
             // Allow more than `MAX_PATH_PROBES` times the PTO so that an old
             // path remains around until after a previous path fails.
@@ -883,7 +883,7 @@ impl Path {
     }
 
     /// Get the RTT estimator for this path.
-    pub fn rtt(&self) -> &RttEstimate {
+    pub const fn rtt(&self) -> &RttEstimate {
         &self.rtt
     }
 
@@ -893,7 +893,7 @@ impl Path {
     }
 
     /// Read-only access to the owned sender.
-    pub fn sender(&self) -> &PacketSender {
+    pub const fn sender(&self) -> &PacketSender {
         &self.sender
     }
 
@@ -959,7 +959,7 @@ impl Path {
             );
             stats.rtt_init_guess = true;
             self.rtt.update(
-                &mut self.qlog,
+                &self.qlog,
                 now - sent.time_sent(),
                 Duration::new(0, 0),
                 false,

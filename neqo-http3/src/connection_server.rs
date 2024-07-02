@@ -228,7 +228,7 @@ impl Http3ServerHandler {
     }
 
     /// Take the next available event.
-    pub(crate) fn next_event(&mut self) -> Option<Http3ServerConnEvent> {
+    pub(crate) fn next_event(&self) -> Option<Http3ServerConnEvent> {
         self.events.next_event()
     }
 

@@ -199,7 +199,7 @@ mod tests {
             sender.local_addr()?,
             receiver.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            "Hello, world!".as_bytes().to_vec(),
+            b"Hello, world!".to_vec(),
         );
 
         sender.writable().await?;

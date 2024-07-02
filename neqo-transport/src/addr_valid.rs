@@ -222,45 +222,47 @@ impl AddressValidation {
         let enc = &token[TOKEN_IDENTIFIER_RETRY.len()..];
         // Note that this allows the token identifier part to be corrupted.
         // That's OK here as we don't depend on that being authenticated.
-        if let Some(cid) = self.decrypt_token(enc, peer_address, retry, now) {
-            if retry {
-                // This is from Retry, so we should have an ODCID >= 8.
-                if cid.len() >= 8 {
-                    qinfo!("AddressValidation: valid Retry token for {}", cid);
-                    AddressValidationResult::ValidRetry(cid)
-                } else {
-                    panic!("AddressValidation: Retry token with small CID {cid}");
-                }
-            } else if cid.is_empty() {
-                // An empty connection ID means NEW_TOKEN.
-                if self.validation == ValidateAddress::Always {
-                    qinfo!("AddressValidation: valid NEW_TOKEN token; validating again");
-                    AddressValidationResult::Validate
-                } else {
-                    qinfo!("AddressValidation: valid NEW_TOKEN token; accepting");
-                    AddressValidationResult::Pass
-                }
-            } else {
-                panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
-            }
-        } else {
-            // From here on, we have a token that we couldn't decrypt.
-            // We've either lost the keys or we've received junk.
-            if retry {
-                // If this looked like a Retry, treat it as being bad.
-                qinfo!("AddressValidation: invalid Retry token; rejecting");
-                AddressValidationResult::Invalid
-            } else if self.validation == ValidateAddress::Never {
-                // We don't require validation, so OK.
-                qinfo!("AddressValidation: invalid NEW_TOKEN token; accepting");
-                AddressValidationResult::Pass
-            } else {
-                // This might be an invalid NEW_TOKEN token, or a valid one
-                // for which we have since lost the keys.  Check again.
-                qinfo!("AddressValidation: invalid NEW_TOKEN token; validating again");
-                AddressValidationResult::Validate
-            }
-        }
+        self.decrypt_token(enc, peer_address, retry, now)
+            .map_or_else(
+                || {
+                    if retry {
+                        // If this looked like a Retry, treat it as being bad.
+                        qinfo!("AddressValidation: invalid Retry token; rejecting");
+                        AddressValidationResult::Invalid
+                    } else if self.validation == ValidateAddress::Never {
+                        // We don't require validation, so OK.
+                        qinfo!("AddressValidation: invalid NEW_TOKEN token; accepting");
+                        AddressValidationResult::Pass
+                    } else {
+                        // This might be an invalid NEW_TOKEN token, or a valid one
+                        // for which we have since lost the keys.  Check again.
+                        qinfo!("AddressValidation: invalid NEW_TOKEN token; validating again");
+                        AddressValidationResult::Validate
+                    }
+                },
+                |cid| {
+                    if retry {
+                        // This is from Retry, so we should have an ODCID >= 8.
+                        if cid.len() >= 8 {
+                            qinfo!("AddressValidation: valid Retry token for {}", cid);
+                            AddressValidationResult::ValidRetry(cid)
+                        } else {
+                            panic!("AddressValidation: Retry token with small CID {cid}");
+                        }
+                    } else if cid.is_empty() {
+                        // An empty connection ID means NEW_TOKEN.
+                        if self.validation == ValidateAddress::Always {
+                            qinfo!("AddressValidation: valid NEW_TOKEN token; validating again");
+                            AddressValidationResult::Validate
+                        } else {
+                            qinfo!("AddressValidation: valid NEW_TOKEN token; accepting");
+                            AddressValidationResult::Pass
+                        }
+                    } else {
+                        panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
+                    }
+                },
+            )
     }
 }
 
@@ -304,15 +306,20 @@ impl NewTokenState {
             ref mut old,
         } = self
         {
-            if let Some(t) = pending.pop() {
+            // pending.pop().map_or(None, |t| {
+            //     if old.len() >= MAX_SAVED_TOKENS {
+            //         old.remove(0);
+            //     }
+            //     old.push(t);
+            //     Some(&old[old.len() - 1])
+            // })
+            pending.pop().map(|t| {
                 if old.len() >= MAX_SAVED_TOKENS {
                     old.remove(0);
                 }
                 old.push(t);
-                Some(&old[old.len() - 1])
-            } else {
-                None
-            }
+                old[old.len() - 1].as_slice()
+            })
         } else {
             unreachable!();
         }

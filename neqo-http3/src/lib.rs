@@ -235,7 +235,7 @@ pub enum Error {
 
 impl Error {
     #[must_use]
-    pub fn code(&self) -> AppError {
+    pub const fn code(&self) -> AppError {
         match self {
             Self::HttpNoError => 0x100,
             Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
@@ -263,7 +263,7 @@ impl Error {
     }
 
     #[must_use]
-    pub fn connection_error(&self) -> bool {
+    pub const fn connection_error(&self) -> bool {
         matches!(
             self,
             Self::HttpGeneralProtocol
@@ -281,7 +281,7 @@ impl Error {
     }
 
     #[must_use]
-    pub fn stream_reset_error(&self) -> bool {
+    pub const fn stream_reset_error(&self) -> bool {
         matches!(self, Self::HttpGeneralProtocolStream | Self::InvalidHeader)
     }
 
@@ -289,15 +289,15 @@ impl Error {
     ///
     /// On unexpected errors, in debug mode.
     #[must_use]
-    pub fn map_stream_send_errors(err: &Error) -> Self {
+    pub fn map_stream_send_errors(err: &Self) -> Self {
         match err {
             Self::TransportError(
                 TransportError::InvalidStreamId | TransportError::FinalSizeError,
-            ) => Error::TransportStreamDoesNotExist,
-            Self::TransportError(TransportError::InvalidInput) => Error::InvalidInput,
+            ) => Self::TransportStreamDoesNotExist,
+            Self::TransportError(TransportError::InvalidInput) => Self::InvalidInput,
             _ => {
                 debug_assert!(false, "Unexpected error");
-                Error::TransportStreamDoesNotExist
+                Self::TransportStreamDoesNotExist
             }
         }
     }
@@ -308,11 +308,11 @@ impl Error {
     #[must_use]
     pub fn map_stream_create_errors(err: &TransportError) -> Self {
         match err {
-            TransportError::ConnectionState => Error::Unavailable,
-            TransportError::StreamLimitError => Error::StreamLimitError,
+            TransportError::ConnectionState => Self::Unavailable,
+            TransportError::StreamLimitError => Self::StreamLimitError,
             _ => {
                 debug_assert!(false, "Unexpected error");
-                Error::TransportStreamDoesNotExist
+                Self::TransportStreamDoesNotExist
             }
         }
     }
@@ -321,7 +321,7 @@ impl Error {
     ///
     /// On unexpected errors, in debug mode.
     #[must_use]
-    pub fn map_stream_recv_errors(err: &Error) -> Self {
+    pub fn map_stream_recv_errors(err: &Self) -> Self {
         match err {
             Self::TransportError(TransportError::NoMoreData) => {
                 debug_assert!(
@@ -334,14 +334,14 @@ impl Error {
                 debug_assert!(false, "Unexpected error");
             }
         };
-        Error::TransportStreamDoesNotExist
+        Self::TransportStreamDoesNotExist
     }
 
     #[must_use]
-    pub fn map_set_resumption_errors(err: &TransportError) -> Self {
+    pub const fn map_set_resumption_errors(err: &TransportError) -> Self {
         match err {
-            TransportError::ConnectionState => Error::InvalidState,
-            _ => Error::InvalidResumptionToken,
+            TransportError::ConnectionState => Self::InvalidState,
+            _ => Self::InvalidResumptionToken,
         }
     }
 
@@ -370,7 +370,7 @@ impl From<TransportError> for Error {
 impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
         match err {
-            QpackError::ClosedCriticalStream => Error::HttpClosedCriticalStream,
+            QpackError::ClosedCriticalStream => Self::HttpClosedCriticalStream,
             e => Self::QpackError(e),
         }
     }
@@ -513,7 +513,7 @@ pub struct Http3StreamInfo {
 
 impl Http3StreamInfo {
     #[must_use]
-    pub fn new(stream_id: StreamId, stream_type: Http3StreamType) -> Self {
+    pub const fn new(stream_id: StreamId, stream_type: Http3StreamType) -> Self {
         Self {
             stream_id,
             stream_type,
@@ -521,12 +521,12 @@ impl Http3StreamInfo {
     }
 
     #[must_use]
-    pub fn stream_id(&self) -> StreamId {
+    pub const fn stream_id(&self) -> StreamId {
         self.stream_id
     }
 
     #[must_use]
-    pub fn session_id(&self) -> Option<StreamId> {
+    pub const fn session_id(&self) -> Option<StreamId> {
         if let Http3StreamType::WebTransport(session) = self.stream_type {
             Some(session)
         } else {
@@ -640,7 +640,7 @@ enum CloseType {
 
 impl CloseType {
     #[must_use]
-    pub fn error(&self) -> Option<AppError> {
+    pub const fn error(&self) -> Option<AppError> {
         match self {
             Self::ResetApp(error) | Self::ResetRemote(error) | Self::LocalError(error) => {
                 Some(*error)
@@ -650,7 +650,7 @@ impl CloseType {
     }
 
     #[must_use]
-    pub fn locally_initiated(&self) -> bool {
-        matches!(self, CloseType::ResetApp(_))
+    pub const fn locally_initiated(&self) -> bool {
+        matches!(self, Self::ResetApp(_))
     }
 }

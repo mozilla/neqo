@@ -332,7 +332,7 @@ async fn ready(
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
     let timeout_ready = timeout
         .as_mut()
-        .map_or(Either::Right(futures::future::pending()), Either::Left)
+        .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
         .map(|()| Ok(Ready::Timeout));
     select(socket_ready, timeout_ready).await.factor_first().0
 }
@@ -375,6 +375,7 @@ struct Runner<'a, H: Handler> {
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
+    #[allow(clippy::future_not_send)]
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
@@ -413,6 +414,7 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(self.handler.take_token())
     }
 
+    #[allow(clippy::future_not_send)]
     async fn process_output(&mut self) -> Result<(), io::Error> {
         loop {
             match self.client.process_output(Instant::now()) {
@@ -435,6 +437,7 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(())
     }
 
+    #[allow(clippy::future_not_send)]
     async fn process_multiple_input(&mut self) -> Res<()> {
         loop {
             let dgrams = self.socket.recv(&self.local_addr)?;
@@ -479,6 +482,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     }
 }
 
+#[allow(clippy::future_not_send)]
 pub async fn client(mut args: Args) -> Res<()> {
     neqo_common::log::init(
         args.shared
