@@ -87,7 +87,6 @@ impl<S> Socket<S> {
                         meta.addr,
                         *local_address,
                         meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                        None, // TODO: get the real TTL https://github.com/quinn-rs/quinn/issues/1749
                         d,
                     )
                 })
@@ -200,7 +199,6 @@ mod tests {
             sender.local_addr()?,
             receiver.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            None,
             "Hello, world!".as_bytes().to_vec(),
         );
 
