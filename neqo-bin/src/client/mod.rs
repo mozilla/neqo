@@ -399,7 +399,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
-                Ready::Socket => self.process_multiple_input().await?,
+                Ready::Socket => self.process_multiple_input()?,
                 Ready::Timeout => {
                     self.timeout = None;
                 }
@@ -435,7 +435,7 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(())
     }
 
-    async fn process_multiple_input(&mut self) -> Res<()> {
+    fn process_multiple_input(&mut self) -> Res<()> {
         loop {
             let dgrams = self.socket.recv(&self.local_addr)?;
             if dgrams.is_empty() {
@@ -443,7 +443,6 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
             self.client
                 .process_multiple_input(dgrams.iter(), Instant::now());
-            self.process_output().await?;
         }
 
         Ok(())
