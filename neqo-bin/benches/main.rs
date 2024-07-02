@@ -20,7 +20,8 @@ fn transfer(c: &mut Criterion) {
     neqo_common::log::init(Some(log::LevelFilter::Off));
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
-    let done_sender = spawn_server();
+    let port = 49151 + (rand::random::<u16>() % 16384);
+    let done_sender = spawn_server(port);
 
     for Benchmark {
         name,
@@ -55,7 +56,7 @@ fn transfer(c: &mut Criterion) {
         }
         group.bench_function("client", |b| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || client::client(client::Args::new(&requests)),
+                || client::client(client::Args::new(port, &requests)),
                 |client| async move {
                     client.await.unwrap();
                 },
@@ -68,11 +69,11 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
-fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
+fn spawn_server(port: u16) -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         Runtime::new().unwrap().block_on(async {
-            let mut server = Box::pin(server::server(server::Args::default()));
+            let mut server = Box::pin(server::server(server::Args::new(port)));
             tokio::select! {
                 _ = &mut done_receiver => {}
                 res = &mut server  => panic!("expect server not to terminate: {res:?}"),

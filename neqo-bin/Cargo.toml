@@ -36,6 +36,7 @@ neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 quinn-udp = { version = "0.5.0", default-features = false }
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"], optional = true}
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }
@@ -45,7 +46,7 @@ criterion = { version = "0.5", default-features = false, features = ["html_repor
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-bench = []
+bench = ["rand"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
