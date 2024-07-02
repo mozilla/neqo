@@ -14,11 +14,13 @@ use super::{
     CLIENT_HANDSHAKE_1RTT_PACKETS, DEFAULT_RTT, POST_HANDSHAKE_CWND,
 };
 use crate::{
+    connection::tests::{connect_with_rtt, new_client, new_server, now},
     packet::PacketNumber,
     recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD},
     sender::PACING_BURST_SIZE,
     stream_id::StreamType,
     tracking::DEFAULT_ACK_PACKET_TOLERANCE,
+    ConnectionParameters,
 };
 
 #[test]
@@ -32,6 +34,21 @@ fn cc_slow_start() {
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     let (c_tx_dgrams, _) = fill_cwnd(&mut client, stream_id, now);
     assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
+    assert!(cwnd_avail(&client) < ACK_ONLY_SIZE_LIMIT);
+}
+
+#[test]
+fn cc_slow_start_pmtud() {
+    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let mut server = new_server(ConnectionParameters::default().pmtud(true));
+    let now = connect_with_rtt(&mut client, &mut server, now(), DEFAULT_RTT);
+
+    // Try to send a lot of data
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    let cwnd = cwnd_avail(&client);
+    let (dgrams, _) = fill_cwnd(&mut client, stream_id, now);
+    let dgrams_len = dgrams.iter().map(|d| d.len()).sum::<usize>();
+    assert_eq!(dgrams_len, cwnd);
     assert!(cwnd_avail(&client) < ACK_ONLY_SIZE_LIMIT);
 }
 
