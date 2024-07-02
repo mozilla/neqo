@@ -591,15 +591,9 @@ impl Server {
             .or_else(|| self.process_next_output(now));
 
         // Clean-up closed connections.
-        self.connections.borrow_mut().retain(|_, c| {
-            if matches!(c.borrow().state(), State::Closed(_)) {
-                // TODO: Is this still needed?
-                c.borrow_mut().set_qlog(NeqoQlog::disabled());
-                false
-            } else {
-                true
-            }
-        });
+        self.connections
+            .borrow_mut()
+            .retain(|_, c| !matches!(c.borrow().state(), State::Closed(_)));
 
         out
     }
