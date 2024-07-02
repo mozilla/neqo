@@ -28,7 +28,7 @@ server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
 tcpdump_pid=$!
-trap 'rm -rf "$tmp"; kill -USR2 $tcpdump_pid' EXIT
+trap 'kill $tcpdump_pid; rm -rf "$tmp"' EXIT
 
 tmux -CC \
         set-option -g default-shell "$(which bash)" \; \

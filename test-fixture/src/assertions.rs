@@ -7,7 +7,7 @@
 use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::{version::WireVersion, Version, MIN_INITIAL_PACKET_SIZE};
+use neqo_transport::{version::WireVersion, Pmtud, Version, MIN_INITIAL_PACKET_SIZE};
 
 use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
 
@@ -160,7 +160,7 @@ pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
 pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, DEFAULT_ADDR_V4);
     if padded {
-        assert_eq!(dgram.len(), 1357 /* PATH_MTU_V4 */);
+        assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR_V4.ip()));
     }
 }
 
@@ -170,6 +170,6 @@ pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
 pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, DEFAULT_ADDR);
     if padded {
-        assert_eq!(dgram.len(), 1337 /* PATH_MTU_V6 */);
+        assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR.ip()));
     }
 }

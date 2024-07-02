@@ -134,6 +134,12 @@ pub struct Stats {
     /// Acknowledgments for packets that contained data that was marked
     /// for retransmission when the PTO timer popped.
     pub pto_ack: usize,
+    /// Number of PMTUD probes sent.
+    pub pmtud_tx: usize,
+    /// Number of PMTUD probes ACK'ed.
+    pub pmtud_ack: usize,
+    /// Number of PMTUD probes lost.
+    pub pmtud_lost: usize,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
@@ -205,6 +211,11 @@ impl Debug for Stats {
             f,
             "  tx: {} lost {} lateack {} ptoack {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack
+        )?;
+        writeln!(
+            f,
+            "  pmtud: {} sent {} acked {} lost",
+            self.pmtud_tx, self.pmtud_ack, self.pmtud_lost
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;

@@ -28,6 +28,7 @@ pub mod packet;
 #[cfg(not(fuzzing))]
 mod packet;
 mod path;
+mod pmtud;
 mod qlog;
 mod quic_datagrams;
 mod recovery;
@@ -62,6 +63,7 @@ pub use self::{
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
+    pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
     recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
     send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
