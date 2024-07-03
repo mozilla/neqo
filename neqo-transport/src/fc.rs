@@ -8,11 +8,13 @@
 // into flow control frames needing to be sent to the remote.
 
 use std::{
+    cmp::min,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
+    time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qdebug, qtrace, Role};
 
 use crate::{
     frame::{
@@ -26,6 +28,12 @@ use crate::{
     stream_id::{StreamId, StreamType},
     Error, Res,
 };
+
+/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
+/// for the size of the stream receive window.
+//
+// TODO: Find reasonable limit.
+const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -66,6 +74,8 @@ where
 
     /// Update the maximum. Returns `Some` with the updated available flow
     /// control if the change was an increase and `None` otherwise.
+    //
+    // TODO: Impose a limit? Otherwise attacker can set large max thus local node allocates large send buffer.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
         debug_assert!(limit < u64::MAX);
         if limit > self.limit {
@@ -206,12 +216,15 @@ where
 {
     /// The thing that we're counting for.
     subject: T,
+    // TODO: Update. The receive buffer is no longer relevant.
     /// The maximum amount of items that can be active (e.g., the size of the receive buffer).
     max_active: u64,
     /// Last max allowed sent.
     max_allowed: u64,
+    // TODO: Not ideal as it adds an Option for all T, even though only needed for T=StreamId.
+    max_allowed_sent_at: Option<Instant>,
     /// Item received, but not retired yet.
-    /// This will be used for byte flow control: each stream will remember is largest byte
+    /// This will be used for byte flow control: each stream will remember its largest byte
     /// offset received and session flow control will remember the sum of all bytes consumed
     /// by all streams.
     consumed: u64,
@@ -230,13 +243,16 @@ where
             subject,
             max_active: max,
             max_allowed: max,
+            // TODO: Starting with None has us loose a round-trip before
+            // increasing stream receive window. Better to start with now.
+            max_allowed_sent_at: None,
             consumed: 0,
             retired: 0,
             frame_pending: false,
         }
     }
 
-    /// Retired some items and maybe send flow control
+    /// Retire some items and maybe send flow control
     /// update.
     pub fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
@@ -244,6 +260,7 @@ where
         }
 
         self.retired = retired;
+        // TODO: Move the `/ 2` logic into function? It is duplicated, no?
         if self.retired + self.max_active / 2 > self.max_allowed {
             self.frame_pending = true;
         }
@@ -345,15 +362,48 @@ impl Default for ReceiverFlowControl<()> {
 }
 
 impl ReceiverFlowControl<StreamId> {
+    // TODO: Should as well apply to Connection flow control? Currently just using a huge limit.
+    // https://github.com/mozilla/neqo/blob/e44c472487b663ea4892bd2ff2786919d20329a2/neqo-transport/src/connection/params.rs#L21
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         if !self.frame_needed() {
             return;
         }
+
+        // TODO: Remove. Debugging only for now.
+        let previous_retired = self.max_allowed.saturating_sub(self.max_active);
+        if let Some(previous) = self.max_allowed_sent_at {
+            let secs = (now - previous).as_secs_f64();
+            let bits = (self.retired - previous_retired) as f64 * 8.0;
+            let mbits = (bits / secs) / 1024.0 / 1024.0;
+            qdebug!("{mbits} mbit/s");
+        }
+
+        // Auto-tune max_active.
+        //
+        // TODO: Should one also auto-tune down?
+        //
+        // TODO: Deduplicate the /2 logic. Used in other places as well.
+        if self.retired + self.max_active / 2 > self.max_allowed
+            && self
+                .max_allowed_sent_at
+                .is_some_and(|at| now - at < rtt * 2)
+            && self.max_active < STREAM_MAX_ACTIVE_LIMIT
+        {
+            let prev_max_active = self.max_active;
+            self.max_active = min(self.max_active * 2, STREAM_MAX_ACTIVE_LIMIT);
+            qdebug!(
+                "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB now: {now:?} rtt: {rtt:?} stream_id: {}",
+                prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024, self.subject,
+            );
+        }
+
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[
             FRAME_TYPE_MAX_STREAM_DATA,
@@ -367,6 +417,8 @@ impl ReceiverFlowControl<StreamId> {
             }));
             self.frame_sent(max_allowed);
         }
+        // TODO: Document why outside of if.
+        self.max_allowed_sent_at = Some(now);
     }
 
     pub fn add_retired(&mut self, count: u64) {
