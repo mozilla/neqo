@@ -111,7 +111,7 @@ type BorrowedSocket = std::os::fd::BorrowedFd<'static>;
 type BorrowedSocket = std::os::windows::io::BorrowedSocket<'static>;
 
 impl Socket<BorrowedSocket> {
-    /// Create a new [`Socket`] given a [`BorrowedSocket`] managed externally.
+    /// Create a new [`Socket`] given a `BorrowedSocket` managed externally.
     pub fn new(socket: BorrowedSocket) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
