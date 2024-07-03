@@ -42,6 +42,7 @@ pub fn default_server() -> Server {
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.
 pub fn connected_server(server: &Server) -> ActiveConnectionRef {
+    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
     #[allow(clippy::mutable_key_type)]
     let server_connections = server.active_connections();
     // Find confirmed connections.  There should only be one.

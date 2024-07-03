@@ -199,6 +199,7 @@ impl super::HttpServer for HttpServer {
     }
 
     fn process_events(&mut self, now: Instant) {
+        // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
         #[allow(clippy::mutable_key_type)]
         let active_conns = self.server.active_connections();
         for acr in active_conns {

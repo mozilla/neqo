@@ -130,6 +130,8 @@ impl Http3Server {
     /// Process HTTP3 layer.
     fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
+        // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable
+        // types.
         #[allow(clippy::mutable_key_type)]
         let mut active_conns = self.server.active_connections();
         active_conns.extend(
