@@ -126,7 +126,7 @@ impl Socket<BorrowedSocket> {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
-    pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         Self::recv_inner(local_address, &self.state, (&self.inner).into())
     }
 }
@@ -167,7 +167,7 @@ impl Socket<tokio::net::UdpSocket> {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
-    pub fn recv(&mut self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
                 Self::recv_inner(local_address, &self.state, (&self.inner).into())
@@ -193,7 +193,7 @@ mod tests {
     async fn datagram_tos() -> Result<(), io::Error> {
         let sender = Socket::bind("127.0.0.1:0")?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let mut receiver = Socket::bind(receiver_addr)?;
+        let receiver = Socket::bind(receiver_addr)?;
 
         let datagram = Datagram::new(
             sender.local_addr()?,
@@ -230,7 +230,7 @@ mod tests {
 
         let sender = Socket::bind("127.0.0.1:0")?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let mut receiver = Socket::bind(receiver_addr)?;
+        let receiver = Socket::bind(receiver_addr)?;
 
         // `neqo_common::udp::Socket::send` does not yet
         // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
