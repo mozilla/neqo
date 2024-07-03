@@ -32,7 +32,7 @@ use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
 
-use crate::{udp, SharedArgs};
+use crate::SharedArgs;
 
 mod http09;
 mod http3;
@@ -326,7 +326,7 @@ enum Ready {
 
 // Wait for the socket to be readable or the timeout to fire.
 async fn ready(
-    socket: &udp::Socket,
+    socket: &neqo_udp::Socket<tokio::net::UdpSocket>,
     mut timeout: Option<&mut Pin<Box<Sleep>>>,
 ) -> Result<Ready, io::Error> {
     let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
@@ -367,7 +367,7 @@ trait Client {
 
 struct Runner<'a, H: Handler> {
     local_addr: SocketAddr,
-    socket: &'a mut udp::Socket,
+    socket: &'a mut neqo_udp::Socket<tokio::net::UdpSocket>,
     client: H::Client,
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
@@ -531,7 +531,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
         };
 
-        let mut socket = udp::Socket::bind(local_addr)?;
+        let mut socket = neqo_udp::Socket::bind(local_addr)?;
         let real_local = socket.local_addr().unwrap();
         qinfo!(
             "{} Client connecting: {:?} -> {:?}",
