@@ -19,3 +19,7 @@ tokio = { version = "1", default-features = false, features = ["net"], optional 
 
 [dev-dependencies]
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
