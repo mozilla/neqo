@@ -2269,8 +2269,7 @@ impl Connection {
             let aead_expansion = tx.expansion();
             builder.set_limit(profile.limit() - aead_expansion);
             builder.enable_padding(needs_padding);
-            let limit = builder.limit();
-            debug_assert!(limit <= 2048);
+            debug_assert!(builder.limit() <= 2048);
             if builder.is_full() {
                 encoder = builder.abort();
                 break;

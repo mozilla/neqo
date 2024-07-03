@@ -994,8 +994,7 @@ impl SendStream {
             } else {
                 builder.encode_vvec(&data[..length]);
             }
-            let limit = builder.limit();
-            debug_assert!(builder.len() <= limit);
+            debug_assert!(builder.len() <= builder.limit());
 
             self.mark_as_sent(offset, length, fin);
             tokens.push(RecoveryToken::Stream(StreamRecoveryToken::Stream(

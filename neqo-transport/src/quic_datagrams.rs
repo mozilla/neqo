@@ -121,8 +121,7 @@ impl QuicDatagrams {
                     builder.encode(dgram.as_ref());
                     builder.mark_full();
                 }
-                let limit = builder.limit();
-                debug_assert!(builder.len() <= limit);
+                debug_assert!(builder.len() <= builder.limit());
                 stats.frame_tx.datagram += 1;
                 tokens.push(RecoveryToken::Datagram(*dgram.tracking()));
             } else if tokens.is_empty() {

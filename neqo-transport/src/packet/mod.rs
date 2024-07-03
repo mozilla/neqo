@@ -361,8 +361,7 @@ impl PacketBuilder {
             for v in values {
                 self.encode_varint(*v);
             }
-            let limit = self.limit();
-            debug_assert!(self.len() <= limit);
+            debug_assert!(self.len() <= self.limit());
         };
         write
     }
