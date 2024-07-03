@@ -316,7 +316,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             .collect();
         let Some(last_lost_packet) = lost_packets.last() else {
             return false;
-        }
+        };
 
         let congestion = self.on_congestion_event(last_lost_packet);
         let persistent_congestion = self.detect_persistent_congestion(
