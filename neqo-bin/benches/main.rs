@@ -76,7 +76,7 @@ fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
             tokio::select! {
                 _ = &mut done_receiver => {}
                 res = &mut server  => panic!("expect server not to terminate: {res:?}"),
-            }
+            };
         });
     });
     done_sender
