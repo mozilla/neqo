@@ -306,13 +306,6 @@ impl NewTokenState {
             ref mut old,
         } = self
         {
-            // pending.pop().map_or(None, |t| {
-            //     if old.len() >= MAX_SAVED_TOKENS {
-            //         old.remove(0);
-            //     }
-            //     old.push(t);
-            //     Some(&old[old.len() - 1])
-            // })
             pending.pop().map(|t| {
                 if old.len() >= MAX_SAVED_TOKENS {
                     old.remove(0);
