@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::future_not_send)]
+
 use std::{
     cell::RefCell,
     fmt::{self, Display},
@@ -226,7 +228,6 @@ impl ServerRunner {
             .unwrap_or(first_socket)
     }
 
-    #[allow(clippy::future_not_send)]
     async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
         loop {
             match self.server.process(dgram.take(), (self.now)()) {
@@ -249,7 +250,6 @@ impl ServerRunner {
     }
 
     // Wait for any of the sockets to be readable or the timeout to fire.
-    #[allow(clippy::future_not_send)]
     async fn ready(&mut self) -> Result<Ready, io::Error> {
         let sockets_ready = select_all(
             self.sockets
@@ -268,7 +268,6 @@ impl ServerRunner {
         select(sockets_ready, timeout_ready).await.factor_first().0
     }
 
-    #[allow(clippy::future_not_send)]
     pub async fn run(mut self) -> Res<()> {
         loop {
             self.server.process_events((self.now)());
@@ -304,7 +303,6 @@ enum Ready {
     Timeout,
 }
 
-#[allow(clippy::future_not_send)]
 pub async fn server(mut args: Args) -> Res<()> {
     const HQ_INTEROP: &str = "hq-interop";
 
