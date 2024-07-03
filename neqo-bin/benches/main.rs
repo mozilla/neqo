@@ -68,6 +68,7 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
+#[allow(clippy::redundant_pub_crate)] // Bug in clippy nursery? Not sure how this lint could fire here.
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
