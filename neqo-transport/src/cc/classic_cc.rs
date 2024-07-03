@@ -314,11 +314,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             .filter(|pkt| !self.pmtud.is_pmtud_probe(pkt))
             .cloned()
             .collect();
-        if lost_packets.is_empty() {
+        let Some(last_lost_packet) = lost_packets.last() else {
             return false;
         }
 
-        let congestion = self.on_congestion_event(lost_packets.last().unwrap());
+        let congestion = self.on_congestion_event(last_lost_packet);
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
