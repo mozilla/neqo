@@ -149,12 +149,15 @@ impl WindowAdjustment for Cubic {
                 }
             })
             .as_secs_f64();
-
         let target_cubic = self.w_cubic(time_ca);
+
         let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
-        let incr = self.tcp_acked_bytes / tcp_cnt;
-        self.tcp_acked_bytes -= incr * tcp_cnt;
-        self.estimated_tcp_cwnd += incr * MAX_DATAGRAM_SIZE_F64;
+        let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
+        if incr > 0.0 {
+            self.tcp_acked_bytes -= incr * tcp_cnt;
+            self.estimated_tcp_cwnd += incr * MAX_DATAGRAM_SIZE_F64;
+        }
+
         let target_cwnd = target_cubic.max(self.estimated_tcp_cwnd);
 
         // Calculate the number of bytes that would need to be acknowledged for an increase
