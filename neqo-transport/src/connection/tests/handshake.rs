@@ -1169,7 +1169,7 @@ fn emit_authentication_needed_once() {
     // packet, but be large enough that the CertificateVerify message does not
     // also fit in the same packet.  Our default test setup achieves this, but
     // changes to the setup might invalidate this test.
-    let _ = client.process(server1.as_dgram_ref(), now());
+    _ = client.process(server1.as_dgram_ref(), now());
     assert_eq!(1, authentication_needed_count(&mut client));
     assert!(client.peer_certificate().is_some());
 
@@ -1177,6 +1177,6 @@ fn emit_authentication_needed_once() {
     // `Connection::authenticated`. On receiving the second packet from the
     // server, the client must not emit a another
     // `ConnectionEvent::AuthenticationNeeded`.
-    let _ = client.process(server2.as_dgram_ref(), now());
+    _ = client.process(server2.as_dgram_ref(), now());
     assert_eq!(0, authentication_needed_count(&mut client));
 }

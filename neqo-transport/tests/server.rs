@@ -860,7 +860,7 @@ fn has_active_connections() {
     assert!(!server.has_active_connections());
 
     let initial = client.process(None, now());
-    let _ = server.process(initial.as_dgram_ref(), now()).dgram();
+    _ = server.process(initial.as_dgram_ref(), now()).dgram();
 
     assert!(server.has_active_connections());
 }
