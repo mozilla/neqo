@@ -18,7 +18,12 @@ pub struct AeadNull {}
 
 impl AeadNull {
     #[allow(clippy::missing_errors_doc)]
-    pub const fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
+    pub const fn new(
+        _version: Version,
+        _cipher: Cipher,
+        _secret: &SymKey,
+        _prefix: &str,
+    ) -> Res<Self> {
         Ok(Self {})
     }
 

@@ -288,6 +288,7 @@ impl Time {
     }
 
     #[allow(clippy::unused_self)] // Only on some platforms is it unused.
+    #[allow(clippy::missing_const_for_fn)] // Only const on some platforms where the function is empty.
     fn start(&self) {
         #[cfg(target_os = "macos")]
         {
@@ -307,7 +308,8 @@ impl Time {
     }
 
     #[allow(clippy::unused_self)] // Only on some platforms is it unused.
-    const fn stop(&self) {
+    #[allow(clippy::missing_const_for_fn)] // Only const on some platforms where the function is empty.
+    fn stop(&self) {
         #[cfg(windows)]
         {
             if let Some(p) = self.active {
