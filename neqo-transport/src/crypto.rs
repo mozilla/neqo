@@ -431,8 +431,10 @@ pub struct CryptoDxState {
     /// become exhausted and can't be used any more.
     invocations: PacketNumber,
     /// The basis of the invocation limits in `invocations`.
-    invocations_base: u32,
+    largest_packet_len: usize,
 }
+
+const INITIAL_LARGEST_PACKET_LEN: usize = 1 << 11; // 2048
 
 impl CryptoDxState {
     #[allow(clippy::reversed_empty_ranges)] // To initialize an empty range.
@@ -460,7 +462,7 @@ impl CryptoDxState {
             used_pn: 0..0,
             min_pn: 0,
             invocations: Self::limit(direction, cipher),
-            invocations_base: 52, // leading zeros for 2^11 as u64
+            largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         }
     }
 
@@ -554,7 +556,7 @@ impl CryptoDxState {
             used_pn: pn..pn,
             min_pn: pn,
             invocations,
-            invocations_base: 52, // leading zeros for 2^11 as u64
+            largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         }
     }
 
@@ -650,21 +652,14 @@ impl CryptoDxState {
             hex(body)
         );
 
-        // The numbers in `Self::limit` assume a maximum packet size of 2^11.
+        // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
         debug_assert!(body.len() < 65536);
-        let base = u64::leading_zeros(body.len().try_into()?) - 1;
-        if base < self.invocations_base {
-            // Need to halve the limits a bunch of times.
-            qtrace!(
-                "New largest body {}, halving invocations {} times from {} to {}",
-                body.len(),
-                self.invocations_base - base,
-                self.invocations,
-                self.invocations >> (self.invocations_base - base)
-            );
-            self.invocations >>= self.invocations_base - base;
-            self.invocations_base = base;
+        if body.len() > self.largest_packet_len {
+            let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
+                - usize::leading_zeros(body.len() - 1);
+            self.invocations >>= new_bits;
+            self.largest_packet_len = body.len();
         }
         self.invoked()?;
 
@@ -1311,7 +1306,7 @@ impl CryptoStates {
                 used_pn: 0..645_971_972,
                 min_pn: 0,
                 invocations: 10,
-                invocations_base: 22,
+                largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
             },
             cipher: TLS_CHACHA20_POLY1305_SHA256,
             next_secret: secret.clone(),
