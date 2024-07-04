@@ -105,22 +105,16 @@ impl Pmtud {
     }
 
     /// Returns the size of the current PMTUD probe.
-    const fn probe_size(&self) -> usize {
+    #[must_use]
+    pub const fn probe_size(&self) -> usize {
         self.search_table[self.probe_index] - self.header_size
     }
 
     /// Sends a PMTUD probe.
-    pub fn send_probe(
-        &mut self,
-        builder: &mut PacketBuilder,
-        stats: &mut Stats,
-        aead_expansion: usize,
-    ) {
-        builder.set_limit(self.probe_size() - aead_expansion);
+    pub fn send_probe(&mut self, builder: &mut PacketBuilder, stats: &mut Stats) {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_varint(FRAME_TYPE_PING);
-        builder.enable_padding(true);
         stats.frame_tx.ping += 1;
         stats.frame_tx.all += 1;
         stats.pmtud_tx += 1;
@@ -250,7 +244,7 @@ mod tests {
         crypto::CryptoDxState,
         packet::{PacketBuilder, PacketType},
         pmtud::PMTU_RAISE_TIMER,
-        recovery::SentPacket,
+        recovery::{SendProfile, SentPacket},
         Pmtud, Stats,
     };
 
@@ -295,7 +289,9 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, []);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
-        pmtud.send_probe(&mut builder, stats, prot.expansion());
+        builder.set_initial_limit(&SendProfile::new_limited(pmtud.plpmtu()), 16, pmtud);
+        builder.enable_padding(true);
+        pmtud.send_probe(&mut builder, stats);
         builder.pad();
         let encoder = builder.build(prot).unwrap();
         assert_eq!(encoder.len(), pmtud.probe_size());

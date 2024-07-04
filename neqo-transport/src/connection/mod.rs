@@ -2105,7 +2105,6 @@ impl Connection {
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
-    #[allow(clippy::too_many_arguments)]
     fn write_frames(
         &mut self,
         path: &PathRef,
@@ -2113,7 +2112,6 @@ impl Connection {
         profile: &SendProfile,
         builder: &mut PacketBuilder,
         coalesced: bool, // Whether this packet is coalesced behind another one.
-        aead_expansion: usize,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
@@ -2162,11 +2160,9 @@ impl Connection {
                     && full_mtu
                 {
                     // Only send PMTUD probes using non-coalesced packets.
-                    path.borrow_mut().pmtud_mut().send_probe(
-                        builder,
-                        &mut self.stats.borrow_mut(),
-                        aead_expansion,
-                    );
+                    path.borrow_mut()
+                        .pmtud_mut()
+                        .send_probe(builder, &mut self.stats.borrow_mut());
                     ack_eliciting = true;
                 }
                 self.write_appdata_frames(builder, &mut tokens);
@@ -2283,7 +2279,15 @@ impl Connection {
 
             // Configure the limits and padding for this packet.
             let aead_expansion = tx.expansion();
-            builder.set_limit(profile.limit() - aead_expansion);
+            needs_padding |= builder.set_initial_limit(
+                &profile,
+                aead_expansion,
+                self.paths
+                    .primary()
+                    .ok_or(Error::InternalError)?
+                    .borrow()
+                    .pmtud(),
+            );
             builder.enable_padding(needs_padding);
             if builder.is_full() {
                 encoder = builder.abort();
@@ -2302,7 +2306,6 @@ impl Connection {
                     &profile,
                     &mut builder,
                     header_start != 0,
-                    aead_expansion,
                     now,
                 );
             }

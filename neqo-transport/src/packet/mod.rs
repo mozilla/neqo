@@ -19,8 +19,9 @@ use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoSpace, CryptoStates},
     frame::FRAME_TYPE_PADDING,
+    recovery::SendProfile,
     version::{Version, WireVersion},
-    Error, Res,
+    Error, Pmtud, Res,
 };
 
 /// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
@@ -227,6 +228,23 @@ impl PacketBuilder {
     /// is only used voluntarily by users of the builder, through `remaining()`.
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
+    }
+
+    /// Set the initial limit for the packet, based on the profile and the PMTUD state.
+    /// Returns true if the packet
+    pub fn set_initial_limit(
+        &mut self,
+        profile: &SendProfile,
+        aead_expansion: usize,
+        pmtud: &Pmtud,
+    ) -> bool {
+        if pmtud.needs_probe() {
+            self.limit = pmtud.probe_size() - aead_expansion;
+            true
+        } else {
+            self.limit = profile.limit() - aead_expansion;
+            false
+        }
     }
 
     /// Get the current limit.
