@@ -49,13 +49,13 @@ fn full_handshake(pmtud: bool) {
     let mut client = new_client(ConnectionParameters::default().pmtud(pmtud));
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = new_server(ConnectionParameters::default().pmtud(pmtud));
     let out = server.process(out.as_dgram_ref(), now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu().unwrap());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu());
 
     qdebug!("---- client: cert verification");
     let out = client.process(out.as_dgram_ref(), now());
@@ -81,7 +81,7 @@ fn full_handshake(pmtud: bool) {
     if pmtud {
         // PMTUD causes a PING probe to be sent here
         let pkt = out.dgram().unwrap();
-        assert!(pkt.len() > client.plpmtu().unwrap());
+        assert!(pkt.len() > client.plpmtu());
     } else {
         assert!(out.as_dgram_ref().is_none());
     }
@@ -161,7 +161,7 @@ fn dup_server_flight1() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
+    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
     qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
@@ -285,7 +285,7 @@ fn send_05rtt() {
     let c1 = client.process(None, now()).dgram();
     assert!(c1.is_some());
     let s1 = server.process(c1.as_ref(), now()).dgram().unwrap();
-    assert_eq!(s1.len(), server.plpmtu().unwrap());
+    assert_eq!(s1.len(), server.plpmtu());
 
     // The server should accept writes at this point.
     let s2 = send_something(&mut server, now());
@@ -455,7 +455,7 @@ fn coalesce_05rtt() {
     let s2 = server.process(c2.as_ref(), now).dgram();
     // Even though there is a 1-RTT packet at the end of the datagram, the
     // flight should be padded to full size.
-    assert_eq!(s2.as_ref().unwrap().len(), server.plpmtu().unwrap());
+    assert_eq!(s2.as_ref().unwrap().len(), server.plpmtu());
 
     // The client should process the datagram.  It can't process the 1-RTT
     // packet until authentication completes though.  So it saves it.
@@ -663,7 +663,7 @@ fn verify_pkt_honors_mtu() {
     assert_eq!(client.stream_send(stream_id, &[0xbb; 2000]).unwrap(), 2000);
     let pkt0 = client.process(None, now);
     assert!(matches!(pkt0, Output::Datagram(_)));
-    assert_eq!(pkt0.as_dgram_ref().unwrap().len(), client.plpmtu().unwrap());
+    assert_eq!(pkt0.as_dgram_ref().unwrap().len(), client.plpmtu());
 }
 
 #[test]
@@ -783,9 +783,9 @@ fn anti_amplification() {
     let c_init = client.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
     let s_init1 = server.process(c_init.as_ref(), now).dgram().unwrap();
-    assert_eq!(s_init1.len(), client.plpmtu().unwrap());
+    assert_eq!(s_init1.len(), client.plpmtu());
     let s_init2 = server.process_output(now).dgram().unwrap();
-    assert_eq!(s_init2.len(), server.plpmtu().unwrap());
+    assert_eq!(s_init2.len(), server.plpmtu());
 
     // Skip the gap for pacing here.
     let s_pacing = server.process_output(now).callback();
@@ -793,7 +793,7 @@ fn anti_amplification() {
     now += s_pacing;
 
     let s_init3 = server.process_output(now).dgram().unwrap();
-    assert_eq!(s_init3.len(), server.plpmtu().unwrap());
+    assert_eq!(s_init3.len(), server.plpmtu());
     let cb = server.process_output(now).callback();
     assert_ne!(cb, Duration::new(0, 0));
 
@@ -808,7 +808,7 @@ fn anti_amplification() {
     // The client sends a padded datagram, with just ACK for Handshake.
     assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
     assert_eq!(client.stats().frame_tx.all, frame_count + 1);
-    assert_ne!(ack.len(), client.plpmtu().unwrap()); // Not padded (it includes Handshake).
+    assert_ne!(ack.len(), client.plpmtu()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
     let remainder = server.process(Some(&ack), now).dgram();

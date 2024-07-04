@@ -3379,14 +3379,13 @@ impl Connection {
 
     /// Return the PLMTU of the primary path.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// The function returns `InternalError` if there is no primary path.
+    /// The function panics if there is no primary path. (Should be fine for test usage.)
     #[cfg(test)]
-    pub fn plpmtu(&self) -> Res<usize> {
-        let path = self.paths.primary().ok_or(Error::InternalError)?;
-        let plpmtu = path.borrow().plpmtu();
-        Ok(plpmtu)
+    #[must_use]
+    pub fn plpmtu(&self) -> usize {
+        self.paths.primary().unwrap().borrow().plpmtu()
     }
 }
 

@@ -82,14 +82,14 @@ fn pto_works_full_cwnd() {
     // Send lots of data.
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     let (dgrams, now) = fill_cwnd(&mut client, stream_id, now);
-    assert_full_cwnd(&dgrams, POST_HANDSHAKE_CWND, client.plpmtu().unwrap());
+    assert_full_cwnd(&dgrams, POST_HANDSHAKE_CWND, client.plpmtu());
 
     // Fill the CWND after waiting for a PTO.
     let (dgrams, now) = fill_cwnd(&mut client, stream_id, now + AT_LEAST_PTO);
     // Two packets in the PTO.
     // The first should be full sized; the second might be small.
     assert_eq!(dgrams.len(), 2);
-    assert_eq!(dgrams[0].len(), client.plpmtu().unwrap());
+    assert_eq!(dgrams[0].len(), client.plpmtu());
 
     // Both datagrams contain one or more STREAM frames.
     for d in dgrams {
@@ -168,7 +168,7 @@ fn pto_initial() {
     let mut client = default_client();
     let pkt1 = client.process(None, now).dgram();
     assert!(pkt1.is_some());
-    assert_eq!(pkt1.clone().unwrap().len(), client.plpmtu().unwrap());
+    assert_eq!(pkt1.clone().unwrap().len(), client.plpmtu());
 
     let delay = client.process(None, now).callback();
     assert_eq!(delay, INITIAL_PTO);
@@ -177,7 +177,7 @@ fn pto_initial() {
     now += delay;
     let pkt2 = client.process(None, now).dgram();
     assert!(pkt2.is_some());
-    assert_eq!(pkt2.unwrap().len(), client.plpmtu().unwrap());
+    assert_eq!(pkt2.unwrap().len(), client.plpmtu());
 
     let delay = client.process(None, now).callback();
     // PTO has doubled.
