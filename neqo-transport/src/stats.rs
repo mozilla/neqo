@@ -18,7 +18,7 @@ use neqo_common::qwarn;
 
 use crate::packet::PacketNumber;
 
-pub(crate) const MAX_PTO_COUNTS: usize = 16;
+pub const MAX_PTO_COUNTS: usize = 16;
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]

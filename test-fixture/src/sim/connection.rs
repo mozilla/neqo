@@ -196,7 +196,7 @@ pub struct ReachState {
 impl ReachState {
     /// Create a new instance that intends to reach the indicated state.
     #[must_use]
-    pub fn new(target: State) -> Self {
+    pub const fn new(target: State) -> Self {
         Self { target }
     }
 }
@@ -225,7 +225,7 @@ pub struct SendData {
 
 impl SendData {
     #[must_use]
-    pub fn new(amount: usize) -> Self {
+    pub const fn new(amount: usize) -> Self {
         Self {
             remaining: amount,
             stream_id: None,
@@ -307,7 +307,7 @@ pub struct ReceiveData {
 
 impl ReceiveData {
     #[must_use]
-    pub fn new(amount: usize) -> Self {
+    pub const fn new(amount: usize) -> Self {
         Self { remaining: amount }
     }
 

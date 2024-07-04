@@ -98,7 +98,7 @@ impl Cubic {
     /// W_cubic(t) = C*(t-K)^3 + W_max (Eq. 1)
     /// t is relative to the start of the congestion avoidance phase and it is in seconds.
     fn w_cubic(&self, t: f64) -> f64 {
-        CUBIC_C * (t - self.k).powi(3) * MAX_DATAGRAM_SIZE_F64 + self.w_max
+        (CUBIC_C * (t - self.k).powi(3)).mul_add(MAX_DATAGRAM_SIZE_F64, self.w_max)
     }
 
     fn start_epoch(&mut self, curr_cwnd_f64: f64, new_acked_f64: f64, now: Instant) {
@@ -152,9 +152,10 @@ impl WindowAdjustment for Cubic {
         let target_cubic = self.w_cubic(time_ca);
 
         let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
-        while self.tcp_acked_bytes > tcp_cnt {
-            self.tcp_acked_bytes -= tcp_cnt;
-            self.estimated_tcp_cwnd += MAX_DATAGRAM_SIZE_F64;
+        let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
+        if incr > 0.0 {
+            self.tcp_acked_bytes -= incr * tcp_cnt;
+            self.estimated_tcp_cwnd += incr * MAX_DATAGRAM_SIZE_F64;
         }
 
         let target_cwnd = target_cubic.max(self.estimated_tcp_cwnd);

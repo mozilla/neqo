@@ -27,17 +27,17 @@ impl Datagram {
     }
 
     #[must_use]
-    pub fn source(&self) -> SocketAddr {
+    pub const fn source(&self) -> SocketAddr {
         self.src
     }
 
     #[must_use]
-    pub fn destination(&self) -> SocketAddr {
+    pub const fn destination(&self) -> SocketAddr {
         self.dst
     }
 
     #[must_use]
-    pub fn tos(&self) -> IpTos {
+    pub const fn tos(&self) -> IpTos {
         self.tos
     }
 
