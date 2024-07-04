@@ -2300,14 +2300,8 @@ impl Connection {
             if let Some(ref close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {
-                (tokens, ack_eliciting, padded) = self.write_frames(
-                    path,
-                    *space,
-                    &profile,
-                    &mut builder,
-                    header_start != 0,
-                    now,
-                );
+                (tokens, ack_eliciting, padded) =
+                    self.write_frames(path, *space, &profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
