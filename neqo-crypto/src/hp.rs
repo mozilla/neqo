@@ -127,11 +127,11 @@ impl HpKey {
     /// Get the sample size, which is also the output size.
     #[must_use]
     #[allow(clippy::unused_self)] // To maintain an API contract.
-    pub fn sample_size(&self) -> usize {
+    pub const fn sample_size(&self) -> usize {
         Self::SAMPLE_SIZE
     }
 
-    fn block_size(&self) -> usize {
+    const fn block_size(&self) -> usize {
         match self {
             Self::Aes(_) => 16,
             Self::Chacha(_) => 64,

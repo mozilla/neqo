@@ -183,19 +183,19 @@ fn tcp_phase() {
     assert!(num_acks2 < expected_ack_tcp_increase2);
 
     // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be
-    // calculates from: W_cubic(elapsed_time + t_to_increase) - W_cubis(elapsed_time) =
+    // calculates from: W_cubic(elapsed_time + t_to_increase) - W_cubic(elapsed_time) =
     // MAX_DATAGRAM_SIZE => CUBIC_C * (elapsed_time + t_to_increase)^3 * MAX_DATAGRAM_SIZE +
-    // CWND_INITIAL -     CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
+    // CWND_INITIAL - CUBIC_C * elapsed_time^3 * MAX_DATAGRAM_SIZE + CWND_INITIAL =
     // MAX_DATAGRAM_SIZE => t_to_increase = cbrt((1 + CUBIC_C * elapsed_time^3) / CUBIC_C) -
     // elapsed_time (t_to_increase is in seconds)
     // number of ack needed is t_to_increase / time_increase.
     let expected_ack_cubic_increase =
-        ((((1.0 + CUBIC_C * (elapsed_time).as_secs_f64().powi(3)) / CUBIC_C).cbrt()
+        (((CUBIC_C.mul_add((elapsed_time).as_secs_f64().powi(3), 1.0) / CUBIC_C).cbrt()
             - elapsed_time.as_secs_f64())
             / time_increase.as_secs_f64())
         .ceil() as u64;
     // num_acks is very close to the calculated value. The exact value is hard to calculate
-    // because the proportional increase(i.e. curr_cwnd_f64 / (target - curr_cwnd_f64) *
+    // because the proportional increase (i.e. curr_cwnd_f64 / (target - curr_cwnd_f64) *
     // MAX_DATAGRAM_SIZE_F64) and the byte counting.
     assert_eq!(num_acks2, expected_ack_cubic_increase + 2);
 }
@@ -235,10 +235,8 @@ fn cubic_phase() {
             next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
         }
 
-        let expected = (CUBIC_C
-            * ((now - epoch_start).as_secs_f64() - k).powi(3)
-            * convert_to_f64(cubic.max_datagram_size())
-            + cwnd_initial_f64 * 10.0)
+        let expected = (CUBIC_C * ((now - epoch_start).as_secs_f64() - k).powi(3))
+            .mul_add(convert_to_f64(cubic.max_datagram_size()), CWND_INITIAL_10_F64)
             .round() as usize;
 
         assert_within(cubic.cwnd(), expected, cubic.max_datagram_size());

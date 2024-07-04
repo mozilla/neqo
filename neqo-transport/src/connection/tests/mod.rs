@@ -553,7 +553,7 @@ const fn cwnd_packets(data: usize, mtu: usize) -> usize {
 
 /// Determine the size of the last packet.
 /// The minimal size of a packet is `ACK_ONLY_SIZE_LIMIT`.
-fn last_packet(cwnd: usize, mtu: usize) -> usize {
+const fn last_packet(cwnd: usize, mtu: usize) -> usize {
     if (cwnd % mtu) > ACK_ONLY_SIZE_LIMIT {
         cwnd % mtu
     } else {

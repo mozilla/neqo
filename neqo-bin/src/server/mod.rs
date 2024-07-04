@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::future_not_send)]
+
 use std::{
     cell::RefCell,
     fmt::{self, Display},
@@ -261,7 +263,7 @@ impl ServerRunner {
         let timeout_ready = self
             .timeout
             .as_mut()
-            .map_or(Either::Right(futures::future::pending()), Either::Left)
+            .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
             .map(|()| Ok(Ready::Timeout));
         select(sockets_ready, timeout_ready).await.factor_first().0
     }

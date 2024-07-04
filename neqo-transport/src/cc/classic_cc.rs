@@ -45,7 +45,7 @@ enum State {
 }
 
 impl State {
-    pub fn in_recovery(self) -> bool {
+    pub const fn in_recovery(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::Recovery)
     }
 
@@ -54,7 +54,7 @@ impl State {
     }
 
     /// These states are transient, we tell qlog on entry, but not on exit.
-    pub fn transient(self) -> bool {
+    pub const fn transient(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::PersistentCongestion)
     }
 
@@ -67,7 +67,7 @@ impl State {
         };
     }
 
-    pub fn to_qlog(self) -> &'static str {
+    pub const fn to_qlog(self) -> &'static str {
         match self {
             Self::SlowStart | Self::PersistentCongestion => "slow_start",
             Self::CongestionAvoidance => "congestion_avoidance",
@@ -217,7 +217,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
             if self.state.in_recovery() {
                 self.set_state(State::CongestionAvoidance);
-                qlog::metrics_updated(&mut self.qlog, &[QlogMetric::InRecovery(false)]);
+                qlog::metrics_updated(&self.qlog, &[QlogMetric::InRecovery(false)]);
             }
 
             new_acked += pkt.len();
@@ -271,7 +271,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
         qlog::metrics_updated(
-            &mut self.qlog,
+            &self.qlog,
             &[
                 QlogMetric::CongestionWindow(self.congestion_window),
                 QlogMetric::BytesInFlight(self.bytes_in_flight),
@@ -304,7 +304,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
         }
         qlog::metrics_updated(
-            &mut self.qlog,
+            &self.qlog,
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
 
@@ -348,7 +348,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             assert!(self.bytes_in_flight >= pkt.len());
             self.bytes_in_flight -= pkt.len();
             qlog::metrics_updated(
-                &mut self.qlog,
+                &self.qlog,
                 &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
             );
             qtrace!([self], "Ignore pkt with size {}", pkt.len());
@@ -358,7 +358,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn discard_in_flight(&mut self) {
         self.bytes_in_flight = 0;
         qlog::metrics_updated(
-            &mut self.qlog,
+            &self.qlog,
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
     }
@@ -389,7 +389,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             pkt.len()
         );
         qlog::metrics_updated(
-            &mut self.qlog,
+            &self.qlog,
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
     }
@@ -422,7 +422,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     #[cfg(test)]
     #[must_use]
-    pub fn ssthresh(&self) -> usize {
+    pub const fn ssthresh(&self) -> usize {
         self.ssthresh
     }
 
@@ -442,7 +442,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     #[cfg(test)]
-    pub fn acked_bytes(&self) -> usize {
+    pub const fn acked_bytes(&self) -> usize {
         self.acked_bytes
     }
 
@@ -512,7 +512,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     self.acked_bytes = 0;
                     self.set_state(State::PersistentCongestion);
                     qlog::metrics_updated(
-                        &mut self.qlog,
+                        &self.qlog,
                         &[QlogMetric::CongestionWindow(self.congestion_window)],
                     );
                     return true;
@@ -525,7 +525,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     }
 
     #[must_use]
-    fn after_recovery_start(&mut self, packet: &SentPacket) -> bool {
+    fn after_recovery_start(&self, packet: &SentPacket) -> bool {
         // At the start of the recovery period, the state is transient and
         // all packets will have been sent before recovery. When sending out
         // the first packet we transition to the non-transient `Recovery`
@@ -559,7 +559,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             self.ssthresh
         );
         qlog::metrics_updated(
-            &mut self.qlog,
+            &self.qlog,
             &[
                 QlogMetric::CongestionWindow(self.congestion_window),
                 QlogMetric::SsThresh(self.ssthresh),

@@ -56,7 +56,7 @@ fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
     Datagram::new(a, a, d.tos(), &d[..])
 }
 
-fn new_port(a: SocketAddr) -> SocketAddr {
+const fn new_port(a: SocketAddr) -> SocketAddr {
     let (port, _) = a.port().overflowing_add(410);
     SocketAddr::new(a.ip(), port)
 }

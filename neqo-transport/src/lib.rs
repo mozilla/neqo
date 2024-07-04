@@ -224,7 +224,7 @@ pub enum CloseReason {
 
 impl CloseReason {
     #[must_use]
-    pub fn app_code(&self) -> Option<AppError> {
+    pub const fn app_code(&self) -> Option<AppError> {
         match self {
             Self::Application(e) => Some(*e),
             Self::Transport(_) => None,
@@ -234,11 +234,8 @@ impl CloseReason {
     /// Checks enclosed error for [`Error::NoError`] and
     /// [`CloseReason::Application(0)`].
     #[must_use]
-    pub fn is_error(&self) -> bool {
-        !matches!(
-            self,
-            CloseReason::Transport(Error::NoError) | CloseReason::Application(0),
-        )
+    pub const fn is_error(&self) -> bool {
+        !matches!(self, Self::Transport(Error::NoError) | Self::Application(0),)
     }
 }
 
