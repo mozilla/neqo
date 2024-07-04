@@ -17,10 +17,10 @@ use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket,
 // the Internet," 2018 Network Traffic Measurement and Analysis Conference (TMA), Vienna, Austria,
 // 2018, pp. 1-8, doi: 10.23919/TMA.2018.8506538. keywords:
 // {Servers;Probes;Tools;Clamps;Middleboxes;Standards},
-const MTU_SIZES_V4: [usize; 11] = [
+const MTU_SIZES_V4: &[usize] = &[
     1280, 1380, 1420, 1472, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
-const MTU_SIZES_V6: [usize; 10] = [
+const MTU_SIZES_V6: &[usize] = &[
     1280, 1380, 1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 
@@ -51,8 +51,8 @@ impl Pmtud {
     /// Returns the MTU search table for the given remote IP address family.
     const fn search_table(remote_ip: IpAddr) -> &'static [usize] {
         match remote_ip {
-            IpAddr::V4(_) => &MTU_SIZES_V4,
-            IpAddr::V6(_) => &MTU_SIZES_V6,
+            IpAddr::V4(_) => MTU_SIZES_V4,
+            IpAddr::V6(_) => MTU_SIZES_V6,
         }
     }
 
