@@ -128,7 +128,7 @@ pub struct ClassicCongestionControl<T> {
 }
 
 impl<T> ClassicCongestionControl<T> {
-    pub fn max_datagram_size(&self) -> usize {
+    pub const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
     }
 }

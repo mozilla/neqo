@@ -34,11 +34,11 @@ use crate::{
 const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const RTT: Duration = Duration::from_millis(100);
 
-fn cwnd_after_loss(cwnd: usize) -> usize {
+const fn cwnd_after_loss(cwnd: usize) -> usize {
     cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
 }
 
-fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
+const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
     (cwnd + mtu) * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
 }
 
@@ -215,7 +215,7 @@ fn cubic_phase() {
 
     next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
 
-    let k = ((cwnd_initial_f64 * 10.0 - cwnd_initial_f64)
+    let k = (cwnd_initial_f64.mul_add(10.0, -cwnd_initial_f64)
         / CUBIC_C
         / convert_to_f64(cubic.max_datagram_size()))
     .cbrt();
@@ -236,7 +236,10 @@ fn cubic_phase() {
         }
 
         let expected = (CUBIC_C * ((now - epoch_start).as_secs_f64() - k).powi(3))
-            .mul_add(convert_to_f64(cubic.max_datagram_size()), CWND_INITIAL_10_F64)
+            .mul_add(
+                convert_to_f64(cubic.max_datagram_size()),
+                cwnd_initial_f64 * 10.0,
+            )
             .round() as usize;
 
         assert_within(cubic.cwnd(), expected, cubic.max_datagram_size());

@@ -94,7 +94,7 @@ impl Pmtud {
     /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
     /// sent. During probing, this may be smaller than the actual path MTU.
     #[must_use]
-    pub fn plpmtu(&self) -> usize {
+    pub const fn plpmtu(&self) -> usize {
         self.mtu - self.header_size
     }
 
@@ -105,7 +105,7 @@ impl Pmtud {
     }
 
     /// Returns the size of the current PMTUD probe.
-    fn probe_size(&self) -> usize {
+    const fn probe_size(&self) -> usize {
         self.search_table[self.probe_index] - self.header_size
     }
 

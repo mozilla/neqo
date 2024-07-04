@@ -348,12 +348,12 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub fn pmtud_enabled(&self) -> bool {
+    pub const fn pmtud_enabled(&self) -> bool {
         self.pmtud
     }
 
     #[must_use]
-    pub fn pmtud(mut self, pmtud: bool) -> Self {
+    pub const fn pmtud(mut self, pmtud: bool) -> Self {
         self.pmtud = pmtud;
         self
     }

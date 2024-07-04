@@ -60,7 +60,7 @@ impl Pacer {
         }
     }
 
-    pub fn mtu(&self) -> usize {
+    pub const fn mtu(&self) -> usize {
         self.p
     }
 
