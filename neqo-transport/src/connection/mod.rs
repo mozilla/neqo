@@ -2719,6 +2719,19 @@ impl Connection {
         Ok(())
     }
 
+    fn set_confirmed(&mut self) -> Res<()> {
+        self.set_state(State::Confirmed);
+        if self.conn_params.pmtud_enabled() {
+            self.paths
+                .primary()
+                .ok_or(Error::InternalError)?
+                .borrow_mut()
+                .pmtud_mut()
+                .start_pmtud();
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_lines)] // Yep, but it's a nice big match, which is basically lots of little functions.
     fn input_frame(
         &mut self,
@@ -2873,15 +2886,7 @@ impl Connection {
                 if self.role == Role::Server || !self.state.connected() {
                     return Err(Error::ProtocolViolation);
                 }
-                self.set_state(State::Confirmed);
-                if self.conn_params.pmtud_enabled() {
-                    self.paths
-                        .primary()
-                        .ok_or(Error::InternalError)?
-                        .borrow_mut()
-                        .pmtud_mut()
-                        .start_pmtud();
-                }
+                self.set_confirmed()?;
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
@@ -3056,15 +3061,7 @@ impl Connection {
         self.stats.borrow_mut().resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
-            self.set_state(State::Confirmed);
-            if self.conn_params.pmtud_enabled() {
-                self.paths
-                    .primary()
-                    .ok_or(Error::InternalError)?
-                    .borrow_mut()
-                    .pmtud_mut()
-                    .start_pmtud();
-            }
+            self.set_confirmed()?;
         }
         qinfo!([self], "Connection established");
         Ok(())
