@@ -514,8 +514,7 @@ mod tests {
         find_pmtu_with_increase(V6, 1280, 1500);
     }
 
-    /// Increments the loss counts for the given search table and loss counts, based on the given
-    /// packet size.
+    /// Increments the loss counts for the given search table, based on the given packet size.
     fn search_table_inc(pmtud: &Pmtud, loss_counts: &[usize], sz: usize) -> Vec<usize> {
         zip(pmtud.search_table, loss_counts.iter())
             .map(|(&s, &c)| {
@@ -598,8 +597,7 @@ mod tests {
         assert_pmtud_stopped(&pmtud, 2047);
     }
 
-    /// Zeros the loss counts for the given search table and loss counts, below the given packet
-    /// size.
+    /// Zeros the loss counts for the given search table, below the given packet size.
     fn search_table_zero(pmtud: &Pmtud, loss_counts: &[usize], sz: usize) -> Vec<usize> {
         zip(pmtud.search_table, loss_counts.iter())
             .map(|(&s, &c)| if s <= sz + pmtud.header_size { 0 } else { c })
@@ -611,6 +609,10 @@ mod tests {
         let now = now();
         let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
+
+        // No packets ACKed, nothing should change.
+        pmtud.on_packets_acked(&[], &mut stats);
+        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
 
         // One packet of size 4000 was lost, which should increase loss counts >= 4000 by one.
         let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 4000);
