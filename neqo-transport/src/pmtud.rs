@@ -152,7 +152,7 @@ impl Pmtud {
         let idx = self
             .search_table
             .iter()
-            .take_while(|&&sz| sz < max_len + self.header_size)
+            .take_while(|&&sz| sz <= max_len + self.header_size)
             .count();
         self.loss_counts.iter_mut().take(idx).for_each(|c| *c = 0);
 
@@ -195,26 +195,47 @@ impl Pmtud {
             return;
         }
 
-        // Track lost probes
-        let lost = self.count_pmtud_probes(lost_packets);
-        stats.pmtud_lost += lost;
-
         let mut increase = vec![0; self.search_table.len()];
+        let mut loss_counts_updated = false;
         for p in lost_packets {
             let idx = self
                 .search_table
                 .iter()
                 .take_while(|&&sz| p.len() > sz - self.header_size)
                 .count();
-            increase[idx] += 1;
+            // Count each lost packet size <= the current MTU only once. Otherwise a burst loss of
+            // >= MAX_PROBES MTU-sized packets triggers a PMTUD restart. Counting only one of them
+            // here requires three consecutive loss instances of such sizes to trigger a PMTUD
+            // restart.
+            //
+            // Also, ignore losses of packets <= the minimum QUIC packet size, (`searchtable[0]`),
+            // since they just increase loss counts across the board, adding to spurious
+            // PMTUD restarts.
+            if idx > 0 && (increase[idx] == 0 || p.len() > self.plpmtu()) {
+                loss_counts_updated = true;
+                increase[idx] += 1;
+            }
         }
+
+        if !loss_counts_updated {
+            return;
+        }
+
         let mut accum = 0;
         for (c, incr) in zip(&mut self.loss_counts, increase) {
             accum += incr;
             *c += accum;
         }
 
+        // Track lost probes
+        let lost = self.count_pmtud_probes(lost_packets);
+        stats.pmtud_lost += lost;
+
         // Check if any packet sizes have been lost MAX_PROBES times or more.
+        //
+        // TODO: It's not clear that MAX_PROBES is the right number for losses of packets that
+        // aren't PMTU probes. We might want to be more conservative, to avoid spurious PMTUD
+        // restarts.
         let Some(first_failed) = self.loss_counts.iter().position(|&c| c >= MAX_PROBES) else {
             // If not, keep going.
             if lost > 0 {
@@ -532,8 +553,9 @@ mod tests {
         assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
 
         // A packet of size 100 was lost, which is smaller than all probe sizes.
+        // Loss counts should be unchanged.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 100)], &mut stats, now);
-        assert_eq!(vec![1; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
 
         pmtud.loss_counts.fill(0); // Reset the loss counts.
 
@@ -549,7 +571,7 @@ mod tests {
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // A packet of size 5000 was lost, which should increase loss counts >= 5000 by one. There
-        // have now been `MAX_PROBES` losses of packets >= 5000, so the PMTUD process should have
+        // have now been MAX_PROBES losses of packets >= 5000, so the PMTUD process should have
         // restarted.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 5000)], &mut stats, now);
         assert_pmtud_restarted(&pmtud);
@@ -566,7 +588,7 @@ mod tests {
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // A packet of size 2000 was lost, which should increase loss counts >= 2000 by one. There
-        // have now been `MAX_PROBES` losses of packets >= 4000, so the PMTUD process should have
+        // have now been MAX_PROBES losses of packets >= 4000, so the PMTUD process should have
         // stopped.
         pmtud.on_packets_lost(
             &[make_sentpacket(0, now, 2000), make_sentpacket(0, now, 2000)],
@@ -612,7 +634,7 @@ mod tests {
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // Now, one more packets of size 9000 was lost, which should increase loss counts >= 9000
-        // by one. There have now been `MAX_PROBES` losses of packets >= 8191, so the PMTUD process
+        // by one. There have now been MAX_PROBES losses of packets >= 8191, so the PMTUD process
         // should have restarted.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 9000)], &mut stats, now);
         assert_pmtud_restarted(&pmtud);
