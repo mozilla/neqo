@@ -11,6 +11,7 @@ use std::{
 };
 
 use neqo_common::{qdebug, qinfo};
+use static_assertions::const_assert;
 
 use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, Stats};
 
@@ -22,8 +23,12 @@ const MTU_SIZES_V4: &[usize] = &[
     1280, 1380, 1420, 1472, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 const MTU_SIZES_V6: &[usize] = &[
-    1280, 1380, 1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
+    1280, 1380,
+    1420, // 1420 is not in the paper for v6, but adding it makes the arrays the same length
+    1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
+const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
+const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
 const MAX_PROBES: usize = 3;
@@ -44,7 +49,7 @@ pub struct Pmtud {
     probe_index: usize,
     probe_count: usize,
     probe_state: Probe,
-    loss_counts: Vec<usize>,
+    loss_counts: [usize; SEARCH_TABLE_LEN],
     raise_timer: Option<Instant>,
 }
 
@@ -66,7 +71,7 @@ impl Pmtud {
     }
 
     #[must_use]
-    pub fn new(remote_ip: IpAddr) -> Self {
+    pub const fn new(remote_ip: IpAddr) -> Self {
         let search_table = Self::search_table(remote_ip);
         let probe_index = 0;
         Self {
@@ -76,7 +81,7 @@ impl Pmtud {
             probe_index,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
-            loss_counts: vec![0; search_table.len()],
+            loss_counts: [0; SEARCH_TABLE_LEN],
             raise_timer: None,
         }
     }
@@ -213,7 +218,7 @@ impl Pmtud {
             return;
         }
 
-        let mut increase = vec![0; self.search_table.len()];
+        let mut increase = [0; SEARCH_TABLE_LEN];
         let mut loss_counts_updated = false;
         for p in lost_packets {
             let Some(idx) = self
@@ -335,7 +340,7 @@ mod tests {
     use crate::{
         crypto::CryptoDxState,
         packet::{PacketBuilder, PacketType},
-        pmtud::{Probe, PMTU_RAISE_TIMER},
+        pmtud::{Probe, PMTU_RAISE_TIMER, SEARCH_TABLE_LEN},
         recovery::{SendProfile, SentPacket},
         Pmtud, Stats,
     };
@@ -553,14 +558,14 @@ mod tests {
     fn assert_pmtud_restarted(pmtud: &Pmtud) {
         assert_eq!(Probe::Needed, pmtud.probe_state);
         assert_eq!(pmtud.mtu, pmtud.search_table[0]);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
     }
 
     /// Asserts that the PMTUD process has stopped at the given MTU.
     fn assert_pmtud_stopped(pmtud: &Pmtud, mtu: usize) {
         // assert_eq!(Probe::NotNeeded, pmtud.probe_state);
         assert_eq!(pmtud.mtu, mtu);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
     }
 
     #[test]
@@ -571,17 +576,17 @@ mod tests {
 
         // No packets lost, nothing should change.
         pmtud.on_packets_lost(&[], &mut stats, now);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         // A packet of size 100 was lost, which is smaller than all probe sizes.
         // Loss counts should be unchanged.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 100)], &mut stats, now);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         // A packet of size 100_000 was lost, which is larger than all probe sizes.
         // Loss counts should be unchanged.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 100_000)], &mut stats, now);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         pmtud.loss_counts.fill(0); // Reset the loss counts.
 
@@ -640,18 +645,18 @@ mod tests {
         // A packet of size 100 was ACKed, which is smaller than all probe sizes.
         // Loss counts should be unchanged.
         pmtud.on_packets_acked(&[make_sentpacket(0, now, 100)], &mut stats);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         // A packet of size 100_000 was ACKed, which is larger than all probe sizes.
         // Loss counts should be unchanged.
         pmtud.on_packets_acked(&[make_sentpacket(0, now, 100_000)], &mut stats);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         pmtud.loss_counts.fill(0); // Reset the loss counts.
 
         // No packets ACKed, nothing should change.
         pmtud.on_packets_acked(&[], &mut stats);
-        assert_eq!(vec![0; pmtud.search_table.len()], pmtud.loss_counts);
+        assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         // One packet of size 4000 was lost, which should increase loss counts >= 4000 by one.
         let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 4000);
