@@ -103,6 +103,12 @@ impl Pmtud {
         self.probe_state == Probe::Needed
     }
 
+    /// Returns true if a PMTUD probe was sent.
+    #[must_use]
+    pub fn probe_sent(&self) -> bool {
+        self.probe_state == Probe::Sent
+    }
+
     /// Returns the size of the current PMTUD probe.
     #[must_use]
     pub const fn probe_size(&self) -> usize {
@@ -127,8 +133,7 @@ impl Pmtud {
     }
 
     /// Returns true if the packet is a PMTUD probe.
-    #[must_use]
-    pub fn is_probe(&self, p: &SentPacket) -> bool {
+    fn is_probe(&self, p: &SentPacket) -> bool {
         self.probe_state == Probe::Sent && p.len() == self.probe_size()
     }
 
@@ -255,6 +260,10 @@ impl Pmtud {
             // We saw multiple losses of packets <= the current MTU outside of PMTU discovery,
             // so we need to probe again. To limit connectivity disruptions, we start the PMTU
             // discovery from the smallest packet up, rather than the failed packet size down.
+            //
+            // TODO: If we are declaring losses, that means that we're getting packets through.
+            // The size of those will put a floor on the MTU. We're currently conservative and
+            // start from scratch, but we don't strictly need to do that.
             self.restart(stats);
         } else {
             // We saw multiple losses of packets > the current MTU during PMTU discovery, so

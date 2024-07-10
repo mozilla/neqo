@@ -309,12 +309,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         );
 
         // Lost PMTUD probes do not elicit a congestion control reaction.
-        let lost_packets: Vec<SentPacket> = lost_packets
+        let probe_size = self.pmtud.probe_size();
+        let probe_sent = self.pmtud.probe_sent();
+        let mut lost_packets = lost_packets
             .iter()
-            .filter(|pkt| !self.pmtud.is_probe(pkt))
-            .cloned()
-            .collect();
-        let Some(last_lost_packet) = lost_packets.last() else {
+            .filter(|pkt| !probe_sent || pkt.len() < probe_size)
+            .rev()
+            .peekable();
+        let Some(last_lost_packet) = lost_packets.peek() else {
             return false;
         };
 
@@ -323,7 +325,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
-            &lost_packets,
+            lost_packets.rev(),
         );
         qdebug!(
             "on_packets_lost this={:p}, bytes_in_flight={}, cwnd={}, state={:?}",
@@ -467,13 +469,16 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         }
     }
 
-    fn detect_persistent_congestion(
+    fn detect_persistent_congestion<'a, I>(
         &mut self,
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
-        lost_packets: &[SentPacket],
-    ) -> bool {
+        lost_packets: I,
+    ) -> bool
+    where
+        I: Iterator<Item = &'a SentPacket>,
+    {
         if first_rtt_sample_time.is_none() {
             return false;
         }
@@ -488,10 +493,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // Also, make sure to ignore any packets sent before we got an RTT estimate
         // as we might not have sent PTO packets soon enough after those.
         let cutoff = max(first_rtt_sample_time, prev_largest_acked_sent);
-        for p in lost_packets
-            .iter()
-            .skip_while(|p| Some(p.time_sent()) < cutoff)
-        {
+        for p in lost_packets.skip_while(|p| Some(p.time_sent()) < cutoff) {
             if p.pn() != last_pn + 1 {
                 // Not a contiguous range of lost packets, start over.
                 start = None;
@@ -878,12 +880,12 @@ mod tests {
         let rtt_time = Some(by_pto(rtt_time));
 
         // Persistent congestion is never declared if the RTT time is `None`.
-        cc.detect_persistent_congestion(None, None, PTO, lost);
+        cc.detect_persistent_congestion(None, None, PTO, lost.iter());
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        cc.detect_persistent_congestion(None, last_ack, PTO, lost);
+        cc.detect_persistent_congestion(None, last_ack, PTO, lost.iter());
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
-        cc.detect_persistent_congestion(rtt_time, last_ack, PTO, lost);
+        cc.detect_persistent_congestion(rtt_time, last_ack, PTO, lost.iter());
         cc.cwnd() == cc.cwnd_min()
     }
 
@@ -1021,7 +1023,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_newreno() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
-        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, &lost);
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
@@ -1029,7 +1031,7 @@ mod tests {
     fn persistent_congestion_no_prev_ack_cubic() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
-        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, &lost);
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
