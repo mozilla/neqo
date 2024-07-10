@@ -231,7 +231,7 @@ impl PacketBuilder {
     }
 
     /// Set the initial limit for the packet, based on the profile and the PMTUD state.
-    /// Returns true if the packet
+    /// Returns true if the packet needs padding.
     pub fn set_initial_limit(
         &mut self,
         profile: &SendProfile,
