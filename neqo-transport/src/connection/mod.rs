@@ -2135,7 +2135,7 @@ impl Connection {
         // but send them even when we don't have space.
         let full_mtu = profile.limit() == path.borrow().plpmtu();
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
-            // Probes should only be padded if the full MTU is available.
+            // Path validation probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
             if path.borrow_mut().write_frames(
                 builder,
