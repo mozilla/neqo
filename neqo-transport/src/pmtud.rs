@@ -173,7 +173,7 @@ impl Pmtud {
             .search_table
             .iter()
             .position(|&sz| sz > max_len + self.header_size)
-            .unwrap_or(self.search_table.len());
+            .unwrap_or(SEARCH_TABLE_LEN);
         self.loss_counts.iter_mut().take(idx).for_each(|c| *c = 0);
 
         let acked = self.count_probes(acked_pkts);
@@ -304,7 +304,7 @@ impl Pmtud {
 
     /// Starts the next upward PMTUD probe.
     pub fn start(&mut self) {
-        if self.probe_index < self.search_table.len() - 1 {
+        if self.probe_index < SEARCH_TABLE_LEN - 1 {
             self.probe_state = Probe::Needed; // We need to send a probe
             self.probe_count = 0; // For the first time
             self.probe_index += 1; // At this size
@@ -367,7 +367,7 @@ mod tests {
             .position(|x| *x == pmtud.mtu)
             .unwrap();
         assert!(mtu >= pmtud.search_table[idx]);
-        if idx < pmtud.search_table.len() - 1 {
+        if idx < SEARCH_TABLE_LEN - 1 {
             assert!(mtu < pmtud.search_table[idx + 1]);
         }
     }
