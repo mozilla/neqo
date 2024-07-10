@@ -216,7 +216,7 @@ impl Debug for Stats {
         )?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost change {}",
+            "  pmtud: {} sent {} acked {} lost {} change",
             self.pmtud_tx, self.pmtud_ack, self.pmtud_lost, self.pmtud_change
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
