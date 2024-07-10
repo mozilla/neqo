@@ -165,6 +165,9 @@ impl Pmtud {
         }
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
+        //
+        // TODO: Maybe we should be tracking stats on a per-probe-size basis rather than just the
+        // total number of successful probes.
         stats.pmtud_ack += acked;
         self.mtu = self.search_table[self.probe_index];
         qdebug!("PMTUD probe of size {} succeeded", self.mtu);
