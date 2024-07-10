@@ -2156,10 +2156,9 @@ impl Connection {
             if space == PacketNumberSpace::ApplicationData {
                 if self.state.connected()
                     && path.borrow().pmtud().needs_probe()
-                    && !coalesced
+                    && !coalesced // Only send PMTUD probes using non-coalesced packets.
                     && full_mtu
                 {
-                    // Only send PMTUD probes using non-coalesced packets.
                     path.borrow_mut()
                         .pmtud_mut()
                         .send_probe(builder, &mut self.stats.borrow_mut());
