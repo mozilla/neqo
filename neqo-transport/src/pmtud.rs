@@ -29,7 +29,7 @@ const MTU_SIZES_V6: &[usize] = &[
 const MAX_PROBES: usize = 3;
 const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
     NotNeeded,
     Needed,
@@ -138,7 +138,7 @@ impl Pmtud {
     /// Allows filtering packets without holding a reference to [`Pmtud`]. When
     /// in doubt, use [`Pmtud::is_probe`].
     pub fn is_probe_filter(&self) -> impl Fn(&SentPacket) -> bool {
-        let probe_state = self.probe_state.clone();
+        let probe_state = self.probe_state;
         let probe_size = self.probe_size();
 
         move |p: &SentPacket| -> bool { probe_state == Probe::Sent && p.len() == probe_size }
