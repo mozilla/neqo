@@ -136,7 +136,6 @@ impl Pmtud {
     ///
     /// Allows filtering packets without holding a reference to [`Pmtud`]. When
     /// in doubt, use [`Pmtud::is_pmtud_probe`].
-    #[must_use]
     pub fn is_probe_filter(&self) -> impl Fn(&SentPacket) -> bool {
         let probe_state = Probe::Sent;
         let probe_size = self.probe_size();
