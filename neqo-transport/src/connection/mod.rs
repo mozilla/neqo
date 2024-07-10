@@ -2131,7 +2131,7 @@ impl Connection {
         }
         let ack_end = builder.len();
 
-        // Avoid sending probes until the handshake completes,
+        // Avoid sending path validation probes until the handshake completes,
         // but send them even when we don't have space.
         let full_mtu = profile.limit() == path.borrow().plpmtu();
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
