@@ -311,7 +311,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         // Lost PMTUD probes do not elicit a congestion control reaction.
         let lost_packets: Vec<SentPacket> = lost_packets
             .iter()
-            .filter(|pkt| !self.pmtud.is_pmtud_probe(pkt))
+            .filter(|pkt| !self.pmtud.is_probe(pkt))
             .cloned()
             .collect();
         let Some(last_lost_packet) = lost_packets.last() else {

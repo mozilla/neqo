@@ -2723,7 +2723,7 @@ impl Connection {
                 .ok_or(Error::InternalError)?
                 .borrow_mut()
                 .pmtud_mut()
-                .start_pmtud();
+                .start();
         }
         Ok(())
     }
