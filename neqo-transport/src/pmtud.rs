@@ -132,9 +132,20 @@ impl Pmtud {
         );
     }
 
+    /// Provides a [`Fn`] that returns true if the packet is a PMTUD probe.
+    ///
+    /// Allows filtering packets without holding a reference to [`Pmtud`]. When
+    /// in doubt, use [`Pmtud::is_pmtud_probe`].
+    pub fn is_probe_filter(&self) -> impl Fn(&SentPacket) -> bool {
+        let probe_state = Probe::Sent;
+        let probe_size = self.probe_size();
+
+        move |p: &SentPacket| -> bool { probe_state == Probe::Sent && p.len() == probe_size }
+    }
+
     /// Returns true if the packet is a PMTUD probe.
     fn is_probe(&self, p: &SentPacket) -> bool {
-        self.probe_state == Probe::Sent && p.len() == self.probe_size()
+        self.is_probe_filter()(p)
     }
 
     /// Count the PMTUD probes included in `pkts`.

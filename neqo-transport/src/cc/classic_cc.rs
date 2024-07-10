@@ -308,14 +308,14 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
 
-        // Lost PMTUD probes do not elicit a congestion control reaction.
-        let probe_size = self.pmtud.probe_size();
-        let probe_sent = self.pmtud.probe_sent();
+        let is_pmtud_probe = self.pmtud.is_probe_filter();
         let mut lost_packets = lost_packets
             .iter()
-            .filter(|pkt| !probe_sent || pkt.len() < probe_size)
+            .filter(|pkt| !is_pmtud_probe(pkt))
             .rev()
             .peekable();
+
+        // Lost PMTUD probes do not elicit a congestion control reaction.
         let Some(last_lost_packet) = lost_packets.peek() else {
             return false;
         };
@@ -469,16 +469,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         }
     }
 
-    fn detect_persistent_congestion<'a, I>(
+    fn detect_persistent_congestion<'a>(
         &mut self,
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
-        lost_packets: I,
-    ) -> bool
-    where
-        I: Iterator<Item = &'a SentPacket>,
-    {
+        lost_packets: impl IntoIterator<Item = &'a SentPacket>,
+    ) -> bool {
         if first_rtt_sample_time.is_none() {
             return false;
         }
@@ -493,7 +490,10 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // Also, make sure to ignore any packets sent before we got an RTT estimate
         // as we might not have sent PTO packets soon enough after those.
         let cutoff = max(first_rtt_sample_time, prev_largest_acked_sent);
-        for p in lost_packets.skip_while(|p| Some(p.time_sent()) < cutoff) {
+        for p in lost_packets
+            .into_iter()
+            .skip_while(|p| Some(p.time_sent()) < cutoff)
+        {
             if p.pn() != last_pn + 1 {
                 // Not a contiguous range of lost packets, start over.
                 start = None;
