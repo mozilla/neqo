@@ -70,6 +70,7 @@ jobs:
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
           /c/msys64/mingw64/bin/pkg-config --cflags --libs nss
           find C:/msys64/mingw64/lib
+          find C:/msys64/mingw64/bin
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -95,7 +96,7 @@ jobs:
       - name: Build
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE -vvv --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
