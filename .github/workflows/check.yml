@@ -70,6 +70,8 @@ jobs:
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
           find C:/msys64/mingw64/lib/pkgconfig
           find C:/msys64/usr/lib/pkgconfig/
+          which pkg-config
+          pkg-config -h
           pkg-config --cflags --libs nss
 
       - name: Set up MSVC build environment (Windows)
