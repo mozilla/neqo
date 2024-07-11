@@ -77,7 +77,7 @@ runs:
         for log in ../logs/*/*/output.txt; do
           if grep -q 'RUST_BACKTRACE=full' "$log"; then
             echo "Panic detected in $log"
-            tail -n 50 "$log" | tee "$GITHUB_OUTPUT"
+            tail -n 50 "$log"
             exit 1
           fi
         done
