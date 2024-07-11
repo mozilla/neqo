@@ -144,7 +144,9 @@ jobs:
           # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
           cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
           # Check that the fuzz targets also build
-          ${{ matrix.rust-toolchain == 'nightly' }} && cargo +${{ matrix.rust-toolchain }} fuzz check
+          if [ ${{ matrix.rust-toolchain == 'nightly' }} ]; then
+            cargo +${{ matrix.rust-toolchain }} fuzz check
+          fi
         if: success() || failure()
 
       - name: Check rustdoc links
