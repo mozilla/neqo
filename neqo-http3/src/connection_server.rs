@@ -255,7 +255,7 @@ impl Http3ServerHandler {
 
     fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
         qinfo!([self], "Connection error: {}.", err);
-        conn.close(now, err.code(), &format!("{err}"));
+        conn.close(now, err.code(), format!("{err}"));
         self.base_handler.close(err.code());
         self.events
             .connection_state_change(self.base_handler.state());
