@@ -68,9 +68,7 @@ jobs:
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall pkg-config mingw-w64-x86_64-nss
-          # echo "gyp-next==0.15.0 --hash=sha256:3600f2a80fa33d3574f51bbb3d4bfc843373dafbe84059958aea3f1c9560f95a" > requirements.txt
-          # python3 -m pip install --require-hashes -r requirements.txt
-          # echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          find C:/msys64/mingw64/lib
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
