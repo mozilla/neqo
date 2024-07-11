@@ -74,12 +74,10 @@ runs:
         python run.py $ARGS 2>&1 | tee ../summary.txt || true
         # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
         # (that we assume happened in neqo.)
-        ls -l ../logs/
-        find ../logs/
-        for log in ../logs/*/output.txt; do
+        for log in ../logs/*/*/output.txt; do
           ls -l "$log"
           if grep -q 'RUST_BACKTRACE=full' "$log"; then
-            tail "$log"
+            tail -n 50 "$log"
             exit 1
           fi
         done
