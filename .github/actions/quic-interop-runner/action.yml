@@ -75,9 +75,9 @@ runs:
         # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
         # (that we assume happened in neqo.)
         for log in ../logs/*/*/output.txt; do
-          ls -l "$log"
           if grep -q 'RUST_BACKTRACE=full' "$log"; then
-            tail -n 50 "$log"
+            echo "Panic detected in $log"
+            tail -n 50 "$log" | tee "$GITHUB_OUTPUT"
             exit 1
           fi
         done
