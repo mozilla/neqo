@@ -68,6 +68,9 @@ jobs:
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
+          find C:/msys64/mingw64/lib/pkgconfig
+          find C:/msys64/usr/lib/pkgconfig/
+          pkg-config --cflags --libs nss
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
