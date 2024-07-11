@@ -69,6 +69,7 @@ jobs:
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
           /c/msys64/mingw64/bin/pkg-config --cflags --libs nss
+          find C:/msys64/mingw64/lib
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -105,7 +106,7 @@ jobs:
       - name: Run client/server transfer
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE -vvv --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           # Give the server time to start.
