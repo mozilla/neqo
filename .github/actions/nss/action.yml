@@ -23,16 +23,13 @@ runs:
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
-        pkg-config --list-all
         if ! pkg-config --exists nss; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
-          echo no nss
           exit 0
         fi
         NSS_VERSION="$(pkg-config --modversion nss)"
         if [ "$?" -ne 0 ]; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
-          echo wrong nss version
           exit 0
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
