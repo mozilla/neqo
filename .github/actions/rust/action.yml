@@ -25,7 +25,7 @@ runs:
     - name: Install Rust tools
       shell: bash
       run: |
-        cargo +${{ inputs.version }} quickinstall --no-binstall --no-fallback \
+        cargo +${{ inputs.version }} quickinstall --no-binstall \
           cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine \
           cargo-machete
 
