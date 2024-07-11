@@ -21,9 +21,9 @@ runs:
       run: |
         if ! command -v pkg-config &> /dev/null; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
-          echo no pkg-config
           exit 0
         fi
+        pkg-config --list-all
         if ! pkg-config --exists nss; then
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           echo no nss
