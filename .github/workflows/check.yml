@@ -137,7 +137,9 @@ jobs:
         if: success() || failure()
 
       - name: Check for unused dependencies
-        run: cargo +${{ matrix.rust-toolchain }} machete --with-metadata
+        run: |
+          #  --with-metadata has false positives, see https://github.com/bnjbvr/cargo-machete/issues/127
+          cargo +${{ matrix.rust-toolchain }} machete
 
       - name: Clippy
         run: |
