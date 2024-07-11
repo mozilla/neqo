@@ -71,8 +71,11 @@ jobs:
           find C:/msys64/mingw64/lib/pkgconfig
           find C:/msys64/usr/lib/pkgconfig/
           which pkg-config
+          find C:/msys64/usr/bin
+          find C:/msys64/mingw64/bin
           pkg-config -h
           pkg-config --cflags --libs nss
+
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
