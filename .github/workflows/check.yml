@@ -64,11 +64,11 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           {
-            echo C:/msys64/usr/bin
-            echo C:/msys64/mingw64/bin
+            echo /c/msys64/usr/bin
+            echo /c/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
-          find C:/msys64/mingw64/lib
+          find /c/msys64/mingw64/lib
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'

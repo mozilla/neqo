@@ -292,13 +292,19 @@ fn pkg_config() -> Vec<String> {
 
     let mut flags: Vec<String> = Vec::new();
     for f in cfg_str.split(' ') {
-        let f = f.trim();
         if let Some(include) = f.strip_prefix("-I") {
+            let include = include.trim();
             flags.push(String::from(f));
             println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
+            let mut path = path.trim().to_string();
+            if env::consts::OS == "windows" && path.chars().nth(1) == Some(':') {
+                // Prefix with /, and remove second character to make a UNIX path.
+                path = format!("/{}{}", &path[0..1], &path[2..]);
+            }
             println!("cargo:rustc-link-search={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
+            let lib = lib.trim();
             if env::consts::OS == "windows" {
                 println!("cargo:rustc-link-lib=static=lib{lib}.dll.a");
             } else {
