@@ -136,6 +136,11 @@ jobs:
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
+      - name: Check for unused dependencies
+        run: |
+          #  --with-metadata has false positives, see https://github.com/bnjbvr/cargo-machete/issues/127
+          cargo +${{ matrix.rust-toolchain }} machete
+
       - name: Clippy
         run: |
           # Use cargo-hack to run clippy on each crate individually with its
