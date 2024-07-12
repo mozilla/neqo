@@ -17,7 +17,7 @@ use std::{
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
-    server::{ActiveConnectionRef, Server, ValidateAddress},
+    server::{ConnectionRef, Server, ValidateAddress},
     ConnectionIdGenerator, Output,
 };
 
@@ -39,7 +39,7 @@ const MAX_EVENT_DATA_SIZE: usize = 1024;
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
-    http3_handlers: HashMap<ActiveConnectionRef, HandlerRef>,
+    http3_handlers: HashMap<ConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
 }
 
@@ -147,7 +147,7 @@ impl Http3Server {
         }
     }
 
-    fn process_events(&mut self, conn: &ActiveConnectionRef, now: Instant) {
+    fn process_events(&mut self, conn: &ConnectionRef, now: Instant) {
         let mut remove = false;
         let http3_parameters = &self.http3_parameters;
         {
@@ -270,7 +270,7 @@ impl Http3Server {
 fn prepare_data(
     stream_info: Http3StreamInfo,
     handler_borrowed: &mut RefMut<Http3ServerHandler>,
-    conn: &ActiveConnectionRef,
+    conn: &ConnectionRef,
     handler: &HandlerRef,
     now: Instant,
     events: &Http3ServerEvents,
