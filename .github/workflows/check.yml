@@ -79,6 +79,7 @@ jobs:
       - name: Fix MSVC build environment (Windows)
         if: runner.os == 'Windows'
         run: |
+          ls -l /c/msys64/mingw64/bin
           echo "BASH=$SHELL" >> "$GITHUB_ENV"
           echo "/c/msys64/mingw64/bin" >> "$GITHUB_PATH"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
