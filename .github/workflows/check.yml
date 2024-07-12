@@ -68,7 +68,7 @@ jobs:
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
-          find C:/msys64/mingw64/lib
+          find C:/msys64/mingw64/bin
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -79,6 +79,8 @@ jobs:
       - name: Fix MSVC build environment (Windows)
         if: runner.os == 'Windows'
         run: |
+          echo "BASH=$SHELL" >> "$GITHUB_ENV"
+          echo "/c/msys64/mingw64/bin" >> "$GITHUB_PATH"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
 
