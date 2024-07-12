@@ -136,6 +136,11 @@ jobs:
           cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
         if: success() || failure()
 
+      - name: Check for unused dependencies
+        run: |
+          #  --with-metadata has false positives, see https://github.com/bnjbvr/cargo-machete/issues/127
+          cargo +${{ matrix.rust-toolchain }} machete
+
       - name: Clippy
         run: |
           # Use cargo-hack to run clippy on each crate individually with its
@@ -143,6 +148,10 @@ jobs:
           # hidden given that a plain cargo clippy combines all features of the
           # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
           cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
+          # Check that the fuzz targets also build
+          if [ ${{ matrix.rust-toolchain }} == 'nightly' ]; then
+            cargo +${{ matrix.rust-toolchain }} fuzz check
+          fi
         if: success() || failure()
 
       - name: Check rustdoc links

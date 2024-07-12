@@ -19,8 +19,9 @@ use crate::{
     cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN},
     crypto::{CryptoDxState, CryptoSpace, CryptoStates},
     frame::FRAME_TYPE_PADDING,
+    recovery::SendProfile,
     version::{Version, WireVersion},
-    Error, Res,
+    Error, Pmtud, Res,
 };
 
 /// `MIN_INITIAL_PACKET_SIZE` is the smallest packet that can be used to establish
@@ -82,6 +83,7 @@ impl PacketType {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<PacketType> for CryptoSpace {
     fn from(v: PacketType) -> Self {
         match v {
@@ -228,9 +230,27 @@ impl PacketBuilder {
         self.limit = limit;
     }
 
+    /// Set the initial limit for the packet, based on the profile and the PMTUD state.
+    /// Returns true if the packet needs padding.
+    pub fn set_initial_limit(
+        &mut self,
+        profile: &SendProfile,
+        aead_expansion: usize,
+        pmtud: &Pmtud,
+    ) -> bool {
+        if pmtud.needs_probe() {
+            debug_assert!(pmtud.probe_size() > profile.limit());
+            self.limit = pmtud.probe_size() - aead_expansion;
+            true
+        } else {
+            self.limit = profile.limit() - aead_expansion;
+            false
+        }
+    }
+
     /// Get the current limit.
     #[must_use]
-    pub fn limit(&mut self) -> usize {
+    pub const fn limit(&self) -> usize {
         self.limit
     }
 
@@ -335,7 +355,7 @@ impl PacketBuilder {
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
-    fn pad_for_crypto(&mut self, crypto: &mut CryptoDxState) {
+    fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
         // Make sure that there is enough data in the packet.
         // The length of the packet number plus the payload length needs to
         // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
@@ -541,11 +561,7 @@ pub struct PublicPacket<'a> {
 
 impl<'a> PublicPacket<'a> {
     fn opt<T>(v: Option<T>) -> Res<T> {
-        if let Some(v) = v {
-            Ok(v)
-        } else {
-            Err(Error::NoMoreData)
-        }
+        v.map_or_else(|| Err(Error::NoMoreData), |v| Ok(v))
     }
 
     /// Decode the type-specific portions of a long header.
@@ -709,12 +725,12 @@ impl<'a> PublicPacket<'a> {
     }
 
     #[must_use]
-    pub fn packet_type(&self) -> PacketType {
+    pub const fn packet_type(&self) -> PacketType {
         self.packet_type
     }
 
     #[must_use]
-    pub fn dcid(&self) -> ConnectionIdRef<'a> {
+    pub const fn dcid(&self) -> ConnectionIdRef<'a> {
         self.dcid
     }
 
@@ -728,7 +744,7 @@ impl<'a> PublicPacket<'a> {
     }
 
     #[must_use]
-    pub fn token(&self) -> &'a [u8] {
+    pub const fn token(&self) -> &'a [u8] {
         self.token
     }
 
@@ -745,11 +761,11 @@ impl<'a> PublicPacket<'a> {
 
     #[must_use]
     #[allow(clippy::len_without_is_empty)] // is_empty() would always return false in this case
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.data.len()
     }
 
-    fn decode_pn(expected: PacketNumber, pn: u64, w: usize) -> PacketNumber {
+    const fn decode_pn(expected: PacketNumber, pn: u64, w: usize) -> PacketNumber {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;
         if candidate + (window / 2) <= expected {
@@ -767,19 +783,19 @@ impl<'a> PublicPacket<'a> {
     /// Decrypt the header of the packet.
     fn decrypt_header(
         &self,
-        crypto: &mut CryptoDxState,
+        crypto: &CryptoDxState,
     ) -> Res<(bool, PacketNumber, Vec<u8>, &'a [u8])> {
         assert_ne!(self.packet_type, PacketType::Retry);
         assert_ne!(self.packet_type, PacketType::VersionNegotiation);
 
         let sample_offset = self.header_len + SAMPLE_OFFSET;
-        let mask = if let Some(sample) = self.data.get(sample_offset..(sample_offset + SAMPLE_SIZE))
-        {
-            qtrace!("unmask hdr={}", hex(&self.data[..sample_offset]));
-            crypto.compute_mask(sample)
-        } else {
-            Err(Error::NoMoreData)
-        }?;
+        let mask = self
+            .data
+            .get(sample_offset..(sample_offset + SAMPLE_SIZE))
+            .map_or(Err(Error::NoMoreData), |sample| {
+                qtrace!("unmask hdr={}", hex(&self.data[..sample_offset]));
+                crypto.compute_mask(sample)
+            })?;
 
         // Un-mask the leading byte.
         let bits = if self.packet_type == PacketType::Short {
@@ -900,17 +916,17 @@ pub struct DecryptedPacket {
 
 impl DecryptedPacket {
     #[must_use]
-    pub fn version(&self) -> Version {
+    pub const fn version(&self) -> Version {
         self.version
     }
 
     #[must_use]
-    pub fn packet_type(&self) -> PacketType {
+    pub const fn packet_type(&self) -> PacketType {
         self.pt
     }
 
     #[must_use]
-    pub fn pn(&self) -> PacketNumber {
+    pub const fn pn(&self) -> PacketNumber {
         self.pn
     }
 }
@@ -942,7 +958,7 @@ mod tests {
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
 
     /// This is a connection ID manager, which is only used for decoding short header packets.
-    fn cid_mgr() -> RandomConnectionIdGenerator {
+    const fn cid_mgr() -> RandomConnectionIdGenerator {
         RandomConnectionIdGenerator::new(SERVER_CID.len())
     }
 

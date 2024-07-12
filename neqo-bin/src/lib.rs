@@ -22,7 +22,6 @@ use neqo_transport::{
 
 pub mod client;
 pub mod server;
-pub mod udp;
 
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
@@ -119,6 +118,10 @@ pub struct QuicParameters {
     /// Whether to disable pacing.
     pub no_pacing: bool,
 
+    #[arg(long)]
+    /// Whether to disable path MTU discovery.
+    pub no_pmtud: bool,
+
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     pub preferred_address_v4: Option<String>,
@@ -138,6 +141,7 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             congestion_control: CongestionControlAlgorithm::NewReno,
             no_pacing: false,
+            no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
         }
@@ -204,7 +208,8 @@ impl QuicParameters {
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
-            .pacing(!self.no_pacing);
+            .pacing(!self.no_pacing)
+            .pmtud(!self.no_pmtud);
 
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {

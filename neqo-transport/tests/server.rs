@@ -36,7 +36,7 @@ use test_fixture::{
 /// Only when the connection fails.
 pub fn complete_connection(
     client: &mut Connection,
-    server: &mut Server,
+    server: &Server,
     mut datagram: Option<Datagram>,
 ) -> ActiveConnectionRef {
     let is_done = |c: &Connection| {
@@ -58,19 +58,19 @@ pub fn complete_connection(
 
 #[test]
 fn single_client() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
-    connect(&mut client, &mut server);
+    connect(&mut client, &server);
 }
 
 #[test]
 fn connect_single_version_both() {
     fn connect_one_version(version: Version) {
         let params = ConnectionParameters::default().versions(version, vec![version]);
-        let mut server = new_server(params.clone());
+        let server = new_server(params.clone());
 
         let mut client = new_client(params);
-        let server_conn = connect(&mut client, &mut server);
+        let server_conn = connect(&mut client, &server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
     }
@@ -84,11 +84,11 @@ fn connect_single_version_both() {
 #[test]
 fn connect_single_version_client() {
     fn connect_one_version(version: Version) {
-        let mut server = default_server();
+        let server = default_server();
 
         let mut client =
             new_client(ConnectionParameters::default().versions(version, vec![version]));
-        let server_conn = connect(&mut client, &mut server);
+        let server_conn = connect(&mut client, &server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
     }
@@ -102,8 +102,7 @@ fn connect_single_version_client() {
 #[test]
 fn connect_single_version_server() {
     fn connect_one_version(version: Version) {
-        let mut server =
-            new_server(ConnectionParameters::default().versions(version, vec![version]));
+        let server = new_server(ConnectionParameters::default().versions(version, vec![version]));
 
         let mut client = default_client();
 
@@ -116,7 +115,7 @@ fn connect_single_version_server() {
             client.process_input(&dgram.unwrap(), now());
         }
 
-        let server_conn = connect(&mut client, &mut server);
+        let server_conn = connect(&mut client, &server);
         assert_eq!(client.version(), version);
         assert_eq!(server_conn.borrow().version(), version);
     }
@@ -129,7 +128,7 @@ fn connect_single_version_server() {
 
 #[test]
 fn duplicate_initial() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
 
     assert_eq!(*client.state(), State::Init);
@@ -144,12 +143,12 @@ fn duplicate_initial() {
     assert!(dgram.is_none());
 
     assert_eq!(server.active_connections().len(), 1);
-    complete_connection(&mut client, &mut server, server_initial);
+    complete_connection(&mut client, &server, server_initial);
 }
 
 #[test]
 fn duplicate_initial_new_path() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
 
     assert_eq!(*client.state(), State::Init);
@@ -169,12 +168,12 @@ fn duplicate_initial_new_path() {
     assert!(server_initial.is_some());
 
     assert_eq!(server.active_connections().len(), 2);
-    complete_connection(&mut client, &mut server, server_initial);
+    complete_connection(&mut client, &server, server_initial);
 }
 
 #[test]
 fn different_initials_same_path() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client1 = default_client();
     let mut client2 = default_client();
 
@@ -195,13 +194,13 @@ fn different_initials_same_path() {
     assert!(server_initial2.is_some());
 
     assert_eq!(server.active_connections().len(), 2);
-    complete_connection(&mut client1, &mut server, server_initial1);
-    complete_connection(&mut client2, &mut server, server_initial2);
+    complete_connection(&mut client1, &server, server_initial1);
+    complete_connection(&mut client2, &server, server_initial2);
 }
 
 #[test]
 fn same_initial_after_connected() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
 
     let client_initial = client.process(None, now());
@@ -209,22 +208,21 @@ fn same_initial_after_connected() {
 
     let server_initial = server.process(client_initial.as_dgram_ref(), now()).dgram();
     assert!(server_initial.is_some());
-    complete_connection(&mut client, &mut server, server_initial);
-    // This removes the connection from the active set until something happens to it.
-    assert_eq!(server.active_connections().len(), 0);
+    complete_connection(&mut client, &server, server_initial);
+    assert_eq!(server.active_connections().len(), 1);
 
     // Now make a new connection using the exact same initial as before.
     // The server should respond to an attempt to connect with the same Initial.
     let dgram = server.process(client_initial.as_dgram_ref(), now()).dgram();
     assert!(dgram.is_some());
     // The server should make a new connection object.
-    assert_eq!(server.active_connections().len(), 1);
+    assert_eq!(server.active_connections().len(), 2);
 }
 
 #[test]
 fn drop_non_initial() {
     const CID: &[u8] = &[55; 8]; // not a real connection ID
-    let mut server = default_server();
+    let server = default_server();
 
     // This is big enough to look like an Initial, but it uses the Retry type.
     let mut header = neqo_common::Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
@@ -243,7 +241,7 @@ fn drop_non_initial() {
 #[test]
 fn drop_short_initial() {
     const CID: &[u8] = &[55; 8]; // not a real connection ID
-    let mut server = default_server();
+    let server = default_server();
 
     // This too small to be an Initial, but it is otherwise plausible.
     let mut header = neqo_common::Encoder::with_capacity(1199);
@@ -259,21 +257,38 @@ fn drop_short_initial() {
     assert!(server.process(Some(&bogus), now()).dgram().is_none());
 }
 
+#[test]
+fn drop_short_header_packet_for_unknown_connection() {
+    const CID: &[u8] = &[55; 8]; // not a real connection ID
+    let server = default_server();
+
+    let mut header = neqo_common::Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    header
+        .encode_byte(0x40) // short header
+        .encode_vec(1, CID)
+        .encode_byte(1);
+    let mut bogus_data: Vec<u8> = header.into();
+    bogus_data.resize(MIN_INITIAL_PACKET_SIZE, 66);
+
+    let bogus = datagram(bogus_data);
+    assert!(server.process(Some(&bogus), now()).dgram().is_none());
+}
+
 /// Verify that the server can read 0-RTT properly.  A more robust server would buffer
-/// 0-RTT before the handshake begins and let 0-RTT arrive for a short periiod after
+/// 0-RTT before the handshake begins and let 0-RTT arrive for a short period after
 /// the handshake completes, but ours is for testing so it only allows 0-RTT while
 /// the handshake is running.
 #[test]
 fn zero_rtt() {
-    let mut server = default_server();
-    let token = generate_ticket(&mut server);
+    let server = default_server();
+    let token = generate_ticket(&server);
 
     // Discharge the old connection so that we don't have to worry about it.
     let mut now = now();
     let t = server.process(None, now).callback();
     now += t;
     assert_eq!(server.process(None, now), Output::None);
-    assert_eq!(server.active_connections().len(), 1);
+    assert_eq!(server.active_connections().len(), 0);
 
     let start_time = now;
     let mut client = default_client();
@@ -308,9 +323,21 @@ fn zero_rtt() {
     let shs = server.process(Some(&c1), now);
     mem::drop(server.process(Some(&c3), now));
     // The server will have received two STREAM frames now if it processed both packets.
+    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
+    #[allow(clippy::mutable_key_type)]
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+    assert_eq!(
+        active
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .stats()
+            .frame_rx
+            .stream,
+        2
+    );
 
     // Complete the handshake.  As the client was pacing 0-RTT packets, extend the time
     // a little so that the pacer doesn't prevent the Finished from being sent.
@@ -320,15 +347,27 @@ fn zero_rtt() {
 
     // The server will drop this last 0-RTT packet.
     mem::drop(server.process(Some(&c4), now));
+    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
+    #[allow(clippy::mutable_key_type)]
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+    assert_eq!(
+        active
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .stats()
+            .frame_rx
+            .stream,
+        2
+    );
 }
 
 #[test]
 fn new_token_0rtt() {
-    let mut server = default_server();
-    let token = generate_ticket(&mut server);
+    let server = default_server();
+    let token = generate_ticket(&server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -352,14 +391,14 @@ fn new_token_0rtt() {
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram.as_dgram_ref(), now()); // (done)
     assert!(dgram.as_dgram_ref().is_some());
-    connected_server(&mut server);
+    connected_server(&server);
     assert!(client.tls_info().unwrap().resumed());
 }
 
 #[test]
 fn new_token_different_port() {
-    let mut server = default_server();
-    let token = generate_ticket(&mut server);
+    let server = default_server();
+    let token = generate_ticket(&server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -381,7 +420,7 @@ fn new_token_different_port() {
 #[test]
 fn bad_client_initial() {
     let mut client = default_client();
-    let mut server = default_server();
+    let server = default_server();
 
     let dgram = client.process(None, now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
@@ -469,7 +508,7 @@ fn bad_client_initial() {
 #[test]
 fn bad_client_initial_connection_close() {
     let mut client = default_client();
-    let mut server = default_server();
+    let server = default_server();
 
     let dgram = client.process(None, now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
@@ -521,7 +560,7 @@ fn bad_client_initial_connection_close() {
 
 #[test]
 fn version_negotiation_ignored() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
 
     // Any packet will do, but let's make something that looks real.
@@ -568,8 +607,7 @@ fn version_negotiation() {
     assert_ne!(VN_VERSION, Version::default());
     assert!(!Version::default().is_compatible(VN_VERSION));
 
-    let mut server =
-        new_server(ConnectionParameters::default().versions(VN_VERSION, vec![VN_VERSION]));
+    let server = new_server(ConnectionParameters::default().versions(VN_VERSION, vec![VN_VERSION]));
     let mut client = default_client();
 
     // `connect()` runs a fixed exchange, so manually run the Version Negotiation.
@@ -579,7 +617,7 @@ fn version_negotiation() {
     assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(&dgram.unwrap(), now());
 
-    let sconn = connect(&mut client, &mut server);
+    let sconn = connect(&mut client, &server);
     assert_eq!(client.version(), VN_VERSION);
     assert_eq!(sconn.borrow().version(), VN_VERSION);
 }
@@ -595,7 +633,7 @@ fn version_negotiation_and_compatible() {
     assert!(!ORIG_VERSION.is_compatible(COMPAT_VERSION));
     assert!(VN_VERSION.is_compatible(COMPAT_VERSION));
 
-    let mut server = new_server(
+    let server = new_server(
         ConnectionParameters::default().versions(VN_VERSION, vec![COMPAT_VERSION, VN_VERSION]),
     );
     // Note that the order of versions at the client only determines what it tries first.
@@ -629,7 +667,7 @@ fn version_negotiation_and_compatible() {
     client.process_input(&dgram.unwrap(), now());
     assert_eq!(*client.state(), State::Confirmed);
 
-    let sconn = connected_server(&mut server);
+    let sconn = connected_server(&server);
     assert_eq!(client.version(), COMPAT_VERSION);
     assert_eq!(sconn.borrow().version(), COMPAT_VERSION);
 }
@@ -652,8 +690,8 @@ fn compatible_upgrade_resumption_and_vn() {
     let mut client = new_client(client_params.clone());
     assert_eq!(client.version(), ORIG_VERSION);
 
-    let mut server = default_server();
-    let mut server_conn = connect(&mut client, &mut server);
+    let server = default_server();
+    let server_conn = connect(&mut client, &server);
     assert_eq!(client.version(), COMPAT_VERSION);
     assert_eq!(server_conn.borrow().version(), COMPAT_VERSION);
 
@@ -664,7 +702,7 @@ fn compatible_upgrade_resumption_and_vn() {
 
     // This new server will reject the ticket, but it will also generate a VN packet.
     let mut client = new_client(client_params);
-    let mut server = new_server(
+    let server = new_server(
         ConnectionParameters::default().versions(RESUMPTION_VERSION, vec![RESUMPTION_VERSION]),
     );
     client.enable_resumption(now(), ticket).unwrap();
@@ -677,7 +715,7 @@ fn compatible_upgrade_resumption_and_vn() {
     assertions::assert_vn(dgram.as_ref().unwrap());
     client.process_input(&dgram.unwrap(), now());
 
-    let server_conn = connect(&mut client, &mut server);
+    let server_conn = connect(&mut client, &server);
     assert_eq!(client.version(), RESUMPTION_VERSION);
     assert_eq!(server_conn.borrow().version(), RESUMPTION_VERSION);
 }
@@ -685,9 +723,9 @@ fn compatible_upgrade_resumption_and_vn() {
 #[test]
 fn closed() {
     // Let a server connection idle and it should be removed.
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
-    connect(&mut client, &mut server);
+    connect(&mut client, &server);
 
     // The server will have sent a few things, so it will be on PTO.
     let res = server.process(None, now());
@@ -711,7 +749,7 @@ fn can_create_streams(c: &mut Connection, t: StreamType, n: u64) {
 #[test]
 fn max_streams() {
     const MAX_STREAMS: u64 = 40;
-    let mut server = Server::new(
+    let server = Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -725,7 +763,7 @@ fn max_streams() {
     .expect("should create a server");
 
     let mut client = default_client();
-    connect(&mut client, &mut server);
+    connect(&mut client, &server);
 
     // Make sure that we can create MAX_STREAMS uni- and bidirectional streams.
     can_create_streams(&mut client, StreamType::UniDi, MAX_STREAMS);
@@ -734,7 +772,7 @@ fn max_streams() {
 
 #[test]
 fn max_streams_default() {
-    let mut server = Server::new(
+    let server = Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -746,7 +784,7 @@ fn max_streams_default() {
     .expect("should create a server");
 
     let mut client = default_client();
-    connect(&mut client, &mut server);
+    connect(&mut client, &server);
 
     // Make sure that we can create streams up to the local limit.
     let local_limit_unidi = ConnectionParameters::default().get_max_streams(StreamType::UniDi);
@@ -767,7 +805,7 @@ impl ZeroRttChecker for RejectZeroRtt {
 fn max_streams_after_0rtt_rejection() {
     const MAX_STREAMS_BIDI: u64 = 40;
     const MAX_STREAMS_UNIDI: u64 = 30;
-    let mut server = Server::new(
+    let server = Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -779,7 +817,7 @@ fn max_streams_after_0rtt_rejection() {
             .max_streams(StreamType::UniDi, MAX_STREAMS_UNIDI),
     )
     .expect("should create a server");
-    let token = generate_ticket(&mut server);
+    let token = generate_ticket(&server);
 
     let mut client = default_client();
     client.enable_resumption(now(), &token).unwrap();
@@ -803,7 +841,7 @@ fn ech() {
 
     let mut client = default_client();
     client.client_enable_ech(server.ech_config()).unwrap();
-    let server_instance = connect(&mut client, &mut server);
+    let server_instance = connect(&mut client, &server);
 
     assert!(client.tls_info().unwrap().ech_accepted());
     assert!(server_instance.borrow().tls_info().unwrap().ech_accepted());
@@ -818,13 +856,13 @@ fn ech() {
 
 #[test]
 fn has_active_connections() {
-    let mut server = default_server();
+    let server = default_server();
     let mut client = default_client();
 
     assert!(!server.has_active_connections());
 
     let initial = client.process(None, now());
-    let _ = server.process(initial.as_dgram_ref(), now()).dgram();
+    _ = server.process(initial.as_dgram_ref(), now()).dgram();
 
     assert!(server.has_active_connections());
 }

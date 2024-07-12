@@ -74,7 +74,7 @@ runs:
         python run.py $ARGS 2>&1 | tee ../summary.txt || true
       shell: bash
 
-    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+    - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -88,7 +88,7 @@ runs:
           mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+    - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |

@@ -7,6 +7,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [lints]
 workspace = true
@@ -15,13 +19,15 @@ workspace = true
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
-neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 static_assertions = { version = "1.1", default-features = false }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+
+[package.metadata.cargo-machete]
+ignored = ["log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
