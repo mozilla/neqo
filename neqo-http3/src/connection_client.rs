@@ -973,7 +973,7 @@ impl Http3Client {
             }
             Err(e) => {
                 qinfo!([self], "Connection error: {}.", e);
-                self.close(now, e.code(), &format!("{e}"));
+                self.close(now, e.code(), format!("{e}"));
                 true
             }
             _ => false,
