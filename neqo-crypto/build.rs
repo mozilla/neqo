@@ -292,6 +292,7 @@ fn pkg_config() -> Vec<String> {
 
     let mut flags: Vec<String> = Vec::new();
     for f in cfg_str.split(' ') {
+        let f = f.trim();
         if let Some(include) = f.strip_prefix("-I") {
             flags.push(String::from(f));
             println!("cargo:include={include}");
