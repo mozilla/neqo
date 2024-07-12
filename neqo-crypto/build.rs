@@ -298,9 +298,9 @@ fn pkg_config() -> Vec<String> {
             println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
             let mut path = path.trim().to_string();
-            if env::consts::OS == "windows" && path.chars().nth(1) == Some(':') {
-                // Prefix with /, and remove second character to make a UNIX path.
-                path = format!("/{}{}", &path[0..1], &path[2..]);
+            if env::consts::OS == "windows" {
+                // Replace slashes with backslashes.
+                path = path.replace('/', "\\");
             }
             println!("cargo:rustc-link-search={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
