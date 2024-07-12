@@ -300,7 +300,7 @@ fn pkg_config() -> Vec<String> {
             println!("cargo:rustc-link-search=native={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
             if env::consts::OS == "windows" {
-                println!("cargo:rustc-link-lib=dylib={lib}");
+                println!("cargo:rustc-link-lib=dylib=lib{lib}.dll.a");
             } else {
                 println!("cargo:rustc-link-lib=dylib={lib}");
             }
