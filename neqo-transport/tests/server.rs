@@ -161,14 +161,14 @@ fn duplicate_initial_new_path() {
         &initial[..],
     );
 
-    // The server should respond to both as these came from different addresses.
-    let dgram = server.process(Some(&other), now()).dgram();
-    assert!(dgram.is_some());
-
     let server_initial = server.process(Some(&initial), now()).dgram();
     assert!(server_initial.is_some());
 
-    assert_eq!(server.active_connections().len(), 2);
+    // The server should ignore a packet with the same destination connection ID.
+    let dgram = server.process(Some(&other), now()).dgram();
+    assert!(dgram.is_none());
+
+    assert_eq!(server.active_connections().len(), 1);
     complete_connection(&mut client, &mut server, server_initial);
 }
 
