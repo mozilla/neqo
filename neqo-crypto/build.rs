@@ -297,7 +297,7 @@ fn pkg_config() -> Vec<String> {
             flags.push(String::from(f));
             println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
-            println!("cargo:rustc-link-search=native={path}");
+            println!("cargo:rustc-link-search={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
             if env::consts::OS == "windows" {
                 println!("cargo:rustc-link-lib=static=lib{lib}.dll.a");
