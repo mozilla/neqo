@@ -15,7 +15,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -63,12 +64,15 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
+          # shellcheck disable=SC2028
           {
             echo C:/msys64/usr/bin
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall mingw-w64-x86_64-pkg-config mingw-w64-x86_64-nss
-          find C:/msys64/mingw64/lib
+          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
+          echo "gyp-next==0.15.0 --hash=sha256:3600f2a80fa33d3574f51bbb3d4bfc843373dafbe84059958aea3f1c9560f95a" > requirements.txt
+          python3 -m pip install --require-hashes -r requirements.txt
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -76,9 +80,14 @@ jobs:
         # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
         # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
-      - name: Fix MSVC build environment (Windows)
+      - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
         run: |
+          {
+            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+            echo "GYP_MSVS_VERSION=2022"
+            echo "BASH=$SHELL"
+          } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
 
@@ -94,7 +103,7 @@ jobs:
       - name: Build
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE -v --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
@@ -105,7 +114,7 @@ jobs:
       - name: Run client/server transfer
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE -vv --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           # Give the server time to start.

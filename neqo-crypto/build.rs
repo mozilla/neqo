@@ -292,18 +292,13 @@ fn pkg_config() -> Vec<String> {
 
     let mut flags: Vec<String> = Vec::new();
     for f in cfg_str.split(' ') {
-        let f = f.trim();
         if let Some(include) = f.strip_prefix("-I") {
             flags.push(String::from(f));
             println!("cargo:include={include}");
         } else if let Some(path) = f.strip_prefix("-L") {
             println!("cargo:rustc-link-search=native={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
-            if env::consts::OS == "windows" {
-                println!("cargo:rustc-link-lib=dylib={lib}.dll");
-            } else {
-                println!("cargo:rustc-link-lib=dylib={lib}");
-            }
+            println!("cargo:rustc-link-lib=dylib={lib}");
         } else {
             println!("Warning: Unknown flag from pkg-config: {f}");
         }
