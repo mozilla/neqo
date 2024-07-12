@@ -18,6 +18,13 @@ runs:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
+    - name: Select GNU toolchain (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        # See https://rust-lang.github.io/rustup/installation/windows.html
+        rustup set default-host x86_64-pc-windows-gnu
+
     - name: Install cargo-quickinstall
       shell: bash
       run: cargo +${{ inputs.version }} install cargo-quickinstall
