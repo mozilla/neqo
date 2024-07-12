@@ -16,7 +16,7 @@ permissions: read-all
 
 jobs:
   actionlint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
@@ -29,4 +29,3 @@ jobs:
         run: |
           echo "::add-matcher::.github/actionlint-matcher.json"
           ${{ steps.get_actionlint.outputs.executable }} -color
-

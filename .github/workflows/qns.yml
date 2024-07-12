@@ -26,7 +26,7 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
     permissions:
@@ -83,7 +83,7 @@ jobs:
   implementations:
     name: Determine interop pairs
     needs: docker-image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       pairs: ${{ steps.config.outputs.pairs }}
       implementations: ${{ steps.config.outputs.implementations }}
@@ -128,7 +128,7 @@ jobs:
       fail-fast: false
       matrix:
         pair: ${{ fromJson(needs.implementations.outputs.pairs) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
@@ -155,7 +155,7 @@ jobs:
   report:
     name: Report results
     needs: run-qns
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
