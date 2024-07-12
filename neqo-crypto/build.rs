@@ -298,7 +298,11 @@ fn pkg_config() -> Vec<String> {
         } else if let Some(path) = f.strip_prefix("-L") {
             println!("cargo:rustc-link-search=native={path}");
         } else if let Some(lib) = f.strip_prefix("-l") {
-            println!("cargo:rustc-link-lib=dylib={lib}");
+            if env::consts::OS == "windows" {
+                println!("cargo:rustc-link-lib=static={lib}");
+            } else {
+                println!("cargo:rustc-link-lib=dylib={lib}");
+            }
         } else {
             println!("Warning: Unknown flag from pkg-config: {f}");
         }
@@ -333,7 +337,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-    if is_debug() && env::consts::OS != "windows" {
+    if is_debug() || env::consts::OS == "windows" {
         static_link();
     } else {
         dynamic_link();
