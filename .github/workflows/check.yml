@@ -85,7 +85,7 @@ jobs:
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
-          version: ${{ matrix.rust-toolchain }}${{ runner.os == 'Windows' && '-x86_64-pc-windows-gnu'}}
+          version: ${{ matrix.rust-toolchain }}${{ runner.os == 'Windows' && '-x86_64-pc-windows-gnu' || ''}}
           components: rustfmt, clippy, llvm-tools-preview
 
       - name: Fetch and build NSS and NSPR
