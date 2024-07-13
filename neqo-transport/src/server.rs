@@ -37,14 +37,8 @@ use crate::{
     ConnectionParameters, Res, Version,
 };
 
-pub enum InitialResult {
-    Accept,
-    Drop,
-    Retry(Vec<u8>),
-}
-
 #[derive(Debug)]
-pub struct ServerConnectionState {
+struct ServerConnectionState {
     c: Rc<RefCell<Connection>>,
     active_attempt: Option<AttemptKey>,
 }
@@ -63,13 +57,8 @@ impl ServerConnectionState {
     }
 
     #[must_use]
-    pub fn borrow(&self) -> impl Deref<Target = Connection> + '_ {
+    fn borrow(&self) -> impl Deref<Target = Connection> + '_ {
         self.c.borrow()
-    }
-
-    #[must_use]
-    pub fn borrow_mut(&self) -> impl DerefMut<Target = Connection> + '_ {
-        self.c.borrow_mut()
     }
 }
 
@@ -321,11 +310,13 @@ impl Server {
             return self.accept_connection(&attempt_key, initial, dgram, orig_dcid, now);
         };
 
+        let out = connection.process(Some(dgram), now);
         qdebug!(
-            "Handle Initial for existing connection attempt {:?}",
+            [self],
+            "Handled Initial for existing connection attempt {:?}",
             attempt_key
         );
-        connection.process(Some(dgram), now)
+        out
     }
 
     fn create_qlog_trace(&self, odcid: ConnectionIdRef<'_>) -> NeqoQlog {
@@ -459,22 +450,22 @@ impl Server {
             odcid: dcid,
         };
 
-        self.connections
+        let Some(connection) = self
+            .connections
             .iter_mut()
             .find(|c| c.active_attempt.as_ref() == Some(&attempt_key))
-            .map_or_else(
-                || {
-                    qdebug!("Dropping 0-RTT for unknown connection");
-                    Output::None
-                },
-                |c| {
-                    qdebug!(
-                        "Handle 0-RTT for existing connection attempt {:?}",
-                        attempt_key
-                    );
-                    c.process(Some(dgram), now)
-                },
-            )
+        else {
+            qdebug!([self], "Dropping 0-RTT for unknown connection");
+            return Output::None;
+        };
+
+        let out = connection.process(Some(dgram), now);
+        qdebug!(
+            [self],
+            "Handled 0-RTT for existing connection attempt {:?}",
+            attempt_key
+        );
+        out
     }
 
     fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Output {
