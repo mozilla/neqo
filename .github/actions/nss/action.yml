@@ -101,7 +101,7 @@ runs:
         else
           NSS_TARGET=Debug
         fi
-        if [ '${{ steps.cache.outputs.cache-hit != 'true' }}' ]; then
+        if [ '${{ steps.cache.outputs.cache-hit }}' != 'true' }}' ]; then
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
         fi
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
