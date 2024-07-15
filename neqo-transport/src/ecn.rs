@@ -30,7 +30,7 @@ enum EcnValidationState {
     /// far on the path during the ECN validation.
     Testing {
         probes_sent: usize,
-        probes_lost: usize,
+        initial_probes_lost: usize,
     },
     /// The validation test has concluded but the path's ECN capability is not yet known.
     Unknown,
