@@ -49,14 +49,14 @@ runs:
     # trying both hg and git. Leaving this here in case we want to re-try in the future.
     #
     # - name: Checkout NSPR
-    #   if: check.build_nss
+    #   if: steps.check.build_nss
     #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     #   with:
     #     repository: "nss-dev/nspr"
     #     path: ${{ github.workspace }}/nspr
 
     # - name: Checkout NSS
-    #   if: check.build_nss
+    #   if: steps.check.build_nss
     #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     #   with:
     #     repository: "nss-dev/nss"
@@ -64,20 +64,20 @@ runs:
 
     - name: Checkout NSPR
       shell: bash
-      if: check.build_nss
+      if: steps.check.build_nss
       run: |
         hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
           git clone --depth=true https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
 
     - name: Checkout NSS
       shell: bash
-      if: check.build_nss
+      if: steps.check.build_nss
       run: |
         hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
           git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
 
     - name: Cache NSS
-      if: check.build_nss
+      if: steps.check.build_nss
       id: cache-nss
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
@@ -86,7 +86,7 @@ runs:
 
     - name: Build
       shell: bash
-      if: check.build_nss
+      if: steps.check.build_nss
       run: |
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
