@@ -430,7 +430,11 @@ pub struct CryptoDxState {
     /// The total number of operations that are remaining before the keys
     /// become exhausted and can't be used any more.
     invocations: PacketNumber,
+    /// The basis of the invocation limits in `invocations`.
+    largest_packet_len: usize,
 }
+
+const INITIAL_LARGEST_PACKET_LEN: usize = 1 << 11; // 2048
 
 impl CryptoDxState {
     #[allow(clippy::reversed_empty_ranges)] // To initialize an empty range.
@@ -458,6 +462,7 @@ impl CryptoDxState {
             used_pn: 0..0,
             min_pn: 0,
             invocations: Self::limit(direction, cipher),
+            largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         }
     }
 
@@ -551,6 +556,7 @@ impl CryptoDxState {
             used_pn: pn..pn,
             min_pn: pn,
             invocations,
+            largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         }
     }
 
@@ -625,9 +631,9 @@ impl CryptoDxState {
         )
     }
 
-    pub fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; HpKey::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
-        qtrace!([self], "HP sample={} mask={}", hex(sample), hex(&mask));
+        qtrace!([self], "HP sample={} mask={}", hex(sample), hex(mask));
         Ok(mask)
     }
 
@@ -645,10 +651,15 @@ impl CryptoDxState {
             hex(hdr),
             hex(body)
         );
-        // The numbers in `Self::limit` assume a maximum packet size of 2^11.
-        if body.len() > 2048 {
-            debug_assert!(false);
-            return Err(Error::InternalError);
+
+        // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
+        // Adjust them as we encounter larger packets.
+        debug_assert!(body.len() < 65536);
+        if body.len() > self.largest_packet_len {
+            let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
+                - usize::leading_zeros(body.len() - 1);
+            self.invocations >>= new_bits;
+            self.largest_packet_len = body.len();
         }
         self.invoked()?;
 
@@ -699,9 +710,7 @@ impl CryptoDxState {
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
     pub const fn extra_padding(&self) -> usize {
-        self.hpkey
-            .sample_size()
-            .saturating_sub(self.aead.expansion())
+        HpKey::SAMPLE_SIZE.saturating_sub(self.aead.expansion())
     }
 }
 
@@ -1295,6 +1304,7 @@ impl CryptoStates {
                 used_pn: 0..645_971_972,
                 min_pn: 0,
                 invocations: 10,
+                largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
             },
             cipher: TLS_CHACHA20_POLY1305_SHA256,
             next_secret: secret.clone(),

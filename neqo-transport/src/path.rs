@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     mem,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -25,6 +25,7 @@ use crate::{
     ecn::{EcnCount, EcnInfo},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
+    pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
     rtt::RttEstimate,
     sender::PacketSender,
@@ -33,14 +34,6 @@ use crate::{
     Stats,
 };
 
-/// This is the MTU that we assume when using IPv6.
-/// We use this size for Initial packets, so we don't need to worry about probing for support.
-/// If the path doesn't support this MTU, we will assume that it doesn't support QUIC.
-///
-/// This is a multiple of 16 greater than the largest possible short header (1 + 20 + 4).
-pub const PATH_MTU_V6: usize = 1337;
-/// The path MTU for IPv4 can be 20 bytes larger than for v6.
-pub const PATH_MTU_V4: usize = PATH_MTU_V6 + 20;
 /// The number of times that a path will be probed before it is considered failed.
 const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
@@ -291,6 +284,10 @@ impl Paths {
                 false
             }
         } else {
+            // See if the PMTUD raise timer wants to fire.
+            if let Some(path) = self.primary() {
+                path.borrow_mut().pmtud_mut().maybe_fire_raise_timer(now);
+            }
             true
         }
     }
@@ -558,7 +555,7 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, pacing, Self::mtu_by_addr(remote.ip()), now);
+        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -652,16 +649,14 @@ impl Path {
         }
     }
 
-    const fn mtu_by_addr(addr: IpAddr) -> usize {
-        match addr {
-            IpAddr::V4(_) => PATH_MTU_V4,
-            IpAddr::V6(_) => PATH_MTU_V6,
-        }
+    /// Get the PL MTU.
+    pub fn plpmtu(&self) -> usize {
+        self.pmtud().plpmtu()
     }
 
-    /// Get the path MTU.  This is currently fixed based on IP version.
-    pub const fn mtu(&self) -> usize {
-        Self::mtu_by_addr(self.remote.ip())
+    /// Get a reference to the PMTUD state.
+    pub fn pmtud(&self) -> &Pmtud {
+        self.sender.pmtud()
     }
 
     /// Get the first local connection ID.
@@ -783,7 +778,6 @@ impl Path {
         if builder.remaining() < 9 {
             return false;
         }
-
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!([self], "Responding to path challenge {}", hex(challenge));
@@ -892,6 +886,11 @@ impl Path {
         &mut self.rtt
     }
 
+    /// Mutably borrow the PMTUD discoverer for this path.
+    pub fn pmtud_mut(&mut self) -> &mut Pmtud {
+        self.sender.pmtud_mut()
+    }
+
     /// Read-only access to the owned sender.
     pub const fn sender(&self) -> &PacketSender {
         &self.sender
@@ -913,7 +912,7 @@ impl Path {
                     m,
                     ack_ratio,
                     self.sender.cwnd(),
-                    self.mtu(),
+                    self.plpmtu(),
                     self.rtt.estimate(),
                 )
             },
@@ -976,6 +975,7 @@ impl Path {
         acked_pkts: &[SentPacket],
         ack_ecn: Option<EcnCount>,
         now: Instant,
+        stats: &mut Stats,
     ) {
         debug_assert!(self.is_primary());
 
@@ -985,11 +985,12 @@ impl Path {
                 .sender
                 .on_ecn_ce_received(acked_pkts.first().expect("must be there"));
             if cwnd_reduced {
-                self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
+                self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
             }
         }
 
-        self.sender.on_packets_acked(acked_pkts, &self.rtt, now);
+        self.sender
+            .on_packets_acked(acked_pkts, &self.rtt, now, stats);
     }
 
     /// Record packets as lost with the sender.
@@ -998,6 +999,8 @@ impl Path {
         prev_largest_acked_sent: Option<Instant>,
         space: PacketNumberSpace,
         lost_packets: &[SentPacket],
+        stats: &mut Stats,
+        now: Instant,
     ) {
         debug_assert!(self.is_primary());
         let cwnd_reduced = self.sender.on_packets_lost(
@@ -1005,9 +1008,11 @@ impl Path {
             prev_largest_acked_sent,
             self.rtt.pto(space), // Important: the base PTO, not adjusted.
             lost_packets,
+            stats,
+            now,
         );
         if cwnd_reduced {
-            self.rtt.update_ack_delay(self.sender.cwnd(), self.mtu());
+            self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
         }
     }
 
@@ -1025,7 +1030,7 @@ impl Path {
                         // If we have received absolutely nothing thus far, then this endpoint
                         // is the one initiating communication on this path.  Allow enough space for
                         // probing.
-                        self.mtu() * 5
+                        self.plpmtu() * 5
                     } else {
                         limit
                     };

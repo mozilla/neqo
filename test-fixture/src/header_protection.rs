@@ -135,7 +135,7 @@ pub fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<us
     qtrace!(
         "sample={} mask={}",
         hex_with_len(&packet[sample_start..sample_end]),
-        hex_with_len(&mask)
+        hex_with_len(mask)
     );
     packet[0] ^= mask[0] & 0xf;
     for i in 0..(pn_bytes.end - pn_bytes.start) {

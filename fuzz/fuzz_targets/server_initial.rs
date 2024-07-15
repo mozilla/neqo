@@ -6,7 +6,7 @@ use libfuzzer_sys::fuzz_target;
 #[cfg(all(fuzzing, not(windows)))]
 fuzz_target!(|data: &[u8]| {
     use neqo_common::{Datagram, Encoder, Role};
-    use neqo_transport::Version;
+    use neqo_transport::{packet::MIN_INITIAL_PACKET_SIZE, Version};
     use test_fixture::{
         default_client, default_server,
         header_protection::{
