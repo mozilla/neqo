@@ -81,12 +81,12 @@ jobs:
         run: |
           echo "BASH=$SHELL" >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
+          # rm /usr/bin/link.exe
 
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
-          version: ${{ matrix.rust-toolchain }}
+          version: ${{ matrix.rust-toolchain }}${{ runner.os == 'Windows' && '-gnu'}}
           components: rustfmt, clippy, llvm-tools-preview
 
       - name: Fetch and build NSS and NSPR
