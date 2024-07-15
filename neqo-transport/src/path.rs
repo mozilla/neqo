@@ -1003,6 +1003,7 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
+        self.ecn_info.on_packets_lost(lost_packets);
         let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,
