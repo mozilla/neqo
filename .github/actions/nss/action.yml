@@ -48,36 +48,15 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
-    # Ideally, we'd use this. But things are sufficiently flaky that we're better off
-    # trying both hg and git. Leaving this here in case we want to re-try in the future.
-    #
-    # - name: Checkout NSPR
-    #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-    #   with:
-    #     repository: "nss-dev/nspr"
-    #     path: ${{ github.workspace }}/nspr
-
-    # - name: Checkout NSS
-    #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-    #   with:
-    #     repository: "nss-dev/nss"
-    #     path: ${{ github.workspace }}/nss
-
-    - name: Checkout NSPR
-      shell: bash
-      if: env.BUILD_NSS == '1'
-      run: |
-        hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
-          git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
+    # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
+    # trying both hg and git.
 
     - name: Checkout NSS
       shell: bash
       if: env.BUILD_NSS == '1'
       run: |
-        hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
-          git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
+        git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss" || \
+          hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss"
 
     - name: Cache NSS
       if: env.BUILD_NSS == '1'
@@ -86,6 +65,13 @@ runs:
       with:
         path: ${{ github.workspace }}/dist
         key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
+
+    - name: Checkout NSPR
+      shell: bash
+      if: env.BUILD_NSS == '1' && steps.cache-nss.outputs.cache-hit != 'true'
+      run: |
+        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
+          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
 
     - name: Build
       shell: bash
@@ -112,4 +98,3 @@ runs:
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
       env:
         NSS_DIR: ${{ github.workspace }}/nss
-        NSPR_DIR: ${{ github.workspace }}/nspr
