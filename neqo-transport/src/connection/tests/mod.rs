@@ -179,7 +179,6 @@ fn handshake_with_modifier(
     rtt: Duration,
     modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
-    let start = now;
     let mut a = client;
     let mut b = server;
     let mut now = now;
@@ -187,7 +186,7 @@ fn handshake_with_modifier(
     let mut input = None;
     let is_done = |c: &mut Connection| {
         matches!(
-            dbg!(c.state()),
+            c.state(),
             State::Confirmed | State::Closing { .. } | State::Closed(..)
         )
     };
@@ -195,8 +194,6 @@ fn handshake_with_modifier(
     let mut did_ping = enum_map! {_ => false};
     while !is_done(a) {
         _ = maybe_authenticate(a);
-        // TODO
-        // let had_input = input.is_some();
         // Insert a PING frame into the first application data packet an endpoint sends,
         // in order to force the peer to ACK it. For the server, this is depending on the
         // client's connection state, which is accessible during the tests.
@@ -210,18 +207,11 @@ fn handshake_with_modifier(
         if should_ping {
             a.test_frame_writer = Some(Box::new(PingWriter {}));
         }
-        println!(
-            "Processing {} at {:?}ms",
-            a.role(),
-            (now - start).as_millis()
-        );
         let output = a.process(input.as_ref(), now).dgram();
         if should_ping {
             a.test_frame_writer = None;
             did_ping[a.role()] = true;
         }
-        // TODO
-        // assert!(dbg!(had_input) || dbg!(output.is_some()));
         input = output.and_then(modifier);
         qtrace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
