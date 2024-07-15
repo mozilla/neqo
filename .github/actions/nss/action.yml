@@ -58,6 +58,13 @@ runs:
         git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss" || \
           hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss"
 
+    - name: Checkout NSPR
+      shell: bash
+      if: env.BUILD_NSS == '1'
+      run: |
+        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
+          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
+
     - name: Cache NSS
       if: env.BUILD_NSS == '1'
       id: cache-nss
@@ -65,13 +72,6 @@ runs:
       with:
         path: ${{ github.workspace }}/dist
         key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
-
-    - name: Checkout NSPR
-      shell: bash
-      if: env.BUILD_NSS == '1' && steps.cache-nss.outputs.cache-hit != 'true'
-      run: |
-        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
-          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
 
     - name: Build
       shell: bash
