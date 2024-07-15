@@ -17,7 +17,7 @@ use crate::{
 /// The number of packets to use for testing a path for ECN capability.
 pub const ECN_TEST_COUNT: usize = 10;
 
-/// The number of packets to use for testing the initial a path for ECN capability when exchanging
+/// The number of packets to use for testing a path for ECN capability when exchanging
 /// Initials during the handshake. This is a lower number than [`ECN_TEST_COUNT`] to avoid
 /// unnecessarily delaying the handshake; we would otherwise double the PTO [`ECN_TEST_COUNT`] times.
 const ECN_TEST_COUNT_INITIAL_PHASE: usize = 3;
