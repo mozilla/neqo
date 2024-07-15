@@ -17,19 +17,20 @@ runs:
   using: composite
   steps:
     - name: Check system NSS version
+      id: check
       shell: bash
       run: |
         if ! command -v pkg-config &> /dev/null; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "build_nss=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         if ! pkg-config --exists nss; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "build_nss=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         NSS_VERSION="$(pkg-config --modversion nss)"
         if [ "$?" -ne 0 ]; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "build_nss=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
@@ -38,24 +39,24 @@ runs:
         REQ_NSS_MINOR=$(cut -d. -f2 < neqo-crypto/min_version.txt)
         if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
           echo "System NSS is too old: $NSS_VERSION"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "build_nss=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
-        echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        echo "build_nss=false" >> "$GITHUB_OUTPUT"
 
     # Ideally, we'd use this. But things are sufficiently flaky that we're better off
     # trying both hg and git. Leaving this here in case we want to re-try in the future.
     #
     # - name: Checkout NSPR
-    #   if: env.BUILD_NSS == '1'
+    #   if: check.build_nss
     #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     #   with:
     #     repository: "nss-dev/nspr"
     #     path: ${{ github.workspace }}/nspr
 
     # - name: Checkout NSS
-    #   if: env.BUILD_NSS == '1'
+    #   if: check.build_nss
     #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     #   with:
     #     repository: "nss-dev/nss"
@@ -63,21 +64,29 @@ runs:
 
     - name: Checkout NSPR
       shell: bash
-      if: env.BUILD_NSS == '1'
+      if: check.build_nss
       run: |
         hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
-          git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
+          git clone --depth=true https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
 
     - name: Checkout NSS
       shell: bash
-      if: env.BUILD_NSS == '1'
+      if: check.build_nss
       run: |
         hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
           git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
 
+    - name: Cache NSS
+      if: check.build_nss
+      id: cache-nss
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+      with:
+        path: ${{ github.workspace }}/dist
+        key: nss-${{ runner.os }}-${{ inputs.type }}-${{ hashFiles('lib/nss/nss.h') }}
+
     - name: Build
       shell: bash
-      if: env.BUILD_NSS == '1'
+      if: check.build_nss
       run: |
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
@@ -89,7 +98,9 @@ runs:
         else
           NSS_TARGET=Debug
         fi
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        if [ '${{ steps.cache.outputs.cache-hit != 'true' }}' ]; then
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        fi
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
