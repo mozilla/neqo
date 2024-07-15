@@ -163,7 +163,7 @@ impl EcnInfo {
                 .filter(|p| p.packet_type() == PacketType::Initial && p.ecn_mark().is_ecn_marked())
                 .count();
             // If we have lost all initial probes a bunch of times, we can conclude that the path
-            // is not ECN capable.
+            // is not ECN capable and likely drops all ECN marked packets.
             if probes_sent == probes_lost && *probes_lost == ECN_TEST_COUNT_INITIAL_PHASE {
                 qdebug!(
                     "ECN validation failed, all {} initial marked packets were lost",
