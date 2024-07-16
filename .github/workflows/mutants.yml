@@ -1,11 +1,8 @@
 name: Find mutants
 on:
-  schedule:
-    - cron: '42 3 * * 2,5' # Runs at 03:42 UTC (m and h chosen arbitrarily) twice a week.
-  workflow_dispatch:
-  pull_request:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  workflow_run:
+    workflows: [Build Check]
+    types: [completed]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -15,6 +12,7 @@ permissions: read-all
 
 jobs:
   mutants:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
