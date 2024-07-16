@@ -188,5 +188,6 @@ jobs:
     name: "QNS"
     needs: [check]
     permissions:
+      contents: read
       packages: write
     uses: ./.github/workflows/qns.yml
