@@ -1,16 +1,10 @@
 name: QNS
 
 on:
-  push:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
-  pull_request:
-    branches: ["main"]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  workflow_run:
+    workflows: ["Build Check"]
+    types: [completed]
   merge_group:
-  schedule:
-    # Run at 1 AM each day
-    - cron: '0 1 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +20,7 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
