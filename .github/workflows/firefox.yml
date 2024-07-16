@@ -4,10 +4,6 @@ on:
     workflows: ["Build Check"]
     types: [completed]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
 env:
     FIREFOX: Firefox
 
