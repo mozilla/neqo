@@ -1,8 +1,7 @@
 name: Firefox
 on:
-  workflow_run:
-    workflows: ["Build Check"]
-    types: [completed]
+  workflow_call:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -14,7 +13,6 @@ env:
 jobs:
   firefox:
     name: Build Firefox
-    if: github.event.workflow_run.conclusion == 'success'
     strategy:
       fail-fast: false
       matrix:

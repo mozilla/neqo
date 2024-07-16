@@ -1,11 +1,9 @@
 name: QNS
 
 on:
-  workflow_run:
-    workflows: ["Build Check"]
-    types: [completed]
-  merge_group:
+  workflow_call:
   workflow_dispatch:
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -20,7 +18,6 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
