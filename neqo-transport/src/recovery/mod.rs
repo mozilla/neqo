@@ -843,8 +843,8 @@ impl LossRecovery {
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
             if let Some(t) = self.pto_time(rtt, *pn_space) {
-                allow_probes[*pn_space] = true;
-                if t <= now {
+                if t <= now && path.is_valid(){
+                    allow_probes[*pn_space] = true;
                     qdebug!([self], "PTO timer fired for {}", pn_space);
                     let space = self.spaces.get_mut(*pn_space).unwrap();
                     lost.extend(
