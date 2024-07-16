@@ -69,7 +69,7 @@ jobs:
           path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
-    name: Determine interop pairs
+    name: Prepare interop
     needs: docker-image
     runs-on: ubuntu-latest
     outputs:
@@ -141,7 +141,7 @@ jobs:
           implementations: ${{ needs.implementations.outputs.implementations }}
 
   report:
-    name: Report results
+    name: Comment on PR
     needs: run-qns
     runs-on: ubuntu-latest
     steps:

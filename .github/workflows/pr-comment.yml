@@ -14,6 +14,11 @@ on:
 permissions: read-all
 
 jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github }}"
+
   comment:
     permissions:
       pull-requests: write
