@@ -245,6 +245,6 @@ jobs:
       - name: Export PR comment data
         uses: ./.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}
+          name: Bench
           contents: results.md
           log-url: ${{ steps.export.outputs.artifact-url }}

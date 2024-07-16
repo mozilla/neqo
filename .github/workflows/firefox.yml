@@ -153,5 +153,5 @@ jobs:
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}
+          name: Firefox
           contents: comment.md

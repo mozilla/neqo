@@ -207,5 +207,5 @@ jobs:
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}
+          name: QNS
           contents: comment.md
