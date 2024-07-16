@@ -1,12 +1,7 @@
 name: Firefox
 on:
-  workflow_run:
-    workflows: ["Build Check"]
-    types: [completed]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
+  workflow_call:
+  workflow_dispatch:
 
 env:
     FIREFOX: Firefox
@@ -14,7 +9,6 @@ env:
 jobs:
   firefox:
     name: Build Firefox
-    if: github.event.workflow_run.conclusion == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -159,5 +153,5 @@ jobs:
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}
+          name: Firefox
           contents: comment.md

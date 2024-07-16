@@ -8,12 +8,18 @@ name: PR Comment
 
 on:
   workflow_run:
-    workflows: [QNS, Bench, Firefox]
+    workflows: [Build Check]
     types: [completed]
 
 permissions: read-all
 
 jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.workflow_run.name }}"
+      - run: echo "${{ github }}"
+
   comment:
     permissions:
       pull-requests: write

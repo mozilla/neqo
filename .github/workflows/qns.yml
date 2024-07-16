@@ -1,17 +1,13 @@
 name: QNS
 
 on:
-  workflow_run:
-    workflows: ["Build Check"]
-    types: [completed]
-  merge_group:
+  workflow_call:
   workflow_dispatch:
+  merge_group:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
-permissions: read-all
+permissions:
+  contents: read
+  packages: write
 
 env:
   LATEST: neqo-latest
@@ -20,12 +16,9 @@ env:
 jobs:
   docker-image:
     name: Build Docker image
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       imageID: ${{ steps.docker_build_and_push.outputs.imageID }}
-    permissions:
-      packages: write
     steps:
       - uses: docker/setup-qemu-action@5927c834f5b4fdf503fca6f4c7eccda82949e1ee # v3.1.0
       - uses: docker/setup-buildx-action@4fd812986e6c8c2a69e18311145f9371337f27d4 # v3.4.0
@@ -76,7 +69,7 @@ jobs:
           path: /tmp/${{ env.LATEST }}.tar
 
   implementations:
-    name: Determine interop pairs
+    name: Prepare interop
     needs: docker-image
     runs-on: ubuntu-latest
     outputs:
@@ -148,7 +141,7 @@ jobs:
           implementations: ${{ needs.implementations.outputs.implementations }}
 
   report:
-    name: Report results
+    name: Comment on PR
     needs: run-qns
     runs-on: ubuntu-latest
     steps:
@@ -214,5 +207,5 @@ jobs:
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
-          name: ${{ github.workflow }}
+          name: QNS
           contents: comment.md

@@ -11,10 +11,6 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
 permissions: read-all
 
 jobs:
@@ -168,3 +164,26 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+
+  bench:
+    name: "Benchmark"
+    needs: [check]
+    uses: ./.github/workflows/bench.yml
+
+  firefox:
+    name: "Firefox"
+    needs: [check]
+    uses: ./.github/workflows/firefox.yml
+
+  mutants:
+    name: "Mutants"
+    needs: [check]
+    uses: ./.github/workflows/mutants.yml
+
+  qns:
+    name: "QNS"
+    needs: [check]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/qns.yml
