@@ -5,10 +5,6 @@ on:
   workflow_dispatch:
   merge_group:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   packages: write
