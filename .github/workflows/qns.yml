@@ -2,7 +2,7 @@ name: QNS
 
 on:
   workflow_run:
-    workflows: [Build Check]
+    workflows: ["Build Check"]
     types: [completed]
   merge_group:
   workflow_dispatch:

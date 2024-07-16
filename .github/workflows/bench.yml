@@ -1,7 +1,7 @@
 name: Bench
 on:
   workflow_run:
-    workflows: [Build Check]
+    workflows: ["Build Check"]
     types: [completed]
   schedule:
     # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
