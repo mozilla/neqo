@@ -783,7 +783,7 @@ fn anti_amplification() {
     let c_init = client.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
     let s_init1 = server.process(c_init.as_ref(), now).dgram().unwrap();
-    assert_eq!(s_init1.len(), client.plpmtu());
+    assert_eq!(s_init1.len(), server.plpmtu());
     let s_init2 = server.process_output(now).dgram().unwrap();
     assert_eq!(s_init2.len(), server.plpmtu());
     let s_init3 = server.process_output(now).dgram().unwrap();

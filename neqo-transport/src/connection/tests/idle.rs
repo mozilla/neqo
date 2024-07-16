@@ -330,8 +330,10 @@ fn idle_caching() {
     // Now only allow the Initial packet from the server through;
     // it shouldn't contain a CRYPTO frame.
     let (initial, _) = split_datagram(&dgram.unwrap());
+    let ping_before_c = client.stats().frame_rx.ping;
     let ack_before = client.stats().frame_rx.ack;
     client.process_input(&initial, middle);
+    assert_eq!(client.stats().frame_rx.ping, ping_before_c + 1);
     assert_eq!(client.stats().frame_rx.ack, ack_before + 1);
 
     let end = start + default_timeout() + (AT_LEAST_PTO / 2);
