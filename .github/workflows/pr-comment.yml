@@ -8,8 +8,9 @@ name: PR Comment
 
 on:
   workflow_run:
-    workflows: [QNS, Bench, Firefox]
-    types: [completed]
+    workflows: ["QNS", "CI", "Firefox"]
+    types:
+      - completed
 
 permissions: read-all
 

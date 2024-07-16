@@ -1,8 +1,9 @@
 name: Firefox
 on:
-  workflow_run:
-    workflows: ["Build Check"]
-    types: [completed]
+  workflow_dispatch:
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -14,7 +15,6 @@ env:
 jobs:
   firefox:
     name: Build Firefox
-    if: github.event.workflow_run.conclusion == 'success'
     strategy:
       fail-fast: false
       matrix:
