@@ -42,7 +42,7 @@ runs:
 
     - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
       with:
-        python-version: 3.8
+        python-version: 3.12
         cache: 'pip'
         cache-dependency-path: 'quic-interop-runner/requirements.txt'
 
@@ -71,7 +71,7 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python run.py $ARGS 2>&1 | tee ../summary.txt || true
+        python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
         # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
         # (that we assume happened in neqo.)
         for log in ../logs/*/*/output.txt; do

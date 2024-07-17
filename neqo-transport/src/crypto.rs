@@ -631,9 +631,9 @@ impl CryptoDxState {
         )
     }
 
-    pub fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+    pub fn compute_mask(&self, sample: &[u8]) -> Res<[u8; HpKey::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
-        qtrace!([self], "HP sample={} mask={}", hex(sample), hex(&mask));
+        qtrace!([self], "HP sample={} mask={}", hex(sample), hex(mask));
         Ok(mask)
     }
 
@@ -710,9 +710,7 @@ impl CryptoDxState {
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
     pub const fn extra_padding(&self) -> usize {
-        self.hpkey
-            .sample_size()
-            .saturating_sub(self.aead.expansion())
+        HpKey::SAMPLE_SIZE.saturating_sub(self.aead.expansion())
     }
 }
 
