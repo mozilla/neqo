@@ -735,9 +735,14 @@ impl LossRecovery {
 
     /// Calculate when the next timeout is likely to be.  This is the earlier of the loss timer
     /// and the PTO timer; either or both might be disabled, so this can return `None`.
-    pub fn next_timeout(&self, rtt: &RttEstimate) -> Option<Instant> {
+    pub fn next_timeout(&self, path: &Path) -> Option<Instant> {
+        let rtt = path.rtt();
         let loss_time = self.earliest_loss_time(rtt);
-        let pto_time = self.earliest_pto(rtt);
+        let pto_time = if path.amplification_limit() >= path.pmtud().plpmtu() {
+            self.earliest_pto(rtt)
+        } else {
+            None
+        };
         qtrace!(
             [self],
             "next_timeout loss={:?} pto={:?}",
@@ -843,8 +848,8 @@ impl LossRecovery {
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
             if let Some(t) = self.pto_time(rtt, *pn_space) {
-                if t <= now && path.is_valid(){
-                    allow_probes[*pn_space] = true;
+                allow_probes[*pn_space] = true;
+                if t <= now {
                     qdebug!([self], "PTO timer fired for {}", pn_space);
                     let space = self.spaces.get_mut(*pn_space).unwrap();
                     lost.extend(
@@ -1015,7 +1020,7 @@ mod tests {
         }
 
         pub fn next_timeout(&self) -> Option<Instant> {
-            self.lr.next_timeout(self.path.borrow().rtt())
+            self.lr.next_timeout(&self.path.borrow())
         }
 
         pub fn discard(&mut self, space: PacketNumberSpace, now: Instant) {

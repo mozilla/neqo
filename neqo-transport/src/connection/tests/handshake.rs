@@ -789,9 +789,9 @@ fn anti_amplification() {
     let s_init3 = server.process_output(now).dgram().unwrap();
     assert_eq!(s_init3.len(), server.plpmtu());
     let cb = server.process_output(now).callback();
+
     // We are blocked by the amplification limit now.
-    assert_eq!(cb, DEFAULT_RTT * 3);
-    now += cb;
+    assert_eq!(cb, server.conn_params.get_idle_timeout());
 
     now += DEFAULT_RTT / 2;
     client.process_input(&s_init1, now);
