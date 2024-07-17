@@ -196,7 +196,7 @@ pub struct ServerRunner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, neqo_udp::Socket<tokio::net::UdpSocket>)>,
+    sockets: Vec<(SocketAddr, crate::udp::Socket)>,
 }
 
 impl ServerRunner {
@@ -204,7 +204,7 @@ impl ServerRunner {
     pub fn new(
         now: Box<dyn Fn() -> Instant>,
         server: Box<dyn HttpServer>,
-        sockets: Vec<(SocketAddr, neqo_udp::Socket<tokio::net::UdpSocket>)>,
+        sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     ) -> Self {
         Self {
             now,
@@ -215,7 +215,7 @@ impl ServerRunner {
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(&mut self, addr: SocketAddr) -> &mut neqo_udp::Socket<tokio::net::UdpSocket> {
+    fn find_socket(&mut self, addr: SocketAddr) -> &mut crate::udp::Socket {
         let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
         rest.iter_mut()
             .map(|(_host, socket)| socket)
@@ -365,7 +365,7 @@ pub async fn server(mut args: Args) -> Res<()> {
     let sockets = hosts
         .into_iter()
         .map(|host| {
-            let socket = neqo_udp::Socket::bind(host)?;
+            let socket = crate::udp::Socket::bind(host)?;
             let local_addr = socket.local_addr()?;
             qinfo!("Server waiting for connection on: {local_addr:?}");
 

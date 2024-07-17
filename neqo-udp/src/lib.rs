@@ -28,184 +28,123 @@ std::thread_local! {
     static RECV_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
 }
 
-/// A UDP socket.
+pub fn send_inner(
+    state: &UdpSocketState,
+    socket: quinn_udp::UdpSockRef<'_>,
+    d: &Datagram,
+) -> io::Result<()> {
+    let transmit = Transmit {
+        destination: d.destination(),
+        ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
+        contents: d,
+        segment_size: None,
+        src_ip: None,
+    };
+
+    state.send(socket, &transmit)?;
+
+    qtrace!(
+        "sent {} bytes from {} to {}",
+        d.len(),
+        d.source(),
+        d.destination()
+    );
+
+    Ok(())
+}
+
+pub fn recv_inner(
+    local_address: &SocketAddr,
+    state: &UdpSocketState,
+    socket: quinn_udp::UdpSockRef<'_>,
+) -> Result<Vec<Datagram>, io::Error> {
+    let dgrams = RECV_BUF.with_borrow_mut(|recv_buf| -> Result<Vec<Datagram>, io::Error> {
+        let mut meta = RecvMeta::default();
+
+        state.recv(
+            socket,
+            &mut [IoSliceMut::new(recv_buf)],
+            slice::from_mut(&mut meta),
+        )?;
+
+        Ok(recv_buf[0..meta.len]
+            .chunks(meta.stride.min(recv_buf.len()))
+            .map(|d| {
+                qtrace!(
+                    "received {} bytes from {} to {}",
+                    d.len(),
+                    meta.addr,
+                    local_address,
+                );
+                Datagram::new(
+                    meta.addr,
+                    *local_address,
+                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+                    d,
+                )
+            })
+            .collect())
+    })?;
+
+    qtrace!(
+        "received {} datagrams ({:?})",
+        dgrams.len(),
+        dgrams.iter().map(|d| d.len()).collect::<Vec<_>>(),
+    );
+
+    Ok(dgrams)
+}
+
+/// A wrapper around a UDP socket, sending and receiving [`Datagram`]s.
 pub struct Socket<S> {
     state: UdpSocketState,
     inner: S,
 }
 
-impl<S> Socket<S> {
-    fn send_inner(
-        state: &UdpSocketState,
-        socket: quinn_udp::UdpSockRef<'_>,
-        d: &Datagram,
-    ) -> io::Result<()> {
-        let transmit = Transmit {
-            destination: d.destination(),
-            ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-            contents: d,
-            segment_size: None,
-            src_ip: None,
-        };
-
-        state.send(socket, &transmit)?;
-
-        qtrace!(
-            "sent {} bytes from {} to {}",
-            d.len(),
-            d.source(),
-            d.destination()
-        );
-
-        Ok(())
-    }
-
-    fn recv_inner(
-        local_address: &SocketAddr,
-        state: &UdpSocketState,
-        socket: quinn_udp::UdpSockRef<'_>,
-    ) -> Result<Vec<Datagram>, io::Error> {
-        let dgrams = RECV_BUF.with_borrow_mut(|recv_buf| -> Result<Vec<Datagram>, io::Error> {
-            let mut meta = RecvMeta::default();
-
-            state.recv(
-                socket,
-                &mut [IoSliceMut::new(recv_buf)],
-                slice::from_mut(&mut meta),
-            )?;
-
-            Ok(recv_buf[0..meta.len]
-                .chunks(meta.stride.min(recv_buf.len()))
-                .map(|d| {
-                    qtrace!(
-                        "received {} bytes from {} to {}",
-                        d.len(),
-                        meta.addr,
-                        local_address,
-                    );
-                    Datagram::new(
-                        meta.addr,
-                        *local_address,
-                        meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                        d,
-                    )
-                })
-                .collect())
-        })?;
-
-        qtrace!(
-            "received {} datagrams ({:?})",
-            dgrams.len(),
-            dgrams.iter().map(|d| d.len()).collect::<Vec<_>>(),
-        );
-
-        Ok(dgrams)
-    }
-}
-
-/// A borrowed socket, i.e. a socket managed externally.
-#[cfg(unix)]
-type BorrowedSocket = std::os::fd::BorrowedFd<'static>;
-/// A borrowed socket, i.e. a socket managed externally.
-#[cfg(windows)]
-type BorrowedSocket = std::os::windows::io::BorrowedSocket<'static>;
-
-impl Socket<BorrowedSocket> {
-    /// Create a new [`Socket`] given a `BorrowedSocket` managed externally.
-    pub fn new(socket: BorrowedSocket) -> Result<Self, io::Error> {
+impl<#[cfg(unix)] S: std::os::fd::AsFd, #[cfg(windows)] S: std::os::windows::io::AsSocket>
+    Socket<S>
+{
+    /// Create a new [`BorrowedSocket`] given a [`Borrowed`] socket managed externally.
+    pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
             inner: socket,
         })
     }
 
-    /// Send a [`Datagram`] on the given [`Socket`].
+    /// Send a [`Datagram`] on the given [`BorrowedSocket`].
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        Self::send_inner(&self.state, (&self.inner).into(), d)
+        send_inner(&self.state, (&self.inner).into(), d)
     }
 
-    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
-    /// the provided local address.
+    /// Receive a batch of [`Datagram`]s on the given [`BorrowedSocket`], each
+    /// set with the provided local address.
     pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        Self::recv_inner(local_address, &self.state, (&self.inner).into())
-    }
-}
-
-#[cfg(feature = "tokio")]
-impl Socket<tokio::net::UdpSocket> {
-    /// Create a new [`Socket`] bound to the provided address, not managed externally.
-    pub fn bind<A: std::net::ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
-        let socket = std::net::UdpSocket::bind(addr)?;
-
-        Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
-            inner: tokio::net::UdpSocket::from_std(socket)?,
-        })
-    }
-
-    /// See [`tokio::net::UdpSocket::local_addr`].
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.inner.local_addr()
-    }
-
-    /// See [`tokio::net::UdpSocket::writable`].
-    pub async fn writable(&self) -> Result<(), io::Error> {
-        self.inner.writable().await
-    }
-
-    /// See [`tokio::net::UdpSocket::readable`].
-    pub async fn readable(&self) -> Result<(), io::Error> {
-        self.inner.readable().await
-    }
-
-    /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
-        self.inner.try_io(tokio::io::Interest::WRITABLE, || {
-            Self::send_inner(&self.state, (&self.inner).into(), d)
-        })
-    }
-
-    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
-    /// the provided local address.
-    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        self.inner
-            .try_io(tokio::io::Interest::READABLE, || {
-                Self::recv_inner(local_address, &self.state, (&self.inner).into())
-            })
-            .or_else(|e| {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    Ok(vec![])
-                } else {
-                    Err(e)
-                }
-            })
+        recv_inner(local_address, &self.state, (&self.inner).into())
     }
 }
 
 #[cfg(test)]
-#[cfg(feature = "tokio")]
 mod tests {
     use neqo_common::{IpTosDscp, IpTosEcn};
 
     use super::*;
 
-    #[tokio::test]
-    async fn datagram_tos() -> Result<(), io::Error> {
-        let sender = Socket::bind("127.0.0.1:0")?;
+    #[test]
+    fn datagram_tos() -> Result<(), io::Error> {
+        let sender = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let receiver = Socket::bind(receiver_addr)?;
 
         let datagram = Datagram::new(
-            sender.local_addr()?,
-            receiver.local_addr()?,
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
             b"Hello, world!".to_vec(),
         );
 
-        sender.writable().await?;
         sender.send(&datagram)?;
 
-        receiver.readable().await?;
         let received_datagram = receiver
             .recv(&receiver_addr)
             .expect("receive to succeed")
@@ -223,22 +162,22 @@ mod tests {
     }
 
     /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
-    #[tokio::test]
+    #[test]
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), ignore)]
-    async fn many_datagrams_through_gro() -> Result<(), io::Error> {
+    fn many_datagrams_through_gro() -> Result<(), io::Error> {
         const SEGMENT_SIZE: usize = 128;
 
-        let sender = Socket::bind("127.0.0.1:0")?;
+        let sender = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let receiver = Socket::bind(receiver_addr)?;
 
-        // `neqo_common::udp::Socket::send` does not yet
+        // `neqo_udp::Socket::send` does not yet
         // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
         // `quinn_udp` directly.
         let max_gso_segments = sender.state.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
         let transmit = Transmit {
-            destination: receiver.local_addr()?,
+            destination: receiver.inner.local_addr()?,
             ecn: EcnCodepoint::from_bits(Into::<u8>::into(IpTos::from((
                 IpTosDscp::Le,
                 IpTosEcn::Ect1,
@@ -247,15 +186,11 @@ mod tests {
             segment_size: Some(SEGMENT_SIZE),
             src_ip: None,
         };
-        sender.writable().await?;
-        sender.inner.try_io(tokio::io::Interest::WRITABLE, || {
-            sender.state.send((&sender.inner).into(), &transmit)
-        })?;
+        sender.state.send((&sender.inner).into(), &transmit)?;
 
         // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
         let mut num_received = 0;
         while num_received < max_gso_segments {
-            receiver.readable().await?;
             receiver
                 .recv(&receiver_addr)
                 .expect("receive to succeed")
