@@ -10,7 +10,7 @@ use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
-    server::{ActiveConnectionRef, Server, ValidateAddress},
+    server::{ConnectionRef, Server, ValidateAddress},
     ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
 };
 use regex::Regex;
@@ -75,7 +75,7 @@ impl HttpServer {
         })
     }
 
-    fn save_partial(&mut self, stream_id: StreamId, partial: Vec<u8>, conn: &ActiveConnectionRef) {
+    fn save_partial(&mut self, stream_id: StreamId, partial: Vec<u8>, conn: &ConnectionRef) {
         let url_dbg = String::from_utf8(partial.clone())
             .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)));
         if partial.len() < 4096 {
@@ -87,7 +87,7 @@ impl HttpServer {
         }
     }
 
-    fn write(&mut self, stream_id: StreamId, data: Option<Vec<u8>>, conn: &ActiveConnectionRef) {
+    fn write(&mut self, stream_id: StreamId, data: Option<Vec<u8>>, conn: &ConnectionRef) {
         let resp = data.unwrap_or_else(|| Vec::from(&b"404 That request was nonsense\r\n"[..]));
         if let Some(stream_state) = self.write_state.get_mut(&stream_id) {
             match stream_state.data_to_send {
@@ -110,7 +110,7 @@ impl HttpServer {
         }
     }
 
-    fn stream_readable(&mut self, stream_id: StreamId, conn: &ActiveConnectionRef) {
+    fn stream_readable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         if !stream_id.is_client_initiated() || !stream_id.is_bidi() {
             qdebug!("Stream {} not client-initiated bidi, ignoring", stream_id);
             return;
@@ -166,7 +166,7 @@ impl HttpServer {
         self.write(stream_id, resp, conn);
     }
 
-    fn stream_writable(&mut self, stream_id: StreamId, conn: &ActiveConnectionRef) {
+    fn stream_writable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         match self.write_state.get_mut(&stream_id) {
             None => {
                 qwarn!("Unknown stream {stream_id}, ignoring event");

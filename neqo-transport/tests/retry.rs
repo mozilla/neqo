@@ -31,7 +31,7 @@ use test_fixture::{
 
 #[test]
 fn retry_basic() {
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
@@ -61,7 +61,7 @@ fn retry_basic() {
 #[test]
 fn implicit_rtt_retry() {
     const RTT: Duration = Duration::from_secs(2);
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
     let mut now = now();
@@ -78,7 +78,7 @@ fn implicit_rtt_retry() {
 
 #[test]
 fn retry_expired() {
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
     let mut now = now();
@@ -101,8 +101,8 @@ fn retry_expired() {
 // Attempt a retry with 0-RTT, and have 0-RTT packets sent with the second ClientHello.
 #[test]
 fn retry_0rtt() {
-    let server = default_server();
-    let token = generate_ticket(&server);
+    let mut server = default_server();
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::Always);
 
     let mut client = default_client();
@@ -138,7 +138,7 @@ fn retry_0rtt() {
 
 #[test]
 fn retry_different_ip() {
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
@@ -163,8 +163,8 @@ fn retry_different_ip() {
 
 #[test]
 fn new_token_different_ip() {
-    let server = default_server();
-    let token = generate_ticket(&server);
+    let mut server = default_server();
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -185,8 +185,8 @@ fn new_token_different_ip() {
 
 #[test]
 fn new_token_expired() {
-    let server = default_server();
-    let token = generate_ticket(&server);
+    let mut server = default_server();
+    let token = generate_ticket(&mut server);
     server.set_validation(ValidateAddress::NoToken);
 
     let mut client = default_client();
@@ -210,8 +210,8 @@ fn new_token_expired() {
 
 #[test]
 fn retry_after_initial() {
-    let server = default_server();
-    let retry_server = default_server();
+    let mut server = default_server();
+    let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
@@ -249,7 +249,7 @@ fn retry_after_initial() {
 
 #[test]
 fn retry_bad_integrity() {
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
@@ -273,9 +273,9 @@ fn retry_bad_integrity() {
 #[test]
 fn retry_bad_token() {
     let mut client = default_client();
-    let retry_server = default_server();
+    let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
-    let server = default_server();
+    let mut server = default_server();
 
     // Send a retry to one server, then replay it to the other.
     let client_initial1 = client.process(None, now()).dgram();
@@ -299,7 +299,7 @@ fn retry_bad_token() {
 #[test]
 fn retry_after_pto() {
     let mut client = default_client();
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut now = now();
 
@@ -322,7 +322,7 @@ fn retry_after_pto() {
 
 #[test]
 fn vn_after_retry() {
-    let server = default_server();
+    let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
@@ -364,9 +364,9 @@ fn vn_after_retry() {
 #[allow(clippy::shadow_unrelated)]
 fn mitm_retry() {
     let mut client = default_client();
-    let retry_server = default_server();
+    let mut retry_server = default_server();
     retry_server.set_validation(ValidateAddress::Always);
-    let server = default_server();
+    let mut server = default_server();
 
     // Trigger initial and a second client Initial.
     let client_initial1 = client.process(None, now()).dgram();

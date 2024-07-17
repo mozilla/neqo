@@ -15,7 +15,7 @@ use std::{
 
 use neqo_common::{qdebug, Encoder, Header};
 use neqo_transport::{
-    server::ActiveConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
+    server::ConnectionRef, AppError, Connection, DatagramTracking, StreamId, StreamType,
 };
 
 use crate::{
@@ -27,7 +27,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct StreamHandler {
-    pub conn: ActiveConnectionRef,
+    pub conn: ConnectionRef,
     pub handler: Rc<RefCell<Http3ServerHandler>>,
     pub stream_info: Http3StreamInfo,
 }
@@ -174,7 +174,7 @@ impl ::std::fmt::Display for Http3OrWebTransportStream {
 
 impl Http3OrWebTransportStream {
     pub(crate) const fn new(
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_info: Http3StreamInfo,
     ) -> Self {
@@ -259,7 +259,7 @@ impl ::std::fmt::Display for WebTransportRequest {
 
 impl WebTransportRequest {
     pub(crate) const fn new(
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_id: StreamId,
     ) -> Self {
@@ -460,7 +460,7 @@ pub enum Http3ServerEvent {
     },
     /// When individual connection change state. It is only used for tests.
     StateChange {
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         state: Http3State,
     },
     PriorityUpdate {
@@ -510,14 +510,14 @@ impl Http3ServerEvents {
     }
 
     /// Insert a `StateChange` event.
-    pub(crate) fn connection_state_change(&self, conn: ActiveConnectionRef, state: Http3State) {
+    pub(crate) fn connection_state_change(&self, conn: ConnectionRef, state: Http3State) {
         self.insert(Http3ServerEvent::StateChange { conn, state });
     }
 
     /// Insert a `Data` event.
     pub(crate) fn data(
         &self,
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_info: Http3StreamInfo,
         data: Vec<u8>,
@@ -532,7 +532,7 @@ impl Http3ServerEvents {
 
     pub(crate) fn data_writable(
         &self,
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_info: Http3StreamInfo,
     ) {
@@ -543,7 +543,7 @@ impl Http3ServerEvents {
 
     pub(crate) fn stream_reset(
         &self,
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_info: Http3StreamInfo,
         error: AppError,
@@ -556,7 +556,7 @@ impl Http3ServerEvents {
 
     pub(crate) fn stream_stop_sending(
         &self,
-        conn: ActiveConnectionRef,
+        conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_info: Http3StreamInfo,
         error: AppError,

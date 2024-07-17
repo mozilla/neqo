@@ -987,6 +987,12 @@ impl Connection {
         }
     }
 
+    /// Whether the given [`ConnectionIdRef`] is a valid local [`ConnectionId`].
+    #[must_use]
+    pub fn is_valid_local_cid(&self, cid: ConnectionIdRef) -> bool {
+        self.cid_manager.is_valid(cid)
+    }
+
     /// Process new input datagrams on the connection.
     pub fn process_input(&mut self, d: &Datagram, now: Instant) {
         self.process_multiple_input(iter::once(d), now);

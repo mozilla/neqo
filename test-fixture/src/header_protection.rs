@@ -16,7 +16,7 @@ use neqo_crypto::{
     Aead, AllowZeroRtt, AuthenticationStatus, ResumptionToken,
 };
 use neqo_transport::{
-    server::{ActiveConnectionRef, Server, ValidateAddress},
+    server::{ConnectionRef, Server, ValidateAddress},
     Connection, ConnectionEvent, ConnectionParameters, State,
 };
 
