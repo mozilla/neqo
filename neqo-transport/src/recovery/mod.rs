@@ -841,13 +841,11 @@ impl LossRecovery {
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
     fn maybe_fire_pto(&mut self, primary_path: &PathRef, now: Instant, lost: &mut Vec<SentPacket>) {
-        let path = primary_path.borrow();
-        let rtt = path.rtt();
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(rtt, *pn_space) {
+            if let Some(t) = self.pto_time(primary_path.borrow().rtt(), *pn_space) {
                 allow_probes[*pn_space] = true;
                 if t <= now {
                     qdebug!([self], "PTO timer fired for {}", pn_space);
