@@ -72,6 +72,15 @@ runs:
         # Don't fail CI if the interop test fails
         set -o pipefail
         python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
+        # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
+        # (that we assume happened in neqo.)
+        for log in ../logs/*/*/output.txt; do
+          if grep -q 'RUST_BACKTRACE=full' "$log"; then
+            echo "Panic detected in $log"
+            tail -n 50 "$log"
+            exit 1
+          fi
+        done
       shell: bash
 
     - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
