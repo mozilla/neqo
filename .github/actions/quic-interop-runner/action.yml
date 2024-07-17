@@ -71,7 +71,7 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python run.py $ARGS 2>&1 | tee ../summary.txt || true
+        python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
       shell: bash
 
     - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
