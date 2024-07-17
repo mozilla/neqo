@@ -13,7 +13,7 @@ use neqo_common::Datagram;
 /// audited as `safe-to-deploy`. `cargo vet` will require `safe-to-deploy` for
 /// [`tokio`] even when behind a feature flag.
 ///
-/// See https://github.com/mozilla/cargo-vet/issues/626.
+/// See <https://github.com/mozilla/cargo-vet/issues/626>.
 pub struct Socket {
     state: quinn_udp::UdpSocketState,
     inner: tokio::net::UdpSocket,

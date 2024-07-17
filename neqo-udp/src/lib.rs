@@ -104,7 +104,7 @@ pub struct Socket<S> {
 impl<#[cfg(unix)] S: std::os::fd::AsFd, #[cfg(windows)] S: std::os::windows::io::AsSocket>
     Socket<S>
 {
-    /// Create a new [`BorrowedSocket`] given a [`Borrowed`] socket managed externally.
+    /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
             state: quinn_udp::UdpSocketState::new((&socket).into())?,
@@ -112,12 +112,12 @@ impl<#[cfg(unix)] S: std::os::fd::AsFd, #[cfg(windows)] S: std::os::windows::io:
         })
     }
 
-    /// Send a [`Datagram`] on the given [`BorrowedSocket`].
+    /// Send a [`Datagram`] on the given [`Socket`].
     pub fn send(&self, d: &Datagram) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
-    /// Receive a batch of [`Datagram`]s on the given [`BorrowedSocket`], each
+    /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
     /// set with the provided local address.
     pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         recv_inner(local_address, &self.state, (&self.inner).into())
