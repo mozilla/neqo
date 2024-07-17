@@ -13,10 +13,6 @@ on:
     - cron: '0 1 * * *'
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
 permissions: read-all
 
 env:

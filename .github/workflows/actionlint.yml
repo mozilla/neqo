@@ -8,10 +8,6 @@ on:
     paths: [".github/**"]
   merge_group:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
-
 permissions: read-all
 
 jobs:
@@ -29,4 +25,3 @@ jobs:
         run: |
           echo "::add-matcher::.github/actionlint-matcher.json"
           ${{ steps.get_actionlint.outputs.executable }} -color
-
