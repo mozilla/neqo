@@ -927,7 +927,7 @@ impl LossRecovery {
                 } else {
                     SendProfile::new_limited(mtu)
                 }
-            } else if path.is_valid() && sender.recovery_packet() {
+            } else if sender.recovery_packet() {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
