@@ -90,16 +90,19 @@ runs:
         path: logs
         compression-level: 9
 
-    - name: Store log URL
+    - name: Store other info
       run: |
         jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
           < result.json  > result.json.tmp && \
           mv result.json.tmp result.json
+        echo "${{ inputs.client }}" >> client
+        echo "${{ inputs.server }}" >> server
       shell: bash
 
     - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
+        retention-days: 1
         path: |
           result.json
           summary.txt
