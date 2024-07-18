@@ -739,7 +739,7 @@ impl LossRecovery {
         let rtt = path.rtt();
         let loss_time = self.earliest_loss_time(rtt);
         let pto_time =
-            if path.amplification_limit() > ACK_ONLY_SIZE_LIMIT || self.confirmed_time.is_some() {
+            if path.amplification_limit() > path.plpmtu() {
                 self.earliest_pto(rtt)
             } else {
                 None
