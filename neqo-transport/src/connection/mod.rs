@@ -2377,7 +2377,7 @@ impl Connection {
         }
 
         if encoder.is_empty() {
-            qdebug!("TX blocked, profile={:?} ", profile);
+            qdebug!("TX blocked, profile={:?}", profile);
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.

@@ -738,7 +738,7 @@ impl LossRecovery {
     pub fn next_timeout(&self, path: &Path) -> Option<Instant> {
         let rtt = path.rtt();
         let loss_time = self.earliest_loss_time(rtt);
-        let pto_time = if path.amplification_limit() > 0 {
+        let pto_time = if path.amplification_limit() > ACK_ONLY_SIZE_LIMIT {
             self.earliest_pto(rtt)
         } else {
             None
