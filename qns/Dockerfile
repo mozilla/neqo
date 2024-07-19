@@ -1,7 +1,7 @@
 FROM martenseemann/quic-network-simulator-endpoint@sha256:91b21d42e23023e08c5ed63c1c08ec24d058c4b30edd52aa3bd74bee87096a5b AS buildimage
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libclang-dev libnss3-dev pkg-config lld \
+    git coreutils build-essential libclang-dev lld gyp ninja-build zlib1g-dev python \
     && apt-get autoremove -y && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 
@@ -47,6 +47,19 @@ RUN set -eux; \
 
 # End of copy from https://github.com/rust-lang/docker-rust...
 
+# We unfortunately need to build NSS from source, because the Debian package is
+# not compiled with support for SSLKEYLOGFILE.
+# See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
+ENV NSS_DIR=/nss \
+    NSPR_DIR=/nspr \
+    LD_LIBRARY_PATH=/dist/Release/lib
+
+RUN set -eux; \
+    git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"; \
+    git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
+
+RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
+
 ADD . /neqo
 
 RUN set -eux; \
@@ -58,12 +71,10 @@ RUN set -eux; \
 
 FROM martenseemann/quic-network-simulator-endpoint@sha256:91b21d42e23023e08c5ed63c1c08ec24d058c4b30edd52aa3bd74bee87096a5b
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnss3-tools libnss3-dev \
-    && apt-get autoremove -y && apt-get clean -y \
-    && rm -rf /var/lib/apt/lists/*
-
+ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=buildimage /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/
+COPY --from=buildimage /dist/Release/lib/*.so /neqo/lib/
+COPY --from=buildimage /dist/Release/bin/certutil /dist/Release/bin/pk12util /neqo/bin/
 
 COPY qns/interop.sh /neqo/
 RUN chmod +x /neqo/interop.sh

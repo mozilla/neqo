@@ -23,6 +23,7 @@ permissions:
 env:
   LATEST: neqo-latest
   DELIM: ' vs. '
+  TIMEOUT: 20
 
 jobs:
   docker-image:
@@ -148,6 +149,7 @@ jobs:
 
       # TODO: Replace once https://github.com/quic-interop/quic-interop-runner/pull/356 is merged.
       - uses: ./.github/actions/quic-interop-runner
+        timeout-minutes: ${{ fromJSON(env.TIMEOUT) }}
         with:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
@@ -155,7 +157,7 @@ jobs:
 
   report:
     name: Report results
-    needs: run-qns
+    needs: [run-qns, implementations]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -166,10 +168,30 @@ jobs:
           path: results
 
       - run: |
-          for RUN in results/*; do
-            [ -e "$RUN/result.json" ] || continue
-            CLIENT=$(jq -r < "$RUN/result.json" '.clients[0]')
-            SERVER=$(jq -r < "$RUN/result.json" '.servers[0]')
+          mapfile -t LIST < <(echo '${{ needs.implementations.outputs.pairs }}' | jq '.[]' | sort)
+          for PREFIX in "${LIST[@]}"; do
+            PREFIX=$(echo "$PREFIX" | tr -d '"')
+            CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
+            SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
+            RUN="results/${PREFIX} results"
+            {
+              [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
+              echo -n "$CLIENT"
+              [ "$CLIENT" == "$LATEST" ] || echo -n "</ins>"
+              echo -n "$DELIM"
+              [ "$SERVER" == "$LATEST" ] || echo -n "<ins>"
+              echo -n "$SERVER"
+              [ "$SERVER" == "$LATEST" ] || echo -n "</ins>"
+            } > "pair.md"
+            if [ ! -e "$RUN/result.json" ]; then
+              {
+                echo -n "* "
+                cat "pair.md"
+                echo -n ": "
+                echo "run cancelled after $TIMEOUT min"
+              } >> "failed.md"
+              continue
+            fi
             jq < "$RUN/result.json" '
                 . as $data |
                 {
@@ -184,13 +206,7 @@ jobs:
               [ -n "$RESULT" ] || continue
               {
                 echo -n "* ["
-                [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
-                echo -n "$CLIENT"
-                [ "$CLIENT" == "$LATEST" ] || echo -n "</ins>"
-                echo -n "$DELIM"
-                [ "$SERVER" == "$LATEST" ] || echo -n "<ins>"
-                echo -n "$SERVER"
-                [ "$SERVER" == "$LATEST" ] || echo -n "</ins>"
+                cat "pair.md"
                 echo -n "]($LOG): "
                 echo "**$RESULT**"
               } >> "$GROUP.md"
