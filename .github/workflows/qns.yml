@@ -173,6 +173,11 @@ jobs:
             PREFIX=$(echo "$PREFIX" | tr -d '"')
             CLIENT=$(echo "$PREFIX" | cut -f1 -d " ")
             SERVER=$(echo "$PREFIX" | cut -f3 -d " ")
+            if [ "$CLIENT" == "$LATEST" ]; then
+              ROLE=client
+            else
+              ROLE=server
+            fi
             RUN="results/${PREFIX} results"
             {
               [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
@@ -189,7 +194,7 @@ jobs:
                 cat "pair.md"
                 echo -n ": "
                 echo "run cancelled after $TIMEOUT min"
-              } >> "failed.md"
+              } >> "$ROLE.failed.md"
               continue
             fi
             jq < "$RUN/result.json" '
@@ -199,24 +204,29 @@ jobs:
                   add
                 } |
                 . + {log_url: $data.log_url}
-              ' > "$RUN/grouped.json"
-            for GROUP in $(jq -r < "$RUN/grouped.json" '.results | keys[]'); do
-              RESULT=$(jq < "$RUN/grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
-              LOG=$(jq -r < "$RUN/grouped.json" -r '.log_url')
-              [ -n "$RESULT" ] || continue
-              {
-                echo -n "* ["
-                cat "pair.md"
-                echo -n "]($LOG): "
-                echo "**$RESULT**"
-              } >> "$GROUP.md"
+              ' > "$RUN/$ROLE.grouped.json"
+            for ROLE in client server; do
+              for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
+                RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
+                LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
+                [ -n "$RESULT" ] || continue
+                {
+                  echo -n "* ["
+                  cat "pair.md"
+                  echo -n "]($LOG): "
+                  echo "**$RESULT**"
+                } >> "$ROLE.$GROUP.md"
+              done
             done
           done
           {
             echo "### Failed Interop Tests"
-            if [ -e failed.md ]; then
+            if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-              cat failed.md
+              echo "#### $LATEST as client"
+              cat client.failed.md
+              echo "#### $LATEST as server"
+              cat server.failed.md
             else
               echo "None :tada:"
             fi
@@ -224,9 +234,12 @@ jobs:
             echo
             for GROUP in succeeded unsupported; do
               echo "### ${GROUP^} Interop Tests"
-              if [ -e "$GROUP.md" ]; then
+              if [ -e "client.$GROUP.md" ] || [ -e "server.$GROUP.md" ]; then
                 echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-                cat "$GROUP.md"
+                echo "#### $LATEST as client"
+                cat "client.$GROUP.md"
+                echo "#### $LATEST as server"
+                cat "server.$GROUP.md"
               else
                 echo "None :question:"
               fi
