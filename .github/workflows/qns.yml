@@ -190,7 +190,7 @@ jobs:
             } > "pair.md"
             if [ ! -e "$RUN/result.json" ]; then
               {
-                echo -n "  * "
+                echo -n "* "
                 cat "pair.md"
                 echo -n ": "
                 echo "run cancelled after $TIMEOUT min"
@@ -211,7 +211,7 @@ jobs:
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
                 [ -n "$RESULT" ] || continue
                 {
-                  echo -n "  * ["
+                  echo -n "* ["
                   cat "pair.md"
                   echo -n "]($LOG): "
                   echo "**$RESULT**"
@@ -223,9 +223,9 @@ jobs:
             echo "### Failed Interop Tests"
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
               echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-              echo "* neqo as client"
+              echo "#### $LATEST as client"
               cat client.failed.md
-              echo "* neqo as server"
+              echo "#### $LATEST as server"
               cat server.failed.md
             else
               echo "None :tada:"
@@ -236,9 +236,9 @@ jobs:
               echo "### ${GROUP^} Interop Tests"
               if [ -e "client.$GROUP.md" ] || [ -e "server.$GROUP.md" ]; then
                 echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
-                echo "* neqo as client"
+                echo "#### $LATEST as client"
                 cat "client.$GROUP.md"
-                echo "* neqo as server"
+                echo "#### $LATEST as server"
                 cat "server.$GROUP.md"
               else
                 echo "None :question:"
