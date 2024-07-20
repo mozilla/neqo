@@ -54,10 +54,10 @@ impl NewStreamType {
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
             (H3_FRAME_TYPE_HEADERS, StreamType::BiDi, Role::Server) => Ok(Some(Self::Http)),
             (stream_type, StreamType::BiDi, Role::Server) => {
-                let Some(stream_type) = stream_type.checked_sub(0x21) else {
+                let Some(st) = stream_type.checked_sub(0x21) else {
                     return Err(Error::HttpFrame);
                 };
-                if stream_type % 0x1f == 0 {
+                if st % 0x1f == 0 {
                     Ok(Some(Self::Grease(stream_type)))
                 } else {
                     Err(Error::HttpFrame)
@@ -512,6 +512,20 @@ mod tests {
             &Err(Error::HttpStreamCreation),
             true,
         );
+    }
+
+    #[test]
+    fn decode_grease_stream() {
+        let mut t = Test::new(StreamType::BiDi, Role::Server);
+        t.decode(
+            &[0x21],
+            false,
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Grease(0x21)), true)),
+            true,
+        );
+
+        let mut t = Test::new(StreamType::BiDi, Role::Server);
+        t.decode(&[0x3f], false, &Err(Error::HttpFrame), true);
     }
 
     #[test]
