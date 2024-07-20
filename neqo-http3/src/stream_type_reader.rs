@@ -28,6 +28,7 @@ pub enum NewStreamType {
     WebTransportStream(u64),
     Http,
     Unknown,
+    Grease(u64),
 }
 
 impl NewStreamType {
@@ -52,7 +53,16 @@ impl NewStreamType {
             | (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
             (H3_FRAME_TYPE_HEADERS, StreamType::BiDi, Role::Server) => Ok(Some(Self::Http)),
-            (_, StreamType::BiDi, Role::Server) => Err(Error::HttpFrame),
+            (stream_type, StreamType::BiDi, Role::Server) => {
+                let Some(stream_type) = stream_type.checked_sub(0x21) else {
+                    return Err(Error::HttpFrame);
+                };
+                if stream_type % 0x1f == 0 {
+                    Ok(Some(Self::Grease(stream_type)))
+                } else {
+                    Err(Error::HttpFrame)
+                }
+            }
             (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Server)
             | (_, StreamType::BiDi, Role::Client) => Err(Error::HttpStreamCreation),
             _ => Ok(Some(Self::Unknown)),
@@ -192,7 +202,7 @@ impl NewStreamHeadReader {
                 Err(Error::HttpClosedCriticalStream)
             }
             None => Err(Error::HttpStreamCreation),
-            Some(NewStreamType::Http) => Err(Error::HttpFrame),
+            Some(NewStreamType::Http | NewStreamType::Grease(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
             Some(NewStreamType::Push(_) | NewStreamType::WebTransportStream(_)) => {
                 unreachable!("PushStream and WebTransport are mapped to None at this stage.")

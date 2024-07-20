@@ -518,7 +518,6 @@ impl Http3Connection {
             output = self.handle_new_stream(conn, stream_type, stream_id)?;
         }
 
-        #[allow(clippy::match_same_arms)] // clippy is being stupid here
         match output {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
                 self.handle_unblocked_streams(unblocked_streams, conn)?;
@@ -534,12 +533,15 @@ impl Http3Connection {
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(
-                NewStreamType::Push(_) | NewStreamType::Http | NewStreamType::WebTransportStream(_),
-            ) => Ok(output),
+                NewStreamType::Push(_)
+                | NewStreamType::Http
+                | NewStreamType::WebTransportStream(_)
+                | NewStreamType::Grease(_),
+            )
+            | ReceiveOutput::NoOutput => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
             }
-            ReceiveOutput::NoOutput => Ok(output),
         }
     }
 
@@ -750,15 +752,19 @@ impl Http3Connection {
             NewStreamType::Unknown => {
                 conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
             }
+            NewStreamType::Grease(id) => {
+                qinfo!([self], "A new grease stream {}.", id);
+            }
         };
 
         match stream_type {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id)
             }
-            NewStreamType::Push(_) | NewStreamType::Http | NewStreamType::WebTransportStream(_) => {
-                Ok(ReceiveOutput::NewStream(stream_type))
-            }
+            NewStreamType::Push(_)
+            | NewStreamType::Http
+            | NewStreamType::WebTransportStream(_)
+            | NewStreamType::Grease(_) => Ok(ReceiveOutput::NewStream(stream_type)),
             NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
         }
     }
