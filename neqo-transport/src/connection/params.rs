@@ -10,7 +10,7 @@ pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
     recv_stream::RECV_BUFFER_SIZE,
-    rtt::GRANULARITY,
+    rtt::{DEFAULT_INITIAL_RTT, GRANULARITY},
     stream_id::StreamType,
     tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
     tracking::DEFAULT_ACK_DELAY,
@@ -70,6 +70,7 @@ pub struct ConnectionParameters {
     /// acknowledgments every round trip, set the value to `5 * ACK_RATIO_SCALE`.
     /// Values less than `ACK_RATIO_SCALE` are clamped to `ACK_RATIO_SCALE`.
     ack_ratio: u8,
+    initial_rtt: Duration,
     /// The duration of the idle timeout for the connection.
     idle_timeout: Duration,
     preferred_address: PreferredAddressConfig,
@@ -96,6 +97,7 @@ impl Default for ConnectionParameters {
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
+            initial_rtt: DEFAULT_INITIAL_RTT,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: 0,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
@@ -266,6 +268,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn get_datagram_size(&self) -> u64 {
         self.datagram_size
+    }
+
+    #[must_use]
+    pub const fn get_initial_rtt(&self) -> Duration {
+        self.initial_rtt
+    }
+
+    #[must_use]
+    pub const fn initial_rtt(mut self, init_rtt: Duration) -> Self {
+        self.initial_rtt = init_rtt;
+        self
     }
 
     #[must_use]
