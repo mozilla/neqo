@@ -65,6 +65,7 @@ impl RecvStreams {
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut RecvStream> {
         self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
+
     #[allow(clippy::missing_errors_doc)]
     pub fn keep_alive(&mut self, id: StreamId, k: bool) -> Res<()> {
         let self_ka = &mut self.keep_alive;
@@ -386,7 +387,6 @@ impl RxStreamOrderer {
 
 /// QUIC receiving states, based on -transport 3.2.
 #[derive(Debug)]
-#[allow(dead_code)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
     Recv {
@@ -813,7 +813,7 @@ impl RecvStream {
 
     /// # Errors
     /// `NoMoreData` if data and fin bit were previously read by the application.
-    #[allow(clippy::missing_panics_doc)] // with a >16 exabyte packet on a 128-bit machine, maybe
+    #[allow(clippy::missing_panics_doc)]
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let data_recvd_state = matches!(self.state, RecvStreamState::DataRecvd { .. });
         match &mut self.state {
@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(unknown_lints, clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
+    #[allow(clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
     fn recv_noncontiguous() {
         // Non-contiguous with the start, no data available.
         recv_ranges(&[10..20], 0);

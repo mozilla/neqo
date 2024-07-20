@@ -21,7 +21,7 @@ use crate::{
     sender::PACING_BURST_SIZE,
     Pmtud,
 };
-#[rustfmt::skip] // to keep `::` and thus prevent conflict with `crate::qlog`
+#[rustfmt::skip]// to keep `::` and thus prevent conflict with `crate::qlog`
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 

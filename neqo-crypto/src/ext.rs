@@ -75,7 +75,7 @@ impl ExtensionTracker {
         f(&mut *rc.borrow_mut())
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(clippy::cast_possible_truncation)]
     unsafe extern "C" fn extension_writer(
         _fd: *mut PRFileDesc,
         message: SSLHandshakeType::Type,
@@ -106,7 +106,7 @@ impl ExtensionTracker {
         arg: *mut c_void,
     ) -> SECStatus {
         let d = null_safe_slice(data, len);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(clippy::cast_possible_truncation)]
         Self::wrap_handler_call(arg, |handler| {
             // Cast is safe here because the message type is always part of the enum
             match handler.handle(message as HandshakeMessage, d) {

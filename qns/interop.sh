@@ -27,7 +27,7 @@ server)
     -name "$CERT" -passout pass: -out "$P12CERT"
   pk12util -d "sql:$DB" -i "$P12CERT" -W ''
   certutil -L -d "sql:$DB" -n "$CERT"
-  RUST_LOG=debug RUST_BACKTRACE=1 neqo-server --cc cubic --qns-test "$TESTCASE" \
+  RUST_LOG=trace RUST_BACKTRACE=1 neqo-server --cc cubic --qns-test "$TESTCASE" \
     --qlog-dir "$QLOGDIR" -d "$DB" -k "$CERT" '[::]:443' 2> >(tee -i -a "/logs/$ROLE.log" >&2)
   ;;
 

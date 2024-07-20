@@ -1118,7 +1118,6 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        #[allow(clippy::let_and_return)]
         let output = self.process_output(now);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {

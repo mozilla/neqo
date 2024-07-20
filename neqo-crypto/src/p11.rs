@@ -24,9 +24,7 @@ use crate::{
     null_safe_slice,
 };
 
-#[allow(clippy::upper_case_acronyms)]
 #[allow(clippy::unreadable_literal)]
-#[allow(unknown_lints, clippy::borrow_as_ptr)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }
@@ -70,9 +68,8 @@ macro_rules! scoped_ptr {
         }
 
         impl Drop for $scoped {
-            #[allow(unused_must_use)]
             fn drop(&mut self) {
-                unsafe { $dtor(self.ptr) };
+                unsafe { _ = $dtor(self.ptr) };
             }
         }
     };
