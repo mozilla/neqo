@@ -1330,7 +1330,7 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::missing_panics_doc)] // not possible
     pub fn reset(&mut self, err: AppError) {
         match &self.state {
             SendStreamState::Ready { fc, .. } => {
