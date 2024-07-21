@@ -1335,7 +1335,7 @@ pub struct CryptoStream {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]// Suppress false positive: https://github.com/rust-lang/rust/issues/68408
+#[allow(dead_code)] // Suppress false positive: https://github.com/rust-lang/rust/issues/68408
 pub enum CryptoStreams {
     Initial {
         initial: CryptoStream,

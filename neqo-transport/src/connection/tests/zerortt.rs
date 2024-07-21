@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider, qinfo};
+use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -15,10 +15,7 @@ use super::{
     resumed_server, CountingConnectionIdGenerator,
 };
 use crate::{
-    addr_valid::AddressValidation,
-    connection::tests::{connect_with_rtt, get_tokens},
-    events::ConnectionEvent,
-    server::ValidateAddress,
+    ackrate::PeerAckDelay, connection::tests::connect_with_rtt, events::ConnectionEvent,
     ConnectionParameters, Error, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
@@ -271,25 +268,12 @@ fn zero_rtt_loss_recovery() {
     connect_with_rtt(&mut client, &mut server, now, rtt);
     assert_eq!(client.paths.rtt(), rtt);
 
-    // We can't use exchange_ticket here because it doesn't respect RTT.
-    // Also, connect_with_rtt() ends with the server receiving a packet it
-    // wants to acknowledge; so the ticket will include an ACK frame too.
-    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
-    let validation = Rc::new(RefCell::new(validation));
-    server.set_validation(&validation);
-    server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process_output(now).dgram();
-    assert!(ticket.is_some());
-    now += rtt / 2;
-    client.process_input(&ticket.unwrap(), now);
-    let token = get_tokens(&mut client).pop().unwrap();
-
+    let token = exchange_ticket(&mut client, &mut server, now);
     let mut client = default_client();
     client
         .enable_resumption(now, token)
         .expect("should set token");
     let mut server = resumed_server(&client);
-    qinfo!("XXXXXX");
 
     // Send ClientHello.
     let client_hs = client.process(None, now);
@@ -301,11 +285,21 @@ fn zero_rtt_loss_recovery() {
     let client_0rtt = client.process(None, now);
     assert!(client_0rtt.as_dgram_ref().is_some());
 
-    now += rtt / 2;
-
     let server_hs = server.process(client_hs.as_dgram_ref(), now);
     assert!(server_hs.as_dgram_ref().is_some());
 
     let server_process_0rtt = server.process(client_0rtt.as_dgram_ref(), now);
     assert!(server_process_0rtt.as_dgram_ref().is_some());
+
+    // After RTT*9/8, the client should not have declared anything lost yet.
+    now += rtt * 9 / 8;
+    let pkt = client.process(None, now);
+    assert!(pkt.as_dgram_ref().is_none());
+    assert_eq!(client.stats().lost, 0);
+
+    // After RTT*9/8, the client should have declared the three packets as lost.
+    now += (rtt - rtt / 8) + PeerAckDelay::default().max();
+    let pkt = client.process(None, now);
+    assert!(pkt.as_dgram_ref().is_some());
+    assert_eq!(client.stats().lost, 3);
 }

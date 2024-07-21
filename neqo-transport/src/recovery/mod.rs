@@ -976,6 +976,7 @@ mod tests {
     const ON_SENT_SIZE: usize = 100;
     /// An initial RTT for using with `setup_lr`.
     const TEST_RTT: Duration = INITIAL_RTT;
+    #[allow(clippy::cast_possible_truncation)]
     const TEST_RTTVAR: Duration = Duration::from_millis(INITIAL_RTT.as_millis() as u64 / 2);
 
     struct Fixture {
