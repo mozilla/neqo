@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::event::Provider;
+use neqo_common::{event::Provider, qinfo};
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -15,8 +15,11 @@ use super::{
     resumed_server, CountingConnectionIdGenerator,
 };
 use crate::{
-    events::ConnectionEvent, ConnectionParameters, Error, StreamType, Version,
-    MIN_INITIAL_PACKET_SIZE,
+    addr_valid::AddressValidation,
+    connection::tests::{connect_with_rtt, get_tokens},
+    events::ConnectionEvent,
+    server::ValidateAddress,
+    ConnectionParameters, Error, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -257,4 +260,52 @@ fn zero_rtt_update_flow_control() {
     // And the new limit applies.
     assert!(client.stream_send_atomic(uni_stream, MESSAGE).unwrap());
     assert!(client.stream_send_atomic(bidi_stream, MESSAGE).unwrap());
+}
+
+#[test]
+fn zero_rtt_loss_recovery() {
+    let rtt = Duration::from_millis(10);
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_with_rtt(&mut client, &mut server, now, rtt);
+    assert_eq!(client.paths.rtt(), rtt);
+
+    // We can't use exchange_ticket here because it doesn't respect RTT.
+    // Also, connect_with_rtt() ends with the server receiving a packet it
+    // wants to acknowledge; so the ticket will include an ACK frame too.
+    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(&validation);
+    server.send_ticket(now, &[]).expect("can send ticket");
+    let ticket = server.process_output(now).dgram();
+    assert!(ticket.is_some());
+    now += rtt / 2;
+    client.process_input(&ticket.unwrap(), now);
+    let token = get_tokens(&mut client).pop().unwrap();
+
+    let mut client = default_client();
+    client
+        .enable_resumption(now, token)
+        .expect("should set token");
+    let mut server = resumed_server(&client);
+    qinfo!("XXXXXX");
+
+    // Send ClientHello.
+    let client_hs = client.process(None, now);
+    assert!(client_hs.as_dgram_ref().is_some());
+
+    // Now send a 0-RTT packet.
+    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
+    let client_0rtt = client.process(None, now);
+    assert!(client_0rtt.as_dgram_ref().is_some());
+
+    now += rtt / 2;
+
+    let server_hs = server.process(client_hs.as_dgram_ref(), now);
+    assert!(server_hs.as_dgram_ref().is_some());
+
+    let server_process_0rtt = server.process(client_0rtt.as_dgram_ref(), now);
+    assert!(server_process_0rtt.as_dgram_ref().is_some());
 }
