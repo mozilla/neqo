@@ -16,15 +16,15 @@ cargo build --bin neqo-client --bin neqo-server
 addr=127.0.0.1
 port=4433
 path=/20000
-flags="--verbose --verbose --verbose --verbose --qlog-dir $tmp --use-old-http --alpn hq-interop --quic-version 1"
+flags="--verbose --verbose --verbose --qlog-dir $tmp --use-old-http --alpn hq-interop --quic-version 1"
 if [ "$(uname -s)" != "Linux" ]; then
         iface=lo0
 else
         iface=lo
 fi
 
-client="./target/debug/neqo-client $flags --output-dir $tmp --qns-test zerortt --idle 2 --stats https://$addr:$port$path https://$addr:$port$path"
-server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags --qns-test zerortt $addr:$port"
+client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
+server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
 tcpdump_pid=$!

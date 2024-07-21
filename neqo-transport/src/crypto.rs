@@ -223,11 +223,9 @@ impl Crypto {
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
         let cipher = info.early_data_cipher();
-        qinfo!("Early data cipher {:?}", cipher);
         if cipher.is_none() {
             return Ok(false);
         }
-        qinfo!([self], "XXXX 0-RTT enabled");
         let (dir, secret) = match role {
             Role::Client => (
                 CryptoDxDirection::Write,
