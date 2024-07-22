@@ -347,8 +347,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     fn discard(&mut self, pkt: &SentPacket) {
         if pkt.cc_outstanding() {
-            assert!(self.bytes_in_flight >= pkt.len());
-            self.bytes_in_flight -= pkt.len();
+            self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
             qlog::metrics_updated(
                 &self.qlog,
                 &[QlogMetric::BytesInFlight(self.bytes_in_flight)],

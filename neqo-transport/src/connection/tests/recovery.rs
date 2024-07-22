@@ -174,10 +174,12 @@ fn pto_initial() {
     assert_eq!(delay, INITIAL_PTO);
 
     // Resend initial after PTO.
+    let cwnd_prior: usize = cwnd(&client);
     now += delay;
     let pkt2 = client.process(None, now).dgram();
     assert!(pkt2.is_some());
     assert_eq!(pkt2.unwrap().len(), client.plpmtu());
+    assert_eq!(cwnd_prior, 2 * cwnd(&client)); // cwnd has halved
 
     let delay = client.process(None, now).callback();
     // PTO has doubled.
