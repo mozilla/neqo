@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
@@ -15,8 +15,8 @@ use super::{
     resumed_server, CountingConnectionIdGenerator,
 };
 use crate::{
-    ackrate::PeerAckDelay, connection::tests::connect_with_rtt, events::ConnectionEvent,
-    ConnectionParameters, Error, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
+    events::ConnectionEvent, ConnectionParameters, Error, StreamType, Version,
+    MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -257,49 +257,4 @@ fn zero_rtt_update_flow_control() {
     // And the new limit applies.
     assert!(client.stream_send_atomic(uni_stream, MESSAGE).unwrap());
     assert!(client.stream_send_atomic(bidi_stream, MESSAGE).unwrap());
-}
-
-#[test]
-fn zero_rtt_loss_recovery() {
-    let rtt = Duration::from_millis(10);
-    let mut now = now();
-    let mut client = default_client();
-    let mut server = default_server();
-    connect_with_rtt(&mut client, &mut server, now, rtt);
-    assert_eq!(client.paths.rtt(), rtt);
-
-    let token = exchange_ticket(&mut client, &mut server, now);
-    let mut client = default_client();
-    client
-        .enable_resumption(now, token)
-        .expect("should set token");
-    let mut server = resumed_server(&client);
-
-    // Send ClientHello.
-    let client_hs = client.process(None, now);
-    assert!(client_hs.as_dgram_ref().is_some());
-
-    // Now send a 0-RTT packet.
-    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-    let client_0rtt = client.process(None, now);
-    assert!(client_0rtt.as_dgram_ref().is_some());
-
-    let server_hs = server.process(client_hs.as_dgram_ref(), now);
-    assert!(server_hs.as_dgram_ref().is_some());
-
-    let server_process_0rtt = server.process(client_0rtt.as_dgram_ref(), now);
-    assert!(server_process_0rtt.as_dgram_ref().is_some());
-
-    // After RTT*9/8, the client should not have declared anything lost yet.
-    now += rtt * 9 / 8;
-    let pkt = client.process(None, now);
-    assert!(pkt.as_dgram_ref().is_none());
-    assert_eq!(client.stats().lost, 0);
-
-    // After RTT*9/8, the client should have declared the three packets as lost.
-    now += (rtt - rtt / 8) + PeerAckDelay::default().max();
-    let pkt = client.process(None, now);
-    assert!(pkt.as_dgram_ref().is_some());
-    assert_eq!(client.stats().lost, 3);
 }

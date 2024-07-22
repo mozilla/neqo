@@ -18,9 +18,7 @@ use neqo_crypto::{
 };
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
-use test_fixture::{
-    assertions, assertions::assert_coalesced_0rtt, fixture_init, now, split_datagram, DEFAULT_ADDR,
-};
+use test_fixture::{assertions, fixture_init, now, split_datagram, DEFAULT_ADDR};
 
 use super::{
     super::{Connection, Output, State},
@@ -401,10 +399,10 @@ fn reorder_05rtt_with_0rtt() {
     // Now PTO at the client and cause the server to re-send handshake packets.
     now += AT_LEAST_PTO;
     let c3 = client.process(None, now).dgram();
-    assert_coalesced_0rtt(c3.as_ref().unwrap());
 
     now += RTT / 2;
     let s3 = server.process(c3.as_ref(), now).dgram().unwrap();
+    assertions::assert_no_1rtt(&s3[..]);
 
     // The client should be able to process the 0.5 RTT now.
     // This should contain an ACK, so we are processing an ACK from the past.

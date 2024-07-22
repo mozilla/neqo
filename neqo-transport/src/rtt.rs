@@ -157,11 +157,7 @@ impl RttEstimate {
         // loss_delay = kTimeThreshold * max(latest_rtt, smoothed_rtt)
         // loss_delay = max(loss_delay, kGranularity)
         let rtt = max(self.latest_rtt, self.smoothed_rtt);
-        // A fixed kTimeThreshold often leads to falsely declaring 0-RTT packets lost,
-        // probably because the peer needs to do a bunch of handshake processing that
-        // delays the ACK.  So, we use a dynamic threshold that use the max of kTimeThreshold or the
-        // peer's max ACK delay.
-        max(rtt + max(rtt / 8, self.ack_delay.max()), GRANULARITY)
+        max(rtt * 9 / 8, GRANULARITY)
     }
 
     pub const fn first_sample_time(&self) -> Option<Instant> {
