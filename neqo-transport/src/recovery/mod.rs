@@ -863,15 +863,18 @@ impl LossRecovery {
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
             qtrace!([self], "PTO {}, probing {:?}", pn_space, allow_probes);
-            // If we hit a PTO, also do a congestion control reaction.
+            // If we hit a PTO while we don't have a largest_acked yet, also do a congestion control
+            // reaction (because otherwise none would happen).
             if let Some(space) = self.spaces.get(pn_space) {
-                path.borrow_mut().on_packets_lost(
-                    space.largest_acked_sent_time,
-                    pn_space,
-                    lost,
-                    &mut self.stats.borrow_mut(),
-                    now,
-                );
+                if space.largest_acked.is_none() {
+                    path.borrow_mut().on_packets_lost(
+                        space.largest_acked_sent_time,
+                        pn_space,
+                        lost,
+                        &mut self.stats.borrow_mut(),
+                        now,
+                    );
+                }
             }
             self.fire_pto(pn_space, allow_probes);
         }
