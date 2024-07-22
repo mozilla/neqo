@@ -256,12 +256,14 @@ fn migrate_immediate_fail() {
         let after = client.stats().frame_tx;
         assert_eq!(after.path_challenge, before.path_challenge + 1);
         assert_eq!(after.padding, before.padding + 1);
+        assert_eq!(after.all, before.all + 2);
 
         // This might be a PTO, which will result in sending a probe.
         if let Some(probe) = client.process_output(now).dgram() {
             assert_v4_path(&probe, false); // Contains PATH_CHALLENGE.
             let after = client.stats().frame_tx;
             assert_eq!(after.ping, before.ping + 1);
+            assert_eq!(after.all, before.all + 3);
         }
     }
 
