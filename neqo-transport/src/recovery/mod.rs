@@ -867,13 +867,9 @@ impl LossRecovery {
             // reaction (because otherwise none would happen).
             if let Some(space) = self.spaces.get(pn_space) {
                 if space.largest_acked.is_none() {
-                    path.borrow_mut().on_packets_lost(
-                        space.largest_acked_sent_time,
-                        pn_space,
-                        lost,
-                        &mut self.stats.borrow_mut(),
-                        now,
-                    );
+                    if let Some(last) = lost.last() {
+                        path.borrow_mut().on_congestion_event(last);
+                    }
                 }
             }
             self.fire_pto(pn_space, allow_probes);

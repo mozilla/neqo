@@ -113,6 +113,11 @@ impl PacketSender {
         self.maybe_update_pacer_mtu();
     }
 
+    /// Initiate a congestion response.
+    pub fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
+        self.cc.on_congestion_event(last_packet)
+    }
+
     /// Called when packets are lost.  Returns true if the congestion window was reduced.
     pub fn on_packets_lost(
         &mut self,

@@ -1016,6 +1016,11 @@ impl Path {
         }
     }
 
+    /// Initiate a congestion response.
+    pub fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
+        self.sender.on_congestion_event(last_packet)
+    }
+
     /// Get the number of bytes that can be written to this path.
     pub fn amplification_limit(&self) -> usize {
         if matches!(self.state, ProbeState::Failed) {

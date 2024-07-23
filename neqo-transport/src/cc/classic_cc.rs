@@ -337,6 +337,41 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         congestion || persistent_congestion
     }
 
+    /// Handle a congestion event.
+    /// Returns true if this was a true congestion event.
+    fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
+        // Start a new congestion event if lost or ECN CE marked packet was sent
+        // after the start of the previous congestion recovery period.
+        if !self.after_recovery_start(last_packet) {
+            return false;
+        }
+
+        let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
+            self.congestion_window,
+            self.acked_bytes,
+            self.max_datagram_size(),
+        );
+        self.congestion_window = max(cwnd, self.cwnd_min());
+        self.acked_bytes = acked_bytes;
+        self.ssthresh = self.congestion_window;
+        qdebug!(
+            [self],
+            "Cong event -> recovery; cwnd {}, ssthresh {}",
+            self.congestion_window,
+            self.ssthresh
+        );
+        qlog::metrics_updated(
+            &self.qlog,
+            &[
+                QlogMetric::CongestionWindow(self.congestion_window),
+                QlogMetric::SsThresh(self.ssthresh),
+                QlogMetric::InRecovery(true),
+            ],
+        );
+        self.set_state(State::RecoveryStart);
+        true
+    }
+
     /// Report received ECN CE mark(s) to the congestion controller as a
     /// congestion event.
     ///
@@ -347,7 +382,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     fn discard(&mut self, pkt: &SentPacket) {
         if pkt.cc_outstanding() {
-            self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
+            assert!(self.bytes_in_flight >= pkt.len());
+            self.bytes_in_flight -= pkt.len();
             qlog::metrics_updated(
                 &self.qlog,
                 &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
@@ -534,41 +570,6 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         // first recovery, all packets were sent after the recovery event,
         // allowing to reduce the cwnd on congestion events.
         !self.state.transient() && self.recovery_start.map_or(true, |pn| packet.pn() >= pn)
-    }
-
-    /// Handle a congestion event.
-    /// Returns true if this was a true congestion event.
-    fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
-        // Start a new congestion event if lost or ECN CE marked packet was sent
-        // after the start of the previous congestion recovery period.
-        if !self.after_recovery_start(last_packet) {
-            return false;
-        }
-
-        let (cwnd, acked_bytes) = self.cc_algorithm.reduce_cwnd(
-            self.congestion_window,
-            self.acked_bytes,
-            self.max_datagram_size(),
-        );
-        self.congestion_window = max(cwnd, self.cwnd_min());
-        self.acked_bytes = acked_bytes;
-        self.ssthresh = self.congestion_window;
-        qdebug!(
-            [self],
-            "Cong event -> recovery; cwnd {}, ssthresh {}",
-            self.congestion_window,
-            self.ssthresh
-        );
-        qlog::metrics_updated(
-            &self.qlog,
-            &[
-                QlogMetric::CongestionWindow(self.congestion_window),
-                QlogMetric::SsThresh(self.ssthresh),
-                QlogMetric::InRecovery(true),
-            ],
-        );
-        self.set_state(State::RecoveryStart);
-        true
     }
 
     fn app_limited(&self) -> bool {
