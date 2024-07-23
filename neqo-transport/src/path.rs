@@ -1017,6 +1017,8 @@ impl Path {
     }
 
     /// Initiate a congestion response.
+    ///
+    /// Returns true if the congestion window was reduced.
     pub fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
         self.sender.on_congestion_event(last_packet)
     }
