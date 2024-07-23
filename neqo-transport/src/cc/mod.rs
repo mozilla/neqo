@@ -62,6 +62,7 @@ pub trait CongestionControl: Display + Debug {
         lost_packets: &[SentPacket],
     ) -> bool;
 
+    /// Initiate a congestion response.
     fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool;
 
     /// Returns true if the congestion window was reduced.
