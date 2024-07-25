@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![allow(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
-#![allow(clippy::missing_panics_doc)] // Functions simply delegate to tokio and quinn-udp.
 
 use std::{
     cell::RefCell,
@@ -130,10 +129,17 @@ mod tests {
 
     use super::*;
 
+    fn socket() -> Result<Socket<std::net::UdpSocket>, io::Error> {
+        let socket = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        // Reverse non-blocking flag set by `UdpSocketState` to make the test non-racy.
+        socket.inner.set_nonblocking(false)?;
+        Ok(socket)
+    }
+
     #[test]
     fn datagram_tos() -> Result<(), io::Error> {
-        let sender = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
-        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let sender = socket()?;
+        let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let datagram = Datagram::new(
@@ -167,8 +173,8 @@ mod tests {
     fn many_datagrams_through_gro() -> Result<(), io::Error> {
         const SEGMENT_SIZE: usize = 128;
 
-        let sender = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
-        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let sender = socket()?;
+        let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         // `neqo_udp::Socket::send` does not yet

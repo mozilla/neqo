@@ -62,9 +62,7 @@ pub use self::{
 mod min_version;
 use min_version::MINIMUM_NSS_VERSION;
 
-#[allow(non_upper_case_globals, clippy::redundant_static_lifetimes)]
-#[allow(clippy::upper_case_acronyms)]
-#[allow(unknown_lints, clippy::borrow_as_ptr)]
+#[allow(non_upper_case_globals)]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
