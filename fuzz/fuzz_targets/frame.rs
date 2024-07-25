@@ -10,7 +10,7 @@ fuzz_target!(|data: &[u8]| {
 
     // Run the fuzzer
     let mut decoder = Decoder::new(data);
-    let _ = Frame::decode(&mut decoder);
+    _ = Frame::decode(&mut decoder);
 });
 
 #[cfg(any(not(fuzzing), windows))]

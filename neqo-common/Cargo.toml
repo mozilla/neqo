@@ -7,6 +7,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [lints]
 workspace = true
@@ -21,7 +25,6 @@ qlog = { workspace = true }
 time = { version = "0.3", default-features = false, features = ["formatting"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]

@@ -42,7 +42,7 @@ runs:
 
     - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
       with:
-        python-version: 3.8
+        python-version: 3.12
         cache: 'pip'
         cache-dependency-path: 'quic-interop-runner/requirements.txt'
 
@@ -71,10 +71,19 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python run.py $ARGS 2>&1 | tee ../summary.txt || true
+        python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
+        # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
+        # (that we assume happened in neqo.)
+        for log in ../logs/*/*/output.txt; do
+          if grep -q 'RUST_BACKTRACE=full' "$log"; then
+            echo "Panic detected in $log"
+            tail -n 50 "$log"
+            exit 1
+          fi
+        done
       shell: bash
 
-    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+    - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -88,10 +97,10 @@ runs:
           mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+    - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
           result.json
           summary.txt
-          retention-days: 1
+        retention-days: 1

@@ -14,7 +14,7 @@ use neqo_crypto::{
     generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
 };
 use neqo_transport::{
-    server::{ActiveConnectionRef, Server, ValidateAddress},
+    server::{ConnectionRef, Server, ValidateAddress},
     CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType, Version,
     MIN_INITIAL_PACKET_SIZE,
 };
@@ -38,7 +38,7 @@ pub fn complete_connection(
     client: &mut Connection,
     server: &mut Server,
     mut datagram: Option<Datagram>,
-) -> ActiveConnectionRef {
+) -> ConnectionRef {
     let is_done = |c: &Connection| {
         matches!(
             c.state(),
@@ -161,14 +161,14 @@ fn duplicate_initial_new_path() {
         &initial[..],
     );
 
-    // The server should respond to both as these came from different addresses.
-    let dgram = server.process(Some(&other), now()).dgram();
-    assert!(dgram.is_some());
-
     let server_initial = server.process(Some(&initial), now()).dgram();
     assert!(server_initial.is_some());
 
-    assert_eq!(server.active_connections().len(), 2);
+    // The server should ignore a packet with the same destination connection ID.
+    let dgram = server.process(Some(&other), now()).dgram();
+    assert!(dgram.is_none());
+
+    assert_eq!(server.active_connections().len(), 1);
     complete_connection(&mut client, &mut server, server_initial);
 }
 
@@ -324,6 +324,8 @@ fn zero_rtt() {
     let shs = server.process(Some(&c1), now);
     mem::drop(server.process(Some(&c3), now));
     // The server will have received two STREAM frames now if it processed both packets.
+    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
+    #[allow(clippy::mutable_key_type)]
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
     assert_eq!(
@@ -346,6 +348,8 @@ fn zero_rtt() {
 
     // The server will drop this last 0-RTT packet.
     mem::drop(server.process(Some(&c4), now));
+    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
+    #[allow(clippy::mutable_key_type)]
     let active = server.active_connections();
     assert_eq!(active.len(), 1);
     assert_eq!(
@@ -388,7 +392,7 @@ fn new_token_0rtt() {
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram.as_dgram_ref(), now()); // (done)
     assert!(dgram.as_dgram_ref().is_some());
-    connected_server(&mut server);
+    connected_server(&server);
     assert!(client.tls_info().unwrap().resumed());
 }
 
@@ -665,7 +669,7 @@ fn version_negotiation_and_compatible() {
     client.process_input(&dgram.unwrap(), now());
     assert_eq!(*client.state(), State::Confirmed);
 
-    let sconn = connected_server(&mut server);
+    let sconn = connected_server(&server);
     assert_eq!(client.version(), COMPAT_VERSION);
     assert_eq!(sconn.borrow().version(), COMPAT_VERSION);
 }
@@ -689,7 +693,7 @@ fn compatible_upgrade_resumption_and_vn() {
     assert_eq!(client.version(), ORIG_VERSION);
 
     let mut server = default_server();
-    let mut server_conn = connect(&mut client, &mut server);
+    let server_conn = connect(&mut client, &mut server);
     assert_eq!(client.version(), COMPAT_VERSION);
     assert_eq!(server_conn.borrow().version(), COMPAT_VERSION);
 
@@ -860,7 +864,7 @@ fn has_active_connections() {
     assert!(!server.has_active_connections());
 
     let initial = client.process(None, now());
-    let _ = server.process(initial.as_dgram_ref(), now()).dgram();
+    _ = server.process(initial.as_dgram_ref(), now()).dgram();
 
     assert!(server.has_active_connections());
 }

@@ -53,7 +53,7 @@ fn retry_basic() {
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // (done)
     assert!(dgram.is_some()); // Note that this packet will be dropped...
-    connected_server(&mut server);
+    connected_server(&server);
 }
 
 /// Receiving a Retry is enough to infer something about the RTT.
@@ -132,7 +132,7 @@ fn retry_0rtt() {
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // (done)
     assert!(dgram.is_some());
-    connected_server(&mut server);
+    connected_server(&server);
     assert!(client.tls_info().unwrap().resumed());
 }
 
@@ -244,7 +244,7 @@ fn retry_after_initial() {
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // (done)
     assert!(dgram.is_some());
-    connected_server(&mut server);
+    connected_server(&server);
 }
 
 #[test]

@@ -17,18 +17,22 @@ runs:
   using: composite
   steps:
     - name: Check system NSS version
+      id: check
       shell: bash
       run: |
         if ! command -v pkg-config &> /dev/null; then
+          echo "pkg-config: not found"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
         if ! pkg-config --exists nss; then
+          echo "pkg-config: NSS not found"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_VERSION="$(pkg-config --modversion nss)"
         if [ "$?" -ne 0 ]; then
+          echo "pkg-config: failed to determine NSS version"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
           exit 0
         fi
@@ -44,36 +48,30 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
-    # Ideally, we'd use this. But things are sufficiently flaky that we're better off
-    # trying both hg and git. Leaving this here in case we want to re-try in the future.
-    #
-    # - name: Checkout NSPR
-    #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-    #   with:
-    #     repository: "nss-dev/nspr"
-    #     path: ${{ github.workspace }}/nspr
-
-    # - name: Checkout NSS
-    #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-    #   with:
-    #     repository: "nss-dev/nss"
-    #     path: ${{ github.workspace }}/nss
-
-    - name: Checkout NSPR
-      shell: bash
-      if: env.BUILD_NSS == '1'
-      run: |
-        hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
-          git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
+    # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
+    # trying both hg and git.
 
     - name: Checkout NSS
       shell: bash
       if: env.BUILD_NSS == '1'
       run: |
-        hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
-          git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
+        git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss" || \
+          hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss"
+
+    - name: Checkout NSPR
+      shell: bash
+      if: env.BUILD_NSS == '1'
+      run: |
+        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
+          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
+
+    - name: Cache NSS
+      if: env.BUILD_NSS == '1'
+      id: cache-nss
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+      with:
+        path: ${{ github.workspace }}/dist
+        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
 
     - name: Build
       shell: bash
@@ -89,7 +87,9 @@ runs:
         else
           NSS_TARGET=Debug
         fi
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        fi
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"

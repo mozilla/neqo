@@ -14,7 +14,8 @@ env:
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
 
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   bench:
@@ -199,7 +200,7 @@ jobs:
           fi
           sed -E -e 's/^                 //gi' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-            perl -p -0777 -e 's/(.*?)\n(.*?)((No change|Change within|Performance has).*?)(\nFound .*?)?\n\n/<details><summary>$1: $3<\/summary><pre>\n$2$5<\/pre><\/details>\n/gs' |\
+            perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$5$6<\/pre><\/details>\n/gs' |\
             sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
                    -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
@@ -230,7 +231,7 @@ jobs:
 
       - name: Export perf data
         id: export
-        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |

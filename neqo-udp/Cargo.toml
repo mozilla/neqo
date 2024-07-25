@@ -1,0 +1,28 @@
+[package]
+name = "neqo-udp"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+log = { workspace = true }
+neqo-common = { path = "./../neqo-common" }
+quinn-udp = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["log"]
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false

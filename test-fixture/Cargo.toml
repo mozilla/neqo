@@ -7,6 +7,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [lints]
 workspace = true
@@ -17,13 +21,15 @@ log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3" }
-neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
 qlog = { workspace = true }
 
 [features]
 bench = []
 disable-random = []
+
+[package.metadata.cargo-machete]
+ignored = ["log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

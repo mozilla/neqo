@@ -47,6 +47,9 @@ RUN set -eux; \
 
 # End of copy from https://github.com/rust-lang/docker-rust...
 
+# We unfortunately need to build NSS from source, because the Debian package is
+# not compiled with support for SSLKEYLOGFILE.
+# See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
 ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
