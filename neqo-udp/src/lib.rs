@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![allow(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
-#![allow(clippy::missing_panics_doc)] // Functions simply delegate to tokio and quinn-udp.
 
 use std::{
     cell::RefCell,

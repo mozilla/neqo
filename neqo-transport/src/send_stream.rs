@@ -2270,7 +2270,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
     fn tx_buffer_next_bytes_1() {
         let mut txb = TxBuffer::new();
 
@@ -2673,7 +2672,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
     // Verify lost frames handle fin properly with zero length fin
     fn send_stream_get_frame_zerolength_fin() {
         let conn_fc = connection_fc(100);

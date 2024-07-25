@@ -2801,7 +2801,6 @@ mod tests {
 
     // Send 2 data frames so that the second one cannot fit into the send_buf and it is only
     // partialy sent. We check that the sent data is correct.
-    #[allow(clippy::useless_vec)]
     fn fetch_with_two_data_frames(
         first_frame: &[u8],
         expected_first_data_frame_header: &[u8],
