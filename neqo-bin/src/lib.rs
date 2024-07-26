@@ -24,6 +24,11 @@ pub mod client;
 pub mod server;
 pub mod udp;
 
+/// Firefox default value
+///
+/// See `network.buffer.cache.size` pref <https://searchfox.org/mozilla-central/rev/f6e3b81aac49e602f06c204f9278da30993cdc8a/modules/libpref/init/all.js#3212>
+const STREAM_IO_BUFFER_SIZE: usize = 32 * 1024;
+
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
     #[command(flatten)]
