@@ -15,6 +15,7 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::c_uint,
     ptr::null_mut,
+    slice::Iter,
 };
 
 use neqo_common::hex_with_len;
@@ -76,7 +77,6 @@ macro_rules! scoped_ptr {
 }
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
-scoped_ptr!(CertList, CERTCertList, CERT_DestroyCertList);
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 
 impl PublicKey {
@@ -284,6 +284,46 @@ impl Item {
         assert_eq!(b.type_, SECItemType::siBuffer);
         let slc = null_safe_slice(b.data, b.len);
         Vec::from(slc)
+    }
+}
+
+unsafe fn destroy_secitem_array(array: *mut SECItemArray) {
+    SECITEM_FreeArray(array, PRBool::from(true));
+}
+scoped_ptr!(ItemArray, SECItemArray, destroy_secitem_array);
+
+impl<'a> IntoIterator for &'a ItemArray {
+    type Item = &'a [u8];
+    type IntoIter = ItemArrayIterator<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        if self.ptr.is_null() || unsafe { *self.ptr }.len == 0 {
+            Self::IntoIter {
+                iter: Iter::default(),
+            }
+        } else {
+            // (*self.ptr).items points to (*self.ptr).len > 0 consecutive elements of type SECItem
+            let items: &[SECItem] = unsafe {
+                #[allow(clippy::disallowed_methods)]
+                std::slice::from_raw_parts(
+                    (*self.ptr).items,
+                    (*self.ptr).len /* unsigned int */ as usize,
+                )
+            };
+            Self::IntoIter { iter: items.iter() }
+        }
+    }
+}
+
+pub struct ItemArrayIterator<'a> {
+    iter: Iter<'a, SECItem>,
+}
+
+impl<'a> Iterator for ItemArrayIterator<'a> {
+    type Item = &'a [u8];
+    fn next(&mut self) -> Option<&'a [u8]> {
+        self.iter
+            .next()
+            .map(|next| unsafe { null_safe_slice(next.data, next.len) })
     }
 }
 
