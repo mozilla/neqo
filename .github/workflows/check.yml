@@ -57,6 +57,7 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           brew update
+          brew upgrade rustup
           brew install llvm nss
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
@@ -96,6 +97,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
+          tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz, cargo-machete
 
       - name: Fetch and build NSS and NSPR
         uses: ./.github/actions/nss

@@ -8,26 +8,28 @@ inputs:
   components:
     description: 'Rust components to install'
     default: ''
+  tools:
+    description: 'Additional Rust tools to install'
+    default: ''
 
 runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@bb45937a053e097f8591208d8e74c90db1873d07 # master
+      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
     - name: Install cargo-quickinstall
       shell: bash
+      if: inputs.tools != ''
       run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
       shell: bash
-      run: |
-        cargo +${{ inputs.version }} quickinstall --no-binstall \
-          cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine \
-          cargo-machete cargo-fuzz
+      if: inputs.tools != ''
+      run: cargo +${{ inputs.version }} quickinstall --no-binstall $(echo ${{ inputs.tools }} | tr -d ",")
 
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.

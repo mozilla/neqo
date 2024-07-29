@@ -36,6 +36,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: stable
+          tools: cargo-mutants
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'
