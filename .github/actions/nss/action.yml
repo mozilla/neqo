@@ -119,7 +119,6 @@ runs:
         key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
 
     - name: Set up MSVC (Windows)
-      shell: bash
       if: runner.os == 'Windows'
       uses: ilammy/msvc-dev-cmd@v1
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
