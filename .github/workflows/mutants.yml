@@ -22,20 +22,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Fetch and build NSS and NSPR
+      - name: Make NSS available
         uses: ./.github/actions/nss
 
       - name: Install Rust
         uses: ./.github/actions/rust
-        with:
-          version: stable
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'

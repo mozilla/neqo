@@ -46,7 +46,7 @@ jobs:
           version: $TOOLCHAIN
           components: rustfmt
 
-      - name: Fetch and build NSS and NSPR
+      - name: Make NSS available
         uses: ./.github/actions/nss
 
       - name: Build neqo
