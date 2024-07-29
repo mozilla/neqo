@@ -55,7 +55,7 @@ runs:
       if: runner.os == 'Linux' && env.BUILD_NSS == '1'
       env:
         DEBIAN_FRONTEND: noninteractive
-      run: sudo apt-get install -y --no-install-recommends git mercurial ninja-build
+      run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
 
     - name: Install dependencies (MacOS)
       shell: bash
@@ -74,7 +74,7 @@ runs:
 
     - name: Install gyp
       shell: bash
-      if: env.BUILD_NSS == '1'
+      if: (runner.os == 'MacOS' || runner.os == 'Windows') && env.BUILD_NSS == '1'
       run: python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
 
     - name: Checkout NSS
