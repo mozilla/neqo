@@ -237,6 +237,12 @@ unsafe fn destroy_secitem(item: *mut SECItem) {
 }
 scoped_ptr!(Item, SECItem, destroy_secitem);
 
+impl AsRef<[u8]> for SECItem {
+    fn as_ref(&self) -> &[u8] {
+        unsafe { null_safe_slice(self.data, self.len) }
+    }
+}
+
 impl Item {
     /// Create a wrapper for a slice of this object.
     /// Creating this object is technically safe, but using it is extremely dangerous.
@@ -296,21 +302,15 @@ impl<'a> IntoIterator for &'a ItemArray {
     type Item = &'a [u8];
     type IntoIter = ItemArrayIterator<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        if self.ptr.is_null() || unsafe { *self.ptr }.len == 0 {
-            Self::IntoIter {
-                iter: Iter::default(),
-            }
-        } else {
-            // (*self.ptr).items points to (*self.ptr).len > 0 consecutive elements of type SECItem
-            let items: &[SECItem] = unsafe {
-                #[allow(clippy::disallowed_methods)]
-                std::slice::from_raw_parts(
-                    (*self.ptr).items,
-                    (*self.ptr).len /* unsigned int */ as usize,
-                )
-            };
-            Self::IntoIter { iter: items.iter() }
+        Self::IntoIter {
+            iter: AsRef::<[SECItem]>::as_ref(self).iter(),
         }
+    }
+}
+
+impl AsRef<[SECItem]> for ItemArray {
+    fn as_ref(&self) -> &[SECItem] {
+        unsafe { null_safe_slice((*self.ptr).items, (*self.ptr).len) }
     }
 }
 
@@ -321,9 +321,7 @@ pub struct ItemArrayIterator<'a> {
 impl<'a> Iterator for ItemArrayIterator<'a> {
     type Item = &'a [u8];
     fn next(&mut self) -> Option<&'a [u8]> {
-        self.iter
-            .next()
-            .map(|next| unsafe { null_safe_slice(next.data, next.len) })
+        self.iter.next().map(AsRef::<[u8]>::as_ref)
     }
 }
 

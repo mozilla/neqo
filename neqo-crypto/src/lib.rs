@@ -213,9 +213,9 @@ pub fn assert_initialized() {
 /// # Safety
 /// The caller must adhere to the safety constraints of `std::slice::from_raw_parts`,
 /// except that this will accept a null value for `data`.
-unsafe fn null_safe_slice<'a, T>(data: *const u8, len: T) -> &'a [u8]
+unsafe fn null_safe_slice<'a, T, L>(data: *const T, len: L) -> &'a [T]
 where
-    usize: TryFrom<T>,
+    usize: TryFrom<L>,
 {
     if data.is_null() {
         &[]
