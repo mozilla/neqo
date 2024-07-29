@@ -17,7 +17,6 @@ runs:
   using: composite
   steps:
     - name: Check system NSS version
-      id: check
       shell: bash
       run: |
         if ! command -v pkg-config &> /dev/null; then
@@ -52,12 +51,14 @@ runs:
     # trying both hg and git.
 
     - name: Install dependencies (Linux)
+      shell: bash
       if: runner.os == 'Linux' && env.BUILD_NSS == '1'
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
 
     - name: Install dependencies (MacOS)
+      shell: bash
       if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
       run: |
         brew install mercurial ninja
@@ -66,6 +67,7 @@ runs:
         echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
     - name: Install dependencies (Windows)
+      shell: bash
       if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
         # shellcheck disable=SC2028
