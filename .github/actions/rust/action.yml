@@ -16,13 +16,14 @@ runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@bb45937a053e097f8591208d8e74c90db1873d07 # master
+      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
     - name: Install cargo-quickinstall
       shell: bash
+      if: inputs.components != ''
       run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
