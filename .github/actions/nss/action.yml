@@ -32,11 +32,6 @@ runs:
         brew update
         brew install nss pkg-config
 
-    - name: Install build dependencies (Windows)
-      shell: bash
-      if: runner.os == 'Windows'
-      run: /c/msys64/usr/bin/pacman -S --noconfirm pkg-config
-
     - name: Check system NSS version
       shell: bash
       run: |
@@ -84,7 +79,11 @@ runs:
       shell: bash
       if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
-        echo "/c/msys64/usr/bin" >> "$GITHUB_PATH"
+        # shellcheck disable=SC2028
+        {
+          echo /c/msys64/usr/bin
+          echo /c/msys64/mingw64/bin
+        } >> "$GITHUB_PATH"
         /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial nsinstall
 
     - name: Install gyp
@@ -123,6 +122,8 @@ runs:
       shell: bash
       if: env.BUILD_NSS == '1'
       run: |
+        which cargo
+        echo $PATH
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
