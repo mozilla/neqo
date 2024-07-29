@@ -37,7 +37,7 @@ runs:
     - name: Set up build environment (Windows)
       shell: bash
       if: runner.os == 'Windows'
-      run: rm /usr/bin/link.exe
+      run: rm /usr/bin/link.exe || true
 
     - name: Install cargo-quickinstall
       shell: bash
