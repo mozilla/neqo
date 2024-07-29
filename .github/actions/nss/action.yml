@@ -16,14 +16,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install system NSS (MacOS)
-      shell: bash
-      if: runner.os == 'MacOS'
-      run: |
-        brew update
-        brew install nss pkg-config
-
-    - name: Install dependencies (Linux)
+    - name: Install system NSS (Linux)
       shell: bash
       if: runner.os == 'Linux'
       env:
@@ -31,6 +24,18 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
+
+    - name: Install system NSS (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS'
+      run: |
+        brew update
+        brew install nss pkg-config
+
+    - name: Install build dependencies (Windows)
+      shell: bash
+      if: runner.os == 'Windows'
+      run: /c/msys64/usr/bin/pacman -S --noconfirm pkg-config
 
     - name: Check system NSS version
       shell: bash
@@ -63,19 +68,19 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
-    - name: Install dependencies (Linux)
+    - name: Install build dependencies (Linux)
       shell: bash
       if: runner.os == 'Linux' && env.BUILD_NSS == '1'
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
 
-    - name: Install dependencies (MacOS)
+    - name: Install build dependencies (MacOS)
       shell: bash
       if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
       run: brew install mercurial ninja
 
-    - name: Install dependencies (Windows)
+    - name: Install build dependencies (Windows)
       shell: bash
       if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
@@ -85,7 +90,10 @@ runs:
     - name: Install gyp
       shell: bash
       if: (runner.os == 'MacOS' || runner.os == 'Windows') && env.BUILD_NSS == '1'
-      run: python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
+      run: |
+        REQ=$(mktemp)
+        echo echo "gyp-next>=0.18.1" > "$REQ"
+        python3 -m pip install --break-system-packages -r "$REQ"
 
     # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
     # trying both hg and git.
@@ -130,9 +138,9 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        # if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
+        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-        # fi
+        fi
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
