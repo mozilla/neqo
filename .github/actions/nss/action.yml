@@ -102,7 +102,11 @@ runs:
     - name: Install build dependencies (MacOS)
       shell: bash
       if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
-      run: brew install mercurial ninja
+      run: |
+        brew install mercurial ninja
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install --user --break-system-packages -r req.txt
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
     - name: Install build dependencies (Windows)
       shell: bash
@@ -114,14 +118,8 @@ runs:
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
         /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial nsinstall
-
-    - name: Install gyp
-      shell: bash
-      if: (runner.os == 'MacOS' || runner.os == 'Windows') && env.BUILD_NSS == '1'
-      run: |
         echo "gyp-next>=0.18.1" > req.txt
-        python3 -m pip install --user --break-system-packages -r req.txt
-        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+        python3 -m pip install -r req.txt
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows' && env.BUILD_NSS == '1'
