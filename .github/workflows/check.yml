@@ -75,7 +75,6 @@ jobs:
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
           echo "gyp-next>=0.18.1" > requirements.txt
           python3 -m pip install -r requirements.txt
-          # echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
