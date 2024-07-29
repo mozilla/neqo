@@ -90,8 +90,9 @@ runs:
       shell: bash
       if: (runner.os == 'MacOS' || runner.os == 'Windows') && env.BUILD_NSS == '1'
       run: |
-        echo "gyp-next==0.15.0" > req.txt
-        python3 -m pip install --break-system-packages -r req.txt
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install --user --break-system-packages -r req.txt
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
     # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
     # trying both hg and git.
