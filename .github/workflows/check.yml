@@ -45,31 +45,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (MacOS)
-        if: runner.os == 'MacOS'
-        run: |
-          brew update
-          brew install llvm nss
-          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          # shellcheck disable=SC2028
-          {
-            echo C:/msys64/usr/bin
-            echo C:/msys64/mingw64/bin
-          } >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
+      # - name: Install dependencies (Windows)
+      #   if: runner.os == 'Windows'
+      #   run: |
+      #     # shellcheck disable=SC2028
+      #     {
+      #       echo C:/msys64/usr/bin
+      #       echo C:/msys64/mingw64/bin
+      #     } >> "$GITHUB_PATH"
+      #     /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
@@ -80,11 +64,11 @@ jobs:
       - name: Set up NSS/NSPR build environment (Windows)
         if: runner.os == 'Windows'
         run: |
-          {
-            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
-            echo "GYP_MSVS_VERSION=2022"
-            echo "BASH=$SHELL"
-          } >> "$GITHUB_ENV"
+          # {
+          #   echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+          #   echo "GYP_MSVS_VERSION=2022"
+          #   echo "BASH=$SHELL"
+          # } >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
           rm /usr/bin/link.exe
 

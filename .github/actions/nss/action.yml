@@ -16,6 +16,22 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Install system NSS (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS'
+      run: |
+        brew update
+        brew install nss
+
+    - name: Install dependencies (Linux)
+      shell: bash
+      if: runner.os == 'Linux'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
+
     - name: Check system NSS version
       shell: bash
       run: |
