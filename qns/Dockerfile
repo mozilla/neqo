@@ -1,4 +1,4 @@
-FROM martenseemann/quic-network-simulator-endpoint@sha256:91b21d42e23023e08c5ed63c1c08ec24d058c4b30edd52aa3bd74bee87096a5b AS buildimage
+FROM martenseemann/quic-network-simulator-endpoint@sha256:5114afeff460a5ce65b066680abcb1ac34f742b40fbf95a60843c1b2783bc532 AS buildimage
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git coreutils build-essential libclang-dev lld gyp ninja-build zlib1g-dev python \
@@ -69,7 +69,7 @@ RUN set -eux; \
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint@sha256:91b21d42e23023e08c5ed63c1c08ec24d058c4b30edd52aa3bd74bee87096a5b
+FROM martenseemann/quic-network-simulator-endpoint@sha256:5114afeff460a5ce65b066680abcb1ac34f742b40fbf95a60843c1b2783bc532
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=buildimage /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/
