@@ -81,8 +81,8 @@ runs:
       run: |
         # shellcheck disable=SC2028
         {
-          echo /c/msys64/usr/bin
-          echo /c/msys64/mingw64/bin
+          echo C:/msys64/usr/bin
+          echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
         /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial nsinstall
 

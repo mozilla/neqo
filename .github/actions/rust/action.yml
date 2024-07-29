@@ -14,6 +14,7 @@ runs:
   steps:
 
     - name: Upgrade rustup (MacOS)
+      shell: bash
       if: runner.os == 'MacOS'
       run: brew update && brew upgrade rustup
 
