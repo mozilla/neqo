@@ -23,7 +23,7 @@ runs:
 
     - name: Install cargo-quickinstall
       shell: bash
-      if: inputs.components != ''
+      if: inputs.tools != ''
       run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
