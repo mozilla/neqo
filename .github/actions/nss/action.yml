@@ -55,26 +55,22 @@ runs:
       if: runner.os == 'Linux' && env.BUILD_NSS == '1'
       env:
         DEBIAN_FRONTEND: noninteractive
-      run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
+      run: sudo apt-get install -y --no-install-recommends git mercurial ninja-build
 
     - name: Install dependencies (MacOS)
       shell: bash
       if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
-      run: |
-        brew install mercurial ninja
-        python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
+      run: brew install mercurial ninja
 
     - name: Install dependencies (Windows)
       shell: bash
       if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
-        # shellcheck disable=SC2028
         {
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
         /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial
-        python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
 
     - name: Checkout NSS
       shell: bash
@@ -83,20 +79,25 @@ runs:
         git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss" || \
           hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss"
 
-    - name: Checkout NSPR
-      shell: bash
-      if: env.BUILD_NSS == '1'
-      run: |
-        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
-          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
-
     - name: Cache NSS
       if: env.BUILD_NSS == '1'
       id: cache-nss
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
         path: ${{ github.workspace }}/dist
-        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h', '.github/actions/nss/action.yml/') }}
+        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
+
+    - name: Checkout NSPR
+      shell: bash
+      if: env.BUILD_NSS == '1' && steps.cache-nss.outputs.cache-hit != 'true'
+      run: |
+        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
+          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
+
+    - name: Install gyp
+      shell: bash
+      if: env.BUILD_NSS == '1' && steps.cache-nss.outputs.cache-hit != 'true'
+      run: python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
 
     - name: Build
       shell: bash
@@ -107,20 +108,18 @@ runs:
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          NSS_TARGET=Release
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
-        else
-          NSS_TARGET=Debug
         fi
-        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-        fi
+        NSS_TARGET="${{ inputs.type }}"
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        fi
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
