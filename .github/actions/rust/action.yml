@@ -8,6 +8,9 @@ inputs:
   components:
     description: 'Rust components to install'
     default: ''
+  tools:
+    description: 'Additional Rust tools to install'
+    default: ''
 
 runs:
   using: composite
@@ -25,7 +28,7 @@ runs:
     - name: Install Rust tools
       shell: bash
       if: inputs.components != ''
-      run: cargo +${{ inputs.version }} quickinstall --no-binstall ${{ inputs.components }}
+      run: cargo +${{ inputs.version }} quickinstall --no-binstall ${{ inputs.tools }}
 
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.
