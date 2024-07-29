@@ -62,7 +62,7 @@ runs:
       if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
       run: |
         brew install mercurial ninja
-        python3 -m pip install --break-system-packages --require-hashes -r \
+        python3 -m pip install --break-system-packages --require-hashes --no-deps -r \
           <(echo "gyp-next==0.18.1 --hash=sha256:4ed66f2a776eef65de4ce7b62c25e95310a833ec567030af5d7419788fb14668")
 
     - name: Install dependencies (Windows)
@@ -75,7 +75,7 @@ runs:
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
         /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial
-        python3 -m pip install --break-system-packages --require-hashes -r \
+        python3 -m pip install --break-system-packages --require-hashes --no-deps -r \
           <(echo "gyp-next==0.18.1 --hash=sha256:4ed66f2a776eef65de4ce7b62c25e95310a833ec567030af5d7419788fb14668")
 
     - name: Checkout NSS
