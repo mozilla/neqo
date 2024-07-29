@@ -131,6 +131,7 @@ runs:
         {
           echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
           echo "GYP_MSVS_VERSION=2022"
+          echo "BASH=$SHELL"
         } >> "$GITHUB_ENV"
         # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
         rm /usr/bin/link.exe
