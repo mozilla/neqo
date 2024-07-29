@@ -118,21 +118,21 @@ runs:
         path: ${{ github.workspace }}/dist
         key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
 
-      - name: Set up MSVC (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
-        # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
-      - name: Set up build environment (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          {
-            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
-            echo "GYP_MSVS_VERSION=2022"
-          } >> "$GITHUB_ENV"
-          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
+    - name: Set up build environment (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        {
+          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+          echo "GYP_MSVS_VERSION=2022"
+        } >> "$GITHUB_ENV"
+        # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+        rm /usr/bin/link.exe
 
     - name: Build
       shell: bash
