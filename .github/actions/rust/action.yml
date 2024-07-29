@@ -24,10 +24,8 @@ runs:
 
     - name: Install Rust tools
       shell: bash
-      run: |
-        cargo +${{ inputs.version }} quickinstall --no-binstall \
-          cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine \
-          cargo-machete cargo-fuzz
+      if: inputs.components != ''
+      run: cargo +${{ inputs.version }} quickinstall --no-binstall ${{ inputs.components }}
 
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.
