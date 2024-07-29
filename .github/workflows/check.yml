@@ -65,7 +65,7 @@ jobs:
         run: |
           echo "BASH=$SHELL" >> "$GITHUB_ENV"
           # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
+          # rm /usr/bin/link.exe
 
       - name: Build
         run: |

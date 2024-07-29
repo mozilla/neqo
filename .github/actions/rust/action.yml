@@ -28,12 +28,6 @@ runs:
       shell: bash
       run: cargo +${{ inputs.version }} install cargo-quickinstall
 
-    # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-    - name: Set up build environment (Windows)
-      shell: bash
-      if: runner.os == 'Windows'
-      run: rm /usr/bin/link.exe
-
     - name: Install Rust tools
       shell: bash
       run: |
