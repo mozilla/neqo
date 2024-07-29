@@ -51,6 +51,33 @@ runs:
     # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
     # trying both hg and git.
 
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux' && env.BUILD_NSS == '1'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
+
+    - name: Install dependencies (MacOS)
+      if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
+      run: |
+        brew install mercurial ninja
+        echo "gyp-next==0.18.1 --hash=sha256:4ed66f2a776eef65de4ce7b62c25e95310a833ec567030af5d7419788fb14668" > requirements.txt
+        python3 -m pip install --require-hashes -r requirements.txt
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+
+    - name: Install dependencies (Windows)
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      run: |
+        # shellcheck disable=SC2028
+        {
+          echo C:/msys64/usr/bin
+          echo C:/msys64/mingw64/bin
+        } >> "$GITHUB_PATH"
+        /c/msys64/usr/bin/pacman -S --noconfirm mercurial
+        echo "gyp-next==0.18.1 --hash=sha256:4ed66f2a776eef65de4ce7b62c25e95310a833ec567030af5d7419788fb14668" > requirements.txt
+        python3 -m pip install --require-hashes -r requirements.txt
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+
     - name: Checkout NSS
       shell: bash
       if: env.BUILD_NSS == '1'
