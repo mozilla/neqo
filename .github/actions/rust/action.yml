@@ -24,6 +24,12 @@ runs:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
+    # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: runner.os == 'Windows'
+      run: rm /usr/bin/link.exe
+
     - name: Install cargo-quickinstall
       shell: bash
       run: cargo +${{ inputs.version }} install cargo-quickinstall
