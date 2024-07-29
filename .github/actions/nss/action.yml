@@ -122,8 +122,6 @@ runs:
       shell: bash
       if: env.BUILD_NSS == '1'
       run: |
-        which cargo
-        echo $PATH
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
