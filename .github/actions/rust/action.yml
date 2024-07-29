@@ -24,6 +24,12 @@ runs:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
     # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
     - name: Set up build environment (Windows)
       shell: bash
