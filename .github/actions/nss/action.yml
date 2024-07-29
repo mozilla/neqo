@@ -91,9 +91,8 @@ runs:
       shell: bash
       if: (runner.os == 'MacOS' || runner.os == 'Windows') && env.BUILD_NSS == '1'
       run: |
-        REQ=$(mktemp)
-        echo echo "gyp-next>=0.18.1" > "$REQ"
-        python3 -m pip install --break-system-packages -r "$REQ"
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install --break-system-packages -r req.txt
 
     # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
     # trying both hg and git.
