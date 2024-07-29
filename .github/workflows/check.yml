@@ -45,12 +45,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "/c/msys64/usr/bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
-
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -74,7 +68,7 @@ jobs:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
 
-      - name: Make NSS available
+      - name: Install NSS
         uses: ./.github/actions/nss
 
       - name: Build

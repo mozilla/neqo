@@ -46,7 +46,7 @@ jobs:
           version: $TOOLCHAIN
           components: rustfmt
 
-      - name: Make NSS available
+      - name: Install NSS
         uses: ./.github/actions/nss
 
       - name: Build neqo

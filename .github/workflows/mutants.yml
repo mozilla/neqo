@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Make NSS available
+      - name: Install NSS
         uses: ./.github/actions/nss
 
       - name: Install Rust

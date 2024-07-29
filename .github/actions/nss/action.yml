@@ -21,7 +21,7 @@ runs:
       if: runner.os == 'MacOS'
       run: |
         brew update
-        brew install nss
+        brew install nss pkg-config
 
     - name: Install dependencies (Linux)
       shell: bash
@@ -63,9 +63,6 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
-    # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
-    # trying both hg and git.
-
     - name: Install dependencies (Linux)
       shell: bash
       if: runner.os == 'Linux' && env.BUILD_NSS == '1'
@@ -82,16 +79,16 @@ runs:
       shell: bash
       if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
-        {
-          echo C:/msys64/usr/bin
-          echo C:/msys64/mingw64/bin
-        } >> "$GITHUB_PATH"
-        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial
+        echo "/c/msys64/usr/bin" >> "$GITHUB_PATH"
+        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial nsinstall
 
     - name: Install gyp
       shell: bash
       if: (runner.os == 'MacOS' || runner.os == 'Windows') && env.BUILD_NSS == '1'
       run: python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
+
+    # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
+    # trying both hg and git.
 
     - name: Checkout NSS
       shell: bash
