@@ -72,12 +72,24 @@ runs:
         } >> "$GITHUB_PATH"
         /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial
 
+    - name: Install gyp
+      shell: bash
+      if: env.BUILD_NSS == '1'
+      run: python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
+
     - name: Checkout NSS
       shell: bash
       if: env.BUILD_NSS == '1'
       run: |
         git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss" || \
           hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss"
+
+    - name: Checkout NSPR
+      shell: bash
+      if: env.BUILD_NSS == '1'
+      run: |
+        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
+          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
 
     - name: Cache NSS
       if: env.BUILD_NSS == '1'
@@ -86,18 +98,6 @@ runs:
       with:
         path: ${{ github.workspace }}/dist
         key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
-
-    - name: Checkout NSPR
-      shell: bash
-      if: env.BUILD_NSS == '1' && steps.cache-nss.outputs.cache-hit != 'true'
-      run: |
-        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
-          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
-
-    - name: Install gyp
-      shell: bash
-      if: env.BUILD_NSS == '1' && steps.cache-nss.outputs.cache-hit != 'true'
-      run: python3 -m pip install --break-system-packages -r <(echo "gyp-next>=0.18.1")
 
     - name: Build
       shell: bash
@@ -117,9 +117,9 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
+        # if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
           $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-        fi
+        # fi
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
