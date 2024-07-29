@@ -57,6 +57,7 @@ jobs:
         if: runner.os == 'MacOS'
         run: |
           brew update
+          brew upgrade rustup
           brew install llvm nss
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
