@@ -30,7 +30,7 @@ runs:
       if: runner.os == 'MacOS'
       run: |
         brew update
-        brew install nss pkg-config
+        brew install nss
 
     - name: Check system NSS version
       shell: bash
