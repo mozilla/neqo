@@ -50,6 +50,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
+          tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz, cargo-machete
 
       - name: Install NSS
         uses: ./.github/actions/nss

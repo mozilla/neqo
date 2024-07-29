@@ -44,7 +44,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          components: rustfmt
+          tools: hyperfine
 
       - name: Install NSS
         uses: ./.github/actions/nss

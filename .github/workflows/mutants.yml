@@ -27,6 +27,8 @@ jobs:
 
       - name: Install Rust
         uses: ./.github/actions/rust
+        with:
+          tools: cargo-mutants
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'
