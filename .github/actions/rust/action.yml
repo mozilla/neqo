@@ -28,7 +28,7 @@ runs:
 
     - name: Install Rust tools
       shell: bash
-      if: inputs.components != ''
+      if: inputs.tools != ''
       run: cargo +${{ inputs.version }} quickinstall --no-binstall $(echo ${{ inputs.tools }} | tr -d ",")
 
     # sccache slows CI down, so we leave it disabled.
