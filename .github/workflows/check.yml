@@ -60,8 +60,7 @@ jobs:
           brew upgrade rustup
           brew install nss
           echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-          echo "gyp-next==0.15.0 --hash=sha256:3600f2a80fa33d3574f51bbb3d4bfc843373dafbe84059958aea3f1c9560f95a" > requirements.txt
+          echo "gyp-next==0.18.1 --hash=sha256:4ed66f2a776eef65de4ce7b62c25e95310a833ec567030af5d7419788fb14668" > requirements.txt
           python3 -m pip install --break-system-packages --user --require-hashes -r requirements.txt
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
@@ -74,9 +73,9 @@ jobs:
             echo C:/msys64/mingw64/bin
           } >> "$GITHUB_PATH"
           /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
-          echo "gyp-next==0.15.0 --hash=sha256:3600f2a80fa33d3574f51bbb3d4bfc843373dafbe84059958aea3f1c9560f95a" > requirements.txt
+          echo "gyp-next==0.18.1 --hash=sha256:4ed66f2a776eef65de4ce7b62c25e95310a833ec567030af5d7419788fb14668" > requirements.txt
           python3 -m pip install --require-hashes -r requirements.txt
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          # echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
       - name: Set up MSVC build environment (Windows)
         if: runner.os == 'Windows'
