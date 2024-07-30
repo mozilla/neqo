@@ -15,7 +15,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -44,60 +45,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (MacOS)
-        if: runner.os == 'MacOS'
-        run: |
-          brew update
-          brew install llvm nss
-          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          # shellcheck disable=SC2028
-          {
-            echo C:/msys64/usr/bin
-            echo C:/msys64/mingw64/bin
-          } >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
-          echo "gyp-next==0.15.0 --hash=sha256:3600f2a80fa33d3574f51bbb3d4bfc843373dafbe84059958aea3f1c9560f95a" > requirements.txt
-          python3 -m pip install --require-hashes -r requirements.txt
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-
-      - name: Set up MSVC build environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
-        # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-
-      - name: Set up NSS/NSPR build environment (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          {
-            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
-            echo "GYP_MSVS_VERSION=2022"
-            echo "BASH=$SHELL"
-          } >> "$GITHUB_ENV"
-          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
-
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
+          tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz, cargo-machete
 
-      - name: Fetch and build NSS and NSPR
+      - name: Get minimum NSS version
+        id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Install NSS
         uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Build
         run: |
