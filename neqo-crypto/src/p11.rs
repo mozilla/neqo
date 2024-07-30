@@ -15,7 +15,7 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::c_uint,
     ptr::null_mut,
-    slice::Iter,
+    slice::Iter as SliceIter,
 };
 
 use neqo_common::hex_with_len;
@@ -315,7 +315,7 @@ impl AsRef<[SECItem]> for ItemArray {
 }
 
 pub struct ItemArrayIterator<'a> {
-    iter: Iter<'a, SECItem>,
+    iter: SliceIter<'a, SECItem>,
 }
 
 impl<'a> Iterator for ItemArrayIterator<'a> {
