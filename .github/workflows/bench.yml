@@ -44,10 +44,16 @@ jobs:
         uses: ./.github/actions/rust
         with:
           version: $TOOLCHAIN
-          components: rustfmt
+          tools: hyperfine
 
-      - name: Fetch and build NSS and NSPR
+      - name: Get minimum NSS version
+        id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Install NSS
         uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Build neqo
         run: |
@@ -200,7 +206,7 @@ jobs:
           fi
           sed -E -e 's/^                 //gi' \
                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-            perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$5$6<\/pre><\/details>\n/gs' |\
+            perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
             sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
                    -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
