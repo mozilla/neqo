@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
@@ -24,7 +24,7 @@ const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: &Option<impl AsRef<str>>) {
     for pacing in [false, true] {
         let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}"));
-        group.throughput(Throughput::Bytes(u64::try_from(TRANSFER_AMOUNT).unwrap()));
+        // Don't let criterion calculate throughput, as that's based on wall-clock time, not simulator time.
         group.noise_threshold(0.03);
         group.bench_function(label, |b| {
             b.iter_batched(
