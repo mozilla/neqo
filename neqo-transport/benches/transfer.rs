@@ -24,7 +24,8 @@ const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: &Option<impl AsRef<str>>) {
     for pacing in [false, true] {
         let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}"));
-        // Don't let criterion calculate throughput, as that's based on wall-clock time, not simulator time.
+        // Don't let criterion calculate throughput, as that's based on wall-clock time, not
+        // simulator time.
         group.noise_threshold(0.03);
         group.bench_function(label, |b| {
             b.iter_batched(
