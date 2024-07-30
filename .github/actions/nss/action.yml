@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -23,7 +23,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: runner.os == 'MacOS'
+      if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
       run: |
         brew update
         brew install nss
@@ -90,7 +90,7 @@ runs:
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: runner.os == 'Linux' && env.BUILD_NSS == '1'
+      if: runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
