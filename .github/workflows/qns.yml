@@ -179,22 +179,9 @@ jobs:
               ROLE=server
             fi
             RUN="results/${PREFIX} results"
-            {
-              [ "$CLIENT" == "$LATEST" ] || echo -n "<ins>"
-              echo -n "$CLIENT"
-              [ "$CLIENT" == "$LATEST" ] || echo -n "</ins>"
-              echo -n "$DELIM"
-              [ "$SERVER" == "$LATEST" ] || echo -n "<ins>"
-              echo -n "$SERVER"
-              [ "$SERVER" == "$LATEST" ] || echo -n "</ins>"
-            } > "pair.md"
+            PAIR="$CLIENT $DELIM $SERVER"
             if [ ! -e "$RUN/result.json" ]; then
-              {
-                echo -n "* "
-                cat "pair.md"
-                echo -n ": "
-                echo "run cancelled after $TIMEOUT min"
-              } >> "$ROLE.failed.md"
+              echo "* $PAIR: run cancelled after $TIMEOUT min" >> "$ROLE.failed.md"
               continue
             fi
             jq < "$RUN/result.json" '
@@ -210,12 +197,7 @@ jobs:
                 RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
                 [ -n "$RESULT" ] || continue
-                {
-                  echo -n "* ["
-                  cat "pair.md"
-                  echo -n "]($LOG): "
-                  echo "**$RESULT**"
-                } >> "$ROLE.$GROUP.md"
+                echo "* [$PAIR]($LOG): **$RESULT**" >> "$ROLE.$GROUP.md"
               done
             done
           done
@@ -228,7 +210,12 @@ jobs:
               echo "#### $LATEST as server"
               cat server.failed.md
             else
-              echo "None :tada:"
+              echo -n "None"
+              if [ -e "client.succeeded.md" ] || [ -e "server.succeeded.md" ] || [ -e "client.unsupported.md" ] || [ -e "server.unsupported.md" ]; then
+                echo ":tada:"
+              else
+                echo ":question:"
+              fi
             fi
             echo "<details><summary>All results</summary>"
             echo
