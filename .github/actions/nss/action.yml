@@ -6,7 +6,7 @@ inputs:
     description: "When building, whether to do a debug or release build of NSS"
     default: "Release"
   minimum-version:
-    description: "Minimum required version of NSS to install or build"
+    description: "Minimum required version of NSS"
     required: true
 
 runs:

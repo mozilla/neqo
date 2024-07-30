@@ -15,6 +15,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Upgrade rustup (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS'
+      run: brew update && brew upgrade rustup
+
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
