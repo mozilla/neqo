@@ -1,17 +1,13 @@
-name: Fetch and build NSS
-description: Fetch and build NSS
+name: Install NSS
+description: Install NSS
 
 inputs:
   type:
-    description: "Whether to do a debug or release build of NSS"
+    description: "When building, whether to do a debug or release build of NSS"
     default: "Release"
-
-# This step might be removed if the distro included a recent enough
-# version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
-# (neqo-crypto/build.rs would also need to query pkg-config to get the
-# right build flags rather than building NSS.)
-#
-# Also see https://github.com/mozilla/neqo/issues/1711
+  minimum-version:
+    description: "Minimum required version of NSS to install or build"
+    required: true
 
 runs:
   using: composite
@@ -53,8 +49,8 @@ runs:
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        REQ_NSS_MAJOR=$(cut -d. -f1 < neqo-crypto/min_version.txt)
-        REQ_NSS_MINOR=$(cut -d. -f2 < neqo-crypto/min_version.txt)
+        REQ_NSS_MAJOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f1)
+        REQ_NSS_MINOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f2)
         if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
           echo "System NSS is too old: $NSS_VERSION"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"

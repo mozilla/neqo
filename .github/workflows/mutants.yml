@@ -22,8 +22,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get minimum NSS version
+        id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)"
+
       - name: Install NSS
         uses: ./.github/actions/nss
+        with:
+          minimum-version: nss-version.minimum
 
       - name: Install Rust
         uses: ./.github/actions/rust

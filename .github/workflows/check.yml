@@ -52,8 +52,14 @@ jobs:
           components: rustfmt, clippy, llvm-tools-preview
           tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz, cargo-machete
 
+      - name: Get minimum NSS version
+        id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)"
+
       - name: Install NSS
         uses: ./.github/actions/nss
+        with:
+          minimum-version: nss-version.minimum
 
       - name: Build
         run: |
