@@ -321,23 +321,25 @@ impl LossRecoverySpace {
         );
         self.first_ooo_time = None;
 
-        let largest_acked = self.largest_acked;
+        let Some(largest_acked) = self.largest_acked else {
+            return;
+        };
 
         for packet in self
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
+            .take_while(|p| p.pn() < largest_acked)
         {
             // Packets sent before now - loss_delay are deemed lost.
-            if largest_acked.is_some() && packet.time_sent() + loss_delay <= now {
+            if packet.time_sent() + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {:?}",
                     packet.pn(),
                     packet.time_sent(),
                     loss_delay
                 );
-            } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
+            } else if largest_acked >= packet.pn() + PACKET_THRESHOLD {
                 qtrace!(
                     "lost={}, is >= {} from largest acked {:?}",
                     packet.pn(),
@@ -345,9 +347,7 @@ impl LossRecoverySpace {
                     largest_acked
                 );
             } else {
-                if largest_acked.is_some() {
-                    self.first_ooo_time = Some(packet.time_sent());
-                }
+                self.first_ooo_time = Some(packet.time_sent());
                 // No more packets can be declared lost after this one.
                 break;
             };
