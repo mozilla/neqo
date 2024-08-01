@@ -2438,7 +2438,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tx_buffer_acks() {
+    fn tx_buffer_acks() {
         let mut tx = TxBuffer::new();
         assert_eq!(tx.send(&[4; 100]), 100);
         let res = tx.next_bytes().unwrap();
