@@ -245,6 +245,13 @@ pub struct AckToken {
     ranges: Vec<PacketRange>,
 }
 
+impl AckToken {
+    /// Get the space for this token.
+    pub const fn space(&self) -> PacketNumberSpace {
+        self.space
+    }
+}
+
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
 #[derive(Debug)]
@@ -497,6 +504,9 @@ impl RecvdPackets {
             .take(max_ranges)
             .cloned()
             .collect::<Vec<_>>();
+        if ranges.is_empty() {
+            return;
+        }
 
         builder.encode_varint(if self.ecn_count.is_some() {
             FRAME_TYPE_ACK_ECN
@@ -593,11 +603,9 @@ impl AckTracker {
             .ack_freq(seqno, tolerance, delay, ignore_order);
     }
 
-    // Force an ACK to be generated immediately (a PING was received).
-    pub fn immediate_ack(&mut self, now: Instant) {
-        self.get_mut(PacketNumberSpace::ApplicationData)
-            .unwrap()
-            .immediate_ack(now);
+    // Force an ACK to be generated immediately.
+    pub fn immediate_ack(&mut self, space: PacketNumberSpace, now: Instant) {
+        self.get_mut(space).unwrap().immediate_ack(now);
     }
 
     /// Determine the earliest time that an ACK might be needed.

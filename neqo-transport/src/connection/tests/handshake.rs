@@ -35,6 +35,7 @@ use crate::{
     },
     events::ConnectionEvent,
     server::ValidateAddress,
+    stats::FrameStats,
     tparams::{TransportParameter, MIN_ACK_DELAY},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
@@ -1193,4 +1194,63 @@ fn emit_authentication_needed_once() {
     // `ConnectionEvent::AuthenticationNeeded`.
     _ = client.process(server2.as_dgram_ref(), now());
     assert_eq!(0, authentication_needed_count(&mut client));
+}
+
+#[test]
+fn server_initial_retransmit() {
+    let mut now = now();
+    let mut client = default_client();
+    let ci = client.process(None, now).dgram().unwrap();
+
+    let mut server = default_server();
+    server.process(Some(&ci), now).dgram().unwrap();
+    assert_eq!(
+        server.stats().frame_tx,
+        FrameStats {
+            crypto: 2,
+            ack: 1,
+            all: 3,
+            ..Default::default()
+        }
+    );
+
+    // Now, force the server to retransmit its Initial packet a number of times and make sure the
+    // retranmissions are identical to the original.
+
+    let pto = server.process(None, now).callback();
+    assert!(pto > Duration::from_secs(0));
+    now += pto;
+
+    server.process(None, now).dgram().unwrap();
+    assert_eq!(
+        server.stats().frame_tx,
+        FrameStats {
+            crypto: 4,
+            ack: 2,
+            all: 6,
+            ..Default::default()
+        }
+    );
+
+    // let pto = server.process(None, now).callback();
+    // assert!(pto > Duration::from_secs(0));
+    // now += pto;
+
+    // server.process(None, now).dgram().unwrap();
+    // assert_eq!(
+    //     server.stats().frame_tx,
+    //     FrameStats {
+    //         crypto: 6,
+    //         ack: 3,
+    //         all: 9,
+    //         ..Default::default()
+    //     }
+    // );
+
+    // let pto = server.process(None, now).callback();
+    // // Server is now amplification-limited.
+    // assert_eq!(
+    //     pto,
+    //     server.conn_params.get_idle_timeout() - (1 + 2) * DEFAULT_RTT * 3
+    // );
 }
