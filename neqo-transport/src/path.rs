@@ -1015,6 +1015,14 @@ impl Path {
         }
     }
 
+    /// Determine whether we should be setting a PTO for this path. This is true when either the
+    /// path is valid or when there is enough remaining in the amplification limit to fit a
+    /// full-sized path (i.e., the path MTU).
+    pub fn pto_possible(&self) -> bool {
+        // See the implementation of `amplification_limit` for details.
+        self.amplification_limit() >= self.plpmtu()
+    }
+
     /// Get the number of bytes that can be written to this path.
     pub fn amplification_limit(&self) -> usize {
         if matches!(self.state, ProbeState::Failed) {
