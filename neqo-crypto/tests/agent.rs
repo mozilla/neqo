@@ -130,7 +130,7 @@ fn raw() {
 
     // The client should have one certificate for the server.
     let certs = client.peer_certificate().unwrap();
-    assert_eq!(1, certs.iter().count());
+    assert_eq!(1, certs.into_iter().count());
 
     // The server shouldn't have a client certificate.
     assert!(server.peer_certificate().is_none());
