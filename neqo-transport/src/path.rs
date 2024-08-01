@@ -1002,6 +1002,7 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
+        self.ecn_info.on_packets_lost(lost_packets);
         let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,
@@ -1013,6 +1014,14 @@ impl Path {
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
         }
+    }
+
+    /// Determine whether we should be setting a PTO for this path. This is true when either the
+    /// path is valid or when there is enough remaining in the amplification limit to fit a
+    /// full-sized path (i.e., the path MTU).
+    pub fn pto_possible(&self) -> bool {
+        // See the implementation of `amplification_limit` for details.
+        self.amplification_limit() >= self.plpmtu()
     }
 
     /// Get the number of bytes that can be written to this path.
