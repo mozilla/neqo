@@ -1542,7 +1542,12 @@ impl Connection {
 
                     qlog::packet_received(&self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
-                    if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
+                    if self
+                        .acks
+                        .get_mut(space)
+                        .ok_or(Error::ProtocolViolation)?
+                        .is_duplicate(payload.pn())
+                    {
                         qdebug!([self], "Duplicate packet {}-{}", space, payload.pn());
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
