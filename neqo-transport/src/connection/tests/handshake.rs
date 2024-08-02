@@ -1231,7 +1231,6 @@ fn server_initial_retransmits_identical() {
     let mut server = default_server();
     let mut total_ptos: Duration = Duration::from_secs(0);
     for i in 1..=3 {
-        qdebug!("XXX Server process {:?}", ci);
         let si = server.process(ci.as_ref(), now).dgram().unwrap();
         assert_eq!(si.len(), server.plpmtu());
         assert_eq!(
@@ -1245,7 +1244,6 @@ fn server_initial_retransmits_identical() {
         );
         ci = None;
 
-        qdebug!("XXX Server PTO {}", i);
         let pto = server.process(None, now).callback();
         if i < 3 {
             assert_eq!(pto, DEFAULT_RTT * 3 * (1 << (i - 1)));
@@ -1255,6 +1253,5 @@ fn server_initial_retransmits_identical() {
         }
         now += pto;
         total_ptos += pto;
-        qdebug!("XXX Server time += {:?}", pto);
     }
 }
