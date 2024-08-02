@@ -23,14 +23,13 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_common::{self as common, qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
+use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
 };
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
-use qlog::{events::EventImportance, streamer::QlogStreamer};
 use tokio::time::Sleep;
 use url::{Origin, Url};
 
@@ -46,7 +45,7 @@ pub enum Error {
     ArgumentError(&'static str),
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
-    QlogError,
+    QlogError(qlog::Error),
     TransportError(neqo_transport::Error),
     ApplicationError(neqo_transport::AppError),
     CryptoError(neqo_crypto::Error),
@@ -71,8 +70,8 @@ impl From<neqo_http3::Error> for Error {
 }
 
 impl From<qlog::Error> for Error {
-    fn from(_err: qlog::Error) -> Self {
-        Self::QlogError
+    fn from(err: qlog::Error) -> Self {
+        Self::QlogError(err)
     }
 }
 
@@ -453,32 +452,17 @@ impl<'a, H: Handler> Runner<'a, H> {
 }
 
 fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
-    if let Some(qlog_dir) = &args.shared.qlog_dir {
-        let mut qlog_path = qlog_dir.clone();
-        let filename = format!("{hostname}-{cid}.sqlog");
-        qlog_path.push(filename);
-
-        let f = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&qlog_path)?;
-
-        let streamer = QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
-            Some("Example qlog".to_string()),
-            Some("Example qlog description".to_string()),
-            None,
-            std::time::Instant::now(),
-            common::qlog::new_trace(Role::Client),
-            EventImportance::Base,
-            Box::new(f),
-        );
-
-        Ok(NeqoQlog::enabled(streamer, qlog_path)?)
-    } else {
-        Ok(NeqoQlog::disabled())
-    }
+    let Some(qlog_dir) = args.shared.qlog_dir.clone() else {
+        return Ok(NeqoQlog::disabled());
+    };
+    NeqoQlog::enabled_with_file(
+        qlog_dir,
+        Role::Client,
+        Some("Example qlog".to_string()),
+        Some("Example qlog description".to_string()),
+        format!("{hostname}-{cid}"),
+    )
+    .map_err(Error::QlogError)
 }
 
 pub async fn client(mut args: Args) -> Res<()> {
