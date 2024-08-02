@@ -660,8 +660,8 @@ impl Path {
 
     /// Get the first local connection ID.
     /// Only do this for the primary path during the handshake.
-    pub fn local_cid(&self) -> &ConnectionId {
-        self.local_cid.as_ref().unwrap()
+    pub const fn local_cid(&self) -> Option<&ConnectionId> {
+        self.local_cid.as_ref()
     }
 
     /// Set the remote connection ID based on the peer's choice.
@@ -674,8 +674,12 @@ impl Path {
     }
 
     /// Access the remote connection ID.
-    pub fn remote_cid(&self) -> &ConnectionId {
-        self.remote_cid.as_ref().unwrap().connection_id()
+    pub fn remote_cid(&self) -> Option<&ConnectionId> {
+        if self.remote_cid.is_some() {
+            Some(self.remote_cid.as_ref().unwrap().connection_id())
+        } else {
+            None
+        }
     }
 
     /// Set the stateless reset token for the connection ID that is currently in use.

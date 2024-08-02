@@ -1679,7 +1679,7 @@ impl Connection {
                 self.paths.make_permanent(path, None, cid);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary.borrow().remote_cid().is_empty() {
+                if primary.borrow().remote_cid().is_none() {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote());
                     Ok(())
@@ -1908,7 +1908,7 @@ impl Connection {
                         // a packet on a new path, we avoid sending (and the privacy risk) rather
                         // than reuse a connection ID.
                         let res = if path.borrow().is_temporary() {
-                            assert!(!cfg!(test), "attempting to close with a temporary path");
+                            debug_assert!(!cfg!(test), "attempting to close with a temporary path");
                             Err(Error::InternalError)
                         } else {
                             self.output_path(&path, now, &Some(details))
@@ -1931,18 +1931,18 @@ impl Connection {
         grease_quic_bit: bool,
     ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(cspace);
+        let dcid = path
+            .remote_cid()
+            .map_or(Vec::new(), |id| id.as_ref().to_vec());
         let mut builder = if pt == PacketType::Short {
-            qdebug!("Building Short dcid {}", path.remote_cid());
-            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
+            qdebug!("Building Short dcid {:?}", dcid);
+            PacketBuilder::short(encoder, tx.key_phase(), dcid)
         } else {
-            qdebug!(
-                "Building {:?} dcid {} scid {}",
-                pt,
-                path.remote_cid(),
-                path.local_cid(),
-            );
-
-            PacketBuilder::long(encoder, pt, version, path.remote_cid(), path.local_cid())
+            let scid = path
+                .local_cid()
+                .map_or(Vec::new(), |id| id.as_ref().to_vec());
+            qdebug!("Building {:?} dcid {:?} scid {:?}", pt, dcid, scid,);
+            PacketBuilder::long(encoder, pt, version, dcid, scid)
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);
