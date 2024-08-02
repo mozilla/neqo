@@ -581,6 +581,9 @@ fn loss_time_past_largest_acked() {
     assert!(s_pto < RTT);
     let s_hs2 = server.process(None, now + s_pto).dgram();
     assert!(s_hs2.is_some());
+    let s_pto = server.process(None, now).callback();
+    assert_ne!(s_pto, Duration::from_secs(0));
+    assert!(s_pto < RTT);
     let s_hs3 = server.process(None, now + s_pto).dgram();
     assert!(s_hs3.is_some());
 
@@ -623,7 +626,6 @@ fn loss_time_past_largest_acked() {
 
     // Now the client should start its loss recovery timer based on the ACK.
     now += RTT / 2;
-    qdebug!("---- client: process ACK");
     let _c_ack = client.process(Some(&s_hs_ack), now).dgram();
     // This ACK triggers an immediate ACK, due to an ACK loss during handshake.
     let c_ack = client.process(None, now).dgram();

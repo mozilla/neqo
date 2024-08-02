@@ -1197,60 +1197,64 @@ fn emit_authentication_needed_once() {
 }
 
 #[test]
-fn server_initial_retransmit() {
+fn client_initial_retransmits_identical() {
     let mut now = now();
     let mut client = default_client();
-    let ci = client.process(None, now).dgram().unwrap();
 
+    // Force the client to retransmit its Initial packet a number of times and make sure the
+    // retranmissions are identical to the original. Also, verify the PTO durations.
+    for i in 1..=5 {
+        let ci = client.process(None, now).dgram().unwrap();
+        assert_eq!(ci.len(), client.plpmtu());
+        assert_eq!(
+            client.stats().frame_tx,
+            FrameStats {
+                crypto: i,
+                all: i,
+                ..Default::default()
+            }
+        );
+        let pto = client.process(None, now).callback();
+        assert_eq!(pto, DEFAULT_RTT * 3 * (1 << (i - 1)));
+        now += pto;
+    }
+}
+
+#[test]
+fn server_initial_retransmits_identical() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut ci = client.process(None, now).dgram();
+
+    // Force the server to retransmit its Initial packet a number of times and make sure the
+    // retranmissions are identical to the original. Also, verify the PTO durations.
     let mut server = default_server();
-    server.process(Some(&ci), now).dgram().unwrap();
-    assert_eq!(
-        server.stats().frame_tx,
-        FrameStats {
-            crypto: 2,
-            ack: 1,
-            all: 3,
-            ..Default::default()
+    let mut total_ptos: Duration = Duration::from_secs(0);
+    for i in 1..=3 {
+        qdebug!("XXX Server process {:?}", ci);
+        let si = server.process(ci.as_ref(), now).dgram().unwrap();
+        assert_eq!(si.len(), server.plpmtu());
+        assert_eq!(
+            server.stats().frame_tx,
+            FrameStats {
+                crypto: i * 2,
+                ack: i,
+                all: i * 3,
+                ..Default::default()
+            }
+        );
+        ci = None;
+
+        qdebug!("XXX Server PTO {}", i);
+        let pto = server.process(None, now).callback();
+        if i < 3 {
+            assert_eq!(pto, DEFAULT_RTT * 3 * (1 << (i - 1)));
+        } else {
+            // Server is amplification-limited after three (re)transmissions.
+            assert_eq!(pto, server.conn_params.get_idle_timeout() - total_ptos);
         }
-    );
-
-    // Now, force the server to retransmit its Initial packet a number of times and make sure the
-    // retranmissions are identical to the original.
-
-    let pto = server.process(None, now).callback();
-    assert!(pto > Duration::from_secs(0));
-    now += pto;
-
-    server.process(None, now).dgram().unwrap();
-    assert_eq!(
-        server.stats().frame_tx,
-        FrameStats {
-            crypto: 4,
-            ack: 2,
-            all: 6,
-            ..Default::default()
-        }
-    );
-
-    // let pto = server.process(None, now).callback();
-    // assert!(pto > Duration::from_secs(0));
-    // now += pto;
-
-    // server.process(None, now).dgram().unwrap();
-    // assert_eq!(
-    //     server.stats().frame_tx,
-    //     FrameStats {
-    //         crypto: 6,
-    //         ack: 3,
-    //         all: 9,
-    //         ..Default::default()
-    //     }
-    // );
-
-    // let pto = server.process(None, now).callback();
-    // // Server is now amplification-limited.
-    // assert_eq!(
-    //     pto,
-    //     server.conn_params.get_idle_timeout() - (1 + 2) * DEFAULT_RTT * 3
-    // );
+        now += pto;
+        total_ptos += pto;
+        qdebug!("XXX Server time += {:?}", pto);
+    }
 }
