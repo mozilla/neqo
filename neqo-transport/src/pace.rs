@@ -14,6 +14,8 @@ use std::{
 
 use neqo_common::qtrace;
 
+use crate::rtt::GRANULARITY;
+
 /// This value determines how much faster the pacer operates than the
 /// congestion window.
 ///
@@ -74,19 +76,30 @@ impl Pacer {
     /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
         if self.c >= self.p {
-            qtrace!([self], "next {}/{:?} no wait = {:?}", cwnd, rtt, self.t);
-            self.t
-        } else {
-            // This is the inverse of the function in `spend`:
-            // self.t + rtt * (self.p - self.c) / (PACER_SPEEDUP * cwnd)
-            let r = rtt.as_nanos();
-            let d = r.saturating_mul(u128::try_from(self.p - self.c).unwrap());
-            let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
-            let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
-            let nxt = self.t + w;
-            qtrace!([self], "next {}/{:?} wait {:?} = {:?}", cwnd, rtt, w, nxt);
-            nxt
+            qtrace!([self], "next {cwnd}/{rtt:?} no wait = {:?}", self.t);
+            return self.t;
         }
+
+        // This is the inverse of the function in `spend`:
+        // self.t + rtt * (self.p - self.c) / (PACER_SPEEDUP * cwnd)
+        let r = rtt.as_nanos();
+        let d = r.saturating_mul(u128::try_from(self.p - self.c).unwrap());
+        let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
+        let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
+
+        // If next is below timer granularity, send immediately.
+        if w < GRANULARITY {
+            qtrace!(
+                [self],
+                "next {cwnd}/{rtt:?} below granularity ({w:?} < {GRANULARITY:?}) no wait = {:?}",
+                self.t
+            );
+            return self.t;
+        }
+
+        let nxt = self.t + w;
+        qtrace!([self], "next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
+        nxt
     }
 
     /// Spend credit.  This cannot fail; users of this API are expected to call
