@@ -437,7 +437,6 @@ pub struct CryptoDxState {
 const INITIAL_LARGEST_PACKET_LEN: usize = 1 << 11; // 2048
 
 impl CryptoDxState {
-    #[allow(clippy::reversed_empty_ranges)] // To initialize an empty range.
     pub fn new(
         version: Version,
         direction: CryptoDxDirection,
@@ -1335,7 +1334,6 @@ pub struct CryptoStream {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)] // Suppress false positive: https://github.com/rust-lang/rust/issues/68408
 pub enum CryptoStreams {
     Initial {
         initial: CryptoStream,

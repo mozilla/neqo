@@ -83,7 +83,7 @@ runs:
         done
       shell: bash
 
-    - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
+    - uses: actions/upload-artifact@89ef406dd8d7e03cfd12d9e0a4a378f454709029 # v4.3.5
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -97,7 +97,7 @@ runs:
           mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
+    - uses: actions/upload-artifact@89ef406dd8d7e03cfd12d9e0a4a378f454709029 # v4.3.5
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |

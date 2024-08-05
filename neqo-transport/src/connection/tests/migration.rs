@@ -166,10 +166,10 @@ fn path_forwarding_attack() {
 
     // Until new data is received from the client on the old path.
     server.process_input(&client_data2, now);
-    // The server sends a probe on the "old" path.
+    // The server sends a probe on the new path.
     let server_data3 = send_something(&mut server, now);
     assert_v4_path(&server_data3, true);
-    // But switches data transmission to the "new" path.
+    // But switches data transmission to the old path.
     let server_data4 = server.process_output(now).dgram().unwrap();
     assert_v6_path(&server_data4, false);
 }

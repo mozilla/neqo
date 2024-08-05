@@ -95,12 +95,10 @@ impl ConnectionNode {
         )
     }
 
-    #[allow(dead_code)]
     pub fn clear_goals(&mut self) {
         self.goals.clear();
     }
 
-    #[allow(dead_code)]
     pub fn add_goal(&mut self, goal: Box<dyn ConnectionGoal>) {
         self.goals.push(goal);
     }

@@ -1040,7 +1040,7 @@ impl Connection {
             qtrace!([self], "Idle/keepalive timer {:?}", idle_time);
             delays.push(idle_time);
 
-            if let Some(lr_time) = self.loss_recovery.next_timeout(rtt) {
+            if let Some(lr_time) = self.loss_recovery.next_timeout(&path) {
                 qtrace!([self], "Loss recovery timer {:?}", lr_time);
                 delays.push(lr_time);
             }
@@ -1664,7 +1664,9 @@ impl Connection {
                     .clone(),
             ),
         );
-        path.borrow_mut().set_valid(now);
+        if self.role == Role::Client {
+            path.borrow_mut().set_valid(now);
+        }
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
@@ -2375,7 +2377,7 @@ impl Connection {
         }
 
         if encoder.is_empty() {
-            qdebug!("TX blocked, profile={:?} ", profile);
+            qdebug!("TX blocked, profile={:?}", profile);
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.

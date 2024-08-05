@@ -1,23 +1,34 @@
-name: Fetch and build NSS
-description: Fetch and build NSS
+name: Install NSS
+description: Install NSS
 
 inputs:
   type:
-    description: "Whether to do a debug or release build of NSS"
+    description: "When building, whether to do a debug or release build of NSS"
     default: "Release"
-
-# This step might be removed if the distro included a recent enough
-# version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
-# (neqo-crypto/build.rs would also need to query pkg-config to get the
-# right build flags rather than building NSS.)
-#
-# Also see https://github.com/mozilla/neqo/issues/1711
+  minimum-version:
+    description: "Minimum required version of NSS"
+    required: true
 
 runs:
   using: composite
   steps:
+    - name: Install system NSS (Linux)
+      shell: bash
+      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
+
+    - name: Install system NSS (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
+      run: |
+        brew update
+        brew install nss
+
     - name: Check system NSS version
-      id: check
       shell: bash
       run: |
         if ! command -v pkg-config &> /dev/null; then
@@ -38,8 +49,8 @@ runs:
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        REQ_NSS_MAJOR=$(cut -d. -f1 < neqo-crypto/min_version.txt)
-        REQ_NSS_MINOR=$(cut -d. -f2 < neqo-crypto/min_version.txt)
+        REQ_NSS_MAJOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f1)
+        REQ_NSS_MINOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f2)
         if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
           echo "System NSS is too old: $NSS_VERSION"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
@@ -70,8 +81,59 @@ runs:
       id: cache-nss
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
-        path: ${{ github.workspace }}/dist
-        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h') }}
+        path: |
+          ${{ github.workspace }}/dist
+          ${{ github.workspace }}/nss/out
+          ${{ github.workspace }}/nspr/Debug
+          ${{ github.workspace }}/nspr/Release
+        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h', 'nspr/pr/include/prinit.h') }}
+
+    - name: Install build dependencies (Linux)
+      shell: bash
+      if: runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
+
+    - name: Install build dependencies (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
+      run: |
+        brew install mercurial ninja
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install --user --break-system-packages -r req.txt
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+
+    - name: Install build dependencies (Windows)
+      shell: bash
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      run: |
+        # shellcheck disable=SC2028
+        {
+          echo C:/msys64/usr/bin
+          echo C:/msys64/mingw64/bin
+        } >> "$GITHUB_PATH"
+        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial nsinstall
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install -r req.txt
+
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      uses: ilammy/msvc-dev-cmd@v1
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      run: |
+        {
+          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+          echo "GYP_MSVS_VERSION=2022"
+          echo "BASH=$SHELL"
+        } >> "$GITHUB_ENV"
+        # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+        rm /usr/bin/link.exe || true
 
     - name: Build
       shell: bash
@@ -82,20 +144,18 @@ runs:
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          NSS_TARGET=Release
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
-        else
-          NSS_TARGET=Debug
         fi
-        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-        fi
+        NSS_TARGET="${{ inputs.type }}"
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
         NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
         echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
+          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        fi
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
