@@ -65,14 +65,6 @@ fn change_source_port(d: &Datagram) -> Datagram {
     Datagram::new(new_port(d.source()), d.destination(), d.tos(), &d[..])
 }
 
-/// As these tests use a new path, that path often has a non-zero RTT.
-/// Pacing can be a problem when testing that path.  This skips time forward.
-fn skip_pacing(c: &mut Connection, now: Instant) -> Instant {
-    let pacing = c.process_output(now).callback();
-    assert_ne!(pacing, Duration::new(0, 0));
-    now + pacing
-}
-
 #[test]
 fn rebinding_port() {
     let mut client = default_client();
@@ -100,7 +92,7 @@ fn path_forwarding_attack() {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
-    let mut now = now();
+    let now = now();
 
     let dgram = send_something(&mut client, now);
     let dgram = change_path(&dgram, DEFAULT_ADDR_V4);
@@ -160,7 +152,6 @@ fn path_forwarding_attack() {
     assert_v6_path(&client_data2, false);
 
     // The server keeps sending on the new path.
-    now = skip_pacing(&mut server, now);
     let server_data2 = send_something(&mut server, now);
     assert_v4_path(&server_data2, false);
 
