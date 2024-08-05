@@ -177,7 +177,7 @@ impl Args {
     }
 
     #[cfg(any(test, feature = "bench"))]
-    pub(crate) fn set_qlog_dir(&mut self, dir: PathBuf) {
+    pub fn set_qlog_dir(&mut self, dir: PathBuf) {
         self.shared.qlog_dir = Some(dir);
     }
 }
