@@ -173,7 +173,7 @@ pub struct Args {
 
 impl Args {
     #[must_use]
-    #[cfg(feature = "bench")]
+    #[cfg(any(test, feature = "bench"))]
     #[allow(clippy::missing_panics_doc)]
     pub fn new(requests: &[u64]) -> Self {
         use std::str::FromStr;
@@ -275,6 +275,11 @@ impl Args {
             }
             _ => exit(127),
         }
+    }
+
+    #[cfg(any(test, feature = "bench"))]
+    pub(crate) fn set_qlog_dir(&mut self, dir: PathBuf) {
+        self.shared.qlog_dir = Some(dir);
     }
 }
 
