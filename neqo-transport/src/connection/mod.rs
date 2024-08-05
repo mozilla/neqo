@@ -1301,7 +1301,7 @@ impl Connection {
 
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
-    #[allow(clippy::too_many_lines)] // Yeah, it's a work in progress.
+    #[allow(clippy::too_many_lines)]// Yeah, it's a work in progress.
     fn preprocess_packet(
         &mut self,
         packet: &PublicPacket,
@@ -2243,7 +2243,7 @@ impl Connection {
 
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
+    #[allow(clippy::too_many_lines)]// Yeah, that's just the way it is.
     fn output_path(
         &mut self,
         path: &PathRef,
@@ -2706,7 +2706,10 @@ impl Connection {
                     self.set_connected(now)?;
                 }
             }
-            _ => return Err(Error::CryptoError(neqo_crypto::Error::InternalError)),
+            _ => {
+                qerror!("Crypto state should not be new or failed after successful handshake");
+                return Err(Error::CryptoError(neqo_crypto::Error::InternalError));
+            }
         }
 
         // There is a chance that this could be called less often, but getting the
@@ -2743,7 +2746,7 @@ impl Connection {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)] // Yep, but it's a nice big match, which is basically lots of little functions.
+    #[allow(clippy::too_many_lines)]// Yep, but it's a nice big match, which is basically lots of little functions.
     fn input_frame(
         &mut self,
         path: &PathRef,
