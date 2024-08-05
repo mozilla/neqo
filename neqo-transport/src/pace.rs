@@ -87,13 +87,9 @@ impl Pacer {
         let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
         let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
 
-        // If next is below timer granularity, send immediately.
+        // If the increment is below the timer granularity, send immediately.
         if w < GRANULARITY {
-            qtrace!(
-                [self],
-                "next {cwnd}/{rtt:?} below granularity ({w:?} < {GRANULARITY:?}) no wait = {:?}",
-                self.t
-            );
+            qtrace!([self], "next {cwnd}/{rtt:?} below granularity ({w:?})",);
             return self.t;
         }
 
