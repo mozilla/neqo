@@ -104,8 +104,8 @@ fn connection_started(qlog: &NeqoQlog, path: &PathRef) {
             protocol: Some("QUIC".into()),
             src_port: p.local_address().port().into(),
             dst_port: p.remote_address().port().into(),
-            src_cid: p.local_cid().map(|id| format!("{id}")),
-            dst_cid: p.remote_cid().map(|id| format!("{id}")),
+            src_cid: p.local_cid().map(ToString::to_string),
+            dst_cid: p.remote_cid().map(ToString::to_string),
         });
 
         Some(ev_data)
