@@ -9,7 +9,7 @@ use std::{
     mem,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use neqo_common::{Datagram, Decoder};
