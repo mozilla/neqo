@@ -68,7 +68,6 @@ impl HpKey {
     /// # Panics
     ///
     /// When `cipher` is not known to this code.
-    #[allow(clippy::cast_sign_loss)] // Cast for PK11_GetBlockSize is safe.
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
         const ZERO: &[u8] = &[0; 12];
 
