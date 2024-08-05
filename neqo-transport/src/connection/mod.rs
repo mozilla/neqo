@@ -1679,7 +1679,11 @@ impl Connection {
                 self.paths.make_permanent(path, None, cid);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary.borrow().remote_cid().is_none() {
+                if primary
+                    .borrow()
+                    .remote_cid()
+                    .map_or(true, |id| id.is_empty())
+                {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote());
                     Ok(())
@@ -1931,18 +1935,17 @@ impl Connection {
         grease_quic_bit: bool,
     ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(cspace);
-        let dcid = path
-            .remote_cid()
-            .map_or(Vec::new(), |id| id.as_ref().to_vec());
         let mut builder = if pt == PacketType::Short {
-            qdebug!("Building Short dcid {:?}", dcid);
-            PacketBuilder::short(encoder, tx.key_phase(), dcid)
+            qdebug!("Building Short dcid {:?}", path.remote_cid());
+            PacketBuilder::short(encoder, tx.key_phase(), &path.remote_cid())
         } else {
-            let scid = path
-                .local_cid()
-                .map_or(Vec::new(), |id| id.as_ref().to_vec());
-            qdebug!("Building {:?} dcid {:?} scid {:?}", pt, dcid, scid,);
-            PacketBuilder::long(encoder, pt, version, dcid, scid)
+            qdebug!(
+                "Building {:?} dcid {:?} scid {:?}",
+                pt,
+                path.remote_cid(),
+                path.local_cid(),
+            );
+            PacketBuilder::long(encoder, pt, version, &path.remote_cid(), &path.local_cid())
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);

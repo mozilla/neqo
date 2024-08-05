@@ -675,7 +675,9 @@ impl Path {
 
     /// Access the remote connection ID.
     pub fn remote_cid(&self) -> Option<&ConnectionId> {
-        self.remote_cid.as_ref().map(|r| r.connection_id())
+        self.remote_cid
+            .as_ref()
+            .map(super::cid::ConnectionIdEntry::connection_id)
     }
 
     /// Set the stateless reset token for the connection ID that is currently in use.
