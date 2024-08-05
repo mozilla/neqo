@@ -177,4 +177,18 @@ mod tests {
         p.spend(n, RTT, CWND, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
     }
+
+    #[test]
+    fn send_immediately_below_granularity() {
+        const SHORT_RTT: Duration = Duration::from_millis(10);
+        let n = now();
+        let mut p = Pacer::new(true, n, PACKET, PACKET);
+        assert_eq!(p.next(SHORT_RTT, CWND), n);
+        p.spend(n, SHORT_RTT, CWND, PACKET);
+        assert_eq!(
+            p.next(SHORT_RTT, CWND),
+            n,
+            "Expect packet to be sent immediately, instead of being paced below timer granularity."
+        );
+    }
 }
