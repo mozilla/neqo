@@ -1912,7 +1912,7 @@ impl Connection {
                         // a packet on a new path, we avoid sending (and the privacy risk) rather
                         // than reuse a connection ID.
                         let res = if path.borrow().is_temporary() {
-                            debug_assert!(!cfg!(test), "attempting to close with a temporary path");
+                            qerror!([self], "Attempting to close with a temporary path");
                             Err(Error::InternalError)
                         } else {
                             self.output_path(&path, now, &Some(details))
