@@ -137,6 +137,26 @@ mod tests {
     }
 
     #[test]
+    fn ignore_empty_datagram() -> Result<(), io::Error> {
+        let sender = socket()?;
+        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+        let datagram = Datagram::new(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            IpTos::default(),
+            vec![],
+        );
+
+        sender.send(&datagram)?;
+        let res = receiver.recv(&receiver_addr);
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+
+        Ok(())
+    }
+
+    #[test]
     fn datagram_tos() -> Result<(), io::Error> {
         let sender = socket()?;
         let receiver = socket()?;
