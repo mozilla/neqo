@@ -985,10 +985,9 @@ fn error_on_new_path_with_no_connection_id() {
         }
     ));
     // Wait until the connection is closed.
-    let delay = client.process(None, now()).callback();
-    _ = client.process_output(now() + delay);
-    let delay = client.process(None, now()).callback();
-    _ = client.process_output(now() + delay);
+    let mut now = now();
+    now += client.process(None, now).callback();
+    _ = client.process_output(now);
     // No closing frames should be sent, and the connection should be closed.
     assert_eq!(client.stats().frame_tx.connection_close, closing_frames);
     assert!(matches!(
