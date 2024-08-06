@@ -34,7 +34,7 @@ pub enum PacketNumberSpace {
     ApplicationData,
 }
 
-#[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
+#[allow(clippy::use_self)]// https://github.com/rust-lang/rust-clippy/issues/3410
 impl PacketNumberSpace {
     pub fn iter() -> impl Iterator<Item = &'static PacketNumberSpace> {
         const SPACES: &[PacketNumberSpace] = &[
@@ -603,7 +603,7 @@ impl AckTracker {
             .ack_freq(seqno, tolerance, delay, ignore_order);
     }
 
-    // Force an ACK to be generated immediately.
+    /// Force an ACK to be generated immediately.
     pub fn immediate_ack(&mut self, space: PacketNumberSpace, now: Instant) {
         self.get_mut(space).unwrap().immediate_ack(now);
     }
