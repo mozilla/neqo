@@ -34,7 +34,7 @@ pub enum PacketNumberSpace {
     ApplicationData,
 }
 
-#[allow(clippy::use_self)]// https://github.com/rust-lang/rust-clippy/issues/3410
+#[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
 impl PacketNumberSpace {
     pub fn iter() -> impl Iterator<Item = &'static PacketNumberSpace> {
         const SPACES: &[PacketNumberSpace] = &[

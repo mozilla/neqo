@@ -440,12 +440,12 @@ impl PtoState {
     /// The number of packets we send on a PTO.
     /// And the number to declare lost when the PTO timer is hit.
     fn pto_packet_count(space: PacketNumberSpace) -> usize {
-        if space == PacketNumberSpace::Initial {
-            // For the Initial space, we only send one packet on PTO. This avoids sending useless
-            // PING-only packets when the Initial is deemed lost.
-            1
-        } else {
+        if space == PacketNumberSpace::ApplicationData {
             MAX_PTO_PACKET_COUNT
+        } else {
+            // For the Initial ahd Handshake spaces, we only send one packet on PTO. This avoids
+            // sending useless PING-only packets when the Initial is deemed lost.
+            1
         }
     }
 
