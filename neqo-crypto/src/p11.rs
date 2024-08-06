@@ -97,10 +97,10 @@ impl PublicKey {
                 **self,
                 buf.as_mut_ptr(),
                 &mut len,
-                c_uint::try_from(buf.len()).unwrap(),
+                c_uint::try_from(buf.len())?,
             )
         })?;
-        buf.truncate(usize::try_from(len).unwrap());
+        buf.truncate(usize::try_from(len)?);
         Ok(buf)
     }
 }
