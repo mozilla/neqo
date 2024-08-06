@@ -192,6 +192,7 @@ jobs:
                 } |
                 . + {log_url: $data.log_url}
               ' > "$RUN/$ROLE.grouped.json"
+            ls -l "$RUN"
             for ROLE in client server; do
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
                 RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
