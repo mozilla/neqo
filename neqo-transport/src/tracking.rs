@@ -797,7 +797,7 @@ mod tests {
     }
 
     fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut stats = FrameStats::default();
         let mut tokens = Vec::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
@@ -952,7 +952,7 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
@@ -1017,7 +1017,7 @@ mod tests {
             .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
             .is_some());
 
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1048,7 +1048,7 @@ mod tests {
             .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
             .is_some());
 
-        let mut builder = PacketBuilder::short(Encoder::new(), false, &None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);

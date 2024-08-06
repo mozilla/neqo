@@ -149,7 +149,7 @@ impl PacketBuilder {
     ///
     /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
     /// the encoder back.
-    pub fn short(mut encoder: Encoder, key_phase: bool, dcid: &Option<impl AsRef<[u8]>>) -> Self {
+    pub fn short(mut encoder: Encoder, key_phase: bool, dcid: Option<impl AsRef<[u8]>>) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
         // Check that there is enough space for the header.
@@ -189,8 +189,8 @@ impl PacketBuilder {
         mut encoder: Encoder,
         pt: PacketType,
         version: Version,
-        dcid: &Option<impl AsRef<[u8]>>,
-        scid: &Option<impl AsRef<[u8]>>,
+        mut dcid: Option<impl AsRef<[u8]>>,
+        mut scid: Option<impl AsRef<[u8]>>,
     ) -> Self {
         let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
@@ -204,8 +204,8 @@ impl PacketBuilder {
         {
             encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.to_byte(version) << 4);
             encoder.encode_uint(4, version.wire_version());
-            encoder.encode_vec(1, dcid.as_ref().map_or(&[], AsRef::as_ref));
-            encoder.encode_vec(1, scid.as_ref().map_or(&[], AsRef::as_ref));
+            encoder.encode_vec(1, dcid.take().as_ref().map_or(&[], AsRef::as_ref));
+            encoder.encode_vec(1, scid.take().as_ref().map_or(&[], AsRef::as_ref));
         } else {
             limit = 0;
         }
@@ -353,7 +353,7 @@ impl PacketBuilder {
         self.pn = pn;
     }
 
-    #[allow(clippy::cast_possible_truncation)] // Nope.
+    #[allow(clippy::cast_possible_truncation)]// Nope.
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
@@ -1001,8 +1001,8 @@ mod tests {
             Encoder::new(),
             PacketType::Initial,
             Version::default(),
-            &None::<&[u8]>,
-            &Some(ConnectionId::from(SERVER_CID)),
+            None::<&[u8]>,
+            Some(ConnectionId::from(SERVER_CID)),
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
@@ -1065,7 +1065,7 @@ mod tests {
     fn build_short() {
         fixture_init();
         let mut builder =
-            PacketBuilder::short(Encoder::new(), true, &Some(ConnectionId::from(SERVER_CID)));
+            PacketBuilder::short(Encoder::new(), true, Some(ConnectionId::from(SERVER_CID)));
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder
@@ -1080,7 +1080,7 @@ mod tests {
         let mut firsts = Vec::new();
         for _ in 0..64 {
             let mut builder =
-                PacketBuilder::short(Encoder::new(), true, &Some(ConnectionId::from(SERVER_CID)));
+                PacketBuilder::short(Encoder::new(), true, Some(ConnectionId::from(SERVER_CID)));
             builder.scramble(true);
             builder.pn(0, 1);
             firsts.push(builder.as_ref()[0]);
@@ -1143,8 +1143,8 @@ mod tests {
             Encoder::new(),
             PacketType::Handshake,
             Version::default(),
-            &Some(ConnectionId::from(SERVER_CID)),
-            &Some(ConnectionId::from(CLIENT_CID)),
+            Some(ConnectionId::from(SERVER_CID)),
+            Some(ConnectionId::from(CLIENT_CID)),
         );
         builder.pn(0, 1);
         builder.encode(&[0; 3]);
@@ -1153,7 +1153,7 @@ mod tests {
         let first = encoder.clone();
 
         let mut builder =
-            PacketBuilder::short(encoder, false, &Some(ConnectionId::from(SERVER_CID)));
+            PacketBuilder::short(encoder, false, Some(ConnectionId::from(SERVER_CID)));
         builder.pn(1, 3);
         builder.encode(&[0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
@@ -1178,8 +1178,8 @@ mod tests {
             Encoder::new(),
             PacketType::Handshake,
             Version::default(),
-            &None::<&[u8]>,
-            &None::<&[u8]>,
+            None::<&[u8]>,
+            None::<&[u8]>,
         );
         builder.pn(0, 1);
         builder.encode(&[1, 2, 3]);
@@ -1197,8 +1197,8 @@ mod tests {
                 Encoder::new(),
                 PacketType::Handshake,
                 Version::default(),
-                &None::<&[u8]>,
-                &None::<&[u8]>,
+                None::<&[u8]>,
+                None::<&[u8]>,
             );
             builder.pn(0, 1);
             builder.scramble(true);
@@ -1218,8 +1218,8 @@ mod tests {
             Encoder::new(),
             PacketType::Initial,
             Version::default(),
-            &None::<&[u8]>,
-            &Some(ConnectionId::from(SERVER_CID)),
+            None::<&[u8]>,
+            Some(ConnectionId::from(SERVER_CID)),
         );
         assert_ne!(builder.remaining(), 0);
         builder.initial_token(&[]);
@@ -1237,7 +1237,7 @@ mod tests {
         let mut builder = PacketBuilder::short(
             Encoder::with_capacity(100),
             true,
-            &Some(ConnectionId::from(SERVER_CID)),
+            Some(ConnectionId::from(SERVER_CID)),
         );
         builder.pn(0, 1);
         // Pad, but not up to the full capacity. Leave enough space for the
@@ -1252,8 +1252,8 @@ mod tests {
             encoder,
             PacketType::Initial,
             Version::default(),
-            &Some(ConnectionId::from(SERVER_CID)),
-            &Some(ConnectionId::from(SERVER_CID)),
+            Some(ConnectionId::from(SERVER_CID)),
+            Some(ConnectionId::from(SERVER_CID)),
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);

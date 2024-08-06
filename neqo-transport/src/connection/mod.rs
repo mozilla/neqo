@@ -1937,7 +1937,7 @@ impl Connection {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
-            PacketBuilder::short(encoder, tx.key_phase(), &path.remote_cid())
+            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
         } else {
             qdebug!(
                 "Building {:?} dcid {:?} scid {:?}",
@@ -1945,7 +1945,7 @@ impl Connection {
                 path.remote_cid(),
                 path.local_cid(),
             );
-            PacketBuilder::long(encoder, pt, version, &path.remote_cid(), &path.local_cid())
+            PacketBuilder::long(encoder, pt, version, path.remote_cid(), path.local_cid())
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);
