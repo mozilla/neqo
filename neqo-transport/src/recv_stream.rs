@@ -643,7 +643,7 @@ impl RecvStream {
         // We should post a DataReadable event only once when we change from no-data-ready to
         // data-ready. Therefore remember the state before processing a new frame.
         let already_data_ready = self.data_ready();
-        let new_end = offset + u64::try_from(data.len()).unwrap();
+        let new_end = offset + u64::try_from(data.len())?;
 
         self.state.flow_control_consume_data(new_end, fin)?;
 
