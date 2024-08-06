@@ -955,7 +955,6 @@ impl crate::connection::test_internal::FrameWriter for GarbageWriter {
 /// Test the case that we run out of connection ID and receive an invalid frame
 /// from a new path.
 #[test]
-#[should_panic(expected = "attempting to close with a temporary path")]
 fn error_on_new_path_with_no_connection_id() {
     let mut client = default_client();
     let mut server = default_server();
@@ -976,5 +975,24 @@ fn error_on_new_path_with_no_connection_id() {
 
     // See issue #1697. We had a crash when the client had a temporary path and
     // process_output is called.
+    let closing_frames = client.stats().frame_tx.connection_close;
     mem::drop(client.process_output(now()));
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::UnknownFrameType),
+            ..
+        }
+    ));
+    // Wait until the connection is closed.
+    let delay = client.process(None, now()).callback();
+    _ = client.process_output(now() + delay);
+    let delay = client.process(None, now()).callback();
+    _ = client.process_output(now() + delay);
+    // No closing frames should be sent, and the connection should be closed.
+    assert_eq!(client.stats().frame_tx.connection_close, closing_frames);
+    assert!(matches!(
+        client.state(),
+        State::Closed(CloseReason::Transport(Error::UnknownFrameType))
+    ));
 }
