@@ -588,16 +588,16 @@ impl AckTracker {
         ignore_order: bool,
     ) {
         // Only ApplicationData ever delays ACK.
-        if let Some(space) = self.get_mut(PacketNumberSpace::ApplicationData) {
-            space.ack_freq(seqno, tolerance, delay, ignore_order);
-        }
+        self.get_mut(PacketNumberSpace::ApplicationData)
+            .unwrap()
+            .ack_freq(seqno, tolerance, delay, ignore_order);
     }
 
     // Force an ACK to be generated immediately (a PING was received).
     pub fn immediate_ack(&mut self, now: Instant) {
-        if let Some(space) = self.get_mut(PacketNumberSpace::ApplicationData) {
-            space.immediate_ack(now);
-        }
+        self.get_mut(PacketNumberSpace::ApplicationData)
+            .unwrap()
+            .immediate_ack(now);
     }
 
     /// Determine the earliest time that an ACK might be needed.

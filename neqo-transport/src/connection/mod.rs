@@ -1547,19 +1547,15 @@ impl Connection {
 
                     qlog::packet_received(&self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
-                    if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(payload.pn()) {
-                            qdebug!("Duplicate packet {}-{}", space, payload.pn());
-                            self.stats.borrow_mut().dups_rx += 1;
-                        } else {
-                            match self.process_packet(path, &payload, now) {
-                                Ok(migrate) => {
-                                    self.postprocess_packet(path, d, &packet, migrate, now);
-                                }
-                                Err(e) => {
-                                    self.ensure_error_path(path, &packet, now);
-                                    return Err(e);
-                                }
+                    if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
+                        qdebug!([self], "Duplicate packet {}-{}", space, payload.pn());
+                        self.stats.borrow_mut().dups_rx += 1;
+                    } else {
+                        match self.process_packet(path, &payload, now) {
+                            Ok(migrate) => self.postprocess_packet(path, d, &packet, migrate, now),
+                            Err(e) => {
+                                self.ensure_error_path(path, &packet, now);
+                                return Err(e);
                             }
                         }
                     }
