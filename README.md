@@ -120,6 +120,13 @@ Compile Gecko as usual with
 Note: Using newer Neqo code with Gecko may also require changes (likely to `neqo_glue`) if
 something has changed.
 
+### Connect with Firefox to local neqo-server
+
+1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345' --db ./test-fixture/db`.
+2. On Firefox, set `about:config` preference `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`.
+3. Optionally enable logging via `about:logging` or profiling via https://profiler.firefox.com/.
+4. Navigate to https://localhost:12345 and accept self-signed certificate.
+
 [NSS]: https://hg.mozilla.org/projects/nss
 [NSPR]: https://hg.mozilla.org/projects/nspr
 [GYP]: https://github.com/nodejs/gyp-next

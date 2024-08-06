@@ -61,6 +61,7 @@ pub use self::{
 
 mod min_version;
 use min_version::MINIMUM_NSS_VERSION;
+use neqo_common::qerror;
 
 #[allow(non_upper_case_globals)]
 mod nss {
@@ -94,13 +95,13 @@ fn already_initialized() -> bool {
     unsafe { nss::NSS_IsInitialized() != 0 }
 }
 
-fn version_check() {
-    let min_ver = CString::new(MINIMUM_NSS_VERSION).unwrap();
-    assert_ne!(
-        unsafe { nss::NSS_VersionCheck(min_ver.as_ptr()) },
-        0,
-        "Minimum NSS version of {MINIMUM_NSS_VERSION} not supported",
-    );
+fn version_check() -> Res<()> {
+    let min_ver = CString::new(MINIMUM_NSS_VERSION)?;
+    if unsafe { nss::NSS_VersionCheck(min_ver.as_ptr()) } == 0 {
+        qerror!("Minimum NSS version of {MINIMUM_NSS_VERSION} not supported");
+        return Err(Error::UnsupportedVersion);
+    }
+    Ok(())
 }
 
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance
@@ -113,7 +114,7 @@ pub fn init() -> Res<()> {
     // Set time zero.
     time::init();
     let res = INITIALIZED.get_or_init(|| {
-        version_check();
+        version_check()?;
         if already_initialized() {
             return Ok(NssLoaded::External);
         }
@@ -152,7 +153,7 @@ fn enable_ssl_trace() -> Res<()> {
 pub fn init_db<P: Into<PathBuf>>(dir: P) -> Res<()> {
     time::init();
     let res = INITIALIZED.get_or_init(|| {
-        version_check();
+        version_check()?;
         if already_initialized() {
             return Ok(NssLoaded::External);
         }
