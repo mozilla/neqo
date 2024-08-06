@@ -186,6 +186,7 @@ jobs:
             fi
             jq < "$RUN/result.json" '
                 . as $data |
+                .results[][].result //= "failed" |
                 {
                   results: [.results[] | group_by(.result)[] | {(.[0].result): [.[] | .abbr]}] |
                   add
