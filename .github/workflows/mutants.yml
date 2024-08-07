@@ -22,20 +22,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config lld
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+      - name: Get minimum NSS version
+        id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch and build NSS and NSPR
+      - name: Install NSS
         uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Install Rust
         uses: ./.github/actions/rust
         with:
-          version: stable
+          tools: cargo-mutants
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'
@@ -64,7 +63,7 @@ jobs:
           } > "$GITHUB_STEP_SUMMARY"
 
       - name: Archive mutants.out
-        uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
+        uses: actions/upload-artifact@89ef406dd8d7e03cfd12d9e0a4a378f454709029 # v4.3.5
         if: always()
         with:
           name: mutants.out
