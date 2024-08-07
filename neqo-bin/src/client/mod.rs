@@ -460,6 +460,15 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     let Some(qlog_dir) = args.shared.qlog_dir.clone() else {
         return Ok(NeqoQlog::disabled());
     };
+
+    // hostname might be an IPv6 address, e.g. `[::1]`. `:` is an invalid
+    // Windows file name character.
+    #[cfg(windows)]
+    let hostname: String = hostname
+        .chars()
+        .map(|c| if c == ':' { '_' } else { c })
+        .collect();
+
     NeqoQlog::enabled_with_file(
         qlog_dir,
         Role::Client,
