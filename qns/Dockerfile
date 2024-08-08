@@ -1,21 +1,18 @@
 FROM martenseemann/quic-network-simulator-endpoint@sha256:5114afeff460a5ce65b066680abcb1ac34f742b40fbf95a60843c1b2783bc532 AS buildimage
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    git coreutils build-essential libclang-dev lld gyp ninja-build zlib1g-dev python-is-python3 sccache
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git coreutils build-essential libclang-dev lld gyp ninja-build zlib1g-dev python-is-python3 \
+    && apt-get autoremove -y && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # From https://github.com/rust-lang/docker-rust/blob/master/1.80.0/bookworm/slim/Dockerfile
-# With the addition of cache mounts for apt.
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
     RUST_VERSION=1.80.0
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    set -eux; \
+RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -50,12 +47,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # End of copy from https://github.com/rust-lang/docker-rust...
 
-# Use sccache to speed up repeated docker build runs
-ENV RUSTC_WRAPPER=/usr/bin/sccache
-ENV RUSTFLAGS="-C link-arg=-fuse-ld=lld"
-ENV CC="sccache cc"
-ENV CXX="sccache c++"
-
 # We unfortunately need to build NSS from source, because the Debian package is
 # not compiled with support for SSLKEYLOGFILE.
 # See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
@@ -67,29 +58,14 @@ RUN set -eux; \
     git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"; \
     git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
-RUN --mount=type=cache,target=/root/.cache/sccache \
-    "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o; \
-    sccache --show-stats
-
-# # Pre-compile dependencies
-# WORKDIR /build
-
-# RUN cargo init --name rust-docker
-
-# COPY Cargo.toml Cargo.lock ./
-
-# RUN --mount=type=cache,target=/root/.cache \
-#     cargo fetch && \
-#     cargo build --release
+RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
 ADD . /neqo
 
-RUN --mount=type=cache,target=/root/.cache/sccache \
-    set -eux; \
+RUN set -eux; \
     cd /neqo; \
-    cargo build --release \
-    --bin neqo-client --bin neqo-server; \
-    sccache --show-stats
+    RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo build --release \
+    --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
 
