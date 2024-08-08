@@ -2783,10 +2783,8 @@ impl Connection {
                 // prepare to resend them.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
-                if space == PacketNumberSpace::ApplicationData {
-                    // Send an ACK immediately if we might not otherwise do so.
-                    self.acks.immediate_ack(space, now);
-                }
+                // Send an ACK immediately if we might not otherwise do so.
+                self.acks.immediate_ack(space, now);
             }
             Frame::Ack {
                 largest_acknowledged,
