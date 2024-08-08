@@ -9,8 +9,8 @@ use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STRE
 use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
-    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::H3_FRAME_TYPE_HEADERS, CloseType,
-    Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
+    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, CloseType, Error, Http3StreamType,
+    ReceiveOutput, RecvStream, Res, Stream,
 };
 
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
@@ -24,9 +24,8 @@ pub enum NewStreamType {
     Encoder,
     Push(u64),
     WebTransportStream(u64),
-    Http,
+    Http(u64),
     Unknown,
-    Grease(u64),
 }
 
 impl NewStreamType {
@@ -50,15 +49,15 @@ impl NewStreamType {
             (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Client)
             | (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
-            (H3_FRAME_TYPE_HEADERS, StreamType::BiDi, Role::Server) => Ok(Some(Self::Http)),
-            (stream_type, StreamType::BiDi, Role::Server) => {
-                let Some(st) = stream_type.checked_sub(0x21) else {
-                    return Err(Error::HttpFrame);
-                };
-                if st % 0x1f == 0 {
-                    Ok(Some(Self::Grease(stream_type)))
-                } else {
+            (_, StreamType::BiDi, Role::Server) => {
+                if stream_type == HTTP3_UNI_STREAM_TYPE_CONTROL
+                    || stream_type == QPACK_UNI_STREAM_TYPE_ENCODER
+                    || stream_type == QPACK_UNI_STREAM_TYPE_DECODER
+                    || stream_type == WEBTRANSPORT_UNI_STREAM
+                {
                     Err(Error::HttpFrame)
+                } else {
+                    Ok(Some(Self::Http(stream_type)))
                 }
             }
             (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Server)
@@ -200,7 +199,7 @@ impl NewStreamHeadReader {
                 Err(Error::HttpClosedCriticalStream)
             }
             None => Err(Error::HttpStreamCreation),
-            Some(NewStreamType::Http | NewStreamType::Grease(_)) => Err(Error::HttpFrame),
+            Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
             Some(NewStreamType::Push(_) | NewStreamType::WebTransportStream(_)) => {
                 unreachable!("PushStream and WebTransport are mapped to None at this stage.")
@@ -226,9 +225,9 @@ impl RecvStream for NewStreamHeadReader {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+        let t = self.get_type(conn)?;
         Ok((
-            self.get_type(conn)?
-                .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
+            t.map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
             self.done(),
         ))
     }
@@ -396,7 +395,10 @@ mod tests {
         t.decode(
             &[H3_FRAME_TYPE_HEADERS],
             false,
-            &Ok((ReceiveOutput::NewStream(NewStreamType::Http), true)),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::Http(H3_FRAME_TYPE_HEADERS)),
+                true,
+            )),
             true,
         );
 
@@ -510,20 +512,6 @@ mod tests {
             &Err(Error::HttpStreamCreation),
             true,
         );
-    }
-
-    #[test]
-    fn decode_grease_stream() {
-        let mut t = Test::new(StreamType::BiDi, Role::Server);
-        t.decode(
-            &[0x21],
-            false,
-            &Ok((ReceiveOutput::NewStream(NewStreamType::Grease(0x21)), true)),
-            true,
-        );
-
-        let mut t = Test::new(StreamType::BiDi, Role::Server);
-        t.decode(&[0x3f], false, &Err(Error::HttpFrame), true);
     }
 
     #[test]
