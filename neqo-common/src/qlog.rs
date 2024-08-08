@@ -8,6 +8,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     fs::OpenOptions,
+    io::BufWriter,
     path::PathBuf,
     rc::Rc,
 };
@@ -60,7 +61,7 @@ impl NeqoQlog {
             std::time::Instant::now(),
             new_trace(role),
             qlog::events::EventImportance::Base,
-            Box::new(file),
+            Box::new(BufWriter::new(file)),
         );
         Self::enabled(streamer, qlog_path)
     }
