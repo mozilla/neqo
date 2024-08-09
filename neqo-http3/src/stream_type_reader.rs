@@ -50,10 +50,11 @@ impl NewStreamType {
             | (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
             (_, StreamType::BiDi, Role::Server) => {
-                if stream_type == HTTP3_UNI_STREAM_TYPE_CONTROL
-                    || stream_type == QPACK_UNI_STREAM_TYPE_ENCODER
-                    || stream_type == QPACK_UNI_STREAM_TYPE_DECODER
-                    || stream_type == WEBTRANSPORT_UNI_STREAM
+                // The "stream_type" for a bidirectional stream is a frame type.
+                // We accept WEBTRANSPORT_STREAM (above), and HEADERS, 
+                // and we have to ignore unknown types, but any other frame type
+                // is bad if we know about it.
+                if HFrame::is_known(stream_type) && stream_type != HEADER_FRAME
                 {
                     Err(Error::HttpFrame)
                 } else {
