@@ -10,7 +10,7 @@ use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
     control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
-    frames::{HFrame, H3_FRAME_TYPE_HEADERS},
+    frames::{reader::FrameDecoder, HFrame, H3_FRAME_TYPE_HEADERS},
     CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
 };
 
@@ -38,7 +38,7 @@ impl NewStreamType {
     ///
     /// Push streams received by the server are not allowed and this function will return
     /// `HttpStreamCreation` error.
-    const fn final_stream_type(
+    fn final_stream_type(
         stream_type: u64,
         trans_stream_type: StreamType,
         role: Role,
@@ -54,7 +54,9 @@ impl NewStreamType {
                 // The "stream_type" for a bidirectional stream is a frame type. We accept
                 // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
                 // but any other frame type is bad if we know about it.
-                if HFrame::is_known_type(stream_type) && stream_type != H3_FRAME_TYPE_HEADERS {
+                if <HFrame as FrameDecoder<HFrame>>::is_known_type(stream_type)
+                    && stream_type != H3_FRAME_TYPE_HEADERS
+                {
                     Err(Error::HttpFrame)
                 } else {
                     Ok(Some(Self::Http(stream_type)))

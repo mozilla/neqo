@@ -78,22 +78,6 @@ impl HFrame {
         }
     }
 
-    /// Is this a known frame type?
-    pub const fn is_known_type(frame_type: HFrameType) -> bool {
-        matches!(
-            frame_type,
-            H3_FRAME_TYPE_DATA
-                | H3_FRAME_TYPE_HEADERS
-                | H3_FRAME_TYPE_CANCEL_PUSH
-                | H3_FRAME_TYPE_SETTINGS
-                | H3_FRAME_TYPE_PUSH_PROMISE
-                | H3_FRAME_TYPE_GOAWAY
-                | H3_FRAME_TYPE_MAX_PUSH_ID
-                | H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST
-                | H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH
-        )
-    }
-
     pub fn encode(&self, enc: &mut Encoder) {
         enc.encode_varint(self.get_type());
 
