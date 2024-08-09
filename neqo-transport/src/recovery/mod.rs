@@ -443,7 +443,7 @@ impl PtoState {
         if space == PacketNumberSpace::ApplicationData {
             MAX_PTO_PACKET_COUNT
         } else {
-            // For the Initial ahd Handshake spaces, we only send one packet on PTO. This avoids
+            // For the Initial and Handshake spaces, we only send one packet on PTO. This avoids
             // sending useless PING-only packets when only a single packet was lost, which is the
             // common case. These PINGs use cwnd and amplification window space, and sending them
             // hence makes the handshake more brittle.
