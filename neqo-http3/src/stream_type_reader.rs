@@ -9,8 +9,9 @@ use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STRE
 use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
-    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, CloseType, Error, Http3StreamType,
-    ReceiveOutput, RecvStream, Res, Stream,
+    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
+    frames::{HFrame, H3_FRAME_TYPE_HEADERS},
+    CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
 };
 
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
@@ -50,12 +51,10 @@ impl NewStreamType {
             | (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
             (_, StreamType::BiDi, Role::Server) => {
-                // The "stream_type" for a bidirectional stream is a frame type.
-                // We accept WEBTRANSPORT_STREAM (above), and HEADERS, 
-                // and we have to ignore unknown types, but any other frame type
-                // is bad if we know about it.
-                if HFrame::is_known(stream_type) && stream_type != HEADER_FRAME
-                {
+                // The "stream_type" for a bidirectional stream is a frame type. We accept
+                // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
+                // but any other frame type is bad if we know about it.
+                if HFrame::is_known_type(stream_type) && stream_type != H3_FRAME_TYPE_HEADERS {
                     Err(Error::HttpFrame)
                 } else {
                     Ok(Some(Self::Http(stream_type)))
@@ -491,7 +490,8 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM],
             false,
-            &Err(Error::HttpFrame),
+            // WEBTRANSPORT_UNI_STREAM is treated as an unknown frame type here.
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Http(84)), true)),
             true,
         );
 
