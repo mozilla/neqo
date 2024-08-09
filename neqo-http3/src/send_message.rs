@@ -146,6 +146,12 @@ impl SendMessage {
             header_block: header_block.to_vec(),
         };
         let mut d = Encoder::default();
+        // In debug builds, add a grease frame before the headers.
+        #[cfg(debug_assertions)]
+        {
+            qdebug!("Encoding grease");
+            HFrame::Grease.encode(&mut d);
+        }
         hframe.encode(&mut d);
         d.into()
     }
