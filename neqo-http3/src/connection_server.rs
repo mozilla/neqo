@@ -351,6 +351,7 @@ impl Http3ServerHandler {
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    conn,
                 )?;
                 let res = self.base_handler.handle_stream_readable(conn, stream_id)?;
                 assert_eq!(ReceiveOutput::NoOutput, res);
