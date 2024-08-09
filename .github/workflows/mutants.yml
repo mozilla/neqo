@@ -35,6 +35,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           tools: cargo-mutants
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'

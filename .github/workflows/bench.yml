@@ -45,6 +45,7 @@ jobs:
         with:
           version: $TOOLCHAIN
           tools: hyperfine
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
         id: nss-version
