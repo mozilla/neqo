@@ -23,6 +23,11 @@ else
         iface=lo
 fi
 
+if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
+        export LD_LIBRARY_PATH=$NSS_DIR/../dist/$NSS_TARGET/lib
+        export DYLD_FALLBACK_LIBRARY_PATH=$LD_LIBRARY_PATH
+fi
+
 client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
 server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
 
