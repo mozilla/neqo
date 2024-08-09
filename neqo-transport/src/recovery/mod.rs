@@ -879,9 +879,7 @@ impl LossRecovery {
                 .get(pn_space)
                 .map_or(false, |space| space.largest_acked.is_none())
             {
-                if let Some(last) = lost.last() {
-                    path.borrow_mut().on_congestion_event(last);
-                }
+                path.borrow_mut().on_congestion_event(lost);
             }
             self.fire_pto(pn_space, allow_probes);
         }

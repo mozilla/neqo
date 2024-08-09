@@ -1021,8 +1021,13 @@ impl Path {
     /// Initiate a congestion response.
     ///
     /// Returns true if the congestion window was reduced.
-    pub fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
-        self.sender.on_congestion_event(last_packet)
+    pub fn on_congestion_event(&mut self, lost_packets: &[SentPacket]) -> bool {
+        if let Some(last) = lost_packets.last() {
+            self.ecn_info.on_packets_lost(lost_packets);
+            self.sender.on_congestion_event(last)
+        } else {
+            false
+        }
     }
 
     /// Determine whether we should be setting a PTO for this path. This is true when either the

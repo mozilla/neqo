@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{Datagram, IpTos, IpTosEcn};
+use neqo_common::{qdebug, Datagram, IpTos, IpTosEcn};
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, now, DEFAULT_ADDR_V4,
@@ -84,10 +84,16 @@ fn handshake_delay_with_ecn_blackhole() {
         drop_ecn_marked_datagrams(),
     );
 
+    // This will simplify once we merge #2027
+    let pto = DEFAULT_RTT * 3;
     assert_eq!(
-        (finish - start).as_millis() / DEFAULT_RTT.as_millis(),
-        15,
-        "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed.",
+        (finish - start),
+        (1 + 2 + 4)
+            * pto + // client RTOs twice
+        (1 + 2)
+            * pto + // server RTOs once until amplification limit (2nd RTX has PING)
+        pto // delay until client sends next RTX to lift amplification limit
+        + DEFAULT_RTT + DEFAULT_RTT/2
     );
 }
 
