@@ -9,8 +9,9 @@ use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STRE
 use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
-    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::H3_FRAME_TYPE_HEADERS, CloseType,
-    Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
+    control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
+    frames::{reader::FrameDecoder, HFrame, H3_FRAME_TYPE_HEADERS},
+    CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
 };
 
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
@@ -24,7 +25,7 @@ pub enum NewStreamType {
     Encoder,
     Push(u64),
     WebTransportStream(u64),
-    Http,
+    Http(u64),
     Unknown,
 }
 
@@ -37,7 +38,7 @@ impl NewStreamType {
     ///
     /// Push streams received by the server are not allowed and this function will return
     /// `HttpStreamCreation` error.
-    const fn final_stream_type(
+    fn final_stream_type(
         stream_type: u64,
         trans_stream_type: StreamType,
         role: Role,
@@ -49,8 +50,18 @@ impl NewStreamType {
             (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Client)
             | (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
-            (H3_FRAME_TYPE_HEADERS, StreamType::BiDi, Role::Server) => Ok(Some(Self::Http)),
-            (_, StreamType::BiDi, Role::Server) => Err(Error::HttpFrame),
+            (_, StreamType::BiDi, Role::Server) => {
+                // The "stream_type" for a bidirectional stream is a frame type. We accept
+                // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
+                // but any other frame type is bad if we know about it.
+                if <HFrame as FrameDecoder<HFrame>>::is_known_type(stream_type)
+                    && stream_type != H3_FRAME_TYPE_HEADERS
+                {
+                    Err(Error::HttpFrame)
+                } else {
+                    Ok(Some(Self::Http(stream_type)))
+                }
+            }
             (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Server)
             | (_, StreamType::BiDi, Role::Client) => Err(Error::HttpStreamCreation),
             _ => Ok(Some(Self::Unknown)),
@@ -190,7 +201,7 @@ impl NewStreamHeadReader {
                 Err(Error::HttpClosedCriticalStream)
             }
             None => Err(Error::HttpStreamCreation),
-            Some(NewStreamType::Http) => Err(Error::HttpFrame),
+            Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
             Some(NewStreamType::Push(_) | NewStreamType::WebTransportStream(_)) => {
                 unreachable!("PushStream and WebTransport are mapped to None at this stage.")
@@ -216,9 +227,9 @@ impl RecvStream for NewStreamHeadReader {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+        let t = self.get_type(conn)?;
         Ok((
-            self.get_type(conn)?
-                .map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
+            t.map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),
             self.done(),
         ))
     }
@@ -386,7 +397,10 @@ mod tests {
         t.decode(
             &[H3_FRAME_TYPE_HEADERS],
             false,
-            &Ok((ReceiveOutput::NewStream(NewStreamType::Http), true)),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::Http(H3_FRAME_TYPE_HEADERS)),
+                true,
+            )),
             true,
         );
 
@@ -478,7 +492,8 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM],
             false,
-            &Err(Error::HttpFrame),
+            // WEBTRANSPORT_UNI_STREAM is treated as an unknown frame type here.
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Http(84)), true)),
             true,
         );
 
