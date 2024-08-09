@@ -1024,7 +1024,7 @@ impl Path {
     pub fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
         self.sender.on_congestion_event(last_packet)
     }
-      
+
     /// Determine whether we should be setting a PTO for this path. This is true when either the
     /// path is valid or when there is enough remaining in the amplification limit to fit a
     /// full-sized path (i.e., the path MTU).
