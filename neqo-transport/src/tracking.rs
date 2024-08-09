@@ -25,7 +25,6 @@ use crate::{
     stats::FrameStats,
 };
 
-// TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum)]
 pub enum PacketNumberSpace {
     Initial,
@@ -549,11 +548,13 @@ impl ::std::fmt::Display for RecvdPackets {
     }
 }
 
-pub struct AckTracker(EnumMap<PacketNumberSpace, Option<RecvdPackets>>);
+pub struct AckTracker {
+    spaces: EnumMap<PacketNumberSpace, Option<RecvdPackets>>,
+}
 
 impl AckTracker {
     pub fn drop_space(&mut self, space: PacketNumberSpace) {
-        self.0[space] = None;
+        self.spaces[space] = None;
         assert_ne!(
             space,
             PacketNumberSpace::ApplicationData,
@@ -562,7 +563,7 @@ impl AckTracker {
     }
 
     pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
-        self.0[space].as_mut()
+        self.spaces[space].as_mut()
     }
 
     pub fn ack_freq(
@@ -588,16 +589,16 @@ impl AckTracker {
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
         #[cfg(debug_assertions)]
-        for (space, recvd) in &self.0 {
+        for (space, recvd) in &self.spaces {
             if let Some(recvd) = recvd {
                 qtrace!("ack_time for {} = {:?}", space, recvd.ack_time());
             }
         }
 
-        if self.0[PacketNumberSpace::Initial].is_none()
-            && self.0[PacketNumberSpace::Handshake].is_none()
+        if self.spaces[PacketNumberSpace::Initial].is_none()
+            && self.spaces[PacketNumberSpace::Handshake].is_none()
         {
-            if let Some(recvd) = &self.0[PacketNumberSpace::ApplicationData] {
+            if let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData] {
                 return recvd.ack_time();
             }
         }
@@ -607,7 +608,7 @@ impl AckTracker {
         // frames for all spaces, which can mean that one space is stuck in the past.
         // That isn't a problem because we guarantee that earlier spaces will always
         // be able to send ACK frames.
-        self.0
+        self.spaces
             .iter()
             .filter_map(|(_, recvd)| {
                 recvd
