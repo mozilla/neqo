@@ -11,6 +11,9 @@ inputs:
   tools:
     description: 'Additional Rust tools to install'
     default: ''
+  token:
+    description: 'A Github PAT'
+    required: true
 
 runs:
   using: composite
@@ -41,11 +44,15 @@ runs:
     - name: Install cargo-quickinstall
       shell: bash
       if: inputs.tools != ''
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
       run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
       shell: bash
       if: inputs.tools != ''
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
       run: cargo +${{ inputs.version }} quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
 
     # sccache slows CI down, so we leave it disabled.
