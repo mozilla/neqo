@@ -656,7 +656,7 @@ mod tests {
     };
     use crate::{
         frame::Frame,
-        packet::{PacketBuilder, PacketNumber},
+        packet::{PacketBuilder, PacketNumber, PacketType},
         stats::FrameStats,
     };
 
@@ -1117,5 +1117,29 @@ mod tests {
         assert!(!copy[PacketNumberSpace::Initial]);
         assert!(copy[PacketNumberSpace::Handshake]);
         assert!(copy[PacketNumberSpace::ApplicationData]);
+    }
+
+    #[test]
+    fn from_packet_type() {
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::Initial),
+            PacketNumberSpace::Initial
+        );
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::Handshake),
+            PacketNumberSpace::Handshake
+        );
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::ZeroRtt),
+            PacketNumberSpace::ApplicationData
+        );
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::Short),
+            PacketNumberSpace::ApplicationData
+        );
+        assert!(std::panic::catch_unwind(|| {
+            PacketNumberSpace::from(PacketType::VersionNegotiation)
+        })
+        .is_err());
     }
 }
