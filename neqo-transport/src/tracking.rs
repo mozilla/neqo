@@ -13,10 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::Enum;
+use enum_map::{enum_map, Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
-use smallvec::{smallvec, SmallVec};
 
 use crate::{
     ecn::EcnCount,
@@ -550,34 +549,20 @@ impl ::std::fmt::Display for RecvdPackets {
     }
 }
 
-#[derive(Debug)]
-pub struct AckTracker {
-    /// This stores information about received packets in *reverse* order
-    /// by spaces.  Why reverse?  Because we ultimately only want to keep
-    /// `ApplicationData` and this allows us to drop other spaces easily.
-    spaces: SmallVec<[RecvdPackets; 1]>,
-}
+pub struct AckTracker(EnumMap<PacketNumberSpace, Option<RecvdPackets>>);
 
 impl AckTracker {
     pub fn drop_space(&mut self, space: PacketNumberSpace) {
-        let sp = match space {
-            PacketNumberSpace::Initial => self.spaces.pop(),
-            PacketNumberSpace::Handshake => {
-                let sp = self.spaces.pop();
-                self.spaces.shrink_to_fit();
-                sp
-            }
-            PacketNumberSpace::ApplicationData => panic!("discarding application space"),
-        };
-        assert_eq!(sp.unwrap().space, space, "dropping spaces out of order");
+        self.0[space] = None;
+        assert_ne!(
+            space,
+            PacketNumberSpace::ApplicationData,
+            "discarding application space"
+        );
     }
 
     pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
-        self.spaces.get_mut(match space {
-            PacketNumberSpace::ApplicationData => 0,
-            PacketNumberSpace::Handshake => 1,
-            PacketNumberSpace::Initial => 2,
-        })
+        self.0[space].as_mut()
     }
 
     pub fn ack_freq(
@@ -602,23 +587,34 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
-        for recvd in &self.spaces {
-            qtrace!("ack_time for {} = {:?}", recvd.space, recvd.ack_time());
+        #[cfg(debug_assertions)]
+        for (space, recvd) in &self.0 {
+            if let Some(recvd) = recvd {
+                qtrace!("ack_time for {} = {:?}", space, recvd.ack_time());
+            }
         }
 
-        if self.spaces.len() == 1 {
-            self.spaces[0].ack_time()
-        } else {
-            // Ignore any time that is in the past relative to `now`.
-            // That is something of a hack, but there are cases where we can't send ACK
-            // frames for all spaces, which can mean that one space is stuck in the past.
-            // That isn't a problem because we guarantee that earlier spaces will always
-            // be able to send ACK frames.
-            self.spaces
-                .iter()
-                .filter_map(|recvd| recvd.ack_time().filter(|t| *t > now))
-                .min()
+        if self.0[PacketNumberSpace::Initial].is_none()
+            && self.0[PacketNumberSpace::Handshake].is_none()
+        {
+            if let Some(recvd) = &self.0[PacketNumberSpace::ApplicationData] {
+                return recvd.ack_time();
+            }
         }
+
+        // Ignore any time that is in the past relative to `now`.
+        // That is something of a hack, but there are cases where we can't send ACK
+        // frames for all spaces, which can mean that one space is stuck in the past.
+        // That isn't a problem because we guarantee that earlier spaces will always
+        // be able to send ACK frames.
+        self.0
+            .iter()
+            .filter_map(|(_, recvd)| {
+                recvd
+                    .as_ref()
+                    .and_then(|recvd| recvd.ack_time().filter(|t| *t > now))
+            })
+            .min()
     }
 
     pub fn acked(&mut self, token: &AckToken) {
@@ -644,13 +640,11 @@ impl AckTracker {
 
 impl Default for AckTracker {
     fn default() -> Self {
-        Self {
-            spaces: smallvec![
-                RecvdPackets::new(PacketNumberSpace::ApplicationData),
-                RecvdPackets::new(PacketNumberSpace::Handshake),
-                RecvdPackets::new(PacketNumberSpace::Initial),
-            ],
-        }
+        Self(enum_map! {
+            PacketNumberSpace::Initial => Some(RecvdPackets::new(PacketNumberSpace::Initial)),
+            PacketNumberSpace::Handshake => Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
+            PacketNumberSpace::ApplicationData => Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
+        })
     }
 }
 
@@ -940,13 +934,6 @@ mod tests {
     fn drop_app() {
         let mut tracker = AckTracker::default();
         tracker.drop_space(PacketNumberSpace::ApplicationData);
-    }
-
-    #[test]
-    #[should_panic(expected = "dropping spaces out of order")]
-    fn drop_out_of_order() {
-        let mut tracker = AckTracker::default();
-        tracker.drop_space(PacketNumberSpace::Handshake);
     }
 
     #[test]
