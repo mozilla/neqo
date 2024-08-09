@@ -26,6 +26,7 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
+use crate::STREAM_IO_BUFFER_SIZE;
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -34,6 +35,7 @@ pub struct Handler<'a> {
     args: &'a Args,
     token: Option<ResumptionToken>,
     needs_key_update: bool,
+    read_buffer: Vec<u8>,
 }
 
 impl<'a> super::Handler for Handler<'a> {
@@ -203,6 +205,7 @@ impl<'b> Handler<'b> {
             args,
             token: None,
             needs_key_update: args.key_update,
+            read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
 
@@ -257,25 +260,26 @@ impl<'b> Handler<'b> {
     fn read_from_stream(
         client: &mut Connection,
         stream_id: StreamId,
+        read_buffer: &mut [u8],
         output_read_data: bool,
         maybe_out_file: &mut Option<BufWriter<File>>,
     ) -> Res<bool> {
-        let mut data = vec![0; 4096];
         loop {
-            let (sz, fin) = client.stream_recv(stream_id, &mut data)?;
+            let (sz, fin) = client.stream_recv(stream_id, read_buffer)?;
             if sz == 0 {
                 return Ok(fin);
             }
+            let read_buffer = &read_buffer[0..sz];
 
             if let Some(out_file) = maybe_out_file {
-                out_file.write_all(&data[..sz])?;
+                out_file.write_all(read_buffer)?;
             } else if !output_read_data {
-                qdebug!("READ[{stream_id}]: {sz} bytes");
+                qdebug!("READ[{stream_id}]: {} bytes", read_buffer.len());
             } else {
                 qdebug!(
                     "READ[{}]: {}",
                     stream_id,
-                    String::from_utf8(data.clone()).unwrap()
+                    std::str::from_utf8(read_buffer).unwrap()
                 );
             }
             if fin {
@@ -294,6 +298,7 @@ impl<'b> Handler<'b> {
                 let fin_recvd = Self::read_from_stream(
                     client,
                     stream_id,
+                    &mut self.read_buffer,
                     self.args.output_read_data,
                     maybe_out_file,
                 )?;
