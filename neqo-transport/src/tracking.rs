@@ -300,6 +300,7 @@ impl RecvdPackets {
             unacknowledged_tolerance: if space == PacketNumberSpace::ApplicationData {
                 DEFAULT_ACK_PACKET_TOLERANCE
             } else {
+                // ACK more aggressively
                 0
             },
             ignore_order: false,
