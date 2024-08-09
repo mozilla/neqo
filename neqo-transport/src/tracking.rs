@@ -68,17 +68,17 @@ impl From<PacketType> for PacketNumberSpace {
 
 #[derive(Clone, Copy, Default)]
 pub struct PacketNumberSpaceSet {
-    initial: bool,
-    handshake: bool,
-    application_data: bool,
+    spaces: EnumMap<PacketNumberSpace, bool>,
 }
 
 impl PacketNumberSpaceSet {
-    pub const fn all() -> Self {
+    pub fn all() -> Self {
         Self {
-            initial: true,
-            handshake: true,
-            application_data: true,
+            spaces: enum_map! {
+                PacketNumberSpace::Initial => true,
+                PacketNumberSpace::Handshake => true,
+                PacketNumberSpace::ApplicationData => true,
+            },
         }
     }
 }
@@ -87,21 +87,13 @@ impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
     type Output = bool;
 
     fn index(&self, space: PacketNumberSpace) -> &Self::Output {
-        match space {
-            PacketNumberSpace::Initial => &self.initial,
-            PacketNumberSpace::Handshake => &self.handshake,
-            PacketNumberSpace::ApplicationData => &self.application_data,
-        }
+        &self.spaces[space]
     }
 }
 
 impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
     fn index_mut(&mut self, space: PacketNumberSpace) -> &mut Self::Output {
-        match space {
-            PacketNumberSpace::Initial => &mut self.initial,
-            PacketNumberSpace::Handshake => &mut self.handshake,
-            PacketNumberSpace::ApplicationData => &mut self.application_data,
-        }
+        &mut self.spaces[space]
     }
 }
 
@@ -554,7 +546,7 @@ pub struct AckTracker {
 
 impl AckTracker {
     pub fn drop_space(&mut self, space: PacketNumberSpace) {
-        self.spaces[space] = None;
+        self.spaces[space].take();
         assert_ne!(
             space,
             PacketNumberSpace::ApplicationData,
