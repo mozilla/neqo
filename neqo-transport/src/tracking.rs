@@ -641,11 +641,13 @@ impl AckTracker {
 
 impl Default for AckTracker {
     fn default() -> Self {
-        Self(enum_map! {
-            PacketNumberSpace::Initial => Some(RecvdPackets::new(PacketNumberSpace::Initial)),
-            PacketNumberSpace::Handshake => Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
-            PacketNumberSpace::ApplicationData => Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
-        })
+        Self {
+            spaces: enum_map! {
+                PacketNumberSpace::Initial => Some(RecvdPackets::new(PacketNumberSpace::Initial)),
+                PacketNumberSpace::Handshake => Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
+                PacketNumberSpace::ApplicationData => Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
+            },
+        }
     }
 }
 
