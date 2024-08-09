@@ -51,6 +51,7 @@ jobs:
           version: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy, llvm-tools-preview
           tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz, cargo-machete
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get minimum NSS version
         id: nss-version
@@ -129,6 +130,8 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
   bench:

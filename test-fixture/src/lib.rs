@@ -13,6 +13,7 @@ use std::{
     io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -410,7 +411,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         EventImportance::Base,
         Box::new(buf),
     );
-    let log = NeqoQlog::enabled(streamer, "");
+    let log = NeqoQlog::enabled(streamer, PathBuf::from(""));
     (log.expect("to be able to write to new log"), contents)
 }
 
