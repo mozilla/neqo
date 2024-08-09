@@ -24,8 +24,8 @@ else
 fi
 
 if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
-        export LD_LIBRARY_PATH=$NSS_DIR/../dist/$NSS_TARGET/lib
-        export DYLD_FALLBACK_LIBRARY_PATH=$LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH="$NSS_DIR/../dist/$NSS_TARGET/lib"
+        export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
 fi
 
 client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
