@@ -174,10 +174,12 @@ fn pto_initial() {
     assert_eq!(delay, INITIAL_PTO);
 
     // Resend initial after PTO.
+    let cwnd_prior: usize = cwnd(&client);
     now += delay;
     let pkt2 = client.process(None, now).dgram();
     assert!(pkt2.is_some());
     assert_eq!(pkt2.unwrap().len(), client.plpmtu());
+    assert_eq!(cwnd_prior, 2 * cwnd(&client)); // cwnd has halved
 
     let delay = client.process(None, now).callback();
     // PTO has doubled.
@@ -294,21 +296,16 @@ fn pto_handshake_complete() {
     // Check that the other packets (pkt2, pkt3) are Handshake packets.
     // The server discarded the Handshake keys already, therefore they are dropped.
     // Note that these don't include 1-RTT packets, because 1-RTT isn't send on PTO.
-    let (pkt2_hs, pkt2_1rtt) = split_datagram(&pkt2.unwrap());
-    assert_handshake(&pkt2_hs);
-    assert!(pkt2_1rtt.is_some());
     let dropped_before1 = server.stats().dropped_rx;
     let server_frames = server.stats().frame_rx.all;
-    server.process_input(&pkt2_hs, now);
+    server.process_input(&pkt2.unwrap(), now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before1);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
-    server.process_input(&pkt2_1rtt.unwrap(), now);
-    let server_frames2 = server.stats().frame_rx.all;
     let dropped_before2 = server.stats().dropped_rx;
     server.process_input(&pkt3_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before2);
-    assert_eq!(server.stats().frame_rx.all, server_frames2);
+    assert_eq!(server.stats().frame_rx.all, server_frames);
 
     now += HALF_RTT;
 

@@ -321,13 +321,15 @@ impl LossRecoverySpace {
         );
         self.first_ooo_time = None;
 
-        let largest_acked = self.largest_acked;
+        let Some(largest_acked) = self.largest_acked else {
+            return;
+        };
 
         for packet in self
             .sent_packets
             .iter_mut()
             // BTreeMap iterates in order of ascending PN
-            .take_while(|p| p.pn() < largest_acked.unwrap_or(PacketNumber::MAX))
+            .take_while(|p| p.pn() < largest_acked)
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent() + loss_delay <= now {
@@ -337,7 +339,7 @@ impl LossRecoverySpace {
                     packet.time_sent(),
                     loss_delay
                 );
-            } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
+            } else if largest_acked >= packet.pn() + PACKET_THRESHOLD {
                 qtrace!(
                     "lost={}, is >= {} from largest acked {:?}",
                     packet.pn(),
@@ -345,9 +347,7 @@ impl LossRecoverySpace {
                     largest_acked
                 );
             } else {
-                if largest_acked.is_some() {
-                    self.first_ooo_time = Some(packet.time_sent());
-                }
+                self.first_ooo_time = Some(packet.time_sent());
                 // No more packets can be declared lost after this one.
                 break;
             };
@@ -840,34 +840,47 @@ impl LossRecovery {
     /// When it has, mark a few packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
-    fn maybe_fire_pto(&mut self, rtt: &RttEstimate, now: Instant, lost: &mut Vec<SentPacket>) {
+    fn maybe_fire_pto(&mut self, path: &PathRef, now: Instant, lost: &mut Vec<SentPacket>) {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
-            if let Some(t) = self.pto_time(rtt, *pn_space) {
-                allow_probes[*pn_space] = true;
-                if t <= now {
-                    qdebug!([self], "PTO timer fired for {}", pn_space);
-                    let space = self.spaces.get_mut(*pn_space).unwrap();
-                    lost.extend(
-                        space
-                            .pto_packets(PtoState::pto_packet_count(
-                                *pn_space,
-                                self.stats.borrow().packets_rx,
-                            ))
-                            .cloned(),
-                    );
-
-                    pto_space = pto_space.or(Some(*pn_space));
-                }
+            if self
+                .pto_time(path.borrow().rtt(), *pn_space)
+                .map_or(true, |t| now < t)
+            {
+                continue;
             }
+            allow_probes[*pn_space] = true;
+            qdebug!([self], "PTO timer fired for {}", pn_space);
+            let space = self.spaces.get_mut(*pn_space).unwrap();
+            lost.extend(
+                space
+                    .pto_packets(PtoState::pto_packet_count(
+                        *pn_space,
+                        self.stats.borrow().packets_rx,
+                    ))
+                    .cloned(),
+            );
+
+            pto_space = pto_space.or(Some(*pn_space));
         }
 
         // This has to happen outside the loop. Increasing the PTO count here causes the
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
             qtrace!([self], "PTO {}, probing {:?}", pn_space, allow_probes);
+            // Packets are only declared as lost, relative to the
+            // `largest_acked`. If we hit a PTO while we don't have a
+            // largest_acked yet, also do a congestion control reaction (because
+            // otherwise none would happen).
+            if self
+                .spaces
+                .get(pn_space)
+                .map_or(false, |space| space.largest_acked.is_none())
+            {
+                path.borrow_mut().on_congestion_event(lost);
+            }
             self.fire_pto(pn_space, allow_probes);
         }
     }
@@ -898,7 +911,7 @@ impl LossRecovery {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
+        self.maybe_fire_pto(primary_path, now, &mut lost_packets);
         lost_packets
     }
 
@@ -967,7 +980,6 @@ mod tests {
         ecn::EcnCount,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
-        rtt::RttEstimate,
         stats::{Stats, StatsCell},
     };
 
@@ -978,8 +990,8 @@ mod tests {
 
     const ON_SENT_SIZE: usize = 100;
     /// An initial RTT for using with `setup_lr`.
-    const TEST_RTT: Duration = ms(80);
-    const TEST_RTTVAR: Duration = ms(40);
+    const TEST_RTT: Duration = ms(7000);
+    const TEST_RTTVAR: Duration = ms(3500);
 
     struct Fixture {
         lr: LossRecovery,
@@ -1050,6 +1062,7 @@ mod tests {
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
             );
             path.set_primary(true);
+            path.rtt_mut().set_initial(TEST_RTT);
             Self {
                 lr: LossRecovery::new(StatsCell::default(), FAST_PTO_SCALE),
                 path: Rc::new(RefCell::new(path)),
@@ -1540,7 +1553,11 @@ mod tests {
 
         // Expiring state after the PTO on the ApplicationData space has
         // expired should result in setting a PTO state.
-        let default_pto = RttEstimate::default().pto(PacketNumberSpace::ApplicationData);
+        let default_pto = lr
+            .path
+            .borrow()
+            .rtt()
+            .pto(PacketNumberSpace::ApplicationData);
         let expected_pto = pn_time(2) + default_pto;
         lr.discard(PacketNumberSpace::Handshake, expected_pto);
         let profile = lr.send_profile(now());
@@ -1572,7 +1589,7 @@ mod tests {
             ON_SENT_SIZE,
         ));
 
-        let handshake_pto = RttEstimate::default().pto(PacketNumberSpace::Handshake);
+        let handshake_pto = lr.path.borrow().rtt().pto(PacketNumberSpace::Handshake);
         let expected_pto = now() + handshake_pto;
         assert_eq!(lr.pto_time(PacketNumberSpace::Initial), Some(expected_pto));
         let profile = lr.send_profile(now());
