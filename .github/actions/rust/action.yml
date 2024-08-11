@@ -8,26 +8,52 @@ inputs:
   components:
     description: 'Rust components to install'
     default: ''
+  tools:
+    description: 'Additional Rust tools to install'
+    default: ''
+  token:
+    description: 'A Github PAT'
+    required: true
 
 runs:
   using: composite
   steps:
+    - name: Upgrade rustup (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS'
+      run: brew update && brew upgrade rustup
+
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@bb45937a053e097f8591208d8e74c90db1873d07 # master
+      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
 
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: runner.os == 'Windows'
+      run: rm /usr/bin/link.exe || true
+
     - name: Install cargo-quickinstall
       shell: bash
+      if: inputs.tools != ''
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
       run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
       shell: bash
-      run: |
-        cargo +${{ inputs.version }} quickinstall --no-binstall \
-          cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine \
-          cargo-machete cargo-fuzz
+      if: inputs.tools != ''
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: cargo +${{ inputs.version }} quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
 
     # sccache slows CI down, so we leave it disabled.
     # Leaving the steps below commented out, so we can re-evaluate enabling it later.

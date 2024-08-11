@@ -104,8 +104,8 @@ fn connection_started(qlog: &NeqoQlog, path: &PathRef) {
             protocol: Some("QUIC".into()),
             src_port: p.local_address().port().into(),
             dst_port: p.remote_address().port().into(),
-            src_cid: Some(format!("{}", p.local_cid())),
-            dst_cid: Some(format!("{}", p.remote_cid())),
+            src_cid: p.local_cid().map(ToString::to_string),
+            dst_cid: p.remote_cid().map(ToString::to_string),
         });
 
         Some(ev_data)
@@ -308,7 +308,7 @@ pub enum QlogMetric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
     LatestRtt(Duration),
-    RttVariance(u64),
+    RttVariance(Duration),
     MaxAckDelay(u64),
     PtoCount(usize),
     CongestionWindow(usize),
@@ -340,7 +340,7 @@ pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric]) {
                 QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
                 QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
                 QlogMetric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
-                QlogMetric::RttVariance(v) => rtt_variance = Some(*v as f32),
+                QlogMetric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
                 QlogMetric::PtoCount(v) => pto_count = Some(u16::try_from(*v).unwrap()),
                 QlogMetric::CongestionWindow(v) => {
                     congestion_window = Some(u64::try_from(*v).unwrap());
