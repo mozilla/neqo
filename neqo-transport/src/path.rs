@@ -660,8 +660,8 @@ impl Path {
 
     /// Get the first local connection ID.
     /// Only do this for the primary path during the handshake.
-    pub fn local_cid(&self) -> &ConnectionId {
-        self.local_cid.as_ref().unwrap()
+    pub const fn local_cid(&self) -> Option<&ConnectionId> {
+        self.local_cid.as_ref()
     }
 
     /// Set the remote connection ID based on the peer's choice.
@@ -674,8 +674,10 @@ impl Path {
     }
 
     /// Access the remote connection ID.
-    pub fn remote_cid(&self) -> &ConnectionId {
-        self.remote_cid.as_ref().unwrap().connection_id()
+    pub fn remote_cid(&self) -> Option<&ConnectionId> {
+        self.remote_cid
+            .as_ref()
+            .map(super::cid::ConnectionIdEntry::connection_id)
     }
 
     /// Set the stateless reset token for the connection ID that is currently in use.
@@ -1002,6 +1004,7 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
+        self.ecn_info.on_packets_lost(lost_packets);
         let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,
@@ -1013,6 +1016,14 @@ impl Path {
         if cwnd_reduced {
             self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
         }
+    }
+
+    /// Determine whether we should be setting a PTO for this path. This is true when either the
+    /// path is valid or when there is enough remaining in the amplification limit to fit a
+    /// full-sized path (i.e., the path MTU).
+    pub fn pto_possible(&self) -> bool {
+        // See the implementation of `amplification_limit` for details.
+        self.amplification_limit() >= self.plpmtu()
     }
 
     /// Get the number of bytes that can be written to this path.

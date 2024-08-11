@@ -643,7 +643,7 @@ impl RecvStream {
         // We should post a DataReadable event only once when we change from no-data-ready to
         // data-ready. Therefore remember the state before processing a new frame.
         let already_data_ready = self.data_ready();
-        let new_end = offset + u64::try_from(data.len()).unwrap();
+        let new_end = offset + u64::try_from(data.len())?;
 
         self.state.flow_control_consume_data(new_end, fin)?;
 
@@ -1483,7 +1483,7 @@ mod tests {
         assert!(s.has_frames_to_write());
 
         // consume it
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut token = Vec::new();
         s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
 
@@ -1597,7 +1597,7 @@ mod tests {
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
         // consume it
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut token = Vec::new();
         session_fc
             .borrow_mut()
@@ -1618,7 +1618,7 @@ mod tests {
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
         // consume it
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut token = Vec::new();
         session_fc
             .borrow_mut()
@@ -1866,7 +1866,7 @@ mod tests {
         assert!(s.fc().unwrap().frame_needed());
 
         // Write the fc update frame
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut token = Vec::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut()

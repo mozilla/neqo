@@ -121,7 +121,7 @@ pub struct Args {
     ech: bool,
 }
 
-#[cfg(feature = "bench")]
+#[cfg(any(test, feature = "bench"))]
 impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr;
@@ -177,6 +177,11 @@ impl Args {
         } else {
             Instant::now()
         }
+    }
+
+    #[cfg(any(test, feature = "bench"))]
+    pub fn set_qlog_dir(&mut self, dir: PathBuf) {
+        self.shared.qlog_dir = Some(dir);
     }
 }
 
