@@ -546,7 +546,6 @@ pub struct AckTracker {
 
 impl AckTracker {
     pub fn drop_space(&mut self, space: PacketNumberSpace) {
-        self.spaces[space].take();
         assert_ne!(
             space,
             PacketNumberSpace::ApplicationData,
@@ -555,6 +554,7 @@ impl AckTracker {
         if space == PacketNumberSpace::Handshake {
             assert!(self.spaces[PacketNumberSpace::Initial].is_none());
         }
+        self.spaces[space].take();
     }
 
     pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
