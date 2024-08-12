@@ -552,6 +552,9 @@ impl AckTracker {
             PacketNumberSpace::ApplicationData,
             "discarding application space"
         );
+        if space == PacketNumberSpace::Handshake {
+            assert!(self.spaces[PacketNumberSpace::Initial].is_none());
+        }
     }
 
     pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
@@ -601,12 +604,9 @@ impl AckTracker {
         // That isn't a problem because we guarantee that earlier spaces will always
         // be able to send ACK frames.
         self.spaces
-            .iter()
-            .filter_map(|(_, recvd)| {
-                recvd
-                    .as_ref()
-                    .and_then(|recvd| recvd.ack_time().filter(|t| *t > now))
-            })
+            .values()
+            .flatten()
+            .filter_map(|recvd| recvd.ack_time().filter(|t| *t > now))
             .min()
     }
 
