@@ -28,12 +28,14 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
+use crate::STREAM_IO_BUFFER_SIZE;
 
 pub struct Handler<'a> {
     #[allow(clippy::struct_field_names)]
     url_handler: UrlHandler<'a>,
     token: Option<ResumptionToken>,
     output_read_data: bool,
+    read_buffer: Vec<u8>,
 }
 
 impl<'a> Handler<'a> {
@@ -54,6 +56,7 @@ impl<'a> Handler<'a> {
             url_handler,
             token: None,
             output_read_data: args.output_read_data,
+            read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
 }
@@ -182,16 +185,14 @@ impl<'a> super::Handler for Handler<'a> {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => loop {
-                            let mut data = vec![0; 4096];
                             let (sz, fin) = client
-                                .read_data(Instant::now(), stream_id, &mut data)
+                                .read_data(Instant::now(), stream_id, &mut self.read_buffer)
                                 .expect("Read should succeed");
 
                             handler.process_data_readable(
                                 stream_id,
                                 fin,
-                                data,
-                                sz,
+                                &self.read_buffer[..sz],
                                 self.output_read_data,
                             )?;
 
@@ -245,8 +246,7 @@ trait StreamHandler {
         &mut self,
         stream_id: StreamId,
         fin: bool,
-        data: Vec<u8>,
-        sz: usize,
+        data: &[u8],
         output_read_data: bool,
     ) -> Res<bool>;
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId);
@@ -275,7 +275,7 @@ impl StreamHandlerType {
             Self::Upload => Box::new(UploadStreamHandler {
                 data: vec![42; args.upload_size],
                 offset: 0,
-                chunk_size: 32768,
+                chunk_size: STREAM_IO_BUFFER_SIZE,
                 start: Instant::now(),
             }),
         }
@@ -297,21 +297,20 @@ impl StreamHandler for DownloadStreamHandler {
         &mut self,
         stream_id: StreamId,
         fin: bool,
-        data: Vec<u8>,
-        sz: usize,
+        data: &[u8],
         output_read_data: bool,
     ) -> Res<bool> {
         if let Some(out_file) = &mut self.out_file {
-            if sz > 0 {
-                out_file.write_all(&data[..sz])?;
+            if !data.is_empty() {
+                out_file.write_all(data)?;
             }
             return Ok(true);
         } else if !output_read_data {
-            qdebug!("READ[{stream_id}]: {sz} bytes");
-        } else if let Ok(txt) = String::from_utf8(data.clone()) {
+            qdebug!("READ[{stream_id}]: {} bytes", data.len());
+        } else if let Ok(txt) = std::str::from_utf8(data) {
             qdebug!("READ[{stream_id}]: {txt}");
         } else {
-            qdebug!("READ[{}]: 0x{}", stream_id, hex(&data));
+            qdebug!("READ[{}]: 0x{}", stream_id, hex(data));
         }
 
         if fin {
@@ -344,11 +343,10 @@ impl StreamHandler for UploadStreamHandler {
         &mut self,
         stream_id: StreamId,
         _fin: bool,
-        data: Vec<u8>,
-        _sz: usize,
+        data: &[u8],
         _output_read_data: bool,
     ) -> Res<bool> {
-        if let Ok(txt) = String::from_utf8(data.clone()) {
+        if let Ok(txt) = std::str::from_utf8(data) {
             let trimmed_txt = txt.trim_end_matches(char::from(0));
             let parsed: usize = trimmed_txt.parse().unwrap();
             if parsed == self.data.len() {
@@ -356,7 +354,7 @@ impl StreamHandler for UploadStreamHandler {
                 qinfo!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
             }
         } else {
-            panic!("Unexpected data [{}]: 0x{}", stream_id, hex(&data));
+            panic!("Unexpected data [{}]: 0x{}", stream_id, hex(data));
         }
         Ok(true)
     }
