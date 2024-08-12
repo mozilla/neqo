@@ -11,7 +11,7 @@ use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    frames::{FrameReader, HFrame, StreamReaderConnectionWrapper},
+    frames::{hframe::HFrameType, FrameReader, HFrame, StreamReaderConnectionWrapper},
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
     push_controller::PushController,
@@ -97,7 +97,7 @@ impl RecvMessage {
                 frame_reader: message_info
                     .first_frame_type
                     .map_or_else(FrameReader::new, |frame_type| {
-                        FrameReader::new_with_type(frame_type)
+                        FrameReader::new_with_type(HFrameType(frame_type))
                     }),
             },
             message_type: message_info.message_type,

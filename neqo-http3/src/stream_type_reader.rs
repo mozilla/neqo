@@ -10,7 +10,7 @@ use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
     control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
-    frames::{reader::FrameDecoder, HFrame, H3_FRAME_TYPE_HEADERS},
+    frames::{hframe::HFrameType, reader::FrameDecoder, HFrame, H3_FRAME_TYPE_HEADERS},
     CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
 };
 
@@ -54,8 +54,8 @@ impl NewStreamType {
                 // The "stream_type" for a bidirectional stream is a frame type. We accept
                 // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
                 // but any other frame type is bad if we know about it.
-                if <HFrame as FrameDecoder<HFrame>>::is_known_type(stream_type)
-                    && stream_type != H3_FRAME_TYPE_HEADERS
+                if <HFrame as FrameDecoder<HFrame>>::is_known_type(HFrameType(stream_type))
+                    && HFrameType(stream_type) != H3_FRAME_TYPE_HEADERS
                 {
                     Err(Error::HttpFrame)
                 } else {
@@ -395,10 +395,10 @@ mod tests {
     fn decode_stream_http() {
         let mut t = Test::new(StreamType::BiDi, Role::Server);
         t.decode(
-            &[H3_FRAME_TYPE_HEADERS],
+            &[u64::from(H3_FRAME_TYPE_HEADERS)],
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::Http(H3_FRAME_TYPE_HEADERS)),
+                ReceiveOutput::NewStream(NewStreamType::Http(u64::from(H3_FRAME_TYPE_HEADERS))),
                 true,
             )),
             true,
@@ -406,8 +406,9 @@ mod tests {
 
         let mut t = Test::new(StreamType::UniDi, Role::Server);
         t.decode(
-            &[H3_FRAME_TYPE_HEADERS], /* this is the same as a HTTP3_UNI_STREAM_TYPE_PUSH which
-                                       * is not aallowed on the server side. */
+            &[u64::from(H3_FRAME_TYPE_HEADERS)], /* this is the same as a
+                                                  * HTTP3_UNI_STREAM_TYPE_PUSH which
+                                                  * is not aallowed on the server side. */
             false,
             &Err(Error::HttpStreamCreation),
             true,
@@ -415,7 +416,7 @@ mod tests {
 
         let mut t = Test::new(StreamType::BiDi, Role::Client);
         t.decode(
-            &[H3_FRAME_TYPE_HEADERS],
+            &[u64::from(H3_FRAME_TYPE_HEADERS)],
             false,
             &Err(Error::HttpStreamCreation),
             true,
@@ -423,8 +424,8 @@ mod tests {
 
         let mut t = Test::new(StreamType::UniDi, Role::Client);
         t.decode(
-            &[H3_FRAME_TYPE_HEADERS, 0xaaaa_aaaa], /* this is the same as a
-                                                    * HTTP3_UNI_STREAM_TYPE_PUSH */
+            &[u64::from(H3_FRAME_TYPE_HEADERS), 0xaaaa_aaaa], /* this is the same as a
+                                                               * HTTP3_UNI_STREAM_TYPE_PUSH */
             false,
             &Ok((
                 ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa)),
