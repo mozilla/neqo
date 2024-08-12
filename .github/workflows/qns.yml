@@ -55,7 +55,7 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@5176d81f87c23d6fc96624dfdbcd9f3830bbe445 # v6.5.0
+      - uses: docker/build-push-action@16ebe778df0e7752d2cfcbd924afdbbd89c1a755 # v6.6.1
         if: github.event_name != 'pull_request'
         with:
           push: true
@@ -66,7 +66,7 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@5176d81f87c23d6fc96624dfdbcd9f3830bbe445 # v6.5.0
+      - uses: docker/build-push-action@16ebe778df0e7752d2cfcbd924afdbbd89c1a755 # v6.6.1
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
