@@ -251,7 +251,8 @@ mod tests {
         WEBTRANSPORT_UNI_STREAM,
     };
     use crate::{
-        control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::H3_FRAME_TYPE_HEADERS,
+        control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
+        frames::{H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS},
         CloseType, Error, NewStreamType, ReceiveOutput, RecvStream, Res,
     };
 
@@ -431,6 +432,14 @@ mod tests {
                 ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa)),
                 true,
             )),
+            true,
+        );
+
+        let mut t = Test::new(StreamType::BiDi, Role::Server);
+        t.decode(
+            &[H3_FRAME_TYPE_SETTINGS.into()],
+            true,
+            &Err(Error::HttpFrame),
             true,
         );
     }

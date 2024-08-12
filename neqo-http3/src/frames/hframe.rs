@@ -38,12 +38,6 @@ impl From<HFrameType> for u64 {
     }
 }
 
-impl From<u64> for HFrameType {
-    fn from(t: u64) -> Self {
-        Self(t)
-    }
-}
-
 // data for DATA frame is not read into HFrame::Data.
 #[derive(PartialEq, Eq, Debug)]
 pub enum HFrame {
