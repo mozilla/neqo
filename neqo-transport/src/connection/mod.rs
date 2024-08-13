@@ -1547,17 +1547,29 @@ impl Connection {
 
                     qlog::packet_received(&self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
-                    if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
-                        qdebug!([self], "Duplicate packet {}-{}", space, payload.pn());
-                        self.stats.borrow_mut().dups_rx += 1;
-                    } else {
-                        match self.process_packet(path, &payload, now) {
-                            Ok(migrate) => self.postprocess_packet(path, d, &packet, migrate, now),
-                            Err(e) => {
-                                self.ensure_error_path(path, &packet, now);
-                                return Err(e);
+                    if let Some(space) = self.acks.get_mut(space) {
+                        if space.is_duplicate(payload.pn()) {
+                            qdebug!("Duplicate packet {}-{}", space, payload.pn());
+                            self.stats.borrow_mut().dups_rx += 1;
+                        } else {
+                            match self.process_packet(path, &payload, now) {
+                                Ok(migrate) => {
+                                    self.postprocess_packet(path, d, &packet, migrate, now);
+                                }
+                                Err(e) => {
+                                    self.ensure_error_path(path, &packet, now);
+                                    return Err(e);
+                                }
                             }
                         }
+                    } else {
+                        qdebug!(
+                            [self],
+                            "Received packet {} for untracked space {}",
+                            space,
+                            payload.pn()
+                        );
+                        return Err(Error::ProtocolViolation);
                     }
                 }
                 Err(e) => {
@@ -1684,7 +1696,11 @@ impl Connection {
                 self.paths.make_permanent(path, None, cid);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
-                if primary.borrow().remote_cid().is_empty() {
+                if primary
+                    .borrow()
+                    .remote_cid()
+                    .map_or(true, |id| id.is_empty())
+                {
                     self.paths
                         .make_permanent(path, None, ConnectionIdEntry::empty_remote());
                     Ok(())
@@ -1913,7 +1929,7 @@ impl Connection {
                         // a packet on a new path, we avoid sending (and the privacy risk) rather
                         // than reuse a connection ID.
                         let res = if path.borrow().is_temporary() {
-                            assert!(!cfg!(test), "attempting to close with a temporary path");
+                            qerror!([self], "Attempting to close with a temporary path");
                             Err(Error::InternalError)
                         } else {
                             self.output_path(&path, now, &Some(details))
@@ -1937,16 +1953,15 @@ impl Connection {
     ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
-            qdebug!("Building Short dcid {}", path.remote_cid());
+            qdebug!("Building Short dcid {:?}", path.remote_cid());
             PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
         } else {
             qdebug!(
-                "Building {:?} dcid {} scid {}",
+                "Building {:?} dcid {:?} scid {:?}",
                 pt,
                 path.remote_cid(),
                 path.local_cid(),
             );
-
             PacketBuilder::long(encoder, pt, version, path.remote_cid(), path.local_cid())
         };
         if builder.remaining() > 0 {

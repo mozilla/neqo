@@ -35,6 +35,7 @@ jobs:
         uses: ./.github/actions/rust
         with:
           tools: cargo-mutants
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find incremental mutants
         if: github.event_name == 'pull_request'
@@ -63,7 +64,7 @@ jobs:
           } > "$GITHUB_STEP_SUMMARY"
 
       - name: Archive mutants.out
-        uses: actions/upload-artifact@89ef406dd8d7e03cfd12d9e0a4a378f454709029 # v4.3.5
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
         if: always()
         with:
           name: mutants.out
