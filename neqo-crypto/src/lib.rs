@@ -161,7 +161,7 @@ fn init_once(db: Option<PathBuf>) -> Res<NssLoaded> {
 }
 
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance
-/// that
+/// that this is invoked twice, that's OK.
 ///
 /// # Errors
 ///
