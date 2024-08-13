@@ -13,10 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use enum_map::Enum;
+use enum_map::{enum_map, Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
-use smallvec::{smallvec, SmallVec};
 
 use crate::{
     ecn::EcnCount,
@@ -26,7 +25,6 @@ use crate::{
     stats::FrameStats,
 };
 
-// TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Enum)]
 pub enum PacketNumberSpace {
     Initial,
@@ -70,17 +68,17 @@ impl From<PacketType> for PacketNumberSpace {
 
 #[derive(Clone, Copy, Default)]
 pub struct PacketNumberSpaceSet {
-    initial: bool,
-    handshake: bool,
-    application_data: bool,
+    spaces: EnumMap<PacketNumberSpace, bool>,
 }
 
 impl PacketNumberSpaceSet {
-    pub const fn all() -> Self {
+    pub fn all() -> Self {
         Self {
-            initial: true,
-            handshake: true,
-            application_data: true,
+            spaces: enum_map! {
+                PacketNumberSpace::Initial => true,
+                PacketNumberSpace::Handshake => true,
+                PacketNumberSpace::ApplicationData => true,
+            },
         }
     }
 }
@@ -89,21 +87,13 @@ impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
     type Output = bool;
 
     fn index(&self, space: PacketNumberSpace) -> &Self::Output {
-        match space {
-            PacketNumberSpace::Initial => &self.initial,
-            PacketNumberSpace::Handshake => &self.handshake,
-            PacketNumberSpace::ApplicationData => &self.application_data,
-        }
+        &self.spaces[space]
     }
 }
 
 impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
     fn index_mut(&mut self, space: PacketNumberSpace) -> &mut Self::Output {
-        match space {
-            PacketNumberSpace::Initial => &mut self.initial,
-            PacketNumberSpace::Handshake => &mut self.handshake,
-            PacketNumberSpace::ApplicationData => &mut self.application_data,
-        }
+        &mut self.spaces[space]
     }
 }
 
@@ -550,34 +540,25 @@ impl ::std::fmt::Display for RecvdPackets {
     }
 }
 
-#[derive(Debug)]
 pub struct AckTracker {
-    /// This stores information about received packets in *reverse* order
-    /// by spaces.  Why reverse?  Because we ultimately only want to keep
-    /// `ApplicationData` and this allows us to drop other spaces easily.
-    spaces: SmallVec<[RecvdPackets; 1]>,
+    spaces: EnumMap<PacketNumberSpace, Option<RecvdPackets>>,
 }
 
 impl AckTracker {
     pub fn drop_space(&mut self, space: PacketNumberSpace) {
-        let sp = match space {
-            PacketNumberSpace::Initial => self.spaces.pop(),
-            PacketNumberSpace::Handshake => {
-                let sp = self.spaces.pop();
-                self.spaces.shrink_to_fit();
-                sp
-            }
-            PacketNumberSpace::ApplicationData => panic!("discarding application space"),
-        };
-        assert_eq!(sp.unwrap().space, space, "dropping spaces out of order");
+        assert_ne!(
+            space,
+            PacketNumberSpace::ApplicationData,
+            "discarding application space"
+        );
+        if space == PacketNumberSpace::Handshake {
+            assert!(self.spaces[PacketNumberSpace::Initial].is_none());
+        }
+        self.spaces[space].take();
     }
 
     pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
-        self.spaces.get_mut(match space {
-            PacketNumberSpace::ApplicationData => 0,
-            PacketNumberSpace::Handshake => 1,
-            PacketNumberSpace::Initial => 2,
-        })
+        self.spaces[space].as_mut()
     }
 
     pub fn ack_freq(
@@ -602,23 +583,31 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
-        for recvd in &self.spaces {
-            qtrace!("ack_time for {} = {:?}", recvd.space, recvd.ack_time());
+        #[cfg(debug_assertions)]
+        for (space, recvd) in &self.spaces {
+            if let Some(recvd) = recvd {
+                qtrace!("ack_time for {} = {:?}", space, recvd.ack_time());
+            }
         }
 
-        if self.spaces.len() == 1 {
-            self.spaces[0].ack_time()
-        } else {
-            // Ignore any time that is in the past relative to `now`.
-            // That is something of a hack, but there are cases where we can't send ACK
-            // frames for all spaces, which can mean that one space is stuck in the past.
-            // That isn't a problem because we guarantee that earlier spaces will always
-            // be able to send ACK frames.
-            self.spaces
-                .iter()
-                .filter_map(|recvd| recvd.ack_time().filter(|t| *t > now))
-                .min()
+        if self.spaces[PacketNumberSpace::Initial].is_none()
+            && self.spaces[PacketNumberSpace::Handshake].is_none()
+        {
+            if let Some(recvd) = &self.spaces[PacketNumberSpace::ApplicationData] {
+                return recvd.ack_time();
+            }
         }
+
+        // Ignore any time that is in the past relative to `now`.
+        // That is something of a hack, but there are cases where we can't send ACK
+        // frames for all spaces, which can mean that one space is stuck in the past.
+        // That isn't a problem because we guarantee that earlier spaces will always
+        // be able to send ACK frames.
+        self.spaces
+            .values()
+            .flatten()
+            .filter_map(|recvd| recvd.ack_time().filter(|t| *t > now))
+            .min()
     }
 
     pub fn acked(&mut self, token: &AckToken) {
@@ -645,11 +634,11 @@ impl AckTracker {
 impl Default for AckTracker {
     fn default() -> Self {
         Self {
-            spaces: smallvec![
-                RecvdPackets::new(PacketNumberSpace::ApplicationData),
-                RecvdPackets::new(PacketNumberSpace::Handshake),
-                RecvdPackets::new(PacketNumberSpace::Initial),
-            ],
+            spaces: enum_map! {
+                PacketNumberSpace::Initial => Some(RecvdPackets::new(PacketNumberSpace::Initial)),
+                PacketNumberSpace::Handshake => Some(RecvdPackets::new(PacketNumberSpace::Handshake)),
+                PacketNumberSpace::ApplicationData => Some(RecvdPackets::new(PacketNumberSpace::ApplicationData)),
+            },
         }
     }
 }
@@ -667,7 +656,7 @@ mod tests {
     };
     use crate::{
         frame::Frame,
-        packet::{PacketBuilder, PacketNumber},
+        packet::{PacketBuilder, PacketNumber, PacketType},
         stats::FrameStats,
     };
 
@@ -943,13 +932,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "dropping spaces out of order")]
-    fn drop_out_of_order() {
-        let mut tracker = AckTracker::default();
-        tracker.drop_space(PacketNumberSpace::Handshake);
-    }
-
-    #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
         let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
@@ -1135,5 +1117,29 @@ mod tests {
         assert!(!copy[PacketNumberSpace::Initial]);
         assert!(copy[PacketNumberSpace::Handshake]);
         assert!(copy[PacketNumberSpace::ApplicationData]);
+    }
+
+    #[test]
+    fn from_packet_type() {
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::Initial),
+            PacketNumberSpace::Initial
+        );
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::Handshake),
+            PacketNumberSpace::Handshake
+        );
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::ZeroRtt),
+            PacketNumberSpace::ApplicationData
+        );
+        assert_eq!(
+            PacketNumberSpace::from(PacketType::Short),
+            PacketNumberSpace::ApplicationData
+        );
+        assert!(std::panic::catch_unwind(|| {
+            PacketNumberSpace::from(PacketType::VersionNegotiation)
+        })
+        .is_err());
     }
 }
