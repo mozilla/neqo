@@ -426,32 +426,33 @@ struct PtoState {
 impl PtoState {
     /// The number of packets we send on a PTO.
     /// And the number to declare lost when the PTO timer is hit.
-    fn pto_packet_count(space: PacketNumberSpace, rx_count: usize) -> usize {
-        if space == PacketNumberSpace::Initial && rx_count == 0 {
-            // For the Initial space, we only send one packet on PTO if we have not received any
-            // packets from the peer yet. This avoids sending useless PING-only packets
-            // when the Client Initial is deemed lost.
-            1
-        } else {
+    fn pto_packet_count(space: PacketNumberSpace) -> usize {
+        if space == PacketNumberSpace::ApplicationData {
             MAX_PTO_PACKET_COUNT
+        } else {
+            // For the Initial and Handshake spaces, we only send one packet on PTO. This avoids
+            // sending useless PING-only packets when only a single packet was lost, which is the
+            // common case. These PINGs use cwnd and amplification window space, and sending them
+            // hence makes the handshake more brittle.
+            1
         }
     }
 
-    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet, rx_count: usize) -> Self {
+    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(probe[space]);
         Self {
             space,
             count: 1,
-            packets: Self::pto_packet_count(space, rx_count),
+            packets: Self::pto_packet_count(space),
             probe,
         }
     }
 
-    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet, rx_count: usize) {
+    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet) {
         debug_assert!(probe[space]);
         self.space = space;
         self.count += 1;
-        self.packets = Self::pto_packet_count(space, rx_count);
+        self.packets = Self::pto_packet_count(space);
         self.probe = probe;
     }
 
@@ -803,11 +804,10 @@ impl LossRecovery {
     }
 
     fn fire_pto(&mut self, pn_space: PacketNumberSpace, allow_probes: PacketNumberSpaceSet) {
-        let rx_count = self.stats.borrow().packets_rx;
         if let Some(st) = &mut self.pto_state {
-            st.pto(pn_space, allow_probes, rx_count);
+            st.pto(pn_space, allow_probes);
         } else {
-            self.pto_state = Some(PtoState::new(pn_space, allow_probes, rx_count));
+            self.pto_state = Some(PtoState::new(pn_space, allow_probes));
         }
 
         self.pto_state
@@ -839,10 +839,7 @@ impl LossRecovery {
                     let space = self.spaces.get_mut(*pn_space).unwrap();
                     lost.extend(
                         space
-                            .pto_packets(PtoState::pto_packet_count(
-                                *pn_space,
-                                self.stats.borrow().packets_rx,
-                            ))
+                            .pto_packets(PtoState::pto_packet_count(*pn_space))
                             .cloned(),
                     );
 
