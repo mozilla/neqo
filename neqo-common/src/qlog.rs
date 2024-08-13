@@ -177,7 +177,7 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
                 // We can't do the obvious two-step conversion with f64::from(i32::try_from(...)),
                 // because that overflows earlier than is ideal.  This should be fine for a while.
                 #[allow(clippy::cast_precision_loss)]
-                Some(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).as_secs_f64() * 1000)
+                Some((time::OffsetDateTime::now_utc().unix_timestamp() * 1000) as f64)
             },
             time_format: Some("relative".to_string()),
         }),
