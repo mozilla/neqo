@@ -1547,17 +1547,29 @@ impl Connection {
 
                     qlog::packet_received(&self.qlog, &packet, &payload);
                     let space = PacketNumberSpace::from(payload.packet_type());
-                    if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
-                        qdebug!([self], "Duplicate packet {}-{}", space, payload.pn());
-                        self.stats.borrow_mut().dups_rx += 1;
-                    } else {
-                        match self.process_packet(path, &payload, now) {
-                            Ok(migrate) => self.postprocess_packet(path, d, &packet, migrate, now),
-                            Err(e) => {
-                                self.ensure_error_path(path, &packet, now);
-                                return Err(e);
+                    if let Some(space) = self.acks.get_mut(space) {
+                        if space.is_duplicate(payload.pn()) {
+                            qdebug!("Duplicate packet {}-{}", space, payload.pn());
+                            self.stats.borrow_mut().dups_rx += 1;
+                        } else {
+                            match self.process_packet(path, &payload, now) {
+                                Ok(migrate) => {
+                                    self.postprocess_packet(path, d, &packet, migrate, now);
+                                }
+                                Err(e) => {
+                                    self.ensure_error_path(path, &packet, now);
+                                    return Err(e);
+                                }
                             }
                         }
+                    } else {
+                        qdebug!(
+                            [self],
+                            "Received packet {} for untracked space {}",
+                            space,
+                            payload.pn()
+                        );
+                        return Err(Error::ProtocolViolation);
                     }
                 }
                 Err(e) => {
@@ -2223,7 +2235,7 @@ impl Connection {
             // Include an ACK frame with the CONNECTION_CLOSE.
             let limit = builder.limit();
             builder.set_limit(limit - ClosingFrame::MIN_LENGTH);
-            self.acks.immediate_ack(now);
+            self.acks.immediate_ack(space, now);
             self.acks.write_frame(
                 space,
                 now,
@@ -2786,10 +2798,8 @@ impl Connection {
                 // prepare to resend them.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
-                if space == PacketNumberSpace::ApplicationData {
-                    // Send an ACK immediately if we might not otherwise do so.
-                    self.acks.immediate_ack(now);
-                }
+                // Send an ACK immediately if we might not otherwise do so.
+                self.acks.immediate_ack(space, now);
             }
             Frame::Ack {
                 largest_acknowledged,
@@ -2948,7 +2958,12 @@ impl Connection {
             for token in lost.tokens() {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
-                    RecoveryToken::Ack(_) => {}
+                    RecoveryToken::Ack(ack_token) => {
+                        // If we lost an ACK frame during the handshake, send another one.
+                        if ack_token.space() != PacketNumberSpace::ApplicationData {
+                            self.acks.immediate_ack(ack_token.space(), lost.time_sent());
+                        }
+                    }
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
