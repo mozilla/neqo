@@ -30,7 +30,6 @@ use crate::{
     rtt::RttEstimate,
     sender::PacketSender,
     stats::FrameStats,
-    tracking::PacketNumberSpace,
     Stats,
 };
 
@@ -998,7 +997,7 @@ impl Path {
     pub fn on_packets_lost(
         &mut self,
         prev_largest_acked_sent: Option<Instant>,
-        space: PacketNumberSpace,
+        confirmed: bool,
         lost_packets: &[SentPacket],
         stats: &mut Stats,
         now: Instant,
@@ -1008,7 +1007,7 @@ impl Path {
         let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,
-            self.rtt.pto(space), // Important: the base PTO, not adjusted.
+            self.rtt.pto(confirmed), // Important: the base PTO, not adjusted.
             lost_packets,
             stats,
             now,

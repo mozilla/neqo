@@ -18,7 +18,9 @@ use neqo_crypto::{
 };
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
-use test_fixture::{assertions, fixture_init, now, split_datagram, DEFAULT_ADDR};
+use test_fixture::{
+    assertions, assertions::assert_coalesced_0rtt, fixture_init, now, split_datagram, DEFAULT_ADDR,
+};
 
 use super::{
     super::{Connection, Output, State},
@@ -400,10 +402,10 @@ fn reorder_05rtt_with_0rtt() {
     // Now PTO at the client and cause the server to re-send handshake packets.
     now += AT_LEAST_PTO;
     let c3 = client.process(None, now).dgram();
+    assert_coalesced_0rtt(c3.as_ref().unwrap());
 
     now += RTT / 2;
     let s3 = server.process(c3.as_ref(), now).dgram().unwrap();
-    assertions::assert_no_1rtt(&s3[..]);
 
     // The client should be able to process the 0.5 RTT now.
     // This should contain an ACK, so we are processing an ACK from the past.
@@ -1250,5 +1252,40 @@ fn server_initial_retransmits_identical() {
         }
         now += pto;
         total_ptos += pto;
+    }
+}
+
+#[test]
+fn client_handshake_retransmits_identical() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut ci = client.process(None, now).dgram();
+    let mut server = default_server();
+    let mut si = server.process(ci.take().as_ref(), now).dgram();
+
+    now += DEFAULT_RTT;
+
+    _ = client.process(si.take().as_ref(), now).callback();
+    maybe_authenticate(&mut client);
+
+    // Force the client to retransmit its coalesced Handshake/Short packet a number of times and
+    // make sure the retranmissions are identical to the original. Also, verify the PTO
+    // durations.
+    for i in 1..=3 {
+        _ = client.process(None, now).dgram().unwrap();
+        let pto = client.process(None, now).callback();
+        assert_eq!(pto, DEFAULT_RTT * 3 * (1 << (i - 1)));
+        now += pto;
+
+        assert_eq!(
+            client.stats().frame_tx,
+            FrameStats {
+                crypto: i + 1,
+                ack: i,
+                new_connection_id: i * 7,
+                all: i * 9 + 1,
+                ..Default::default()
+            }
+        );
     }
 }

@@ -252,7 +252,6 @@ fn pto_handshake_complete() {
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
     // Wait for PTO to expire and resend a handshake packet.
-    // Wait long enough that the 1-RTT PTO also fires.
     qdebug!("---- client: PTO");
     now += HALF_RTT * 6;
     let pkt2 = client.process(None, now).dgram();
@@ -261,17 +260,11 @@ fn pto_handshake_complete() {
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    // Get a second PTO packet.
-    // Add some application data to this datagram, then split the 1-RTT off.
+    // Split the 1-RTT off.
     // We'll use that packet to force the server to acknowledge 1-RTT.
-    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    client.stream_close_send(stream_id).unwrap();
-    now += HALF_RTT * 6;
-    let pkt3 = client.process(None, now).dgram();
-    assert_handshake(pkt3.as_ref().unwrap());
-    let (pkt3_hs, pkt3_1rtt) = split_datagram(&pkt3.unwrap());
-    assert_handshake(&pkt3_hs);
-    assert!(pkt3_1rtt.is_some());
+    let (pkt2_hs, pkt2_1rtt) = split_datagram(&pkt2.unwrap());
+    assert_handshake(&pkt2_hs);
+    assert!(pkt2_1rtt.is_some());
 
     // PTO has been doubled.
     let cb = client.process(None, now).callback();
@@ -288,7 +281,7 @@ fn pto_handshake_complete() {
     // This should remove the 1-RTT PTO from messing this test up.
     let server_acks = server.stats().frame_tx.ack;
     let server_done = server.stats().frame_tx.handshake_done;
-    server.process_input(&pkt3_1rtt.unwrap(), now);
+    server.process_input(&pkt2_1rtt.unwrap(), now);
     let ack = server.process(pkt1.as_ref(), now).dgram();
     assert!(ack.is_some());
     assert_eq!(server.stats().frame_tx.ack, server_acks + 2);
@@ -299,14 +292,16 @@ fn pto_handshake_complete() {
     // Note that these don't include 1-RTT packets, because 1-RTT isn't send on PTO.
     let dropped_before1 = server.stats().dropped_rx;
     let server_frames = server.stats().frame_rx.all;
-    server.process_input(&pkt2.unwrap(), now);
+    server.process_input(&pkt2_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before1);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
+    // server.process_input(&pkt2_1rtt.unwrap(), now);
+    let server_frames2 = server.stats().frame_rx.all;
     let dropped_before2 = server.stats().dropped_rx;
-    server.process_input(&pkt3_hs, now);
+    server.process_input(&pkt2_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before2);
-    assert_eq!(server.stats().frame_rx.all, server_frames);
+    assert_eq!(server.stats().frame_rx.all, server_frames2);
 
     now += HALF_RTT;
 

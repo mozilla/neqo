@@ -19,7 +19,6 @@ use crate::{
     qlog::{self, QlogMetric},
     recovery::RecoveryToken,
     stats::FrameStats,
-    tracking::PacketNumberSpace,
 };
 
 /// The smallest time that the system timer (via `sleep()`, `nanosleep()`,
@@ -143,9 +142,9 @@ impl RttEstimate {
         self.smoothed_rtt
     }
 
-    pub fn pto(&self, pn_space: PacketNumberSpace) -> Duration {
+    pub fn pto(&self, hs_confirmed: bool) -> Duration {
         let mut t = self.estimate() + max(4 * self.rttvar, GRANULARITY);
-        if pn_space == PacketNumberSpace::ApplicationData {
+        if hs_confirmed {
             t += self.ack_delay.max();
         }
         t
