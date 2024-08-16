@@ -296,7 +296,6 @@ fn pto_handshake_complete() {
     assert_eq!(1, server.stats().dropped_rx - dropped_before1);
     assert_eq!(server.stats().frame_rx.all, server_frames);
 
-    // server.process_input(&pkt2_1rtt.unwrap(), now);
     let server_frames2 = server.stats().frame_rx.all;
     let dropped_before2 = server.stats().dropped_rx;
     server.process_input(&pkt2_hs, now);
