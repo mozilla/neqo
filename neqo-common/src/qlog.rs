@@ -11,6 +11,7 @@ use std::{
     io::BufWriter,
     path::PathBuf,
     rc::Rc,
+    time::SystemTime,
 };
 
 use qlog::{
@@ -152,6 +153,7 @@ impl Drop for NeqoQlogShared {
     }
 }
 
+#[allow(clippy::missing_panics_doc)]
 #[must_use]
 pub fn new_trace(role: Role) -> qlog::TraceSeq {
     TraceSeq {
@@ -173,11 +175,16 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
             group_id: None,
             protocol_type: None,
             reference_time: {
-                // It is better to allow this than deal with a conversion from i64 to f64.
+                // It is better to allow this than deal with a conversion from u128 to f64.
                 // We can't do the obvious two-step conversion with f64::from(i32::try_from(...)),
                 // because that overflows earlier than is ideal.  This should be fine for a while.
                 #[allow(clippy::cast_precision_loss)]
-                Some((time::OffsetDateTime::now_utc().unix_timestamp() * 1000) as f64)
+                Some(
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("expect UNIX_EPOCH to always be earlier than now")
+                        .as_millis() as f64,
+                )
             },
             time_format: Some("relative".to_string()),
         }),
