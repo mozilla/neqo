@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::event::Provider;
+use neqo_common::{event::Provider, qdebug};
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -257,4 +257,46 @@ fn zero_rtt_update_flow_control() {
     // And the new limit applies.
     assert!(client.stream_send_atomic(uni_stream, MESSAGE).unwrap());
     assert!(client.stream_send_atomic(bidi_stream, MESSAGE).unwrap());
+}
+
+#[test]
+fn zero_rtt_loss_accepted() {
+    for i in 0..5 {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let token = exchange_ticket(&mut client, &mut server, now());
+        let mut client = default_client();
+        client
+            .enable_resumption(now(), token)
+            .expect("should set token");
+        let mut server = resumed_server(&client);
+
+        // Make CI/0-RTT
+        let mut now = now();
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
+        let ci = client.process(None, now);
+        assert!(ci.as_dgram_ref().is_some());
+
+        if i > 0 {
+            // Drop CI/0-RTT a number of times
+            qdebug!("Drop CI/0-RTT {} times", i);
+            for _ in 0..i {
+                now += client.process(None, now).callback();
+                let ci = client.process(None, now);
+                assert!(ci.as_dgram_ref().is_some());
+            }
+        }
+
+        // Process CI/0-RTT
+        let si = server.process(ci.as_dgram_ref(), now);
+        assert!(si.as_dgram_ref().is_some());
+
+        // 0-RTT should be accepted
+        _ = client.process(si.as_dgram_ref(), now);
+        let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
+        assert!(!client.events().any(recvd_0rtt_reject));
+    }
 }
