@@ -312,6 +312,7 @@ fn zero_rtt_lost_data_rtx() {
         })
         .expect("should have received a new stream event");
     assert_eq!(client_stream_id, server_stream_id.as_u64());
+}
 
 #[test]
 fn zero_rtt_loss_accepted() {
@@ -342,7 +343,7 @@ fn zero_rtt_loss_accepted() {
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let mut ci = client.process_output(now);
         assert!(ci.as_dgram_ref().is_some());
-        assertions::assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
+        assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
         qdebug!("Drop CI/0-RTT {i} extra times");
