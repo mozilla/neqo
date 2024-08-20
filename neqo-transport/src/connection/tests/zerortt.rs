@@ -279,6 +279,7 @@ fn zero_rtt_loss_accepted() {
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let mut ci = client.process(None, now);
         assert!(ci.as_dgram_ref().is_some());
+        assertions::assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
         qdebug!("Drop CI/0-RTT {} extra times", i);
@@ -291,6 +292,15 @@ fn zero_rtt_loss_accepted() {
         // Process CI/0-RTT
         let si = server.process(ci.as_dgram_ref(), now);
         assert!(si.as_dgram_ref().is_some());
+
+        let server_stream_id = server
+            .events()
+            .find_map(|evt| match evt {
+                ConnectionEvent::NewStream { stream_id } => Some(stream_id),
+                _ => None,
+            })
+            .expect("should have received a new stream event");
+        assert_eq!(client_stream_id, server_stream_id.as_u64());
 
         // 0-RTT should be accepted
         _ = client.process(si.as_dgram_ref(), now);
