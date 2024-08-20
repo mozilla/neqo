@@ -312,7 +312,7 @@ fn zero_rtt_loss_accepted() {
         assert_eq!(client_stream_id, server_stream_id.as_u64());
 
         // 0-RTT should be accepted
-        _ = client.process(si.as_dgram_ref(), now);
+        client.process_input(si.as_dgram_ref().unwrap(), now);
         let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
         assert!(
             !client.events().any(recvd_0rtt_reject),
