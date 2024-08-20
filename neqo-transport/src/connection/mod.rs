@@ -949,9 +949,8 @@ impl Connection {
                     let st = State::Closed(error.clone());
                     self.set_state(st);
                     qinfo!("Closing timer expired");
+                    return;
                 }
-                // Don't do anything else in these states.
-                return;
             }
             State::Closed(_) => {
                 qdebug!("Timer fired while closed");
@@ -964,6 +963,11 @@ impl Connection {
         if self.idle_timeout.expired(now, pto) {
             qinfo!([self], "idle timeout expired");
             self.set_state(State::Closed(CloseReason::Transport(Error::IdleTimeout)));
+            return;
+        }
+
+        if self.state.closing() {
+            qdebug!([self], "Closing, not processing other timers");
             return;
         }
 
