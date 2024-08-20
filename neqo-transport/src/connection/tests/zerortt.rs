@@ -277,17 +277,15 @@ fn zero_rtt_loss_accepted() {
         let mut now = now();
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-        let ci = client.process(None, now);
+        let mut ci = client.process(None, now);
         assert!(ci.as_dgram_ref().is_some());
 
-        if i > 0 {
-            // Drop CI/0-RTT a number of times
-            qdebug!("Drop CI/0-RTT {} times", i);
-            for _ in 0..i {
-                now += client.process(None, now).callback();
-                let ci = client.process(None, now);
-                assert!(ci.as_dgram_ref().is_some());
-            }
+        // Drop CI/0-RTT a number of times
+        qdebug!("Drop CI/0-RTT {} extra times", i);
+        for _ in 0..i {
+            now += client.process(None, now).callback();
+            ci = client.process(None, now);
+            assert!(ci.as_dgram_ref().is_some());
         }
 
         // Process CI/0-RTT
@@ -297,6 +295,9 @@ fn zero_rtt_loss_accepted() {
         // 0-RTT should be accepted
         _ = client.process(si.as_dgram_ref(), now);
         let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
-        assert!(!client.events().any(recvd_0rtt_reject));
+        assert!(
+            !client.events().any(recvd_0rtt_reject),
+            "rejected 0-RTT after {i} extra dropped packets"
+        );
     }
 }
