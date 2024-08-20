@@ -966,6 +966,11 @@ impl Connection {
             return;
         }
 
+        if self.state.closing() {
+            qdebug!([self], "Closing, not processing other timers");
+            return;
+        }
+
         self.streams.cleanup_closed_streams();
 
         let res = self.crypto.states.check_key_update(now);
