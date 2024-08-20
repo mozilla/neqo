@@ -966,6 +966,11 @@ impl Connection {
             return;
         }
 
+        if self.state.closing() {
+            qdebug!([self], "Closing, not processing other timers");
+            return;
+        }
+
         self.streams.cleanup_closed_streams();
 
         let res = self.crypto.states.check_key_update(now);
@@ -1745,12 +1750,12 @@ impl Connection {
             // Make a path on which to run the handshake.
             self.setup_handshake_path(path, now);
 
-            self.zero_rtt_state = match self.crypto.enable_0rtt(self.version, self.role) {
-                Ok(true) => {
-                    qdebug!([self], "Accepted 0-RTT");
-                    ZeroRttState::AcceptedServer
-                }
-                _ => ZeroRttState::Rejected,
+            self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
+                qdebug!([self], "Accepted 0-RTT");
+                ZeroRttState::AcceptedServer
+            } else {
+                qtrace!([self], "Rejected 0-RTT");
+                ZeroRttState::Rejected
             };
 
             // The server knows the final version if it has remote transport parameters.
