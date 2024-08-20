@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider, qdebug};
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
@@ -261,27 +261,36 @@ fn zero_rtt_update_flow_control() {
 
 #[test]
 fn zero_rtt_loss_accepted() {
+    // This test requires a wider anti-replay window than other tests
+    // because the dropped 0-RTT packets add a bunch of delay.
+    const WINDOW: Duration = Duration::from_secs(20);
     for i in 0..5 {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let token = exchange_ticket(&mut client, &mut server, now());
+        let mut now = now();
+        let earlier = now;
+
+        let token = exchange_ticket(&mut client, &mut server, now);
+
+        now += WINDOW;
         let mut client = default_client();
-        client
-            .enable_resumption(now(), token)
-            .expect("should set token");
+        client.enable_resumption(now, token).unwrap();
         let mut server = resumed_server(&client);
+        let anti_replay = AntiReplay::new(earlier, WINDOW, 1, 3).unwrap();
+        server
+            .server_enable_0rtt(&anti_replay, AllowZeroRtt {})
+            .unwrap();
 
         // Make CI/0-RTT
-        let mut now = now();
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let mut ci = client.process(None, now);
         assert!(ci.as_dgram_ref().is_some());
 
         // Drop CI/0-RTT a number of times
-        qdebug!("Drop CI/0-RTT {} extra times", i);
+        qdebug!("Drop CI/0-RTT {i} extra times");
         for _ in 0..i {
             now += client.process(None, now).callback();
             ci = client.process(None, now);
