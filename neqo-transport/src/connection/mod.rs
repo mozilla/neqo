@@ -949,8 +949,9 @@ impl Connection {
                     let st = State::Closed(error.clone());
                     self.set_state(st);
                     qinfo!("Closing timer expired");
-                    return;
                 }
+                // Don't do anything else in these states.
+                return;
             }
             State::Closed(_) => {
                 qdebug!("Timer fired while closed");
