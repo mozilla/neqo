@@ -153,7 +153,6 @@ impl Drop for NeqoQlogShared {
     }
 }
 
-#[allow(clippy::missing_panics_doc)]
 #[must_use]
 pub fn new_trace(role: Role) -> qlog::TraceSeq {
     TraceSeq {
@@ -174,15 +173,10 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
         common_fields: Some(CommonFields {
             group_id: None,
             protocol_type: None,
-            reference_time: {
-                Some(
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("expect UNIX_EPOCH to always be earlier than now")
-                        .as_secs_f64()
-                        * 1_000.0,
-                )
-            },
+            reference_time: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64() * 1_000.0)
+                .ok(),
             time_format: Some("relative".to_string()),
         }),
     }
