@@ -222,7 +222,9 @@ impl<'a> super::Handler for Handler<'a> {
                     }
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
-                | Http3ClientEvent::RequestsCreatable => {
+                | Http3ClientEvent::RequestsCreatable
+                | Http3ClientEvent::ZeroRttRejected => {
+                    qinfo!("{event:?}");
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),

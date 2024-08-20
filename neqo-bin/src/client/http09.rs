@@ -76,7 +76,8 @@ impl<'a> super::Handler for Handler<'a> {
                 }
                 ConnectionEvent::StateChange(
                     State::WaitInitial | State::Handshaking | State::Connected,
-                ) => {
+                )
+                | ConnectionEvent::ZeroRttRejected => {
                     qdebug!("{event:?}");
                     self.download_urls(client);
                 }
