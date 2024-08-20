@@ -293,8 +293,8 @@ fn zero_rtt_loss_accepted() {
         // Drop CI/0-RTT a number of times
         qdebug!("Drop CI/0-RTT {i} extra times");
         for _ in 0..i {
-            now += client.process(None, now).callback();
-            ci = client.process(None, now);
+            now += client.process_output(now).callback();
+            ci = client.process_output(now);
             assert!(ci.as_dgram_ref().is_some());
         }
 
