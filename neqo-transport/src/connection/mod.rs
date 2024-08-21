@@ -967,7 +967,7 @@ impl Connection {
         }
 
         if self.state.closing() {
-            qdebug!([self], "Closing, not processing other timers");
+            qtrace!([self], "Closing, not processing other timers");
             return;
         }
 
