@@ -163,6 +163,7 @@ impl<'a> super::Handler for Handler<'a> {
             self.url_handler.url_queue.push_front(url);
         }
         self.url_handler.stream_handlers.clear();
+        self.url_handler.all_paths.clear();
     }
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {

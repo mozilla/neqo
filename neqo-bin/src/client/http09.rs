@@ -47,6 +47,7 @@ impl<'a> super::Handler for Handler<'a> {
             self.url_queue.push_front(url);
         }
         self.streams.clear();
+        self.all_paths.clear();
     }
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool> {
