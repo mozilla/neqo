@@ -246,7 +246,6 @@ impl<'b> Handler<'b> {
             .url_queue
             .pop_front()
             .expect("download_next called with empty queue");
-        self.handled_urls.push(url.clone());
         match client.stream_create(StreamType::BiDi) {
             Ok(client_stream_id) => {
                 qinfo!("Created stream {client_stream_id} for {url}");
@@ -257,6 +256,7 @@ impl<'b> Handler<'b> {
                 client.stream_close_send(client_stream_id).unwrap();
                 let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
                 self.streams.insert(client_stream_id, out_file);
+                self.handled_urls.push(url);
                 true
             }
             Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {

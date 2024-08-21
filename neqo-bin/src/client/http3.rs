@@ -445,6 +445,7 @@ impl<'a> UrlHandler<'a> {
                     client_stream_id,
                 );
                 self.stream_handlers.insert(client_stream_id, handler);
+                self.handled_urls.push(url);
                 true
             }
             Err(
