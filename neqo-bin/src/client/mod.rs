@@ -349,6 +349,7 @@ trait Handler {
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
     fn take_token(&mut self) -> Option<ResumptionToken>;
+    fn reinit(&mut self);
 }
 
 enum CloseState {

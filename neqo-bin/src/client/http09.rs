@@ -31,6 +31,7 @@ use crate::STREAM_IO_BUFFER_SIZE;
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
+    handled_urls: Vec<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
     token: Option<ResumptionToken>,
@@ -40,6 +41,13 @@ pub struct Handler<'a> {
 
 impl<'a> super::Handler for Handler<'a> {
     type Client = Connection;
+
+    fn reinit(&mut self) {
+        for url in self.handled_urls.drain(..) {
+            self.url_queue.push_front(url);
+        }
+        self.streams.clear();
+    }
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool> {
         while let Some(event) = client.next_event() {
@@ -76,9 +84,13 @@ impl<'a> super::Handler for Handler<'a> {
                 }
                 ConnectionEvent::StateChange(
                     State::WaitInitial | State::Handshaking | State::Connected,
-                )
-                | ConnectionEvent::ZeroRttRejected => {
+                ) => {
                     qdebug!("{event:?}");
+                    self.download_urls(client);
+                }
+                ConnectionEvent::ZeroRttRejected => {
+                    qdebug!("{event:?}");
+                    self.reinit();
                     self.download_urls(client);
                 }
                 ConnectionEvent::ResumptionToken(token) => {
@@ -202,6 +214,7 @@ impl<'b> Handler<'b> {
         Self {
             streams: HashMap::new(),
             url_queue,
+            handled_urls: Vec::new(),
             all_paths: Vec::new(),
             args,
             token: None,
@@ -233,6 +246,7 @@ impl<'b> Handler<'b> {
             .url_queue
             .pop_front()
             .expect("download_next called with empty queue");
+        self.handled_urls.push(url.clone());
         match client.stream_create(StreamType::BiDi) {
             Ok(client_stream_id) => {
                 qinfo!("Created stream {client_stream_id} for {url}");
