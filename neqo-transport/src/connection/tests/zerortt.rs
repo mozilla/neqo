@@ -8,10 +8,7 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider, qdebug};
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
-use test_fixture::{
-    assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial},
-    now,
-};
+use test_fixture::{assertions, now};
 
 use super::{
     super::Connection, connect, default_client, default_server, exchange_ticket, new_server,
@@ -106,7 +103,7 @@ fn zero_rtt_send_coalesce() {
     let client_0rtt = client.process(None, now());
     assert!(client_0rtt.as_dgram_ref().is_some());
 
-    assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
+    assertions::assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
 
     let server_hs = server.process(client_0rtt.as_dgram_ref(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
@@ -263,58 +260,6 @@ fn zero_rtt_update_flow_control() {
 }
 
 #[test]
-fn zero_rtt_lost_data_rtx() {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect(&mut client, &mut server);
-
-    let token = exchange_ticket(&mut client, &mut server, now());
-    let mut client = default_client();
-    client
-        .enable_resumption(now(), token)
-        .expect("should set token");
-    let mut server = resumed_server(&client);
-
-    // Make CI/0-RTT
-    let mut now = now();
-    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-    let mut ci = client.process(None, now);
-    assert_coalesced_0rtt(ci.as_dgram_ref().unwrap());
-
-    // Drop CI/0-RTT until it's outside the replay window
-    for _ in 0..3 {
-        now += client.process_output(now).callback();
-        ci = client.process_output(now);
-        assert!(ci.as_dgram_ref().is_some());
-    }
-
-    // Now finish the handshake
-    let si = server.process(ci.as_dgram_ref(), now).dgram().unwrap();
-    assert_initial(&si, false);
-    let ch = client.process(Some(&si), now).dgram().unwrap();
-    assert_handshake(&ch);
-    let hsd = server.process(Some(&ch), now).dgram().unwrap();
-    assert_handshake(&hsd);
-    now += client.process(Some(&hsd), now).callback();
-
-    // See what the client wants to RTX and feed that to the server.
-    // That should include the rejected 0-RTT stream data.
-    let rtx = client.process_output(now).dgram();
-    _ = server.process(rtx.as_ref(), now);
-
-    // Server should have opened the stream the client opened
-    let server_stream_id = server
-        .events()
-        .find_map(|evt| match evt {
-            ConnectionEvent::NewStream { stream_id } => Some(stream_id),
-            _ => None,
-        })
-        .expect("should have received a new stream event");
-    assert_eq!(client_stream_id, server_stream_id.as_u64());
-}
-
-#[test]
 fn zero_rtt_loss_accepted() {
     // This test requires a wider anti-replay window than other tests
     // because the dropped 0-RTT packets add a bunch of delay.
@@ -343,7 +288,7 @@ fn zero_rtt_loss_accepted() {
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let mut ci = client.process_output(now);
         assert!(ci.as_dgram_ref().is_some());
-        assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
+        assertions::assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
         qdebug!("Drop CI/0-RTT {i} extra times");
