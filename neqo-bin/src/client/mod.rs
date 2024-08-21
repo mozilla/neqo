@@ -252,6 +252,8 @@ impl Args {
                 }
                 self.shared.use_old_http = true;
                 self.resume = true;
+                // PMTUD probes inflate what we sent in 1-RTT, causing QNS to fail the test.
+                self.shared.quic_parameters.no_pmtud = true;
             }
             "multiconnect" => {
                 self.shared.use_old_http = true;
