@@ -39,9 +39,7 @@ pub struct Handler<'a> {
     read_buffer: Vec<u8>,
 }
 
-impl<'a> super::Handler for Handler<'a> {
-    type Client = Connection;
-
+impl<'a> Handler<'a> {
     fn reinit(&mut self) {
         for url in self.handled_urls.drain(..) {
             self.url_queue.push_front(url);
@@ -49,6 +47,10 @@ impl<'a> super::Handler for Handler<'a> {
         self.streams.clear();
         self.all_paths.clear();
     }
+}
+
+impl<'a> super::Handler for Handler<'a> {
+    type Client = Connection;
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool> {
         while let Some(event) = client.next_event() {
@@ -91,6 +93,7 @@ impl<'a> super::Handler for Handler<'a> {
                 }
                 ConnectionEvent::ZeroRttRejected => {
                     qdebug!("{event:?}");
+                    // All 0-RTT data was rejected. We need to retransmit it.
                     self.reinit();
                     self.download_urls(client);
                 }

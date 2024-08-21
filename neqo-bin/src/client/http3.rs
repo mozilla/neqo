@@ -155,9 +155,7 @@ impl super::Client for Http3Client {
     }
 }
 
-impl<'a> super::Handler for Handler<'a> {
-    type Client = Http3Client;
-
+impl<'a> Handler<'a> {
     fn reinit(&mut self) {
         for url in self.url_handler.handled_urls.drain(..) {
             self.url_handler.url_queue.push_front(url);
@@ -165,6 +163,10 @@ impl<'a> super::Handler for Handler<'a> {
         self.url_handler.stream_handlers.clear();
         self.url_handler.all_paths.clear();
     }
+}
+
+impl<'a> super::Handler for Handler<'a> {
+    type Client = Http3Client;
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
         while let Some(event) = client.next_event() {
@@ -237,6 +239,7 @@ impl<'a> super::Handler for Handler<'a> {
                 }
                 Http3ClientEvent::ZeroRttRejected => {
                     qinfo!("{event:?}");
+                    // All 0-RTT data was rejected. We need to retransmit it.
                     self.reinit();
                     self.url_handler.process_urls(client);
                 }
