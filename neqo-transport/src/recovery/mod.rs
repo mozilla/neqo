@@ -534,7 +534,7 @@ impl LossRecovery {
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
-        qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
+        qtrace!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
             path.borrow_mut().packet_sent(&mut sent_packet);
             space.on_packet_sent(sent_packet);
@@ -890,7 +890,7 @@ impl LossRecovery {
     /// what the current congestion window is, and what the pacer says.
     #[allow(clippy::option_if_let_else)]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
-        qdebug!([self], "get send profile {:?}", now);
+        qtrace!([self], "get send profile {:?}", now);
         let sender = path.sender();
         let mtu = path.plpmtu();
         if let Some(profile) = self
