@@ -42,6 +42,7 @@ impl<'a> Handler<'a> {
     pub(crate) fn new(url_queue: VecDeque<Url>, args: &'a Args) -> Self {
         let url_handler = UrlHandler {
             url_queue,
+            handled_urls: Vec::new(),
             stream_handlers: HashMap::new(),
             all_paths: Vec::new(),
             handler_type: if args.test.is_some() {
@@ -154,6 +155,16 @@ impl super::Client for Http3Client {
     }
 }
 
+impl<'a> Handler<'a> {
+    fn reinit(&mut self) {
+        for url in self.url_handler.handled_urls.drain(..) {
+            self.url_handler.url_queue.push_front(url);
+        }
+        self.url_handler.stream_handlers.clear();
+        self.url_handler.all_paths.clear();
+    }
+}
+
 impl<'a> super::Handler for Handler<'a> {
     type Client = Http3Client;
 
@@ -223,6 +234,13 @@ impl<'a> super::Handler for Handler<'a> {
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
+                    qinfo!("{event:?}");
+                    self.url_handler.process_urls(client);
+                }
+                Http3ClientEvent::ZeroRttRejected => {
+                    qinfo!("{event:?}");
+                    // All 0-RTT data was rejected. We need to retransmit it.
+                    self.reinit();
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
@@ -381,6 +399,7 @@ impl StreamHandler for UploadStreamHandler {
 
 struct UrlHandler<'a> {
     url_queue: VecDeque<Url>,
+    handled_urls: Vec<Url>,
     stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
     handler_type: StreamHandlerType,
@@ -430,6 +449,7 @@ impl<'a> UrlHandler<'a> {
                     client_stream_id,
                 );
                 self.stream_handlers.insert(client_stream_id, handler);
+                self.handled_urls.push(url);
                 true
             }
             Err(

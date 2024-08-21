@@ -31,11 +31,22 @@ use crate::STREAM_IO_BUFFER_SIZE;
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
+    handled_urls: Vec<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
     token: Option<ResumptionToken>,
     needs_key_update: bool,
     read_buffer: Vec<u8>,
+}
+
+impl<'a> Handler<'a> {
+    fn reinit(&mut self) {
+        for url in self.handled_urls.drain(..) {
+            self.url_queue.push_front(url);
+        }
+        self.streams.clear();
+        self.all_paths.clear();
+    }
 }
 
 impl<'a> super::Handler for Handler<'a> {
@@ -78,6 +89,12 @@ impl<'a> super::Handler for Handler<'a> {
                     State::WaitInitial | State::Handshaking | State::Connected,
                 ) => {
                     qdebug!("{event:?}");
+                    self.download_urls(client);
+                }
+                ConnectionEvent::ZeroRttRejected => {
+                    qdebug!("{event:?}");
+                    // All 0-RTT data was rejected. We need to retransmit it.
+                    self.reinit();
                     self.download_urls(client);
                 }
                 ConnectionEvent::ResumptionToken(token) => {
@@ -201,6 +218,7 @@ impl<'b> Handler<'b> {
         Self {
             streams: HashMap::new(),
             url_queue,
+            handled_urls: Vec::new(),
             all_paths: Vec::new(),
             args,
             token: None,
@@ -242,6 +260,7 @@ impl<'b> Handler<'b> {
                 client.stream_close_send(client_stream_id).unwrap();
                 let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
                 self.streams.insert(client_stream_id, out_file);
+                self.handled_urls.push(url);
                 true
             }
             Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {

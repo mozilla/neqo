@@ -377,7 +377,7 @@ impl RecvdPackets {
     /// Return true if the packet was the largest received so far.
     pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) -> bool {
         let next_in_order_pn = self.ranges.front().map_or(0, |r| r.largest + 1);
-        qdebug!([self], "received {}, next: {}", pn, next_in_order_pn);
+        qtrace!([self], "received {}, next: {}", pn, next_in_order_pn);
 
         self.add(pn);
         self.trim_ranges();
