@@ -94,10 +94,7 @@ impl<'a> super::Handler for Handler<'a> {
         }
 
         if self.args.resume && self.token.is_none() {
-            let Some(token) = client.take_resumption_token(Instant::now()) else {
-                return Ok(false);
-            };
-            self.token = Some(token);
+            self.token = client.take_resumption_token(Instant::now());
         }
 
         Ok(true)
