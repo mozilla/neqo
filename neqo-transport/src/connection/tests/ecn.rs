@@ -12,11 +12,11 @@ use test_fixture::{
     fixture_init, now, DEFAULT_ADDR_V4,
 };
 
-use super::{send_something_with_modifier, DEFAULT_RTT};
 use crate::{
     connection::tests::{
         connect_force_idle, connect_force_idle_with_modifier, default_client, default_server,
-        handshake_with_modifier, migration::get_cid, new_client, new_server, send_something,
+        handshake_with_modifier, migration::get_cid, new_client, new_server, send_and_receive,
+        send_something, send_something_with_modifier, DEFAULT_RTT,
     },
     ecn::ECN_TEST_COUNT,
     ConnectionId, ConnectionParameters, StreamType,
@@ -89,6 +89,37 @@ fn handshake_delay_with_ecn_blackhole() {
         15,
         "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed.",
     );
+}
+
+#[test]
+fn stats() {
+    let now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    for _ in 0..ECN_TEST_COUNT {
+        let ack = send_and_receive(&mut client, &mut server, now);
+        client.process_input(&ack.unwrap(), now);
+    }
+
+    for _ in 0..ECN_TEST_COUNT {
+        let ack = send_and_receive(&mut server, &mut client, now);
+        server.process_input(&ack.unwrap(), now);
+    }
+
+    for stats in [client.stats(), server.stats()] {
+        assert_eq!(stats.ecn_paths_capable, 1);
+        assert_eq!(stats.ecn_paths_not_capable, 0);
+
+        for codepoint in [IpTosEcn::Ect1, IpTosEcn::Ce] {
+            assert_eq!(stats.ecn_tx[codepoint], 0);
+            assert_eq!(stats.ecn_rx[codepoint], 0);
+        }
+    }
+
+    assert!(client.stats().ecn_tx[IpTosEcn::Ect0] <= server.stats().ecn_rx[IpTosEcn::Ect0]);
+    assert!(server.stats().ecn_tx[IpTosEcn::Ect0] <= client.stats().ecn_rx[IpTosEcn::Ect0]);
 }
 
 #[test]

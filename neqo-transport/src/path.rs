@@ -698,12 +698,12 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V) -> Datagram {
+    pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V, stats: &mut Stats) -> Datagram {
         // Make sure to use the TOS value from before calling EcnInfo::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
         let tos = self.tos();
-        self.ecn_info.on_packet_sent();
+        self.ecn_info.on_packet_sent(stats);
         Datagram::new(self.local, self.remote, tos, payload)
     }
 
@@ -980,7 +980,7 @@ impl Path {
     ) {
         debug_assert!(self.is_primary());
 
-        let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn);
+        let ecn_ce_received = self.ecn_info.on_packets_acked(acked_pkts, ack_ecn, stats);
         if ecn_ce_received {
             let cwnd_reduced = self
                 .sender
@@ -1004,7 +1004,7 @@ impl Path {
         now: Instant,
     ) {
         debug_assert!(self.is_primary());
-        self.ecn_info.on_packets_lost(lost_packets);
+        self.ecn_info.on_packets_lost(lost_packets, stats);
         let cwnd_reduced = self.sender.on_packets_lost(
             self.rtt.first_sample_time(),
             prev_largest_acked_sent,
