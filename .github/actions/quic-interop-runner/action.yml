@@ -81,8 +81,10 @@ runs:
             FAILED=1
           fi
         done
-        # Remove all log files >10MB to make the artifacts smaller.
-        find ../logs -type f -size +10M -ls -delete
+        MAX_SIZE=5M
+        # Remove all log files > $MAX_SIZE to make the artifacts smaller.
+        echo "Removing these log files > $MAX_SIZE:"
+        find ../logs -type f -size +$MAX_SIZE -ls -delete
         exit $FAILED
       shell: bash
 
