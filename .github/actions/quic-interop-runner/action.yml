@@ -81,10 +81,11 @@ runs:
             FAILED=1
           fi
         done
-        MAX_SIZE=5M
         # Remove all log files > $MAX_SIZE to make the artifacts smaller.
+        MAX_SIZE=5M
+        echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
         echo "Removing these log files > $MAX_SIZE:"
-        find ../logs -type f -size +$MAX_SIZE -ls -delete
+        find ../logs -type f -size +$MAX_SIZE -ls -exec cp note.txt {} \;
         exit $FAILED
       shell: bash
 
