@@ -78,12 +78,16 @@ runs:
           if grep -q 'RUST_BACKTRACE=full' "$log"; then
             echo "Panic detected in $log"
             tail -n 50 "$log"
-            exit 1
+            FAILED=1
           fi
         done
+        # Remove all log files >10MB to make the artifacts smaller.
+        find ../logs -type f -size +10M -ls -delete
+        exit $FAILED
       shell: bash
 
     - uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
+      if: always()
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -91,6 +95,7 @@ runs:
         compression-level: 9
 
     - name: Store log URL
+      if: always()
       run: |
         jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
           < result.json  > result.json.tmp && \
@@ -98,6 +103,7 @@ runs:
       shell: bash
 
     - uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
+      if: always()
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
