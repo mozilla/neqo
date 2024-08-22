@@ -9,11 +9,18 @@ export PATH="${PATH}:/neqo/bin"
 [ -n "$TESTCASE" ]
 [ -n "$QLOGDIR" ]
 
+if [[ "$TESTCASE" == blackhole ]] || [[ "$TESTCASE" == transfer ]]; then
+  # These tests generate way too much output with a "debug" log level.
+  LOG_LEVEL=info
+else
+  LOG_LEVEL=debug
+fi
+
 case "$ROLE" in
 client)
   /wait-for-it.sh sim:57832 -s -t 30
   # shellcheck disable=SC2086
-  RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --cc cubic --qns-test "$TESTCASE" \
+  RUST_LOG=$LOG_LEVEL RUST_BACKTRACE=1 neqo-client --cc cubic --qns-test "$TESTCASE" \
     --qlog-dir "$QLOGDIR" --output-dir /downloads $REQUESTS 2> >(tee -i -a "/logs/$ROLE.log" >&2)
   ;;
 
@@ -27,7 +34,7 @@ server)
     -name "$CERT" -passout pass: -out "$P12CERT"
   pk12util -d "sql:$DB" -i "$P12CERT" -W ''
   certutil -L -d "sql:$DB" -n "$CERT"
-  RUST_LOG=debug RUST_BACKTRACE=1 neqo-server --cc cubic --qns-test "$TESTCASE" \
+  RUST_LOG=$LOG_LEVEL RUST_BACKTRACE=1 neqo-server --cc cubic --qns-test "$TESTCASE" \
     --qlog-dir "$QLOGDIR" -d "$DB" -k "$CERT" '[::]:443' 2> >(tee -i -a "/logs/$ROLE.log" >&2)
   ;;
 
