@@ -50,11 +50,6 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
         }
 
         // First, find the name of the interface with the the local IP address determined above.
-        // Then, in a second loop below, find the MTU of that interface. We need to do two
-        // loops, because `getifaddrs` returns one entry per interface and link type, and
-        // the IP addresses are in the AF_INET/AF_INET6 entries for an interface, whereas
-        // the MTU is (only) in the AF_LINK entry, whose `ifa_addr` contains MAC address
-        // information, not IP address information.
         let mut cursor = ifap;
         let iface = loop {
             if cursor.is_null() {
@@ -87,6 +82,11 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
         if let Some(iface) = iface {
             #[cfg(target_os = "macos")]
             {
+                // On macOS, We need to loop again to find the MTU of that interface. We need to do two
+                // loops, because `getifaddrs` returns one entry per interface and link type, and
+                // the IP addresses are in the AF_INET/AF_INET6 entries for an interface, whereas
+                // the MTU is (only) in the AF_LINK entry, whose `ifa_addr` contains MAC address
+                // information, not IP address information.
                 let mut cursor = ifap;
                 while !cursor.is_null() {
                     let ifa = unsafe { &*cursor };
@@ -101,6 +101,7 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
             }
             #[cfg(target_os = "linux")]
             {
+                // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
                 ifr.ifr_name[..iface.len()].copy_from_slice(iface.as_bytes());
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
