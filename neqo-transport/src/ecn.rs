@@ -56,14 +56,14 @@ impl EcnValidationState {
         let old = std::mem::replace(self, new);
 
         match old {
-            EcnValidationState::Testing { .. } | EcnValidationState::Unknown => {}
-            EcnValidationState::Failed => debug_assert!(false, "Failed is a terminal state"),
-            EcnValidationState::Capable => stats.ecn_paths_capable -= 1,
+            Self::Testing { .. } | Self::Unknown => {}
+            Self::Failed => debug_assert!(false, "Failed is a terminal state"),
+            Self::Capable => stats.ecn_paths_capable -= 1,
         }
         match new {
-            EcnValidationState::Testing { .. } | EcnValidationState::Unknown => {}
-            EcnValidationState::Failed => stats.ecn_paths_not_capable += 1,
-            EcnValidationState::Capable => stats.ecn_paths_capable += 1,
+            Self::Testing { .. } | Self::Unknown => {}
+            Self::Failed => stats.ecn_paths_not_capable += 1,
+            Self::Capable => stats.ecn_paths_capable += 1,
         }
     }
 }
