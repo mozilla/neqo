@@ -19,6 +19,7 @@ workspace = true
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = { version = "2.7", default-features = false }
 indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
+libc = { version = "0.2", default-features = false }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }

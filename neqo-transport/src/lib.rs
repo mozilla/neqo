@@ -22,6 +22,7 @@ mod fc;
 pub mod frame;
 #[cfg(not(fuzzing))]
 mod frame;
+mod mtu;
 mod pace;
 #[cfg(fuzzing)]
 pub mod packet;
@@ -62,6 +63,7 @@ pub use self::{
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
+    mtu::get_interface_mtu,
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,

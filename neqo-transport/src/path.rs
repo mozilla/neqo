@@ -24,6 +24,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn::{EcnCount, EcnInfo},
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
+    get_interface_mtu,
     packet::PacketBuilder,
     pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
@@ -556,6 +557,11 @@ impl Path {
     ) -> Self {
         let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
+        qdebug!(
+            "MTU towards {:?} is {:?}",
+            remote.ip(),
+            get_interface_mtu(&remote.ip())
+        );
         Self {
             local,
             remote,
