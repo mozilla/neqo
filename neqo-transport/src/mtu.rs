@@ -28,9 +28,9 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        use std::{ffi::CStr, ptr};
         #[cfg(target_os = "linux")]
-        use std::{mem, os::fd::AsRawFd};
+        use std::{ffi::c_char, mem, os::fd::AsRawFd};
+        use std::{ffi::CStr, ptr};
 
         #[cfg(target_os = "macos")]
         use libc::if_data;
@@ -49,7 +49,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
         let local_ip = socket.local_addr()?.ip();
 
         // Get the interface list.
-        let mut ifap: *mut ifaddrs = ptr::null_mut();
+        let mut ifap: *mut ifaddrs = ptr::null_mut(); // Do not modify this pointer.
         if unsafe { getifaddrs(&mut ifap) } != 0 {
             return Err(Error::last_os_error());
         }
@@ -62,23 +62,24 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
             }
 
             let ifa = unsafe { &*cursor };
-            let found = match local_ip {
-                IpAddr::V4(ip) => {
-                    let saddr_ptr = ifa.ifa_addr as *const u8;
-                    let saddr: sockaddr_in =
-                        unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
-                    saddr.sin_addr.s_addr == u32::from_le_bytes(ip.octets())
-                }
-                IpAddr::V6(ip) => {
-                    let saddr_ptr = ifa.ifa_addr as *const u8;
-                    let saddr: sockaddr_in6 =
-                        unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in6>()) };
-                    saddr.sin6_addr.s6_addr == ip.octets()
-                }
-            };
+            let saddr_ptr = ifa.ifa_addr as *const u8;
+            if !saddr_ptr.is_null() {
+                let found = match local_ip {
+                    IpAddr::V4(ip) => {
+                        let saddr: sockaddr_in =
+                            unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
+                        saddr.sin_addr.s_addr == u32::from_le_bytes(ip.octets())
+                    }
+                    IpAddr::V6(ip) => {
+                        let saddr: sockaddr_in6 =
+                            unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in6>()) };
+                        saddr.sin6_addr.s6_addr == ip.octets()
+                    }
+                };
 
-            if found {
-                break unsafe { CStr::from_ptr(ifa.ifa_name).to_str().ok() };
+                if found {
+                    break unsafe { CStr::from_ptr(ifa.ifa_name).to_str().ok() };
+                }
             }
             cursor = ifa.ifa_next;
         };
@@ -111,7 +112,9 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
             {
                 // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
-                ifr.ifr_name[..iface.len()].copy_from_slice(iface.as_bytes());
+                // ifr.ifr_name[..iface.len()].copy_from_slice(iface.as_bytes());
+                ifr.ifr_name[..iface.len()]
+                    .copy_from_slice(unsafe { &*(iface.as_bytes() as *const [c_char]) });
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
                 } else {
@@ -123,7 +126,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
         unsafe { freeifaddrs(ifap) };
     }
 
-    qtrace!("MTU for {:?} is {:?}", remote, res);
+    qtrace!("MTU towards {:?} is {:?}", remote, res);
     res
 }
 
