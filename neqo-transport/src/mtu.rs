@@ -82,11 +82,12 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
         if let Some(iface) = iface {
             #[cfg(target_os = "macos")]
             {
-                // On macOS, We need to loop again to find the MTU of that interface. We need to do two
-                // loops, because `getifaddrs` returns one entry per interface and link type, and
-                // the IP addresses are in the AF_INET/AF_INET6 entries for an interface, whereas
-                // the MTU is (only) in the AF_LINK entry, whose `ifa_addr` contains MAC address
-                // information, not IP address information.
+                // On macOS, We need to loop again to find the MTU of that interface. We need to do
+                // two loops, because `getifaddrs` returns one entry per interface
+                // and link type, and the IP addresses are in the AF_INET/AF_INET6
+                // entries for an interface, whereas the MTU is (only) in the
+                // AF_LINK entry, whose `ifa_addr` contains MAC address information,
+                // not IP address information.
                 let mut cursor = ifap;
                 while !cursor.is_null() {
                     let ifa = unsafe { &*cursor };
