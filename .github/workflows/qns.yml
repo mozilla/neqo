@@ -212,7 +212,7 @@ jobs:
               echo "#### $LATEST as server"
               cat server.failed.md
             else
-              echo -n "None"
+              echo -n "None "
               if [ -e "client.succeeded.md" ] || [ -e "server.succeeded.md" ] || [ -e "client.unsupported.md" ] || [ -e "server.unsupported.md" ]; then
                 echo ":tada:"
               else
