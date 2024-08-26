@@ -73,7 +73,7 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
             };
 
             if found {
-                break Some(unsafe { CStr::from_ptr(ifa.ifa_name).to_string_lossy().to_string() });
+                break unsafe { CStr::from_ptr(ifa.ifa_name).to_str().ok() };
             }
             cursor = ifa.ifa_next;
         };
@@ -92,7 +92,9 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
                 while !cursor.is_null() {
                     let ifa = unsafe { &*cursor };
                     if let Some(data) = unsafe { (ifa.ifa_data as *const if_data).as_ref() } {
-                        if unsafe { CStr::from_ptr(ifa.ifa_name).to_string_lossy() } == iface {
+                        if unsafe { CStr::from_ptr(ifa.ifa_name).to_str().unwrap_or_default() }
+                            == iface
+                        {
                             res = Ok(data.ifi_mtu);
                             break;
                         }
@@ -104,7 +106,8 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
             {
                 // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
-                ifr.ifr_name[..iface.len()].copy_from_slice(iface.as_bytes());
+                ifr.ifr_name[..iface.len()]
+                    .copy_from_slice(unsafe { *iface.as_bytes().as_ptr().cast::<&[i8]>() });
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
                 } else {
