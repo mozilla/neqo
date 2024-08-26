@@ -12,7 +12,7 @@ use test_fixture::{
     fixture_init, now, DEFAULT_ADDR_V4,
 };
 
-use super::{send_something_with_modifier, DEFAULT_RTT};
+use super::{send_something_with_modifier, send_with_modifier_and_receive, DEFAULT_RTT};
 use crate::{
     connection::tests::{
         connect_force_idle, connect_force_idle_with_modifier, default_client, default_server,
@@ -104,6 +104,24 @@ fn disables_on_loss() {
 
     for _ in 0..ECN_TEST_COUNT {
         send_something(&mut client, now);
+    }
+
+    // ECN should now be disabled.
+    let client_pkt = send_something(&mut client, now);
+    assert_ecn_disabled(client_pkt.tos());
+}
+
+#[test]
+fn disables_on_remark() {
+    let now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    for _ in 0..ECN_TEST_COUNT {
+        if let Some(ack) = send_with_modifier_and_receive(&mut client, &mut server, now, remark()) {
+            client.process_input(&ack, now);
+        }
     }
 
     // ECN should now be disabled.
