@@ -559,8 +559,8 @@ impl Path {
         sender.set_qlog(qlog.clone());
         qdebug!(
             "MTU towards {:?} is {:?}",
-            remote.ip(),
-            get_interface_mtu(&remote.ip())
+            remote,
+            get_interface_mtu(&remote)
         );
         Self {
             local,

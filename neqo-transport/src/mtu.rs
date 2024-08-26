@@ -6,18 +6,18 @@
 
 use std::{
     io::{Error, ErrorKind},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
 };
 
 use neqo_common::qtrace;
 use static_assertions::assert_cfg;
 
-/// Return the MTU of the interface that is used to reach the given remote IP address.
+/// Return the MTU of the interface that is used to reach the given remote socket address.
 ///
 /// # Errors
 ///
 /// This function returns an error if the local interface MTU cannot be determined.
-pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
+pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
     // Prepare a default error result.
     let mut res = Err(Error::new(
         ErrorKind::NotFound,
@@ -40,12 +40,12 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
 
         // Make a new socket that is connected to the remote address. We use this to learn which
         // local address is chosen by routing.
-        let socket = if remote_ip.is_ipv4() {
+        let socket = if remote.is_ipv4() {
             UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?
         } else {
             UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 0))?
         };
-        socket.connect((*remote_ip, 10000))?;
+        socket.connect(remote)?;
         let local_ip = socket.local_addr()?.ip();
 
         // Get the interface list.
@@ -123,44 +123,38 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
         unsafe { freeifaddrs(ifap) };
     }
 
-    qtrace!("MTU for {:?} is {:?}", remote_ip, res);
+    qtrace!("MTU for {:?} is {:?}", remote, res);
     res
 }
 
 #[cfg(test)]
 mod test {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-    use neqo_common::qdebug;
-
-    fn check_mtu(ip4: IpAddr, ip6: IpAddr, expected: u32) {
-        let mtu4 = super::get_interface_mtu(&ip4).unwrap();
-        let mtu6 = super::get_interface_mtu(&ip6).unwrap();
-        qdebug!(
-            "MTU for {:?} is {} and for {:?} is {}",
-            ip4,
-            mtu4,
-            ip6,
-            mtu6
-        );
+    fn check_mtu(addr4: SocketAddr, addr6: SocketAddr, expected: u32) {
+        let mtu4 = super::get_interface_mtu(&addr4).unwrap();
+        let mtu6 = super::get_interface_mtu(&addr6).unwrap();
         assert_eq!(mtu4, expected);
         assert_eq!(mtu6, expected);
     }
 
     #[test]
     fn loopback_interface_mtu() {
-        let ip4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        let ip6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
+        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
+        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 1234);
         #[cfg(target_os = "macos")]
-        check_mtu(ip4, ip6, 16384);
+        check_mtu(addr4, addr6, 16384);
         #[cfg(target_os = "linux")]
-        check_mtu(ip4, ip6, 65536);
+        check_mtu(addr4, addr6, 65536);
     }
 
     #[test]
     fn default_interface_mtu() {
-        let ip4 = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-        let ip6 = IpAddr::V6(Ipv6Addr::new(2001, 4860, 4860, 0, 0, 0, 0, 8888));
-        check_mtu(ip4, ip6, 1500);
+        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 1234);
+        let addr6 = SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(2001, 4860, 4860, 0, 0, 0, 0, 8888)),
+            1234,
+        );
+        check_mtu(addr4, addr6, 1500);
     }
 }
