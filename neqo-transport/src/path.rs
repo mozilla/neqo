@@ -557,11 +557,7 @@ impl Path {
     ) -> Self {
         let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
-        qdebug!(
-            "MTU towards {:?} is {:?}",
-            remote,
-            get_interface_mtu(&remote)
-        );
+        _ = get_interface_mtu(&remote);
         Self {
             local,
             remote,
