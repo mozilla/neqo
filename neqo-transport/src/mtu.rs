@@ -9,6 +9,9 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket},
 };
 
+use neqo_common::qtrace;
+use static_assertions::assert_cfg;
+
 /// Return the MTU of the interface that is used to reach the given remote IP address.
 ///
 /// # Errors
@@ -20,6 +23,8 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
         ErrorKind::NotFound,
         "Local interface MTU not found",
     ));
+
+    assert_cfg!(any(target_os = "macos", target_os = "linux"));
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
@@ -119,5 +124,44 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
         unsafe { freeifaddrs(ifap) };
     }
 
+    qtrace!("MTU for {:?} is {:?}", remote_ip, res);
     res
+}
+
+#[cfg(test)]
+mod test {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use neqo_common::qdebug;
+
+    fn check_mtu(ip4: IpAddr, ip6: IpAddr, expected: u32) {
+        let mtu4 = super::get_interface_mtu(&ip4).unwrap();
+        let mtu6 = super::get_interface_mtu(&ip6).unwrap();
+        qdebug!(
+            "MTU for {:?} is {} and for {:?} is {}",
+            ip4,
+            mtu4,
+            ip6,
+            mtu6
+        );
+        assert_eq!(mtu4, expected);
+        assert_eq!(mtu6, expected);
+    }
+
+    #[test]
+    fn loopback_interface_mtu() {
+        let ip4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let ip6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
+        #[cfg(target_os = "macos")]
+        check_mtu(ip4, ip6, 16384);
+        #[cfg(target_os = "linux")]
+        check_mtu(ip4, ip6, 65536);
+    }
+
+    #[test]
+    fn default_interface_mtu() {
+        let ip4 = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
+        let ip6 = IpAddr::V6(Ipv6Addr::new(2001, 4860, 4860, 0, 0, 0, 0, 8888));
+        check_mtu(ip4, ip6, 1500);
+    }
 }
