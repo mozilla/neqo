@@ -111,8 +111,7 @@ pub fn get_interface_mtu(remote_ip: &IpAddr) -> Result<u32, Error> {
             {
                 // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
-                ifr.ifr_name[..iface.len()]
-                    .copy_from_slice(unsafe { *iface.as_bytes().as_ptr().cast::<&[i8]>() });
+                ifr.ifr_name[..iface.len()].copy_from_slice(iface.as_bytes());
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
                 } else {
