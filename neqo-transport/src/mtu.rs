@@ -154,17 +154,12 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
     {
         use std::mem;
 
-        use winapi::{
-            shared::{
-                in6addr::IN6_ADDR,
-                inaddr::IN_ADDR,
-                minwindef::DWORD,
-                netioapi::{GetIfEntry2, MIB_IF_ROW2},
-                winerror::NO_ERROR,
-                ws2def::{ADDRESS_FAMILY, AF_INET, AF_INET6, SOCKADDR_IN},
-                ws2ipdef::SOCKADDR_IN6,
+        use windows_sys::Win32::{
+            Foundation::{NO_ERROR, WIN32_ERROR},
+            NetworkManagement::IpHelper::{GetBestInterfaceEx, GetIfEntry2, MIB_IF_ROW2},
+            Networking::WinSock::{
+                ADDRESS_FAMILY, AF_INET, AF_INET6, IN6_ADDR, IN_ADDR, SOCKADDR_IN, SOCKADDR_IN6,
             },
-            um::iphlpapi::GetBestInterfaceEx,
         };
 
         let mut saddr = match remote {
