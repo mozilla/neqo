@@ -5,10 +5,22 @@
 // except according to those terms.
 
 use std::{
+    ffi::CStr,
     io::{Error, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    ptr,
 };
+#[cfg(target_os = "linux")]
+use std::{mem, os::fd::AsRawFd};
 
+#[cfg(target_os = "macos")]
+use libc::if_data;
+use libc::{
+    freeifaddrs, getifaddrs, ifaddrs, in_addr_t, sa_family_t, sockaddr_in, sockaddr_in6, AF_INET,
+    AF_INET6,
+};
+#[cfg(target_os = "linux")]
+use libc::{ifreq, ioctl};
 use neqo_common::qtrace;
 use static_assertions::assert_cfg;
 
@@ -17,7 +29,7 @@ use static_assertions::assert_cfg;
 /// # Errors
 ///
 /// This function returns an error if the local interface MTU cannot be determined.
-pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
+pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
     // Prepare a default error result.
     let mut res = Err(Error::new(
         ErrorKind::NotFound,
@@ -28,23 +40,16 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        use std::{ffi::CStr, ptr};
-        #[cfg(target_os = "linux")]
-        use std::{mem, os::fd::AsRawFd};
-
-        #[cfg(target_os = "macos")]
-        use libc::if_data;
-        use libc::{freeifaddrs, getifaddrs, ifaddrs, sockaddr_in, sockaddr_in6};
-        #[cfg(target_os = "linux")]
-        use libc::{ifreq, ioctl};
-
         // Make a new socket that is connected to the remote address. We use this to learn which
         // local address is chosen by routing.
-        let socket = if remote.is_ipv4() {
-            UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?
-        } else {
-            UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 0))?
-        };
+        let socket = UdpSocket::bind((
+            if remote.is_ipv4() {
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+            } else {
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+            },
+            0,
+        ))?;
         socket.connect(remote)?;
         let local_ip = socket.local_addr()?.ip();
 
@@ -62,13 +67,18 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
             }
 
             let ifa = unsafe { &*cursor };
-            let saddr_ptr = ifa.ifa_addr as *const u8;
-            if !saddr_ptr.is_null() {
+            if !ifa.ifa_addr.is_null()
+                && ((unsafe { *ifa.ifa_addr }).sa_family
+                    == sa_family_t::try_from(AF_INET).unwrap_or(sa_family_t::MAX)
+                    || (unsafe { *ifa.ifa_addr }).sa_family
+                        == sa_family_t::try_from(AF_INET6).unwrap_or(sa_family_t::MAX))
+            {
+                let saddr_ptr = ifa.ifa_addr as *const u8;
                 let found = match local_ip {
                     IpAddr::V4(ip) => {
                         let saddr: sockaddr_in =
                             unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
-                        saddr.sin_addr.s_addr == u32::from_le_bytes(ip.octets())
+                        saddr.sin_addr.s_addr == in_addr_t::from_le_bytes(ip.octets())
                     }
                     IpAddr::V6(ip) => {
                         let saddr: sockaddr_in6 =
@@ -101,7 +111,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
                         if unsafe { CStr::from_ptr(ifa.ifa_name).to_str().unwrap_or_default() }
                             == iface
                         {
-                            res = Ok(data.ifi_mtu);
+                            res = usize::try_from(data.ifi_mtu).or(res);
                             break;
                         }
                     }
@@ -117,7 +127,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
                 } else {
-                    res = unsafe { u32::try_from(ifr.ifr_ifru.ifru_mtu).or(res) };
+                    res = unsafe { usize::try_from(ifr.ifr_ifru.ifru_mtu).or(res) };
                 }
             }
         }
@@ -133,7 +143,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<u32, Error> {
 mod test {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-    fn check_mtu(addr4: SocketAddr, addr6: SocketAddr, expected: u32) {
+    fn check_mtu(addr4: SocketAddr, addr6: SocketAddr, expected: usize) {
         let mtu4 = super::get_interface_mtu(&addr4).unwrap();
         let mtu6 = super::get_interface_mtu(&addr6).unwrap();
         assert_eq!(mtu4, expected);
@@ -142,8 +152,8 @@ mod test {
 
     #[test]
     fn loopback_interface_mtu() {
-        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
-        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 1234);
+        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 443);
+        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 443);
         #[cfg(target_os = "macos")]
         check_mtu(addr4, addr6, 16384);
         #[cfg(target_os = "linux")]
@@ -152,10 +162,10 @@ mod test {
 
     #[test]
     fn default_interface_mtu() {
-        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 1234);
+        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 443);
         let addr6 = SocketAddr::new(
             IpAddr::V6(Ipv6Addr::new(2001, 4860, 4860, 0, 0, 0, 0, 8888)),
-            1234,
+            443,
         );
         check_mtu(addr4, addr6, 1500);
     }
