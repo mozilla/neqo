@@ -164,15 +164,40 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             um::iphlpapi::GetBestInterfaceEx,
         };
 
+        let mut saddr = match remote {
+            SocketAddr::V4(addr) => {
+                let sin_addr = IN_ADDR {
+                    S_un: unsafe { mem::transmute(remote.ip().octets()) },
+                };
+                let sockaddr_in = SOCKADDR_IN {
+                    sin_family: ADDRESS_FAMILY(AF_INET),
+                    sin_port: remote.port().to_be(),
+                    sin_addr,
+                    sin_zero: [0; 8],
+                };
+                unsafe { mem::transmute(sockaddr_in) }
+            }
+            SocketAddr::V6(addr) => {
+                let sockaddr_in6 = SOCKADDR_IN6 {
+                    sin6_family: ADDRESS_FAMILY(AF_INET6),
+                    sin6_port: remote.port().to_be(),
+                    sin6_flowinfo: remote.flowinfo(),
+                    sin6_addr: IN6_ADDR {
+                        u: unsafe { mem::transmute(remote.ip().octets()) },
+                    },
+                    sin6_scope_id: remote.scope_id(),
+                };
+                unsafe { mem::transmute(sockaddr_in6) }
+            }
+        };
         let mut idx: DWORD = 0;
-        let mut saddr = remote.clone();
-        if unsafe { GetBestInterfaceEx(&saddr as *mut SOCKADDR, &mut idx) } != NO_ERROR {
+        if unsafe { GetBestInterfaceEx(&saddr, &mut idx) } != NO_ERROR {
             res = Err(Error::last_os_error());
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
             row.InterfaceIndex = idx;
             res = if unsafe { GetIfEntry2(&mut row) } == NO_ERROR {
-                Ok(row.Mtu)
+                usize::try_from(row.Mtu).or(res)
             } else {
                 Err(Error::last_os_error())
             };
