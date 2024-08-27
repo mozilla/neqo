@@ -155,9 +155,11 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         use std::{mem, ptr};
 
         use windows::Win32::{
+            Foundation::NO_ERROR,
             NetworkManagement::IpHelper::{GetBestInterfaceEx, GetIfEntry2, MIB_IF_ROW2},
             Networking::WinSock::{SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
         };
+
         let saddr = match remote {
             SocketAddr::V4(addr) => {
                 let saddr_ptr = ptr::from_ref(&SOCKADDR_IN::from(*addr)).cast::<u8>();
@@ -175,7 +177,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
             row.InterfaceIndex = idx;
-            if unsafe { GetIfEntry2(&mut row) } == 0 {
+            if unsafe { GetIfEntry2(&mut row) } == NO_ERROR {
                 usize::try_from(row.Mtu).or(res)
             } else {
                 Err(Error::last_os_error())
