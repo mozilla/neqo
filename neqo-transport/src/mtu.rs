@@ -206,7 +206,7 @@ mod test {
         let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 443);
         #[cfg(target_os = "macos")]
         check_mtu(addr4, addr6, 16384);
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
         check_mtu(addr4, addr6, 65536);
     }
 
