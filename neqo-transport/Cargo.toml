@@ -27,6 +27,10 @@ qlog = { workspace = true }
 smallvec = { version = "1.11", default-features = false }
 static_assertions = { version = "1.1", default-features = false }
 
+[target."cfg(windows)".dependencies]
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+winapi = { version = "0.3", default-features = false, features = ["iphlpapi"] }
+
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 test-fixture = { path = "../test-fixture" }

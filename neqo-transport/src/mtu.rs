@@ -145,6 +145,22 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         unsafe { freeifaddrs(ifap) };
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        let mut idx: DWORD = 0;
+        if unsafe { GetBestInterfaceEx(remote.as_ptr(), &mut idx) } != NOERROR {
+            res = return Err(Error::last_os_error());
+        } else {
+            let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
+            row.InterfaceIndex = idx;
+            if unsafe { GetIfEntry2(&mut row) } == NOERROR {
+                res = Ok(row.Mtu);
+            } else {
+                res = Err(Error::last_os_error());
+            }
+        }
+    }
+
     qtrace!("MTU towards {:?} is {:?}", remote, res);
     res
 }
