@@ -162,7 +162,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 netioapi::{GetIfEntry2, MIB_IF_ROW2},
                 winerror::NO_ERROR,
                 ws2def::{ADDRESS_FAMILY, AF_INET, AF_INET6, SOCKADDR_IN},
-                ws2ipdef::{SOCKADDR_IN6_LH_u, SOCKADDR_IN6},
+                ws2ipdef::SOCKADDR_IN6,
             },
             um::iphlpapi::GetBestInterfaceEx,
         };
@@ -187,7 +187,8 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     sin6_addr: IN6_ADDR {
                         u: unsafe { mem::transmute(addr.ip().octets()) },
                     },
-                    u: SOCKADDR_IN6_LH_u(addr.scope_id()),
+                    // TODO: Figure out how to set the scope ID.
+                    // u: SOCKADDR_IN6_LH_u(addr.scope_id()),
                 };
 
                 unsafe { mem::transmute(saddr) }
