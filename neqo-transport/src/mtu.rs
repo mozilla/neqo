@@ -177,7 +177,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     },
                     sin_zero: [0; 8],
                 };
-                unsafe { mem::transmute(SOCKADDR) }
+                unsafe { mem::transmute(saddr) }
             }
             SocketAddr::V6(addr) => {
                 let saddr = SOCKADDR_IN6 {
@@ -187,9 +187,9 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     sin6_addr: IN6_ADDR {
                         u: unsafe { mem::transmute(addr.ip().octets()) },
                     },
-                    u: addr.scope_id(),
+                    u: addr.scope_id() as SOCKADDR_IN6_LH_u,
                 };
-                unsafe { mem::transmute(SOCKADDR) }
+                unsafe { mem::transmute(saddr) }
             }
         };
         let mut idx: DWORD = 0;
