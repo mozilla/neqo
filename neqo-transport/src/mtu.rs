@@ -24,7 +24,11 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         "Local interface MTU not found",
     ));
 
-    assert_cfg!(any(target_os = "macos", target_os = "linux"));
+    assert_cfg!(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    ));
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
@@ -148,17 +152,24 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     #[cfg(target_os = "windows")]
     {
+        use std::mem;
+
+        use winapi::{
+            shared::{minwindef::DWORD, winerror::NOERROR},
+            um::iphlpapi::{GetBestInterfaceEx, GetIfEntry2},
+        };
+
         let mut idx: DWORD = 0;
-        if unsafe { GetBestInterfaceEx(remote.as_ptr(), &mut idx) } != NOERROR {
-            res = return Err(Error::last_os_error());
+        if unsafe { GetBestInterfaceEx(&remote as *const SOCKADDR, &mut idx) } != NOERROR {
+            res = Err(Error::last_os_error());
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
             row.InterfaceIndex = idx;
-            if unsafe { GetIfEntry2(&mut row) } == NOERROR {
-                res = Ok(row.Mtu);
+            res = if unsafe { GetIfEntry2(&mut row) } == NOERROR {
+                Ok(row.Mtu)
             } else {
-                res = Err(Error::last_os_error());
-            }
+                Err(Error::last_os_error())
+            };
         }
     }
 
