@@ -152,57 +152,32 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::mem;
+        use std::{mem, ptr};
 
-        use windows_sys::Win32::{
-            Foundation::NO_ERROR,
+        use windows::Win32::{
             NetworkManagement::IpHelper::{GetBestInterfaceEx, GetIfEntry2, MIB_IF_ROW2},
-            Networking::WinSock::{
-                ADDRESS_FAMILY, AF_INET, AF_INET6, IN6_ADDR, IN_ADDR, SOCKADDR_IN, SOCKADDR_IN6,
-                SOCKADDR_IN6_0,
-            },
+            Networking::WinSock::{SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
         };
-
-        let mut saddr = match remote {
+        let saddr = match remote {
             SocketAddr::V4(addr) => {
-                let saddr = SOCKADDR_IN {
-                    sin_family: AF_INET as ADDRESS_FAMILY,
-                    sin_port: addr.port().to_be(),
-                    sin_addr: IN_ADDR {
-                        S_un: unsafe { mem::transmute(addr.ip().octets()) },
-                    },
-                    sin_zero: [0; 8],
-                };
-                unsafe { mem::transmute(saddr) }
+                let saddr_ptr = ptr::from_ref(&SOCKADDR_IN::from(*addr)).cast::<u8>();
+                unsafe { ptr::read_unaligned(saddr_ptr.cast::<SOCKADDR>()) }
             }
             SocketAddr::V6(addr) => {
-                let saddr = SOCKADDR_IN6 {
-                    sin6_family: AF_INET6 as ADDRESS_FAMILY,
-                    sin6_port: addr.port().to_be(),
-                    sin6_flowinfo: addr.flowinfo(),
-                    sin6_addr: IN6_ADDR {
-                        u: unsafe { mem::transmute(addr.ip().octets()) },
-                    },
-                    Anonymous: SOCKADDR_IN6_0 {
-                        sin6_scope_id: addr.scope_id(),
-                    },
-                };
-
-                unsafe { mem::transmute(saddr) }
+                let saddr_ptr = ptr::from_ref(&SOCKADDR_IN6::from(*addr)).cast::<u8>();
+                unsafe { ptr::read_unaligned(saddr_ptr.cast::<SOCKADDR>()) }
             }
         };
+
         let mut idx: u32 = 0;
-        if unsafe { GetBestInterfaceEx(saddr, &mut idx) } != NO_ERROR {
-            res = Err(Error::last_os_error());
+        res = if unsafe { GetBestInterfaceEx(&saddr, &mut idx) } != 0 {
+            Err(Error::last_os_error())
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
             row.InterfaceIndex = idx;
-            res = if unsafe { GetIfEntry2(&mut row) } == NO_ERROR {
-                usize::try_from(row.Mtu).or(res)
-            } else {
-                Err(Error::last_os_error())
-            };
-        }
+            unsafe { GetIfEntry2(&mut row)? };
+            usize::try_from(row.Mtu).or(res)
+        };
     }
 
     qtrace!("MTU towards {:?} is {:?}", remote, res);

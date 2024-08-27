@@ -29,8 +29,7 @@ static_assertions = { version = "1.1", default-features = false }
 
 [target."cfg(windows)".dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-windows-sys = { version = "0.52", features = [
-        "Win32_Foundation",
+windows = { version = "0.58", features = [
         "Win32_NetworkManagement_IpHelper",
         "Win32_NetworkManagement_Ndis",
         "Win32_Networking_WinSock",
