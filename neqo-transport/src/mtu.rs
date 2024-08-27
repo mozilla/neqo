@@ -159,6 +159,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             NetworkManagement::IpHelper::{GetBestInterfaceEx, GetIfEntry2, MIB_IF_ROW2},
             Networking::WinSock::{
                 ADDRESS_FAMILY, AF_INET, AF_INET6, IN6_ADDR, IN_ADDR, SOCKADDR_IN, SOCKADDR_IN6,
+                SOCKADDR_IN6_0,
             },
         };
 
@@ -182,13 +183,15 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     sin6_addr: IN6_ADDR {
                         u: unsafe { mem::transmute(addr.ip().octets()) },
                     },
-                    sin6_scope_id: addr.scope_id(),
+                    Anonymous: SOCKADDR_IN6_0 {
+                        sin6_scope_id: addr.scope_id(),
+                    },
                 };
 
                 unsafe { mem::transmute(saddr) }
             }
         };
-        let mut idx: DWORD = 0;
+        let mut idx: u32 = 0;
         if unsafe { GetBestInterfaceEx(saddr, &mut idx) } != NO_ERROR {
             res = Err(Error::last_os_error());
         } else {
