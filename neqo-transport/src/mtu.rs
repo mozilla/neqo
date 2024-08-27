@@ -13,12 +13,12 @@ use std::{
 #[cfg(target_os = "linux")]
 use std::{mem, os::fd::AsRawFd};
 
-#[cfg(target_os = "macos")]
-use libc::if_data;
 use libc::{
     freeifaddrs, getifaddrs, ifaddrs, in_addr_t, sa_family_t, sockaddr_in, sockaddr_in6, AF_INET,
     AF_INET6,
 };
+#[cfg(target_os = "macos")]
+use libc::{if_data, AF_LINK};
 #[cfg(target_os = "linux")]
 use libc::{ifreq, ioctl};
 use neqo_common::qtrace;
@@ -38,75 +38,77 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     assert_cfg!(any(target_os = "macos", target_os = "linux"));
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    {
-        // Make a new socket that is connected to the remote address. We use this to learn which
-        // local address is chosen by routing.
-        let socket = UdpSocket::bind((
-            if remote.is_ipv4() {
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-            } else {
-                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
-            },
-            0,
-        ))?;
-        socket.connect(remote)?;
-        let local_ip = socket.local_addr()?.ip();
+    // Make a new socket that is connected to the remote address. We use this to learn which
+    // local address is chosen by routing.
+    let socket = UdpSocket::bind((
+        if remote.is_ipv4() {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        } else {
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+        },
+        0,
+    ))?;
+    socket.connect(remote)?;
+    let local_ip = socket.local_addr()?.ip();
 
-        // Get the interface list.
-        let mut ifap: *mut ifaddrs = ptr::null_mut(); // Do not modify this pointer.
-        if unsafe { getifaddrs(&mut ifap) } != 0 {
-            return Err(Error::last_os_error());
+    // Get the interface list.
+    let mut ifap: *mut ifaddrs = ptr::null_mut(); // Do not modify this pointer.
+    if unsafe { getifaddrs(&mut ifap) } != 0 {
+        return Err(Error::last_os_error());
+    }
+
+    // First, find the name of the interface with the the local IP address determined above.
+    let mut cursor = ifap;
+    let iface = loop {
+        if cursor.is_null() {
+            break None;
         }
 
-        // First, find the name of the interface with the the local IP address determined above.
-        let mut cursor = ifap;
-        let iface = loop {
-            if cursor.is_null() {
-                break None;
-            }
-
-            let ifa = unsafe { &*cursor };
-            if !ifa.ifa_addr.is_null()
-                && ((unsafe { *ifa.ifa_addr }).sa_family
-                    == sa_family_t::try_from(AF_INET).unwrap_or(sa_family_t::MAX)
-                    || (unsafe { *ifa.ifa_addr }).sa_family
-                        == sa_family_t::try_from(AF_INET6).unwrap_or(sa_family_t::MAX))
-            {
-                let saddr_ptr = ifa.ifa_addr as *const u8;
-                let found = match local_ip {
-                    IpAddr::V4(ip) => {
-                        let saddr: sockaddr_in =
-                            unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
-                        saddr.sin_addr.s_addr == in_addr_t::from_le_bytes(ip.octets())
-                    }
-                    IpAddr::V6(ip) => {
-                        let saddr: sockaddr_in6 =
-                            unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in6>()) };
-                        saddr.sin6_addr.s6_addr == ip.octets()
-                    }
-                };
-
-                if found {
-                    break unsafe { CStr::from_ptr(ifa.ifa_name).to_str().ok() };
+        let ifa = unsafe { &*cursor };
+        if !ifa.ifa_addr.is_null()
+            && ((unsafe { *ifa.ifa_addr }).sa_family
+                == sa_family_t::try_from(AF_INET).unwrap_or(sa_family_t::MAX)
+                || (unsafe { *ifa.ifa_addr }).sa_family
+                    == sa_family_t::try_from(AF_INET6).unwrap_or(sa_family_t::MAX))
+        {
+            let saddr_ptr = ifa.ifa_addr as *const u8;
+            let found = match local_ip {
+                IpAddr::V4(ip) => {
+                    let saddr: sockaddr_in =
+                        unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
+                    saddr.sin_addr.s_addr == in_addr_t::from_le_bytes(ip.octets())
                 }
-            }
-            cursor = ifa.ifa_next;
-        };
+                IpAddr::V6(ip) => {
+                    let saddr: sockaddr_in6 =
+                        unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in6>()) };
+                    saddr.sin6_addr.s6_addr == ip.octets()
+                }
+            };
 
-        // If we have found the interface name we are looking for, find the MTU.
-        if let Some(iface) = iface {
-            #[cfg(target_os = "macos")]
-            {
-                // On macOS, we need to loop again to find the MTU of that interface. We need to do
-                // two loops, because `getifaddrs` returns one entry per interface
-                // and link type, and the IP addresses are in the AF_INET/AF_INET6
-                // entries for an interface, whereas the MTU is (only) in the
-                // AF_LINK entry, whose `ifa_addr` contains MAC address information,
-                // not IP address information.
-                let mut cursor = ifap;
-                while !cursor.is_null() {
-                    let ifa = unsafe { &*cursor };
+            if found {
+                break unsafe { CStr::from_ptr(ifa.ifa_name).to_str().ok() };
+            }
+        }
+        cursor = ifa.ifa_next;
+    };
+
+    // If we have found the interface name we are looking for, find the MTU.
+    if let Some(iface) = iface {
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, we need to loop again to find the MTU of that interface. We need to do
+            // two loops, because `getifaddrs` returns one entry per interface
+            // and link type, and the IP addresses are in the AF_INET/AF_INET6
+            // entries for an interface, whereas the MTU is (only) in the
+            // AF_LINK entry, whose `ifa_addr` contains MAC address information,
+            // not IP address information.
+            let mut cursor = ifap;
+            while !cursor.is_null() {
+                let ifa = unsafe { &*cursor };
+                if !ifa.ifa_addr.is_null()
+                    && (unsafe { *ifa.ifa_addr }).sa_family
+                        == sa_family_t::try_from(AF_LINK).unwrap_or(sa_family_t::MAX)
+                {
                     if let Some(data) = unsafe { (ifa.ifa_data as *const if_data).as_ref() } {
                         if unsafe { CStr::from_ptr(ifa.ifa_name).to_str().unwrap_or_default() }
                             == iface
@@ -115,20 +117,20 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                             break;
                         }
                     }
-                    cursor = ifa.ifa_next;
                 }
+                cursor = ifa.ifa_next;
             }
-            #[cfg(target_os = "linux")]
-            {
-                // On Linux, we can get the MTU via an ioctl on the socket.
-                let mut ifr: ifreq = unsafe { mem::zeroed() };
-                ifr.ifr_name[..iface.len()]
-                    .copy_from_slice(unsafe { mem::transmute(iface.as_bytes()) });
-                if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
-                    res = Err(Error::last_os_error());
-                } else {
-                    res = unsafe { usize::try_from(ifr.ifr_ifru.ifru_mtu).or(res) };
-                }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // On Linux, we can get the MTU via an ioctl on the socket.
+            let mut ifr: ifreq = unsafe { mem::zeroed() };
+            ifr.ifr_name[..iface.len()]
+                .copy_from_slice(unsafe { mem::transmute(iface.as_bytes()) });
+            if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
+                res = Err(Error::last_os_error());
+            } else {
+                res = unsafe { usize::try_from(ifr.ifr_ifru.ifru_mtu).or(res) };
             }
         }
 
