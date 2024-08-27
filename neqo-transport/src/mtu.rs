@@ -155,17 +155,18 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         use std::mem;
 
         use winapi::{
-            shared::{minwindef::DWORD, winerror::NOERROR},
-            um::iphlpapi::{GetBestInterfaceEx, GetIfEntry2},
+            netioapi::{GetIfEntry2, MIB_IF_ROW2},
+            shared::{minwindef::DWORD, winerror::NO_ERROR, ws2def::SOCKADDR},
+            um::iphlpapi::GetBestInterfaceEx,
         };
 
         let mut idx: DWORD = 0;
-        if unsafe { GetBestInterfaceEx(&remote as *const SOCKADDR, &mut idx) } != NOERROR {
+        if unsafe { GetBestInterfaceEx(&remote as *const SOCKADDR, &mut idx) } != NO_ERROR {
             res = Err(Error::last_os_error());
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
             row.InterfaceIndex = idx;
-            res = if unsafe { GetIfEntry2(&mut row) } == NOERROR {
+            res = if unsafe { GetIfEntry2(&mut row) } == NO_ERROR {
                 Ok(row.Mtu)
             } else {
                 Err(Error::last_os_error())
