@@ -87,7 +87,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     IpAddr::V4(ip) => {
                         let saddr: sockaddr_in =
                             unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
-                        saddr.sin_addr.s_addr == in_addr_t::from_le_bytes(ip.octets())
+                        saddr.sin_addr.s_addr == in_addr_t::to_be(ip.into())
                     }
                     IpAddr::V6(ip) => {
                         let saddr: sockaddr_in6 =
@@ -137,7 +137,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
                 ifr.ifr_name[..iface.len()].copy_from_slice(unsafe {
-                    &*(iface.as_bytes() as *const [u8] as *const [c_char])
+                    &*(std::ptr::from_ref::<[u8]>(iface.as_bytes()) as *const [c_char])
                 });
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
@@ -156,23 +156,24 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
         use winapi::{
             shared::{
+                in6addr::IN6_ADDR,
                 minwindef::DWORD,
                 netioapi::{GetIfEntry2, MIB_IF_ROW2},
                 winerror::NO_ERROR,
-                ws2def::SOCKADDR,
+                ws2def::AF_INET6,
+                ws2ipdef::SOCKADDR_IN6,
             },
             um::iphlpapi::GetBestInterfaceEx,
         };
 
         let mut saddr = match remote {
             SocketAddr::V4(addr) => {
-                let sin_addr = IN_ADDR {
-                    S_un: unsafe { mem::transmute(remote.ip().octets()) },
-                };
                 let sockaddr_in = SOCKADDR_IN {
                     sin_family: ADDRESS_FAMILY(AF_INET),
                     sin_port: remote.port().to_be(),
-                    sin_addr,
+                    sin_addr: IN_ADDR {
+                        S_un: unsafe { in_addr_t::to_be_bytes(remote.ip().into()) },
+                    },
                     sin_zero: [0; 8],
                 };
                 unsafe { mem::transmute(sockaddr_in) }
@@ -191,7 +192,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             }
         };
         let mut idx: DWORD = 0;
-        if unsafe { GetBestInterfaceEx(&saddr, &mut idx) } != NO_ERROR {
+        if unsafe { GetBestInterfaceEx(saddr, &mut idx) } != NO_ERROR {
             res = Err(Error::last_os_error());
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
