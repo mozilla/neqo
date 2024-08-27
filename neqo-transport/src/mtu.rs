@@ -187,8 +187,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     sin6_addr: IN6_ADDR {
                         u: unsafe { mem::transmute(addr.ip().octets()) },
                     },
-                    // TODO: Figure out how to set the scope ID.
-                    // u: SOCKADDR_IN6_LH_u(addr.scope_id()),
+                    sin6_scope_id: addr.scope_id(),
                 };
 
                 unsafe { mem::transmute(saddr) }
