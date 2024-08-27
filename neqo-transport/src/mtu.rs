@@ -161,8 +161,8 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 minwindef::DWORD,
                 netioapi::{GetIfEntry2, MIB_IF_ROW2},
                 winerror::NO_ERROR,
-                ws2def::{ADDRESS_FAMILY, AF_INET, AF_INET6, SOCKADDR, SOCKADDR_IN},
-                ws2ipdef::SOCKADDR_IN6,
+                ws2def::{ADDRESS_FAMILY, AF_INET, AF_INET6, SOCKADDR_IN},
+                ws2ipdef::{SOCKADDR_IN6_LH_u, SOCKADDR_IN6},
             },
             um::iphlpapi::GetBestInterfaceEx,
         };
