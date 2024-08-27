@@ -173,6 +173,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
         let mut idx: u32 = 0;
         res = if unsafe { GetBestInterfaceEx(&saddr, &mut idx) } != 0 {
+            qtrace!("GetBestInterfaceEx failed");
             Err(Error::last_os_error())
         } else {
             let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
@@ -180,6 +181,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             if unsafe { GetIfEntry2(&mut row) } == NO_ERROR {
                 usize::try_from(row.Mtu).or(res)
             } else {
+                qtrace!("GetIfEntry2 failed");
                 Err(Error::last_os_error())
             }
         };
