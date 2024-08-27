@@ -380,6 +380,7 @@ struct Runner<'a, H: Handler> {
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
+    recv_buf: Option<Vec<u8>>,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -445,12 +446,26 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process_multiple_input(&mut self) -> Res<()> {
         loop {
-            let dgrams = self.socket.recv(&self.local_addr)?;
-            if dgrams.is_empty() {
-                break;
-            }
+            // TODO: big hack
+            let dgram = match self.socket.recv(
+                &self.local_addr,
+                self.recv_buf.take().expect("recv_buf not to be taken"),
+            ) {
+                Ok(Ok(d)) => d,
+                Ok(Err(recv_buf)) => {
+                    self.recv_buf = Some(recv_buf);
+                    break;
+                }
+                Err((e, recv_buf)) => {
+                    self.recv_buf = Some(recv_buf);
+                    return Err(e.into());
+                }
+            };
+
             self.client
-                .process_multiple_input(dgrams.iter(), Instant::now());
+                // TODO
+                .process_multiple_input(std::iter::once(&dgram), Instant::now());
+            self.recv_buf = Some(dgram.into_recv_buf());
             self.process_output().await?;
         }
 
@@ -568,6 +583,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     local_addr: real_local,
                     socket: &mut socket,
                     timeout: None,
+                    recv_buf: Some(Vec::with_capacity(neqo_udp::RECV_BUF_SIZE)),
                 }
                 .run()
                 .await?
@@ -584,6 +600,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     local_addr: real_local,
                     socket: &mut socket,
                     timeout: None,
+                    recv_buf: Some(Vec::with_capacity(neqo_udp::RECV_BUF_SIZE)),
                 }
                 .run()
                 .await?

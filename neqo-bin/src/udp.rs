@@ -54,16 +54,35 @@ impl Socket {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
-    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    pub fn recv(
+        &self,
+        local_address: &SocketAddr,
+        recv_buf: Vec<u8>,
+    ) -> Result<Result<Datagram, Vec<u8>>, (io::Error, Vec<u8>)> {
+        // TODO: big hack!
+        let mut recv_buf = Some(recv_buf);
         self.inner
-            .try_io(tokio::io::Interest::READABLE, || {
-                neqo_udp::recv_inner(local_address, &self.state, &self.inner)
-            })
+            .try_io(
+                tokio::io::Interest::READABLE,
+                || match neqo_udp::recv_inner_2(
+                    local_address,
+                    &self.state,
+                    &self.inner,
+                    recv_buf.take().unwrap(),
+                ) {
+                    Ok(d) => return Ok(d),
+                    Err((e, buf)) => {
+                        recv_buf = Some(buf);
+                        return Err(e);
+                    }
+                },
+            )
+            .map(Ok)
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::WouldBlock {
-                    Ok(vec![])
+                    Ok(Err(recv_buf.take().unwrap()))
                 } else {
-                    Err(e)
+                    Err((e, recv_buf.take().unwrap()))
                 }
             })
     }

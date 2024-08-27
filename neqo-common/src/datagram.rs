@@ -13,6 +13,9 @@ pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
     tos: IpTos,
+    /// The segment size if this transmission contains multiple datagrams.
+    /// This is `None` if the [`Datagram`] only contains a single datagram
+    segment_size: Option<usize>,
     d: Vec<u8>,
 }
 
@@ -22,6 +25,23 @@ impl Datagram {
             src,
             dst,
             tos,
+            segment_size: None,
+            d: d.into(),
+        }
+    }
+
+    pub fn new_with_segment_size<V: Into<Vec<u8>>>(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        segment_size: usize,
+        d: V,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size: Some(segment_size),
             d: d.into(),
         }
     }
@@ -43,6 +63,14 @@ impl Datagram {
 
     pub fn set_tos(&mut self, tos: IpTos) {
         self.tos = tos;
+    }
+
+    pub fn into_recv_buf(self) -> Vec<u8> {
+        self.d
+    }
+
+    pub fn segment_size(&self) -> Option<usize> {
+        self.segment_size
     }
 }
 

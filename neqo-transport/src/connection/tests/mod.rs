@@ -678,3 +678,32 @@ fn create_server() {
     // Server won't have a default path, so no RTT.
     assert_eq!(stats.rtt, Duration::from_secs(0));
 }
+
+#[test]
+fn segments() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let before = server.stats().packets_rx;
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    let (dgrams, _) = fill_cwnd(&mut client, stream_id, now());
+
+    let source = dgrams[0].source();
+    let destination = dgrams[0].destination();
+    let tos = dgrams[0].tos();
+    let d: Vec<u8> = dgrams.into_iter().fold(Vec::new(), |mut acc, i| {
+        acc.extend_from_slice(i.as_slice());
+        acc
+    });
+    // TODO: segment size is wrong.
+    let large_dgram = Datagram::new_with_segment_size(source, destination, tos, 42, d);
+    server.process_input(&large_dgram, now());
+    assert!(
+        server.stats().packets_rx > before + 1,
+        "before {}, after {}",
+        before,
+        server.stats().packets_rx
+    );
+}

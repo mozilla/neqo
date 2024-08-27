@@ -1498,118 +1498,123 @@ impl Connection {
     }
 
     fn input_path(&mut self, path: &PathRef, d: &Datagram, now: Instant) -> Res<()> {
-        let mut slc = &d[..];
-        let mut dcid = None;
+        for mut slc in d
+            .as_slice()
+            .chunks(d.segment_size().unwrap_or(d.as_slice().len()))
+        {
+            let mut dcid = None;
 
-        qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
-        let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
+            qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
+            let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
 
-        // Handle each packet in the datagram.
-        while !slc.is_empty() {
-            self.stats.borrow_mut().packets_rx += 1;
-            let (packet, remainder) =
-                match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
-                    Ok((packet, remainder)) => (packet, remainder),
-                    Err(e) => {
-                        qinfo!([self], "Garbage packet: {}", e);
-                        qtrace!([self], "Garbage packet contents: {}", hex(slc));
-                        self.stats.borrow_mut().pkt_dropped("Garbage packet");
-                        break;
-                    }
-                };
-            match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
-                PreprocessResult::Continue => (),
-                PreprocessResult::Next => break,
-                PreprocessResult::End => return Ok(()),
-            }
+            // Handle each packet in the datagram.
+            while !slc.is_empty() {
+                self.stats.borrow_mut().packets_rx += 1;
+                let (packet, remainder) =
+                    match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
+                        Ok((packet, remainder)) => (packet, remainder),
+                        Err(e) => {
+                            qinfo!([self], "Garbage packet: {}", e);
+                            qtrace!([self], "Garbage packet contents: {}", hex(slc));
+                            self.stats.borrow_mut().pkt_dropped("Garbage packet");
+                            break;
+                        }
+                    };
+                match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
+                    PreprocessResult::Continue => (),
+                    PreprocessResult::Next => break,
+                    PreprocessResult::End => return Ok(()),
+                }
 
-            qtrace!([self], "Received unverified packet {:?}", packet);
+                qtrace!([self], "Received unverified packet {:?}", packet);
 
-            match packet.decrypt(&mut self.crypto.states, now + pto) {
-                Ok(payload) => {
-                    // OK, we have a valid packet.
-                    self.idle_timeout.on_packet_received(now);
-                    dump_packet(
-                        self,
-                        path,
-                        "-> RX",
-                        payload.packet_type(),
-                        payload.pn(),
-                        &payload[..],
-                        d.tos(),
-                        d.len(),
-                    );
+                match packet.decrypt(&mut self.crypto.states, now + pto) {
+                    Ok(payload) => {
+                        // OK, we have a valid packet.
+                        self.idle_timeout.on_packet_received(now);
+                        dump_packet(
+                            self,
+                            path,
+                            "-> RX",
+                            payload.packet_type(),
+                            payload.pn(),
+                            &payload[..],
+                            d.tos(),
+                            d.len(),
+                        );
 
-                    #[cfg(feature = "build-fuzzing-corpus")]
-                    if packet.packet_type() == PacketType::Initial {
-                        let target = if self.role == Role::Client {
-                            "server_initial"
-                        } else {
-                            "client_initial"
-                        };
-                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
-                    }
+                        #[cfg(feature = "build-fuzzing-corpus")]
+                        if packet.packet_type() == PacketType::Initial {
+                            let target = if self.role == Role::Client {
+                                "server_initial"
+                            } else {
+                                "client_initial"
+                            };
+                            neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
+                        }
 
-                    qlog::packet_received(&self.qlog, &packet, &payload);
-                    let space = PacketNumberSpace::from(payload.packet_type());
-                    if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(payload.pn()) {
-                            qdebug!("Duplicate packet {}-{}", space, payload.pn());
-                            self.stats.borrow_mut().dups_rx += 1;
-                        } else {
-                            match self.process_packet(path, &payload, now) {
-                                Ok(migrate) => {
-                                    self.postprocess_packet(path, d, &packet, migrate, now);
-                                }
-                                Err(e) => {
-                                    self.ensure_error_path(path, &packet, now);
-                                    return Err(e);
+                        qlog::packet_received(&self.qlog, &packet, &payload);
+                        let space = PacketNumberSpace::from(payload.packet_type());
+                        if let Some(space) = self.acks.get_mut(space) {
+                            if space.is_duplicate(payload.pn()) {
+                                qdebug!("Duplicate packet {}-{}", space, payload.pn());
+                                self.stats.borrow_mut().dups_rx += 1;
+                            } else {
+                                match self.process_packet(path, &payload, now) {
+                                    Ok(migrate) => {
+                                        self.postprocess_packet(path, d, &packet, migrate, now);
+                                    }
+                                    Err(e) => {
+                                        self.ensure_error_path(path, &packet, now);
+                                        return Err(e);
+                                    }
                                 }
                             }
+                        } else {
+                            qdebug!(
+                                [self],
+                                "Received packet {} for untracked space {}",
+                                space,
+                                payload.pn()
+                            );
+                            return Err(Error::ProtocolViolation);
                         }
-                    } else {
-                        qdebug!(
-                            [self],
-                            "Received packet {} for untracked space {}",
-                            space,
-                            payload.pn()
-                        );
-                        return Err(Error::ProtocolViolation);
+                    }
+                    Err(e) => {
+                        match e {
+                            Error::KeysPending(cspace) => {
+                                // This packet can't be decrypted because we don't have the keys yet.
+                                // Don't check this packet for a stateless reset, just return.
+                                let remaining = slc.len();
+                                self.save_datagram(cspace, d, remaining, now);
+                                return Ok(());
+                            }
+                            Error::KeysExhausted => {
+                                // Exhausting read keys is fatal.
+                                return Err(e);
+                            }
+                            Error::KeysDiscarded(cspace) => {
+                                // This was a valid-appearing Initial packet: maybe probe with
+                                // a Handshake packet to keep the handshake moving.
+                                self.received_untracked |=
+                                    self.role == Role::Client && cspace == CryptoSpace::Initial;
+                            }
+                            _ => (),
+                        }
+                        // Decryption failure, or not having keys is not fatal.
+                        // If the state isn't available, or we can't decrypt the packet, drop
+                        // the rest of the datagram on the floor, but don't generate an error.
+                        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
+                        self.stats.borrow_mut().pkt_dropped("Decryption failure");
+                        qlog::packet_dropped(&self.qlog, &packet);
                     }
                 }
-                Err(e) => {
-                    match e {
-                        Error::KeysPending(cspace) => {
-                            // This packet can't be decrypted because we don't have the keys yet.
-                            // Don't check this packet for a stateless reset, just return.
-                            let remaining = slc.len();
-                            self.save_datagram(cspace, d, remaining, now);
-                            return Ok(());
-                        }
-                        Error::KeysExhausted => {
-                            // Exhausting read keys is fatal.
-                            return Err(e);
-                        }
-                        Error::KeysDiscarded(cspace) => {
-                            // This was a valid-appearing Initial packet: maybe probe with
-                            // a Handshake packet to keep the handshake moving.
-                            self.received_untracked |=
-                                self.role == Role::Client && cspace == CryptoSpace::Initial;
-                        }
-                        _ => (),
-                    }
-                    // Decryption failure, or not having keys is not fatal.
-                    // If the state isn't available, or we can't decrypt the packet, drop
-                    // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(path, d, dcid.is_none(), now)?;
-                    self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&self.qlog, &packet);
-                }
+                slc = remainder;
+                dcid = Some(ConnectionId::from(packet.dcid()));
             }
-            slc = remainder;
-            dcid = Some(ConnectionId::from(packet.dcid()));
+
+            self.check_stateless_reset(path, d, dcid.is_none(), now)?;
         }
-        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
         Ok(())
     }
 
