@@ -155,7 +155,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         use std::mem;
 
         use windows_sys::Win32::{
-            Foundation::{NO_ERROR, WIN32_ERROR},
+            Foundation::NO_ERROR,
             NetworkManagement::IpHelper::{GetBestInterfaceEx, GetIfEntry2, MIB_IF_ROW2},
             Networking::WinSock::{
                 ADDRESS_FAMILY, AF_INET, AF_INET6, IN6_ADDR, IN_ADDR, SOCKADDR_IN, SOCKADDR_IN6,
