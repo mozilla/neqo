@@ -157,39 +157,34 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         use winapi::{
             shared::{
                 in6addr::IN6_ADDR,
+                inaddr::IN_ADDR,
                 minwindef::DWORD,
                 netioapi::{GetIfEntry2, MIB_IF_ROW2},
                 winerror::NO_ERROR,
-                ws2def::AF_INET6,
+                ws2def::{ADDRESS_FAMILY, AF_INET, AF_INET6, SOCKADDR_IN},
                 ws2ipdef::SOCKADDR_IN6,
             },
             um::iphlpapi::GetBestInterfaceEx,
         };
 
         let mut saddr = match remote {
-            SocketAddr::V4(addr) => {
-                let sockaddr_in = SOCKADDR_IN {
-                    sin_family: ADDRESS_FAMILY(AF_INET),
-                    sin_port: remote.port().to_be(),
-                    sin_addr: IN_ADDR {
-                        S_un: unsafe { in_addr_t::to_be_bytes(remote.ip().into()) },
-                    },
-                    sin_zero: [0; 8],
-                };
-                unsafe { mem::transmute(sockaddr_in) }
-            }
-            SocketAddr::V6(addr) => {
-                let sockaddr_in6 = SOCKADDR_IN6 {
-                    sin6_family: ADDRESS_FAMILY(AF_INET6),
-                    sin6_port: remote.port().to_be(),
-                    sin6_flowinfo: remote.flowinfo(),
-                    sin6_addr: IN6_ADDR {
-                        u: unsafe { mem::transmute(remote.ip().octets()) },
-                    },
-                    sin6_scope_id: remote.scope_id(),
-                };
-                unsafe { mem::transmute(sockaddr_in6) }
-            }
+            SocketAddr::V4(addr) => SOCKADDR_IN {
+                sin_family: AF_INET as ADDRESS_FAMILY,
+                sin_port: addr.port().to_be(),
+                sin_addr: IN_ADDR {
+                    S_un: unsafe { mem::transmute(addr.ip().octets()) },
+                },
+                sin_zero: [0; 8],
+            },
+            SocketAddr::V6(addr) => SOCKADDR_IN6 {
+                sin6_family: AF_INET6 as ADDRESS_FAMILY,
+                sin6_port: addr.port().to_be(),
+                sin6_flowinfo: addr.flowinfo(),
+                sin6_addr: IN6_ADDR {
+                    u: unsafe { mem::transmute(addr.ip().octets()) },
+                },
+                sin6_scope_id: addr.scope_id(),
+            },
         };
         let mut idx: DWORD = 0;
         if unsafe { GetBestInterfaceEx(saddr, &mut idx) } != NO_ERROR {
