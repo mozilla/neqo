@@ -28,13 +28,13 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
+        #[cfg(target_os = "linux")]
+        use std::{ffi::c_char, mem, os::fd::AsRawFd};
         use std::{
             ffi::CStr,
             net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket},
             ptr,
         };
-        #[cfg(target_os = "linux")]
-        use std::{mem, os::fd::AsRawFd};
 
         use libc::{
             freeifaddrs, getifaddrs, ifaddrs, in_addr_t, sa_family_t, sockaddr_in, sockaddr_in6,
@@ -132,8 +132,9 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             {
                 // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
-                ifr.ifr_name[..iface.len()]
-                    .copy_from_slice(unsafe { mem::transmute(iface.as_bytes()) });
+                ifr.ifr_name[..iface.len()].copy_from_slice(unsafe {
+                    &*(iface.as_bytes() as *const [u8] as *const [c_char])
+                });
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
                 } else {
