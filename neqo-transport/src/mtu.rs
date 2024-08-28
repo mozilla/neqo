@@ -149,7 +149,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::{mem, ptr};
+        use std::mem;
 
         use windows::Win32::{
             Foundation::NO_ERROR,
@@ -158,14 +158,8 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         };
 
         let saddr = match remote {
-            SocketAddr::V4(addr) => {
-                let saddr_ptr = ptr::from_ref(&SOCKADDR_IN::from(*addr)).cast::<u8>();
-                unsafe { ptr::read_unaligned(saddr_ptr.cast::<SOCKADDR>()) }
-            }
-            SocketAddr::V6(addr) => {
-                let saddr_ptr = ptr::from_ref(&SOCKADDR_IN6::from(*addr)).cast::<u8>();
-                unsafe { ptr::read_unaligned(saddr_ptr.cast::<SOCKADDR>()) }
-            }
+            SocketAddr::V4(addr) => SOCKADDR_IN::from(*adsdr),
+            SocketAddr::V6(addr) => SOCKADDR_IN6::from(*addr),
         };
 
         let mut idx: u32 = 0;
