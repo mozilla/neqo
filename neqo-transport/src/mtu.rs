@@ -35,14 +35,14 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         #[cfg(target_os = "linux")]
         use std::{ffi::c_char, mem, os::fd::AsRawFd};
         use std::{
-            ffi::CStr,
+            ffi::{c_int, CStr},
             net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket},
             ptr,
         };
 
         use libc::{
-            freeifaddrs, getifaddrs, ifaddrs, in_addr_t, sa_family_t, sockaddr_in, sockaddr_in6,
-            AF_INET, AF_INET6,
+            freeifaddrs, getifaddrs, ifaddrs, in_addr_t, sockaddr_in, sockaddr_in6, AF_INET,
+            AF_INET6,
         };
         #[cfg(target_os = "macos")]
         use libc::{if_data, AF_LINK};
@@ -76,27 +76,22 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             }
 
             let ifa = unsafe { &*cursor };
-            if !ifa.ifa_addr.is_null()
-                && ((unsafe { *ifa.ifa_addr }).sa_family
-                    == sa_family_t::try_from(AF_INET).unwrap_or(sa_family_t::MAX)
-                    || (unsafe { *ifa.ifa_addr }).sa_family
-                        == sa_family_t::try_from(AF_INET6).unwrap_or(sa_family_t::MAX))
-            {
-                let saddr_ptr = ifa.ifa_addr as *const u8;
-                let found = match local_ip {
-                    IpAddr::V4(ip) => {
-                        let saddr: sockaddr_in =
-                            unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in>()) };
-                        saddr.sin_addr.s_addr == in_addr_t::to_be(ip.into())
+            if !ifa.ifa_addr.is_null() {
+                let saddr = unsafe { &*ifa.ifa_addr };
+                if matches!(c_int::from(saddr.sa_family), AF_INET | AF_INET6)
+                    && match local_ip {
+                        IpAddr::V4(ip) => {
+                            let saddr: sockaddr_in =
+                                unsafe { ptr::read_unaligned(ifa.ifa_addr.cast::<sockaddr_in>()) };
+                            saddr.sin_addr.s_addr == in_addr_t::to_be(ip.into())
+                        }
+                        IpAddr::V6(ip) => {
+                            let saddr: sockaddr_in6 =
+                                unsafe { ptr::read_unaligned(ifa.ifa_addr.cast::<sockaddr_in6>()) };
+                            saddr.sin6_addr.s6_addr == ip.octets()
+                        }
                     }
-                    IpAddr::V6(ip) => {
-                        let saddr: sockaddr_in6 =
-                            unsafe { ptr::read_unaligned(saddr_ptr.cast::<sockaddr_in6>()) };
-                        saddr.sin6_addr.s6_addr == ip.octets()
-                    }
-                };
-
-                if found {
+                {
                     break unsafe { CStr::from_ptr(ifa.ifa_name).to_str().ok() };
                 }
             }
@@ -116,22 +111,24 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 let mut cursor = ifap;
                 while !cursor.is_null() {
                     let ifa = unsafe { &*cursor };
-                    if !ifa.ifa_addr.is_null()
-                        && (unsafe { *ifa.ifa_addr }).sa_family
-                            == sa_family_t::try_from(AF_LINK).unwrap_or(sa_family_t::MAX)
-                    {
-                        if let Some(data) = unsafe { (ifa.ifa_data as *const if_data).as_ref() } {
-                            if unsafe { CStr::from_ptr(ifa.ifa_name).to_str().unwrap_or_default() }
-                                == iface
-                            {
-                                res = usize::try_from(data.ifi_mtu).or(res);
-                                break;
-                            }
+                    if !ifa.ifa_addr.is_null() {
+                        let saddr = unsafe { &*ifa.ifa_addr };
+                        let name = String::from_utf8_lossy(unsafe {
+                            CStr::from_ptr(ifa.ifa_name).to_bytes()
+                        });
+                        if c_int::from(saddr.sa_family) == AF_LINK
+                            && !ifa.ifa_data.is_null()
+                            && name == iface
+                        {
+                            let data = unsafe { &*(ifa.ifa_data as *const if_data) };
+                            res = usize::try_from(data.ifi_mtu).or(res);
+                            break;
                         }
                     }
                     cursor = ifa.ifa_next;
                 }
             }
+
             #[cfg(target_os = "linux")]
             {
                 // On Linux, we can get the MTU via an ioctl on the socket.
