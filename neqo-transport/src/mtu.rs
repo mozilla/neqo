@@ -158,12 +158,12 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         };
 
         let saddr = match remote {
-            SocketAddr::V4(addr) => unsafe { mem::transmute(SOCKADDR_IN::from(*addr)) },
-            SocketAddr::V6(addr) => unsafe { mem::transmute(SOCKADDR_IN6::from(*addr)) },
+            SocketAddr::V4(addr) => &SOCKADDR_IN::from(*addr) as *const u8 as *const SOCKADDR,
+            SocketAddr::V6(addr) => &SOCKADDR_IN6::from(*addr) as *const u8 as *const SOCKADDR,
         };
 
         let mut idx: u32 = 0;
-        res = if unsafe { GetBestInterfaceEx(&saddr, &mut idx) } != 0 {
+        res = if unsafe { GetBestInterfaceEx(saddr, &mut idx) } != 0 {
             qtrace!("GetBestInterfaceEx failed");
             Err(Error::last_os_error())
         } else {
