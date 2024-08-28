@@ -158,8 +158,8 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         };
 
         let saddr = match remote {
-            SocketAddr::V4(addr) => SOCKADDR_IN::from(*addr).cast::<SOCKADDR>(),
-            SocketAddr::V6(addr) => SOCKADDR_IN6::from(*addr).cast::<SOCKADDR>(),
+            SocketAddr::V4(addr) => unsafe { mem::transmute(SOCKADDR_IN::from(*addr)) },
+            SocketAddr::V6(addr) => unsafe { mem::transmute(SOCKADDR_IN6::from(*addr)) },
         };
 
         let mut idx: u32 = 0;
