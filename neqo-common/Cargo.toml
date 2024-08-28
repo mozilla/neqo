@@ -23,16 +23,16 @@ hex = { version = "0.4", default-features = false, features = ["alloc"], optiona
 log = { workspace = true }
 qlog = { workspace = true }
 
+[target."cfg(windows)".dependencies]
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+windows = { version = "0.58", default-features = false, features = ["Win32_Media"] }
+
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
 [features]
 ci = []
 build-fuzzing-corpus = ["hex"]
-
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3"
-features = ["timeapi"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
