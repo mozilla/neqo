@@ -1460,7 +1460,9 @@ impl Connection {
     ) {
         let space = PacketNumberSpace::from(packet.packet_type());
         if let Some(space) = self.acks.get_mut(space) {
-            *space.ecn_marks() += d.tos().into();
+            let space_ecn_marks = space.ecn_marks();
+            *space_ecn_marks += d.tos().into();
+            self.stats.borrow_mut().ecn_rx = *space_ecn_marks;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
         }
@@ -2427,7 +2429,10 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial);
             }
             path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(path.borrow_mut().datagram(packets)))
+            Ok(SendOption::Yes(
+                path.borrow_mut()
+                    .datagram(packets, &mut self.stats.borrow_mut()),
+            ))
         }
     }
 
