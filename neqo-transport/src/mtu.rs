@@ -160,6 +160,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
         let mut addr_table: *mut MIB_UNICASTIPADDRESS_TABLE = ptr::null_mut();
         if unsafe { GetUnicastIpAddressTable(AF_UNSPEC, &mut addr_table) } == NO_ERROR {
+            #[allow(clippy::disallowed_methods)] // Not empty if NO_ERROR was returned.
             let addrs = unsafe {
                 slice::from_raw_parts::<MIB_UNICASTIPADDRESS_ROW>(
                     &(*addr_table).Table[0],
@@ -181,6 +182,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 {
                     let mut if_table: *mut MIB_IPINTERFACE_TABLE = ptr::null_mut();
                     if unsafe { GetIpInterfaceTable(af, &mut if_table) } == NO_ERROR {
+                        #[allow(clippy::disallowed_methods)] // Not empty if NO_ERROR was returned.
                         let ifaces = unsafe {
                             slice::from_raw_parts::<MIB_IPINTERFACE_ROW>(
                                 &(*if_table).Table[0],
