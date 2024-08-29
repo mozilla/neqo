@@ -158,6 +158,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC},
         };
 
+        // Get a list of all unicast IP addresses with associated metadata.
         let mut addr_table: *mut MIB_UNICASTIPADDRESS_TABLE = ptr::null_mut();
         if unsafe { GetUnicastIpAddressTable(AF_UNSPEC, &mut addr_table) } == NO_ERROR {
             #[allow(clippy::disallowed_methods)] // Not empty if NO_ERROR was returned.
@@ -167,41 +168,46 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                     (*addr_table).NumEntries as usize,
                 )
             };
-            for addr in addrs {
-                let af = unsafe { addr.Address.si_family };
-                if (af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6())
-                    && match local_ip {
-                        IpAddr::V4(ip) => {
-                            u32::from(ip).to_be()
-                                == unsafe { addr.Address.Ipv4.sin_addr.S_un.S_addr }
+
+            // Get a list of all interfaces with associated metadata.
+            let mut if_table: *mut MIB_IPINTERFACE_TABLE = ptr::null_mut();
+            if unsafe { GetIpInterfaceTable(AF_UNSPEC, &mut if_table) } == NO_ERROR {
+                #[allow(clippy::disallowed_methods)] // Not empty if NO_ERROR was returned.
+                let ifaces = unsafe {
+                    slice::from_raw_parts::<MIB_IPINTERFACE_ROW>(
+                        &(*if_table).Table[0],
+                        (*if_table).NumEntries as usize,
+                    )
+                };
+
+                // Run through the list of addresses and find the one that matches the local IP
+                // address.
+                'addr_loop: for addr in addrs {
+                    let af = unsafe { addr.Address.si_family };
+                    if (af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6())
+                        && match local_ip {
+                            IpAddr::V4(ip) => {
+                                u32::from(ip).to_be()
+                                    == unsafe { addr.Address.Ipv4.sin_addr.S_un.S_addr }
+                            }
+                            IpAddr::V6(ip) => {
+                                ip.octets() == unsafe { addr.Address.Ipv6.sin6_addr.u.Byte }
+                            }
                         }
-                        IpAddr::V6(ip) => {
-                            ip.octets() == unsafe { addr.Address.Ipv6.sin6_addr.u.Byte }
-                        }
-                    }
-                {
-                    let mut if_table: *mut MIB_IPINTERFACE_TABLE = ptr::null_mut();
-                    if unsafe { GetIpInterfaceTable(af, &mut if_table) } == NO_ERROR {
-                        #[allow(clippy::disallowed_methods)] // Not empty if NO_ERROR was returned.
-                        let ifaces = unsafe {
-                            slice::from_raw_parts::<MIB_IPINTERFACE_ROW>(
-                                &(*if_table).Table[0],
-                                (*if_table).NumEntries as usize,
-                            )
-                        };
+                    {
+                        // For the matching address, find local interface and its MTU.
                         for iface in ifaces {
                             if iface.InterfaceIndex == addr.InterfaceIndex {
                                 // On loopback, the MTU is 4294967295...
                                 res = min(iface.NlMtu, 65536).try_into().or(res);
-                                break;
+                                break 'addr_loop;
                             }
                         }
-                        unsafe { FreeMibTable(if_table as *const c_void) };
-                    } else {
-                        res = Err(Error::last_os_error());
                     }
-                    break;
                 }
+                unsafe { FreeMibTable(if_table as *const c_void) };
+            } else {
+                res = Err(Error::last_os_error());
             }
             unsafe { FreeMibTable(addr_table as *const c_void) };
         } else {
