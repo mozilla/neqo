@@ -76,18 +76,6 @@ runs:
         git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
           hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
 
-    - name: Cache NSS
-      if: env.BUILD_NSS == '1'
-      id: cache-nss
-      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
-      with:
-        path: |
-          ${{ github.workspace }}/dist
-          ${{ github.workspace }}/nss/out
-          ${{ github.workspace }}/nspr/Debug
-          ${{ github.workspace }}/nspr/Release
-        key: nss-${{ runner.os }}-${{ runner.arch }}-${{ inputs.type }}-${{ hashFiles('nss/lib/nss/nss.h', 'nspr/pr/include/prinit.h') }}
-
     - name: Install build dependencies (Linux)
       shell: bash
       if: runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
@@ -153,9 +141,7 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        if [ "${{ steps.cache-nss.outputs.cache-hit }}" != "true" ]; then
-          $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-        fi
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
