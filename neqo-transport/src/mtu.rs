@@ -171,7 +171,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 if (af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6())
                     && match local_ip {
                         IpAddr::V4(ip) => {
-                            ip.to_bits().to_be()
+                            u32::from(ip).to_be()
                                 == unsafe { addr.Address.Ipv4.sin_addr.S_un.S_addr }
                         }
                         IpAddr::V6(ip) => {
@@ -190,7 +190,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                         for iface in ifaces {
                             if iface.InterfaceIndex == addr.InterfaceIndex {
                                 // On loopback, the MTU is 4294967295...
-                                res = min(iface.NlMtu, u16::MAX.into()).try_into().or(res);
+                                res = min(iface.NlMtu, 65536).try_into().or(res);
                                 break;
                             }
                         }
@@ -213,42 +213,54 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
 #[cfg(test)]
 mod test {
-    use std::net::{SocketAddr, ToSocketAddrs};
+    use std::net::ToSocketAddrs;
 
     use neqo_common::qwarn;
 
-    fn check_mtu(sockaddr: &str, expected: usize) {
-        type AfCheck = fn(&SocketAddr) -> bool;
-        let afs: [(&str, AfCheck); 2] =
-            [("IPv4", SocketAddr::is_ipv4), ("IPv6", SocketAddr::is_ipv6)];
-
-        for (af, af_check) in afs {
-            let addr = sockaddr.to_socket_addrs().unwrap().find(af_check);
-            match addr {
-                Some(addr) => {
-                    let mtu = super::get_interface_mtu(&addr).unwrap();
-                    assert_eq!(mtu, expected);
-                }
-                None => {
-                    // Since GitHub runners don't have IPv6, just warn if we can't find an address.
-                    qwarn!("No {} address found for {}", af, sockaddr);
+    fn check_mtu(sockaddr: &str, ipv4: bool, expected: usize) {
+        let addr = sockaddr
+            .to_socket_addrs()
+            .unwrap()
+            .find(|a| a.is_ipv4() == ipv4);
+        if let Some(addr) = addr {
+            match super::get_interface_mtu(&addr) {
+                Ok(mtu) => assert_eq!(mtu, expected),
+                Err(e) => {
+                    // Some GitHub runners don't have IPv6. Just warn if we can't get the MTU.
+                    assert!(addr.is_ipv6());
+                    qwarn!("Error getting MTU for {}: {}", sockaddr, e);
                 }
             }
+        } else {
+            // Some GitHub runners don't have IPv6. Just warn if we can't get an IPv6 address.
+            assert!(!ipv4);
+            qwarn!("No IPv6 address found for {}", sockaddr);
         }
     }
 
     #[test]
-    fn loopback_interface_mtu() {
+    fn loopback_interface_mtu_v4() {
         #[cfg(target_os = "macos")]
-        check_mtu("localhost:443", 16384);
-        #[cfg(target_os = "linux")]
+        check_mtu("localhost:443", true, 16384);
+        #[cfg(not(target_os = "macos"))]
         check_mtu("localhost:443", 65536);
-        #[cfg(target_os = "windows")]
-        check_mtu("localhost:443", 65535);
     }
 
     #[test]
-    fn default_interface_mtu() {
-        check_mtu("ietf.org:443", 1500);
+    fn loopback_interface_mtu_v6() {
+        #[cfg(target_os = "macos")]
+        check_mtu("localhost:443", false, 16384);
+        #[cfg(not(target_os = "macos"))]
+        check_mtu("localhost:443", 65536);
+    }
+
+    #[test]
+    fn default_interface_mtu_v4() {
+        check_mtu("ietf.org:443", true, 1500);
+    }
+
+    #[test]
+    fn default_interface_mtu_v6() {
+        check_mtu("ietf.org:443", false, 1500);
     }
 }
