@@ -6,11 +6,13 @@
 
 use std::{
     io::{Error, ErrorKind},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    ptr,
 };
 
 use neqo_common::qtrace;
 use static_assertions::assert_cfg;
+
 /// Return the MTU of the interface that is used to reach the given remote socket address.
 ///
 /// # Errors
@@ -24,6 +26,19 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         "Local interface MTU not found",
     ));
 
+    // Make a new socket that is connected to the remote address. We use this to learn which
+    // local address is chosen by routing.
+    let socket = UdpSocket::bind((
+        if remote.is_ipv4() {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        } else {
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+        },
+        0,
+    ))?;
+    socket.connect(remote)?;
+    let local_ip = socket.local_addr()?.ip();
+
     assert_cfg!(any(
         target_os = "macos",
         target_os = "linux",
@@ -32,13 +47,9 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
+        use std::ffi::{c_int, CStr};
         #[cfg(target_os = "linux")]
         use std::{ffi::c_char, mem, os::fd::AsRawFd};
-        use std::{
-            ffi::{c_int, CStr},
-            net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket},
-            ptr,
-        };
 
         use libc::{
             freeifaddrs, getifaddrs, ifaddrs, in_addr_t, sockaddr_in, sockaddr_in6, AF_INET,
@@ -48,19 +59,6 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
         use libc::{if_data, AF_LINK};
         #[cfg(target_os = "linux")]
         use libc::{ifreq, ioctl};
-
-        // Make a new socket that is connected to the remote address. We use this to learn which
-        // local address is chosen by routing.
-        let socket = UdpSocket::bind((
-            if remote.is_ipv4() {
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-            } else {
-                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
-            },
-            0,
-        ))?;
-        socket.connect(remote)?;
-        let local_ip = socket.local_addr()?.ip();
 
         // Get the interface list.
         let mut ifap: *mut ifaddrs = ptr::null_mut(); // Do not modify this pointer.
@@ -134,7 +132,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
                 // On Linux, we can get the MTU via an ioctl on the socket.
                 let mut ifr: ifreq = unsafe { mem::zeroed() };
                 ifr.ifr_name[..iface.len()].copy_from_slice(unsafe {
-                    &*(std::ptr::from_ref::<[u8]>(iface.as_bytes()) as *const [c_char])
+                    &*(ptr::from_ref::<[u8]>(iface.as_bytes()) as *const [c_char])
                 });
                 if unsafe { ioctl(socket.as_raw_fd(), libc::SIOCGIFMTU, &ifr) } != 0 {
                     res = Err(Error::last_os_error());
@@ -149,33 +147,54 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::mem;
+        use std::{cmp::min, ffi::c_void, slice};
 
         use windows::Win32::{
             Foundation::NO_ERROR,
-            NetworkManagement::IpHelper::{GetBestInterfaceEx, GetIfEntry2, MIB_IF_ROW2},
-            Networking::WinSock::{SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
+            NetworkManagement::IpHelper::{
+                FreeMibTable, GetIpInterfaceTable, GetUnicastIpAddressTable, MIB_IPINTERFACE_ROW,
+                MIB_IPINTERFACE_TABLE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
+            },
+            Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC},
         };
 
-        let saddr = match remote {
-            SocketAddr::V4(addr) => &SOCKADDR_IN::from(*addr) as *const _ as *const SOCKADDR,
-            SocketAddr::V6(addr) => &SOCKADDR_IN6::from(*addr) as *const _ as *const SOCKADDR,
-        };
-
-        let mut idx: u32 = 0;
-        res = if unsafe { GetBestInterfaceEx(saddr, &mut idx) } != 0 {
-            qtrace!("GetBestInterfaceEx failed");
-            Err(Error::last_os_error())
-        } else {
-            let mut row: MIB_IF_ROW2 = unsafe { mem::zeroed() };
-            row.InterfaceIndex = idx;
-            if unsafe { GetIfEntry2(&mut row) } == NO_ERROR {
-                usize::try_from(row.Mtu).or(res)
-            } else {
-                qtrace!("GetIfEntry2 failed");
-                Err(Error::last_os_error())
+        let mut addr_table: *mut MIB_UNICASTIPADDRESS_TABLE = ptr::null_mut();
+        if unsafe { GetUnicastIpAddressTable(AF_UNSPEC, &mut addr_table) } == NO_ERROR {
+            let addrs = unsafe {
+                slice::from_raw_parts::<MIB_UNICASTIPADDRESS_ROW>(
+                    &(*addr_table).Table[0],
+                    (*addr_table).NumEntries as usize,
+                )
+            };
+            for addr in addrs {
+                let af = unsafe { addr.Address.si_family };
+                if af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6() {
+                    let mut if_table: *mut MIB_IPINTERFACE_TABLE = ptr::null_mut();
+                    if unsafe { GetIpInterfaceTable(af, &mut if_table) } == NO_ERROR {
+                        let ifaces = unsafe {
+                            slice::from_raw_parts::<MIB_IPINTERFACE_ROW>(
+                                &(*if_table).Table[0],
+                                (*if_table).NumEntries as usize,
+                            )
+                        };
+                        for iface in ifaces {
+                            if iface.InterfaceIndex == addr.InterfaceIndex {
+                                // On loopback, the MTU is 4294967295...
+                                res = min(iface.NlMtu, u16::MAX.into()).try_into().or(res);
+                                break;
+                            }
+                        }
+                        unsafe { FreeMibTable(if_table as *const c_void) };
+                    } else {
+                        res = Err(Error::last_os_error());
+                    }
+                    break;
+                }
             }
-        };
+            unsafe { FreeMibTable(addr_table as *const c_void) };
+        } else {
+            res = Err(Error::last_os_error());
+        }
     }
 
     qtrace!("MTU towards {:?} is {:?}", remote, res);
@@ -185,6 +204,8 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 #[cfg(test)]
 mod test {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+
+    use static_assertions::assert_cfg;
 
     fn check_mtu(addr4: SocketAddr, addr6: SocketAddr, expected: usize) {
         let mtu4 = super::get_interface_mtu(&addr4).unwrap();
@@ -197,10 +218,17 @@ mod test {
     fn loopback_interface_mtu() {
         let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 443);
         let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 443);
+        assert_cfg!(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "windows"
+        ));
         #[cfg(target_os = "macos")]
         check_mtu(addr4, addr6, 16384);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
         check_mtu(addr4, addr6, 65536);
+        #[cfg(target_os = "windows")]
+        check_mtu(addr4, addr6, 65535);
     }
 
     #[test]
