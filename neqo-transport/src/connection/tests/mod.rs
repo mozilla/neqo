@@ -586,10 +586,10 @@ fn send_something_paced_with_modifier(
                 .dgram()
                 .expect("send_something: should have something to send")
         }
-        Output::Datagram(d) => modifier(d).unwrap(),
+        Output::Datagram(d) => d,
         Output::None => panic!("send_something: got Output::None"),
     };
-    (dgram, now)
+    (modifier(dgram).unwrap(), now)
 }
 
 fn send_something_paced(
