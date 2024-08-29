@@ -213,47 +213,42 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 
 #[cfg(test)]
 mod test {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+    use std::net::{SocketAddr, ToSocketAddrs};
 
-    use static_assertions::assert_cfg;
+    use neqo_common::qwarn;
 
-    fn check_mtu(addr4: SocketAddr, addr6: SocketAddr, expected: usize) {
-        let mtu4 = super::get_interface_mtu(&addr4).unwrap();
-        let mtu6 = super::get_interface_mtu(&addr6).unwrap();
-        assert_eq!(mtu4, expected);
-        assert_eq!(mtu6, expected);
+    fn check_mtu(sockaddr: &str, expected: usize) {
+        type AfCheck = fn(&SocketAddr) -> bool;
+        let afs: [(&str, AfCheck); 2] =
+            [("IPv4", SocketAddr::is_ipv4), ("IPv6", SocketAddr::is_ipv6)];
+
+        for (af, af_check) in afs {
+            let addr = sockaddr.to_socket_addrs().unwrap().find(af_check);
+            match addr {
+                Some(addr) => {
+                    let mtu = super::get_interface_mtu(&addr).unwrap();
+                    assert_eq!(mtu, expected);
+                }
+                None => {
+                    // Since GitHub runners don't have IPv6, just warn if we can't find an address.
+                    qwarn!("No {} address found for {}", af, sockaddr);
+                }
+            }
+        }
     }
 
     #[test]
     fn loopback_interface_mtu() {
-        let addr4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 443);
-        let addr6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 443);
-        assert_cfg!(any(
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "windows"
-        ));
         #[cfg(target_os = "macos")]
-        check_mtu(addr4, addr6, 16384);
+        check_mtu("localhost:443", 16384);
         #[cfg(target_os = "linux")]
-        check_mtu(addr4, addr6, 65536);
+        check_mtu("localhost:443", 65536);
         #[cfg(target_os = "windows")]
-        check_mtu(addr4, addr6, 65535);
+        check_mtu("localhost:443", 65535);
     }
 
     #[test]
     fn default_interface_mtu() {
-        // For GitHub CI, this needs to be looked up dynamically.
-        let addr4 = "ietf.org:443"
-            .to_socket_addrs()
-            .unwrap()
-            .find(SocketAddr::is_ipv4)
-            .unwrap();
-        let addr6 = "ietf.org:443"
-            .to_socket_addrs()
-            .unwrap()
-            .find(SocketAddr::is_ipv6)
-            .unwrap();
-        check_mtu(addr4, addr6, 1500);
+        check_mtu("ietf.org:443", 1500);
     }
 }
