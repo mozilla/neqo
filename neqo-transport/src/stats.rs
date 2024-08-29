@@ -173,12 +173,15 @@ pub struct Stats {
     pub ecn_paths_not_capable: usize,
     /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
     ///
-    /// Note: Given that QUIC ACKs only carry [`crate::ecn::IpTosEcn::Ect0`],
-    /// [`crate::ecn::IpTosEcn::Ect1`] and [`crate::ecn::IpTosEcn::Ce`], but
-    /// never [`crate::ecn::IpTosEcn::NotEct`], the
-    /// [`crate::ecn::IpTosEcn::NotEct`] value will always be 0.
+    /// Note: Given that QUIC ACKs only carry [`Ect0`], [`Ect1`] and [`Ce`], but
+    /// never [`NotEct`], the [`NotEct`] value will always be 0.
     ///
     /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
+    ///
+    /// [`Ect0`]: neqo_common::tos::IpTosEcn::Ect0
+    /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
+    /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
+    /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
     pub ecn_tx: EcnCount,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header.
     pub ecn_rx: EcnCount,
