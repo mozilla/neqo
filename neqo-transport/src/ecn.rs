@@ -72,8 +72,9 @@ impl EcnValidationState {
 ///
 /// Note: [`EcnCount`] is used both for outgoing UDP datagrams, returned by
 /// remote through QUIC ACKs and for incoming UDP datagrams, read from IP TOS
-/// header. In the former case, given that QUIC ACKs only carry Ect0, Ect1 and
-/// Ce, but never NotEct, the NotEct value will always be 0.
+/// header. In the former case, given that QUIC ACKs only carry
+/// [`IpTosEcn::Ect0`], [`IpTosEcn::Ect1`] and [`IpTosEcn::Ce`], but never
+/// [`IpTosEcn::NotEct`], the [`IpTosEcn::NotEct`] value will always be 0.
 ///
 /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
