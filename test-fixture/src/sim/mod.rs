@@ -42,8 +42,10 @@ macro_rules! boxed {
 }
 
 /// Create a simulation test case.  This takes either two or three arguments.
+///
 /// The two argument form takes a bare name (`ident`), a comma, and an array of
 /// items that implement `Node`.
+///
 /// The three argument form adds a setup block that can be used to construct a
 /// complex value that is then shared between all nodes.  The values in the
 /// three-argument form have to be closures (or functions) that accept a reference

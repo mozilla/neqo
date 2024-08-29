@@ -452,10 +452,10 @@ impl Paths {
         // make a new RTT esimate and interrogate that.
         // That is more expensive, but it should be rare and breaking encapsulation
         // is worse, especially as this is only used in tests.
-        self.primary()
-            .map_or(RttEstimate::default().estimate(), |p| {
-                p.borrow().rtt().estimate()
-            })
+        self.primary().map_or_else(
+            || RttEstimate::default().estimate(),
+            |p| p.borrow().rtt().estimate(),
+        )
     }
 
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
