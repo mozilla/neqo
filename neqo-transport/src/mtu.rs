@@ -168,7 +168,17 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             };
             for addr in addrs {
                 let af = unsafe { addr.Address.si_family };
-                if af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6() {
+                if (af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6())
+                    && match local_ip {
+                        IpAddr::V4(ip) => {
+                            ip.to_bits().to_be()
+                                == unsafe { addr.Address.Ipv4.sin_addr.S_un.S_addr }
+                        }
+                        IpAddr::V6(ip) => {
+                            ip.octets() == unsafe { addr.Address.Ipv6.sin6_addr.u.Byte }
+                        }
+                    }
+                {
                     let mut if_table: *mut MIB_IPINTERFACE_TABLE = ptr::null_mut();
                     if unsafe { GetIpInterfaceTable(af, &mut if_table) } == NO_ERROR {
                         let ifaces = unsafe {
@@ -234,8 +244,16 @@ mod test {
     #[test]
     fn default_interface_mtu() {
         // For GitHub CI, this needs to be looked up dynamically.
-        let addr4 = "mozilla.com:443".to_socket_addrs().unwrap().next().unwrap();
-        let addr6 = "mozilla.com:443".to_socket_addrs().unwrap().next().unwrap();
+        let addr4 = "ietf.org:443"
+            .to_socket_addrs()
+            .unwrap()
+            .find(SocketAddr::is_ipv4)
+            .unwrap();
+        let addr6 = "ietf.org:443"
+            .to_socket_addrs()
+            .unwrap()
+            .find(SocketAddr::is_ipv6)
+            .unwrap();
         check_mtu(addr4, addr6, 1500);
     }
 }
