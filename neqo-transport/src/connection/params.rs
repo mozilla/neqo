@@ -10,7 +10,7 @@ pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
     recv_stream::RECV_BUFFER_SIZE,
-    rtt::{DEFAULT_INITIAL_RTT, GRANULARITY},
+    rtt::{GRANULARITY, INITIAL_RTT},
     stream_id::StreamType,
     tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
     tracking::DEFAULT_ACK_DELAY,
@@ -99,7 +99,7 @@ impl Default for ConnectionParameters {
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
-            initial_rtt: DEFAULT_INITIAL_RTT,
+            initial_rtt: INITIAL_RTT,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: 0,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,

@@ -17,7 +17,7 @@ use std::{
 use clap::Parser;
 use neqo_transport::{
     tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
-    Version,
+    Version, INITIAL_RTT,
 };
 
 pub mod client;
@@ -117,9 +117,9 @@ pub struct QuicParameters {
     /// The idle timeout for connections, in seconds.
     pub idle_timeout: u64,
 
-    #[arg(long = "init_rtt", default_value = "100")]
-    /// The initial round-trip time.
-    pub initial_rtt_ms: u64,
+    #[arg(long = "init_rtt")]
+    /// The initial round-trip time. Defaults to [``INITIAL_RTT``] if not specified.
+    pub initial_rtt_ms: Option<u64>,
 
     #[arg(long = "cc", default_value = "newreno")]
     /// The congestion controller to use.
@@ -150,6 +150,7 @@ impl Default for QuicParameters {
             max_streams_bidi: 16,
             max_streams_uni: 16,
             idle_timeout: 30,
+            initial_rtt_ms: None,
             congestion_control: CongestionControlAlgorithm::NewReno,
             no_pacing: false,
             no_pmtud: false,
@@ -226,7 +227,10 @@ impl QuicParameters {
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
-            .initial_rtt(Duration::from_millis(self.initial_rtt_ms))
+            .initial_rtt(
+                self.initial_rtt_ms
+                    .map_or(INITIAL_RTT, Duration::from_millis),
+            )
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud);
