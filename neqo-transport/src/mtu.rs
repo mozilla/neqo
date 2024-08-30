@@ -43,16 +43,15 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             0,
         ))?;
         socket.connect(remote)?;
-        let local_ip = socket.local_addr()?.ip();
 
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            res = get_interface_mtu_linux_macos(local_ip);
+            res = get_interface_mtu_linux_macos(&socket);
         }
 
         #[cfg(target_os = "windows")]
         {
-            res = get_interface_mtu_windows(local_ip);
+            res = get_interface_mtu_windows(&socket);
         }
     }
 
@@ -61,7 +60,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn get_interface_mtu_linux_macos(local_ip: IpAddr) -> Result<usize, Error> {
+fn get_interface_mtu_linux_macos(socket: &UdpSocket) -> Result<usize, Error> {
     use std::ffi::{c_int, CStr};
     #[cfg(target_os = "linux")]
     use std::{ffi::c_char, mem, os::fd::AsRawFd};
@@ -91,7 +90,7 @@ fn get_interface_mtu_linux_macos(local_ip: IpAddr) -> Result<usize, Error> {
         if !ifa.ifa_addr.is_null() {
             let saddr = unsafe { &*ifa.ifa_addr };
             if matches!(c_int::from(saddr.sa_family), AF_INET | AF_INET6)
-                && match local_ip {
+                && match socket.local_addr()?.ip() {
                     IpAddr::V4(ip) => {
                         let saddr: sockaddr_in =
                             unsafe { ptr::read_unaligned(ifa.ifa_addr.cast::<sockaddr_in>()) };
@@ -162,7 +161,7 @@ fn get_interface_mtu_linux_macos(local_ip: IpAddr) -> Result<usize, Error> {
 }
 
 #[cfg(target_os = "windows")]
-fn get_interface_mtu_windows(local_ip: IpAddr) -> Result<usize, Error> {
+fn get_interface_mtu_windows(socket: &UdpSocket) -> Result<usize, Error> {
     use std::{cmp::min, ffi::c_void, slice};
 
     use windows::Win32::{
@@ -202,8 +201,9 @@ fn get_interface_mtu_windows(local_ip: IpAddr) -> Result<usize, Error> {
             // address.
             'addr_loop: for addr in addrs {
                 let af = unsafe { addr.Address.si_family };
-                if (af == AF_INET && local_ip.is_ipv4() || af == AF_INET6 && local_ip.is_ipv6())
-                    && match local_ip {
+                let ip = socket.local_addr()?.ip();
+                if (af == AF_INET && ip.is_ipv4() || af == AF_INET6 && ip.is_ipv6())
+                    && match ip {
                         IpAddr::V4(ip) => {
                             u32::from(ip).to_be()
                                 == unsafe { addr.Address.Ipv4.sin_addr.S_un.S_addr }
