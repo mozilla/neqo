@@ -66,7 +66,7 @@ pub fn get_interface_mtu(remote: &SocketAddr) -> Result<usize, Error> {
             return Err(Error::last_os_error());
         }
 
-        // First, find the name of the interface with the the local IP address determined above.
+        // First, find the name of the interface with the local IP address determined above.
         let mut cursor = ifap;
         let iface = loop {
             if cursor.is_null() {
