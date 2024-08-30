@@ -225,7 +225,13 @@ impl Paths {
     /// Otherwise, migration will occur after probing succeeds.
     /// The path is always probed and will be abandoned if probing fails.
     /// Returns `true` if the path was migrated.
-    pub fn migrate(&mut self, path: &PathRef, force: bool, now: Instant, stats: &mut Stats) -> bool {
+    pub fn migrate(
+        &mut self,
+        path: &PathRef,
+        force: bool,
+        now: Instant,
+        stats: &mut Stats,
+    ) -> bool {
         debug_assert!(!self.is_temporary(path));
         let baseline = self.primary().map_or_else(
             || EcnInfo::default().baseline(),
@@ -301,7 +307,13 @@ impl Paths {
 
     /// Set the identified path to be primary.
     /// This panics if `make_permanent` hasn't been called.
-    pub fn handle_migration(&mut self, path: &PathRef, remote: SocketAddr, now: Instant, stats: &mut Stats) {
+    pub fn handle_migration(
+        &mut self,
+        path: &PathRef,
+        remote: SocketAddr,
+        now: Instant,
+        stats: &mut Stats,
+    ) {
         // The update here needs to match the checks in `Path::received_on`.
         // Here, we update the remote port number to match the source port on the
         // datagram that was received.  This ensures that we send subsequent
@@ -865,9 +877,9 @@ impl Path {
             true
         } else if matches!(self.state, ProbeState::Valid) {
             // Retire validated, non-primary paths.
-            // Allow more than `MAX_PATH_PROBES` times the PTO so that an old
+            // Allow more than 2* `MAX_PATH_PROBES` times the PTO so that an old
             // path remains around until after a previous path fails.
-            let count = u32::try_from(MAX_PATH_PROBES + 1).unwrap();
+            let count = u32::try_from(2 * MAX_PATH_PROBES + 1).unwrap();
             self.validated.unwrap() + (pto * count) > now
         } else {
             // Keep paths that are being actively probed.
