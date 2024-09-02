@@ -118,8 +118,8 @@ fn migration_delay_to_ecn_blackhole() {
                 // The new path is IPv4.
                 if d.source().is_ipv4() {
                     // This should be a PATH_CHALLENGE.
-                    assert_eq!(client.stats().frame_tx.path_challenge, probes + 1);
                     probes += 1;
+                    assert_eq!(client.stats().frame_tx.path_challenge, probes);
                     if probes <= MAX_PATH_PROBES {
                         // The first probes should be sent with ECN.
                         assert_ecn_enabled(d.tos());
