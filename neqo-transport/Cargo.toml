@@ -19,21 +19,13 @@ workspace = true
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = { version = "2.7", default-features = false }
 indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
-libc = { version = "0.2", default-features = false }
 log = { workspace = true }
+mtu = { version = "0.1", default-features = false }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 qlog = { workspace = true }
 smallvec = { version = "1.11", default-features = false }
 static_assertions = { version = "1.1", default-features = false }
-
-[target."cfg(windows)".dependencies]
-# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-windows = { version = "0.58", default-features = false, features = [
-        "Win32_NetworkManagement_IpHelper",
-        "Win32_NetworkManagement_Ndis",
-        "Win32_Networking_WinSock",
-] }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
