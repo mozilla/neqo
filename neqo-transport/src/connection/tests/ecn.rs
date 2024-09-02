@@ -109,7 +109,7 @@ fn migration_delay_to_ecn_blackhole() {
     // The client should send MAX_PATH_PROBES path challenges with ECN enabled, and then another
     // MAX_PATH_PROBES without ECN.
     let mut probes = 0;
-    while probes <= MAX_PATH_PROBES + 1 {
+    while probes <= MAX_PATH_PROBES * 2 {
         match client.process_output(now) {
             crate::Output::Callback(t) => {
                 now += t;
