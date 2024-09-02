@@ -35,6 +35,9 @@ use crate::{
 };
 
 /// The number of times that a path will be probed before it is considered failed.
+///
+/// Note that with [`crate::ecn`], a path is probed [`MAX_PATH_PROBES`] with ECN
+/// marks and [`MAX_PATH_PROBES`] without.
 pub const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
