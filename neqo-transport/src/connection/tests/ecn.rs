@@ -19,6 +19,7 @@ use crate::{
         send_something, send_something_with_modifier, send_with_modifier_and_receive, DEFAULT_RTT,
     },
     ecn::ECN_TEST_COUNT,
+    path::MAX_PATH_PROBES,
     ConnectionId, ConnectionParameters, StreamType,
 };
 
@@ -89,6 +90,48 @@ fn handshake_delay_with_ecn_blackhole() {
         15,
         "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed.",
     );
+}
+
+#[test]
+fn migration_delay_to_ecn_blackhole() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+
+    // Do a handshake.
+    connect_force_idle(&mut client, &mut server);
+
+    // Migrate the client.
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
+        .unwrap();
+
+    // The client should send MAX_PATH_PROBES path challenges with ECN enabled, and then another
+    // MAX_PATH_PROBES without ECN.
+    let mut probes = 0;
+    while probes < MAX_PATH_PROBES * 2 {
+        match client.process_output(now) {
+            crate::Output::Callback(t) => {
+                now += t;
+            }
+            crate::Output::Datagram(d) => {
+                // The new path is IPv4.
+                if d.source().is_ipv4() {
+                    // This should be a PATH_CHALLENGE.
+                    probes += 1;
+                    assert_eq!(client.stats().frame_tx.path_challenge, probes);
+                    if probes <= MAX_PATH_PROBES {
+                        // The first probes should be sent with ECN.
+                        assert_ecn_enabled(d.tos());
+                    } else {
+                        // The next probes should be sent without ECN.
+                        assert_ecn_disabled(d.tos());
+                    }
+                }
+            }
+            crate::Output::None => panic!("unexpected output"),
+        }
+    }
 }
 
 #[test]

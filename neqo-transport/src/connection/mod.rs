@@ -986,7 +986,10 @@ impl Connection {
             self.create_resumption_token(now);
         }
 
-        if !self.paths.process_timeout(now, pto) {
+        if !self
+            .paths
+            .process_timeout(now, pto, &mut self.stats.borrow_mut())
+        {
             qinfo!([self], "last available path failed");
             self.absorb_error::<Error>(now, Err(Error::NoAvailablePath));
         }
@@ -1840,7 +1843,10 @@ impl Connection {
             path.borrow(),
             if force { "now" } else { "after" }
         );
-        if self.paths.migrate(&path, force, now) {
+        if self
+            .paths
+            .migrate(&path, force, now, &mut self.stats.borrow_mut())
+        {
             self.loss_recovery.migrate();
         }
         Ok(())
@@ -1901,7 +1907,8 @@ impl Connection {
         }
 
         if self.ensure_permanent(path).is_ok() {
-            self.paths.handle_migration(path, d.source(), now);
+            self.paths
+                .handle_migration(path, d.source(), now, &mut self.stats.borrow_mut());
         } else {
             qinfo!(
                 [self],
@@ -2887,7 +2894,10 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                if self.paths.path_response(data, now) {
+                if self
+                    .paths
+                    .path_response(data, now, &mut self.stats.borrow_mut())
+                {
                     // This PATH_RESPONSE enabled migration; tell loss recovery.
                     self.loss_recovery.migrate();
                 }
