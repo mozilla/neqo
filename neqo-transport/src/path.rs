@@ -768,10 +768,7 @@ impl Path {
             _ => 0,
         };
         self.state = if probe_count >= MAX_PATH_PROBES {
-            if self.ecn_info.ecn_mark() == IpTosEcn::NotEct {
-                qinfo!([self], "Probing failed");
-                ProbeState::Failed
-            } else {
+            if self.ecn_info.ecn_mark() == IpTosEcn::Ect0 {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 qinfo!(
                     [self],
@@ -779,6 +776,10 @@ impl Path {
                 );
                 self.ecn_info.disable_ecn(stats);
                 ProbeState::ProbeNeeded { probe_count: 0 }
+                
+            } else {
+                qinfo!([self], "Probing failed");
+                ProbeState::Failed
             }
         } else {
             qdebug!([self], "Initiating probe");
