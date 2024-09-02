@@ -124,7 +124,7 @@ fn migration_delay_to_ecn_blackhole() {
                         // The first probes should be sent with ECN.
                         assert_ecn_enabled(d.tos());
                     } else {
-                        // The next probe should be sent without ECN.
+                        // The next probes should be sent without ECN.
                         assert_ecn_disabled(d.tos());
                     }
                 }
