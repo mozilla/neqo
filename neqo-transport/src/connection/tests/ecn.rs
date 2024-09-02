@@ -106,8 +106,8 @@ fn migration_delay_to_ecn_blackhole() {
         .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
         .unwrap();
 
-    // The client should send MAX_PATH_PROBES path challenges with ECN enabled, and then another one
-    // without ECN.
+    // The client should send MAX_PATH_PROBES path challenges with ECN enabled, and then another
+    // MAX_PATH_PROBES without ECN.
     let mut probes = 0;
     while probes <= MAX_PATH_PROBES + 1 {
         match client.process_output(now) {
