@@ -779,7 +779,6 @@ impl Path {
                 );
                 self.ecn_info.disable_ecn(stats);
                 ProbeState::ProbeNeeded { probe_count: 0 }
-                
             } else {
                 qinfo!([self], "Probing failed");
                 ProbeState::Failed
