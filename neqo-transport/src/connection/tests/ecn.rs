@@ -98,7 +98,7 @@ fn migration_delay_to_ecn_blackhole() {
     let mut client = default_client();
     let mut server = default_server();
 
-    // Do a handshake,
+    // Do a handshake.
     connect_force_idle(&mut client, &mut server);
 
     // Migrate the client.
