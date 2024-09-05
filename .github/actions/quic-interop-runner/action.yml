@@ -29,13 +29,6 @@ runs:
         repository: 'quic-interop/quic-interop-runner'
         path: 'quic-interop-runner'
 
-    # Until https://github.com/quic-interop/quic-network-simulator/pull/133 is merged
-    - name: Use patched simulator image
-      run: |
-        docker pull larseggert/quic-network-simulator:tcpdump
-        docker tag larseggert/quic-network-simulator:tcpdump martenseemann/quic-network-simulator:latest
-      shell: bash
-
     - name: Enable IPv6 support
       run: sudo modprobe ip6table_filter
       shell: bash
