@@ -1045,9 +1045,9 @@ impl Path {
     /// Initiate a congestion response.
     ///
     /// Returns true if the congestion window was reduced.
-    pub fn on_congestion_event(&mut self, lost_packets: &[SentPacket]) -> bool {
+    pub fn on_congestion_event(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) -> bool {
         if let Some(last) = lost_packets.last() {
-            self.ecn_info.on_packets_lost(lost_packets);
+            self.ecn_info.on_packets_lost(lost_packets, stats);
             self.sender.on_congestion_event(last)
         } else {
             false
