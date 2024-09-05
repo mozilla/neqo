@@ -6,7 +6,7 @@
 2. [Installation Steps](#installation-steps)
 
 ## System Details
-
+<!-- markdownlint-disable no-inline-html -->
 <details>
   <summary><b>Ubuntu:</b> 18.04 (expand for details)</summary>
 
@@ -77,7 +77,9 @@ cargo clippy --version
 ```output
 clippy 0.0.212 (69f99e7 2019-12-14)
 ```
+
 </details>
+<!-- markdownlint-enable no-inline-html -->
 
 ## Installation Steps
 
@@ -94,15 +96,15 @@ build-essential clang llvm libclang-dev gyp ninja-build \
 pkg-config zlib1g-dev sudo
 ```
 
-2. Remove orphaned packages and clear local repository (optional)
+1. Remove orphaned packages and clear local repository (optional)
 
 ```shell
 sudo apt-get autoremove -y && sudo apt-get clean -y
 ```
 
-3. Install rust. Follow the steps from [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
+1. Install rust. Follow the steps from [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
 
-4. Export following path variables. `$HOME` is your home directory which is usually `/home/{username}`. `LD_LIBRARY_PATH` will be `$NSS_DIR/../dist/Debug/lib`
+1. Export following path variables. `$HOME` is your home directory which is usually `/home/{username}`. `LD_LIBRARY_PATH` will be `$NSS_DIR/../dist/Debug/lib`
 
 ```shell
 export NSS_DIR=$HOME/nss
@@ -110,27 +112,27 @@ export NSPR_DIR=$HOME/nspr
 export LD_LIBRARY_PATH=$NSS_DIR/../dist/Debug/lib
 ```
 
-5. Clone **NSS** and **NSPR**
+1. Clone **NSS** and **NSPR**
 
 ```shell
 hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"
 hg clone -u NSPR_4_25_RTM https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
 ```
 
-6. Build **NSS**
+1. Build **NSS**
 
 ```shell
 cd $NSS_DIR
 ./build.sh --static -Ddisable_tests=1
 ```
 
-7. Navigate to your workspace and checkout **Neqo**
+1. Navigate to your workspace and checkout **Neqo**
 
 ```shell
 git clone https://github.com/mozilla/neqo.git
 ```
 
-8. Build neqo and run all tests
+1. Build neqo and run all tests
 
 ```shell
 cd neqo
@@ -138,7 +140,7 @@ cargo build -v --all-targets --tests
 cargo test -v
 ```
 
-9. Run HTTP/3 programs
+1. Run HTTP/3 programs
 
 ```shell
 #Start server

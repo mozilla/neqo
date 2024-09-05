@@ -28,6 +28,7 @@ use crate::{
     connection::tests::send_something_paced,
     frame::FRAME_TYPE_NEW_CONNECTION_ID,
     packet::PacketBuilder,
+    path::MAX_PATH_PROBES,
     pmtud::Pmtud,
     tparams::{self, PreferredAddress, TransportParameter},
     CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
@@ -236,7 +237,8 @@ fn migrate_immediate_fail() {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
 
-    for _ in 0..2 {
+    // -1 because first PATH_CHALLENGE already sent above
+    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -311,7 +313,8 @@ fn migrate_same_fail() {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
 
-    for _ in 0..2 {
+    // -1 because first PATH_CHALLENGE already sent above
+    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;

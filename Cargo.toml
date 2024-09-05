@@ -20,7 +20,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.8.2"
+version = "0.9.0"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
