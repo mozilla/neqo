@@ -25,8 +25,7 @@ qlog = { workspace = true }
 
 [target."cfg(windows)".dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-windows = { version = "0.58", default-features = false }
-
+windows = { version = "0.58", default-features = false, features = ["Win32_Media"] }
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
