@@ -74,8 +74,7 @@ runs:
     #     echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
     #     echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
 
-    # Ditto for rust-cache.
-    # - name: Use Rust cache
-    #   uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
-    #   with:
-    #     cache-all-crates: "true"
+    - name: Use Rust cache
+      uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+      with:
+        cache-all-crates: "true"
