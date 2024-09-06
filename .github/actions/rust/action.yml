@@ -27,17 +27,12 @@ runs:
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
         toolchain: ${{ inputs.version }}
+        components: ${{ inputs.components }}
 
     - name: Use Rust cache
       uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
       with:
         cache-all-crates: "true"
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
-      with:
-        toolchain: ${{ inputs.version }}
-        components: ${{ inputs.components }}
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'
