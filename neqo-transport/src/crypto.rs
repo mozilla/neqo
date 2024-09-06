@@ -354,6 +354,10 @@ impl Crypto {
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
+        // If this happens in the Initial space, resend also resend any Handshake data.
+        if space == PacketNumberSpace::Initial {
+            self.resend_unacked(PacketNumberSpace::Handshake);
+        }
     }
 
     /// Discard state for a packet number space and return true

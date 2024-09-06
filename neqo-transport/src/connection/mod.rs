@@ -2867,10 +2867,6 @@ impl Connection {
                 } else {
                     // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
                     self.crypto.resend_unacked(space);
-                    // If this happens in the Initial space, resend also resend any Handshake data.
-                    if space == PacketNumberSpace::Initial {
-                        self.crypto.resend_unacked(PacketNumberSpace::Handshake);
-                    }
                 }
             }
             Frame::NewToken { token } => {
