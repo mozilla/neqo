@@ -62,6 +62,23 @@ runs:
     # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
     # trying both hg and git.
 
+    - name: Use sccache
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+
+    - name: Enable sscache
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          echo "CC=sccache cl" >> "$GITHUB_ENV"
+          echo "CXX=sccache cl" >> "$GITHUB_ENV"
+        else
+          echo "CC=sccache cc" >> "$GITHUB_ENV"
+          echo "CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+
     - name: Checkout NSS
       shell: bash
       if: env.BUILD_NSS == '1'
