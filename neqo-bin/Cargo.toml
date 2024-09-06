@@ -45,7 +45,7 @@ url = { version = "2.5", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }
-tokio = { version = "1", default-features = false }
+tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
 bench = []
