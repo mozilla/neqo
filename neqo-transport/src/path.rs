@@ -257,7 +257,6 @@ impl Paths {
     /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
     /// for themselves.
     pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
-        qdebug!("Processing path timeouts");
         let to_retire = &mut self.to_retire;
         let mut primary_failed = false;
         self.paths.retain(|p| {
@@ -287,10 +286,8 @@ impl Paths {
                 let path = Rc::clone(fallback);
                 qinfo!([path.borrow()], "Failing over after primary path failed");
                 mem::drop(self.select_primary(&path));
-                qdebug!("Path timeout processing complete 1");
                 true
             } else {
-                qdebug!("Path timeout processing complete 2");
                 false
             }
         } else {
@@ -298,7 +295,6 @@ impl Paths {
             if let Some(path) = self.primary() {
                 path.borrow_mut().pmtud_mut().maybe_fire_raise_timer(now);
             }
-            qdebug!("Path timeout processing complete 3");
             true
         }
     }

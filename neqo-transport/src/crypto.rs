@@ -326,7 +326,6 @@ impl Crypto {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        qdebug!("Writing crypto frames for space {:?}", space);
         self.streams.write_frame(space, builder, tokens, stats);
     }
 
@@ -354,7 +353,7 @@ impl Crypto {
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
-        // If this happens in the Initial space, resend also resend any Handshake data.
+        // If this happens in the Initial space, also resend any Handshake data.
         if space == PacketNumberSpace::Initial {
             self.resend_unacked(PacketNumberSpace::Handshake);
         }
@@ -1415,9 +1414,7 @@ impl CryptoStreams {
     }
 
     pub fn data_ready(&self, space: PacketNumberSpace) -> bool {
-        let x = self.get(space).map_or(false, |cs| cs.rx.data_ready());
-        qdebug!("Data ready for {}? {}", space, x);
-        x
+        self.get(space).map_or(false, |cs| cs.rx.data_ready())
     }
 
     pub fn read_to_end(&mut self, space: PacketNumberSpace, buf: &mut Vec<u8>) -> Res<usize> {
