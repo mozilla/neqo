@@ -2314,6 +2314,7 @@ impl Connection {
             );
             // The builder will set the limit to 0 if there isn't enough space for the header.
             if builder.is_full() {
+                qdebug!("Builder is full 1");
                 encoder = builder.abort();
                 break;
             }
@@ -2331,6 +2332,7 @@ impl Connection {
             );
             builder.enable_padding(needs_padding);
             if builder.is_full() {
+                qdebug!("Builder is full 2");
                 encoder = builder.abort();
                 break;
             }
@@ -2346,6 +2348,7 @@ impl Connection {
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
+                qdebug!("Builder packet empty");
                 encoder = builder.abort();
                 continue;
             }
