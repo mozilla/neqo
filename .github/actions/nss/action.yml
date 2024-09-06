@@ -69,8 +69,8 @@ runs:
       shell: bash
       run: |
         if [ "${{ runner.os }}" = "Windows" ]; then
-          echo "CC=sccache cl" >> "$GITHUB_ENV"
-          echo "CXX=sccache cl" >> "$GITHUB_ENV"
+          echo "CC=sccache.exe cl" >> "$GITHUB_ENV"
+          echo "CXX=sccache.exe cl" >> "$GITHUB_ENV"
         else
           echo "CC=sccache cc" >> "$GITHUB_ENV"
           echo "CXX=sccache c++" >> "$GITHUB_ENV"
