@@ -1289,3 +1289,23 @@ fn client_handshake_retransmits_identical() {
         );
     }
 }
+
+#[test]
+fn quicgo() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+
+    let ci = client.process(None, now).dgram();
+    now += DEFAULT_RTT / 2;
+    _ = server.process(ci.as_ref(), now);
+
+    // Drop si and wait for client to retransmit.
+    let pto = client.process_output(now).callback();
+    now += pto;
+    let ci = client.process_output(now).dgram();
+
+    // Server processes the retransmitted Initial packet.
+    // now += DEFAULT_RTT / 2;
+    _ = server.process(ci.as_ref(), now);
+}

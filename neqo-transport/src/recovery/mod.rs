@@ -622,6 +622,7 @@ impl LossRecovery {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
         let mut lost = Vec::new();
+        qdebug!("detect 1");
         self.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
             now,
             loss_delay,
@@ -878,6 +879,7 @@ impl LossRecovery {
                 confirmed,
                 self.fast_pto,
             );
+            qdebug!("detect 2");
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(

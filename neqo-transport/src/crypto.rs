@@ -326,6 +326,7 @@ impl Crypto {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
+        qdebug!("Writing crypto frames for space {:?}", space);
         self.streams.write_frame(space, builder, tokens, stats);
     }
 
@@ -1410,7 +1411,9 @@ impl CryptoStreams {
     }
 
     pub fn data_ready(&self, space: PacketNumberSpace) -> bool {
-        self.get(space).map_or(false, |cs| cs.rx.data_ready())
+        let x = self.get(space).map_or(false, |cs| cs.rx.data_ready());
+        qdebug!("Data ready for {}? {}", space, x);
+        x
     }
 
     pub fn read_to_end(&mut self, space: PacketNumberSpace, buf: &mut Vec<u8>) -> Res<usize> {

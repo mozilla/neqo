@@ -978,6 +978,7 @@ impl Connection {
 
         if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
+            qdebug!("Handle lost packets: {:?}", lost);
             self.handle_lost_packets(&lost);
             qlog::packets_lost(&self.qlog, &lost);
         }
@@ -1919,7 +1920,7 @@ impl Connection {
     }
 
     fn output(&mut self, now: Instant) -> SendOption {
-        qtrace!([self], "output {:?}", now);
+        qtrace!([self], "output {:?} {:?}", now, self.state);
         let res = match &self.state {
             State::Init
             | State::WaitInitial
@@ -2156,6 +2157,7 @@ impl Connection {
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool, bool) {
+        qdebug!("write_frames {:?}", space);
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2191,6 +2193,7 @@ impl Connection {
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send acks!
+            qdebug!("Only sending ACKs");
             return (tokens, false, false);
         }
 
@@ -2292,8 +2295,10 @@ impl Connection {
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PacketNumberSpace::iter() {
+            qdebug!("output_path {:?}", space);
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
+                qdebug!([self], "No tx state in {:?}", self.crypto.states);
                 continue;
             };
 
@@ -2862,6 +2867,10 @@ impl Connection {
                 } else {
                     // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
                     self.crypto.resend_unacked(space);
+                    // If this happens in the Initial space, resend also resend any Handshake data.
+                    if space == PacketNumberSpace::Initial {
+                        self.crypto.resend_unacked(PacketNumberSpace::Handshake);
+                    }
                 }
             }
             Frame::NewToken { token } => {

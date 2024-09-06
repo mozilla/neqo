@@ -15,7 +15,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qdebug, qtrace, Role};
 use smallvec::SmallVec;
 
 use crate::{
@@ -153,6 +153,7 @@ impl RxStreamOrderer {
         let new_end = new_start + u64::try_from(new_data.len()).unwrap();
 
         if new_end <= self.retired {
+            qdebug!("Dropping frame with already-retired range {}-{}", new_start, new_end);
             // Range already read by application, this frame is very late and unneeded.
             return;
         }
@@ -164,6 +165,7 @@ impl RxStreamOrderer {
 
         if new_data.is_empty() {
             // No data to insert
+            qdebug!("Dropping empty frame at {}", new_start);
             return;
         }
 
