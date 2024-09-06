@@ -153,7 +153,11 @@ impl RxStreamOrderer {
         let new_end = new_start + u64::try_from(new_data.len()).unwrap();
 
         if new_end <= self.retired {
-            qdebug!("Dropping frame with already-retired range {}-{}", new_start, new_end);
+            qdebug!(
+                "Dropping frame with already-retired range {}-{}",
+                new_start,
+                new_end
+            );
             // Range already read by application, this frame is very late and unneeded.
             return;
         }
