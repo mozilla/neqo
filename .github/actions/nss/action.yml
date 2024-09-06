@@ -68,10 +68,8 @@ runs:
     - name: Enable sscache
       shell: bash
       run: |
-        if [ "${{ runner.os }}" = "Windows" ]; then
-          echo "CC=sccache.exe cl" >> "$GITHUB_ENV"
-          echo "CXX=sccache.exe cl" >> "$GITHUB_ENV"
-        else
+        if [ "${{ runner.os }}" != "Windows" ]; then
+          # TODO: Figure out if Windows can be supported
           echo "CC=sccache cc" >> "$GITHUB_ENV"
           echo "CXX=sccache c++" >> "$GITHUB_ENV"
         fi
