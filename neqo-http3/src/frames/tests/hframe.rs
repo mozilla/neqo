@@ -63,7 +63,9 @@ fn goaway_frame4() {
 #[test]
 fn grease() {
     fn make_grease() -> u64 {
-        let mut enc = Encoder::default();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         HFrame::Grease.encode(&mut enc);
         let mut dec = Decoder::from(&enc);
         let ft = dec.decode_varint().unwrap();

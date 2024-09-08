@@ -47,7 +47,7 @@ impl Socket {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
+    pub fn send(&self, d: Datagram<&[u8]>) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             neqo_udp::send_inner(&self.state, (&self.inner).into(), d)
         })
@@ -55,14 +55,19 @@ impl Socket {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
-    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    pub fn recv<'a>(
+        &self,
+        local_address: &SocketAddr,
+        recv_buf: &'a mut Vec<u8>,
+    ) -> Result<Option<Datagram<&'a [u8]>>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
-                neqo_udp::recv_inner(local_address, &self.state, &self.inner)
+                neqo_udp::recv_inner_2(local_address, &self.state, &self.inner, recv_buf)
             })
+            .map(Some)
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::WouldBlock {
-                    Ok(vec![])
+                    Ok(None)
                 } else {
                     Err(e)
                 }

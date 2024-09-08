@@ -298,7 +298,9 @@ fn wt_unknown_session_frame_client() {
     let wt_session = wt.create_wt_session();
 
     // Send an unknown frame.
-    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    // TODO: separate write buffer needed?
+    let mut write_buffer = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     enc.encode_varint(1028_u64); // Arbitrary type.
     enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
     let mut buf: Vec<_> = enc.into();
@@ -344,7 +346,9 @@ fn wt_close_session_frame_broken_client() {
     let wt_session = wt.create_wt_session();
 
     // Send a incorrect CloseSession frame.
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     WebTransportFrame::CloseSession {
         error: 5,
         message: "Hello".to_string(),

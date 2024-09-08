@@ -177,15 +177,13 @@ impl TryFrom<&State> for CloseState {
 }
 
 impl super::Client for Connection {
-    fn process_output(&mut self, now: Instant) -> Output {
-        self.process_output(now)
-    }
-
-    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
-        self.process_multiple_input(dgrams, now);
+    fn process<'a>(
+        &mut self,
+        input: Option<Datagram<&[u8]>>,
+        now: Instant,
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        self.process_into(input, now, write_buffer)
     }
 
     fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)

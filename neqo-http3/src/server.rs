@@ -113,18 +113,35 @@ impl Http3Server {
         self.server.ech_config()
     }
 
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_into<'a>(
+        &mut self,
+        dgram: Option<Datagram<&[u8]>>,
+        now: Instant,
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        let out = self.server.process(dgram, now);
+        let out = self
+            .server
+            // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
+            //
+            // Find alternative.
+            .process_2(dgram, now, unsafe { &mut *(write_buffer as *mut _) });
         self.process_http3(now);
-        // If we do not that a dgram already try again after process_http3.
+        // If we do not have a dgram already try again after process_http3.
         match out {
             Output::Datagram(d) => {
                 qtrace!([self], "Send packet: {:?}", d);
-                Output::Datagram(d)
+                return Output::Datagram(d);
             }
-            _ => self.server.process(Option::<&Datagram>::None, now),
+            _ => self.server.process_2(None, now, write_buffer),
         }
+    }
+
+    // TODO: Remove in favor of `process_into`?
+    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+        let mut write_buffer = vec![];
+        self.process_into(dgram.map(Into::into), now, &mut write_buffer)
+            .map_datagram(Into::into)
     }
 
     /// Process HTTP3 layer.
@@ -623,7 +640,9 @@ mod tests {
             element_id: stream_id.as_u64(),
             priority: Priority::default(),
         };
-        let mut e = Encoder::default();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut e = Encoder::new_with_buffer(&mut write_buffer);
         frame.encode(&mut e);
         peer_conn.control_send(e.as_ref());
         let out = peer_conn.process(None, now());

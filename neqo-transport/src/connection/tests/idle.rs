@@ -287,7 +287,10 @@ fn idle_caching() {
     let mut client = default_client();
     let mut server = default_server();
     let start = now();
-    let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+    let mut buf = vec![];
+    // TODO: 0 ideal here?
+    let mut builder =
+        PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.

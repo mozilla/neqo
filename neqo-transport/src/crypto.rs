@@ -372,7 +372,9 @@ impl Crypto {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
                 qtrace!("TLS token {}", hex(t.as_ref()));
-                let mut enc = Encoder::default();
+                // TODO: separate write buffer needed?
+                let mut write_buffer = vec![];
+                let mut enc = Encoder::new_with_buffer(&mut write_buffer);
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
                 enc.encode_vvec_with(|enc_inner| {

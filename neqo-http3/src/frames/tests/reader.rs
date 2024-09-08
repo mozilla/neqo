@@ -143,7 +143,9 @@ fn unknown_frame() {
 
     let mut fr = FrameReaderTest::new();
 
-    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    // TODO: separate write buffer needed?
+    let mut write_buffer = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     enc.encode_varint(1028_u64); // Arbitrary type.
     enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
     let mut buf: Vec<_> = enc.into();
@@ -187,7 +189,9 @@ fn unknown_wt_frame() {
 
     let mut fr = FrameReaderTest::new();
 
-    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    // TODO: separate write buffer needed?
+    let mut write_buffer = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     enc.encode_varint(1028_u64); // Arbitrary type.
     enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
     let mut buf: Vec<_> = enc.into();
@@ -271,7 +275,9 @@ fn test_reading_frame<T: FrameDecoder<T> + PartialEq + Debug>(
 fn complete_and_incomplete_unknown_frame() {
     // Construct an unknown frame.
     const UNKNOWN_FRAME_LEN: usize = 832;
-    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    // TODO: separate write buffer needed?
+    let mut write_buffer = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     enc.encode_varint(1028_u64); // Arbitrary type.
     enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
     let mut buf: Vec<_> = enc.into();
@@ -383,7 +389,9 @@ fn complete_and_incomplete_frames() {
 
     // H3_FRAME_TYPE_DATA len=0
     let f = HFrame::Data { len: 0 };
-    let mut enc = Encoder::with_capacity(2);
+    // TODO: separate write buffer needed?
+    let mut write_buffer = Vec::with_capacity(2);
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, 2);
@@ -392,7 +400,9 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Data {
         len: FRAME_LEN as u64,
     };
-    let mut enc = Encoder::with_capacity(2);
+    // TODO: separate write buffer needed?
+    let mut write_buffer = Vec::with_capacity(2);
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let mut buf: Vec<_> = enc.into();
     buf.resize(FRAME_LEN + buf.len(), 0);
@@ -402,7 +412,9 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Headers {
         header_block: Vec::new(),
     };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, 2);
@@ -411,14 +423,18 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Headers {
         header_block: HEADER_BLOCK.to_vec(),
     };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
     // H3_FRAME_TYPE_CANCEL_PUSH
     let f = HFrame::CancelPush { push_id: 5 };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
@@ -427,7 +443,9 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::MaxHeaderListSize, 4)]),
     };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
@@ -437,7 +455,9 @@ fn complete_and_incomplete_frames() {
         push_id: 4,
         header_block: HEADER_BLOCK.to_vec(),
     };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
@@ -446,14 +466,18 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Goaway {
         stream_id: StreamId::new(5),
     };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
     // H3_FRAME_TYPE_MAX_PUSH_ID
     let f = HFrame::MaxPushId { push_id: 5 };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
@@ -466,7 +490,9 @@ fn complete_and_incomplete_wt_frames() {
         error: 5,
         message: "Hello".to_string(),
     };
-    let mut enc = Encoder::default();
+    // TODO: separate write buffer needed?
+    let mut write_buffer = vec![];
+    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<WebTransportFrame>(&buf, buf.len());

@@ -318,7 +318,9 @@ mod tests {
             outcome: &Res<(ReceiveOutput, bool)>,
             done: bool,
         ) {
-            let mut enc = Encoder::default();
+            // TODO: separate write buffer needed?
+            let mut write_buffer = vec![];
+            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
             for i in to_encode {
                 enc.encode_varint(*i);
             }

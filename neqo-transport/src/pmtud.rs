@@ -382,8 +382,11 @@ mod tests {
     ) {
         let stats_before = stats.clone();
 
+        let mut buf = vec![];
         // Fake a packet number, so the builder logic works.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        // TODO: 0 ideal here?
+        let mut builder =
+            PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.set_initial_limit(&SendProfile::new_limited(pmtud.plpmtu()), 16, pmtud);

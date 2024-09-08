@@ -134,7 +134,9 @@ impl WebTransportSendStream {
         Self {
             stream_id,
             state: if local {
-                let mut d = Encoder::default();
+                // TODO: separate write buffer needed?
+                let mut write_buffer = vec![];
+                let mut d = Encoder::new_with_buffer(&mut write_buffer);
                 if stream_id.is_uni() {
                     d.encode_varint(WEBTRANSPORT_UNI_STREAM);
                 } else {

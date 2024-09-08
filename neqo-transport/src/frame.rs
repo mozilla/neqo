@@ -669,7 +669,9 @@ mod tests {
     };
 
     fn just_dec(f: &Frame, s: &str) {
-        let encoded = Encoder::from_hex(s);
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let encoded = Encoder::new_with_buffer(&mut write_buffer).from_hex(s);
         let decoded = Frame::decode(&mut encoded.as_decoder()).expect("Failed to decode frame");
         assert_eq!(*f, decoded);
     }
@@ -702,8 +704,10 @@ mod tests {
 
         just_dec(&f, "025234523502523601020304");
 
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
         // Try to parse ACK_ECN without ECN values
-        let enc = Encoder::from_hex("035234523502523601020304");
+        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("035234523502523601020304");
         let mut dec = enc.as_decoder();
         assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
 
@@ -716,7 +720,10 @@ mod tests {
             ack_ranges: ar,
             ecn_count,
         };
-        let enc = Encoder::from_hex("035234523502523601020304010203");
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let enc =
+            Encoder::new_with_buffer(&mut write_buffer).from_hex("035234523502523601020304010203");
         let mut dec = enc.as_decoder();
         assert_eq!(Frame::decode(&mut dec).unwrap(), fe);
     }
@@ -888,7 +895,9 @@ mod tests {
 
     #[test]
     fn too_large_new_connection_id() {
-        let mut enc = Encoder::from_hex("18523400"); // up to the CID
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("18523400"); // up to the CID
         enc.encode_vvec(&[0x0c; MAX_CONNECTION_ID_LEN + 10]);
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
@@ -990,7 +999,9 @@ mod tests {
 
     #[test]
     fn ack_frequency_ignore_error_error() {
-        let enc = Encoder::from_hex("40af0a0547d003"); // ignore_order of 3
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("40af0a0547d003"); // ignore_order of 3
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
             Error::FrameEncodingError
@@ -1000,7 +1011,9 @@ mod tests {
     /// Hopefully this test is eventually redundant.
     #[test]
     fn ack_frequency_zero_packets() {
-        let enc = Encoder::from_hex("40af0a000101"); // packets of 0
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("40af0a000101"); // packets of 0
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
             Error::FrameEncodingError
@@ -1027,7 +1040,9 @@ mod tests {
 
     #[test]
     fn frame_decode_enforces_bound_on_ack_range() {
-        let mut e = Encoder::new();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut e = Encoder::new_with_buffer(&mut write_buffer);
 
         e.encode_varint(FRAME_TYPE_ACK);
         e.encode_varint(0u64); // largest acknowledged

@@ -185,8 +185,13 @@ impl HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        self.server.process(dgram, now)
+    fn process_into<'a>(
+        &mut self,
+        dgram: Option<Datagram<&[u8]>>,
+        now: Instant,
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        self.server.process_2(dgram, now, write_buffer)
     }
 
     fn process_events(&mut self, now: Instant) {

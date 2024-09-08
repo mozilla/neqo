@@ -25,9 +25,9 @@ impl QpackData {
     }
 
     pub fn encode_varint(&mut self, i: u64) {
-        let mut enc = Encoder::default();
+        // TODO: Sane?
+        let mut enc = Encoder::new_with_buffer(&mut self.buf);
         enc.encode_varint(i);
-        self.buf.append(&mut enc.into());
     }
 
     pub(crate) fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, mut val: u64) -> usize {

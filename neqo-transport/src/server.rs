@@ -192,12 +192,15 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
-    fn handle_initial(
+    fn handle_initial<'a>(
         &mut self,
         initial: InitialDetails,
-        dgram: &Datagram,
+        dgram: Datagram<&[u8]>,
         now: Instant,
-    ) -> Output {
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(write_buffer.is_empty());
+
         qdebug!([self], "Handle initial");
         let res = self
             .address_validation
@@ -205,9 +208,11 @@ impl Server {
             .validate(&initial.token, dgram.source(), now);
         match res {
             AddressValidationResult::Invalid => Output::None,
-            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
+            AddressValidationResult::Pass => {
+                self.accept_connection(initial, dgram, None, now, write_buffer)
+            }
             AddressValidationResult::ValidRetry(orig_dcid) => {
-                self.accept_connection(initial, dgram, Some(orig_dcid), now)
+                self.accept_connection(initial, dgram, Some(orig_dcid), now, write_buffer)
             }
             AddressValidationResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", initial.dst_cid);
@@ -228,6 +233,7 @@ impl Server {
                         &new_dcid,
                         &token,
                         &initial.dst_cid,
+                        write_buffer,
                     );
                     packet.map_or_else(
                         |_| {
@@ -235,7 +241,7 @@ impl Server {
                             Output::None
                         },
                         |p| {
-                            Output::Datagram(Datagram::new(
+                            Output::Datagram(Datagram::<&[u8]>::new_2(
                                 dgram.destination(),
                                 dgram.source(),
                                 dgram.tos(),
@@ -294,13 +300,14 @@ impl Server {
         }
     }
 
-    fn accept_connection(
+    fn accept_connection<'a>(
         &mut self,
         initial: InitialDetails,
-        dgram: &Datagram,
+        dgram: Datagram<&[u8]>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) -> Output {
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qinfo!(
             [self],
             "Accept connection {:?}",
@@ -321,7 +328,7 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process(Some(dgram), now);
+                let out = c.process_into(Some(dgram), now, write_buffer);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -339,7 +346,13 @@ impl Server {
         }
     }
 
-    fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Output {
+    fn process_input<'a>(
+        &mut self,
+        dgram: Datagram<&[u8]>,
+        now: Instant,
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(write_buffer.is_empty());
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -356,7 +369,7 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process(Some(dgram), now);
+            return c.borrow_mut().process_into(Some(dgram), now, write_buffer);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -384,6 +397,7 @@ impl Server {
                 &packet.dcid()[..],
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
+                write_buffer,
             );
 
             crate::qlog::server_version_information_failed(
@@ -392,7 +406,7 @@ impl Server {
                 packet.wire_version(),
             );
 
-            return Output::Datagram(Datagram::new(
+            return Output::Datagram(Datagram::<&[u8]>::new_2(
                 dgram.destination(),
                 dgram.source(),
                 dgram.tos(),
@@ -409,7 +423,7 @@ impl Server {
                 // Copy values from `packet` because they are currently still borrowing from
                 // `dgram`.
                 let initial = InitialDetails::new(&packet);
-                self.handle_initial(initial, dgram, now)
+                self.handle_initial(initial, dgram, now, write_buffer)
             }
             PacketType::ZeroRtt => {
                 let dcid = ConnectionId::from(packet.dcid());
@@ -426,11 +440,22 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant) -> Output {
+    fn process_next_output<'a>(
+        &mut self,
+        now: Instant,
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(write_buffer.is_empty());
         let mut callback = None;
 
         for connection in &mut self.connections {
-            match connection.borrow_mut().process(None, now) {
+            match connection
+                .borrow_mut()
+                // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
+                //
+                // Find alternative.
+                .process_into(None, now, unsafe { &mut *(write_buffer as *mut _) })
+            {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
                 Output::Callback(next) => match callback {
@@ -443,11 +468,32 @@ impl Server {
         callback.map_or(Output::None, Output::Callback)
     }
 
+    // TODO: Still needed?
     #[must_use]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+        let mut write_buffer = vec![];
+        self.process_2(dgram.map(Into::into), now, &mut write_buffer)
+            // TODO: Yet another allocation.
+            .map_datagram(Into::into)
+    }
+
+    #[must_use]
+    pub fn process_2<'a>(
+        &mut self,
+        dgram: Option<Datagram<&[u8]>>,
+        now: Instant,
+        write_buffer: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        // TODO: This the right place?
+        assert!(write_buffer.is_empty());
         let out = dgram
-            .map_or(Output::None, |d| self.process_input(d, now))
-            .or_else(|| self.process_next_output(now));
+            .map_or(Output::None, |d| {
+                // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
+                //
+                // Find alternative.
+                self.process_input(d, now, unsafe { &mut *(write_buffer as *mut _) })
+            })
+            .or_else(|| self.process_next_output(now, write_buffer));
 
         // Clean-up closed connections.
         self.connections

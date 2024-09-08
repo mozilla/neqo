@@ -74,11 +74,11 @@ impl AddressValidation {
         })
     }
 
-    fn encode_aad(peer_address: SocketAddr, retry: bool) -> Encoder {
+    fn encode_aad(peer_address: SocketAddr, retry: bool, aad: &mut Encoder) {
         // Let's be "clever" by putting the peer's address in the AAD.
         // We don't need to encode these into the token as they should be
         // available when we need to check the token.
-        let mut aad = Encoder::default();
+        // TODO: separate write buffer needed?
         if retry {
             aad.encode(TOKEN_IDENTIFIER_RETRY);
         } else {
@@ -97,7 +97,6 @@ impl AddressValidation {
         if retry {
             aad.encode_uint(2, peer_address.port());
         }
-        aad
     }
 
     pub fn generate_token(
@@ -111,7 +110,10 @@ impl AddressValidation {
 
         // TODO(mt) rotate keys on a fixed schedule.
         let retry = dcid.is_some();
-        let mut data = Encoder::default();
+
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut data = Encoder::new_with_buffer(&mut write_buffer);
         let end = now
             + if retry {
                 EXPIRATION_RETRY
@@ -125,11 +127,14 @@ impl AddressValidation {
         }
 
         // Include the token identifier ("Retry"/~) in the AAD, then keep it for plaintext.
-        let mut buf = Self::encode_aad(peer_address, retry);
-        let encrypted = self.self_encrypt.seal(buf.as_ref(), data.as_ref())?;
-        buf.truncate(TOKEN_IDENTIFIER_RETRY.len());
-        buf.encode(&encrypted);
-        Ok(buf.into())
+        let mut write_buffer = vec![];
+        let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+        Self::encode_aad(peer_address, retry, &mut encoder);
+        let encrypted = self.self_encrypt.seal(encoder.as_ref(), data.as_ref())?;
+        encoder.truncate(TOKEN_IDENTIFIER_RETRY.len());
+        encoder.encode(&encrypted);
+        // TODO: We could as well return write_buffer here.
+        Ok(encoder.into())
     }
 
     /// This generates a token for use with Retry.
@@ -163,8 +168,10 @@ impl AddressValidation {
         retry: bool,
         now: Instant,
     ) -> Option<ConnectionId> {
-        let peer_addr = Self::encode_aad(peer_address, retry);
-        let data = self.self_encrypt.open(peer_addr.as_ref(), token).ok()?;
+        let mut write_buffer = vec![];
+        let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+        Self::encode_aad(peer_address, retry, &mut encoder);
+        let data = self.self_encrypt.open(encoder.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);
         match dec.decode_uint(4) {
             Some(d) => {

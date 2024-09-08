@@ -688,7 +688,9 @@ impl ExtensionHandler for TransportParametersHandler {
         qdebug!("Writing transport parameters, msg={:?}", msg);
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
-        let mut enc = Encoder::default();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         self.local.encode(&mut enc);
         assert!(enc.len() <= d.len());
         d[..enc.len()].copy_from_slice(enc.as_ref());
@@ -805,7 +807,9 @@ mod tests {
         tps.params
             .insert(INITIAL_MAX_STREAMS_BIDI, TransportParameter::Integer(10));
 
-        let mut enc = Encoder::default();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         tps.encode(&mut enc);
 
         let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
@@ -825,7 +829,9 @@ mod tests {
         assert!(!tps2.has_value(RETRY_SOURCE_CONNECTION_ID));
         assert!(tps2.has_value(STATELESS_RESET_TOKEN));
 
-        let mut enc = Encoder::default();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         tps.encode(&mut enc);
 
         let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
@@ -854,7 +860,9 @@ mod tests {
             0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
         ];
         let spa = make_spa();
-        let mut enc = Encoder::new();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         assert_eq!(enc.as_ref(), ENCODED);
 
@@ -887,7 +895,9 @@ mod tests {
     /// It then encodes it, working from the knowledge that the `encode` function
     /// doesn't care about validity, and decodes it.  The result should be failure.
     fn assert_invalid_spa(spa: &TransportParameter) {
-        let mut enc = Encoder::new();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         assert_eq!(
             TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
@@ -897,7 +907,9 @@ mod tests {
 
     /// This is for those rare mutations that are acceptable.
     fn assert_valid_spa(spa: &TransportParameter) {
-        let mut enc = Encoder::new();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         let mut dec = enc.as_decoder();
         let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
@@ -948,7 +960,9 @@ mod tests {
     #[test]
     fn preferred_address_truncated() {
         let spa = make_spa();
-        let mut enc = Encoder::new();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
         let mut dec = Decoder::from(&enc.as_ref()[..enc.len() - 1]);
         assert_eq!(
@@ -1073,7 +1087,9 @@ mod tests {
         tps.params
             .insert(ACTIVE_CONNECTION_ID_LIMIT, TransportParameter::Integer(1));
 
-        let mut enc = Encoder::default();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         tps.encode(&mut enc);
 
         // When decoding a set of transport parameters with an invalid ACTIVE_CONNECTION_ID_LIMIT
@@ -1092,7 +1108,9 @@ mod tests {
             other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
         };
 
-        let mut enc = Encoder::new();
+        // TODO: separate write buffer needed?
+        let mut write_buffer = vec![];
+        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
         vn.encode(&mut enc, VERSION_INFORMATION);
         assert_eq!(enc.as_ref(), ENCODED);
 
