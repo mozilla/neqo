@@ -27,7 +27,7 @@ workspace = true
 
 [dependencies]
 # neqo-bin is not used in Firefox, so we can be liberal with dependency versions
-clap = { version = "4.4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions"] }
+clap = { version = "4.4", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "derive"] }
 clap-verbosity-flag = { version = "2.2", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = { version = "0.4", default-features = false, features = ["std"] }
@@ -40,7 +40,7 @@ neqo-udp = { path = "./../neqo-udp" }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
-tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt-multi-thread"] }
+tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }
 
 [dev-dependencies]
