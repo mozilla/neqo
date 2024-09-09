@@ -3,7 +3,7 @@ FROM lukemathwalker/cargo-chef:latest-rust-latest AS chef
 WORKDIR /app
 
 
-FROM chef as planner
+FROM chef AS planner
 
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
