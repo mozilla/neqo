@@ -164,7 +164,11 @@ runs:
         which cl || true
         which sccache.exe || true
         which cl.exe || true
-        CC="$SCCACHE_CC" CXX="$SCCACHE_CXX" $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        if [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX"]; then
+          export CC="$SCCACHE_CC"
+          export CXX="$SCCACHE_CXX"
+        fi
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
