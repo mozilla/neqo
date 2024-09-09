@@ -30,7 +30,7 @@ use super::{
 };
 use crate::{
     connection::{
-        tests::{new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
     },
     events::ConnectionEvent,
@@ -1218,6 +1218,44 @@ fn client_initial_retransmits_identical() {
         assert_eq!(pto, DEFAULT_RTT * 3 * (1 << (i - 1)));
         now += pto;
     }
+}
+
+#[test]
+fn client_triggered_zerortt_retransmits_identical() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+    let mut server = resumed_server(&client);
+
+    // Write 0-RTT before generating any packets.
+    // This should result in a datagram that coalesces Initial and 0-RTT.
+    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
+    let client_0rtt = client.process(None, now());
+    assert!(client_0rtt.as_dgram_ref().is_some());
+    let stats1 = client.stats().frame_tx;
+
+    assertions::assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
+
+    let s1 = server.process(client_0rtt.as_dgram_ref(), now());
+    assert!(s1.as_dgram_ref().is_some()); // Should produce ServerHello etc...
+
+    // Drop the Initial packet from this.
+    let (_, s_hs) = split_datagram(s1.as_dgram_ref().unwrap());
+    assert!(s_hs.is_some());
+
+    // Passing only the server handshake packet to the client should trigger a retransmit.
+    _ = client.process(s_hs.as_ref(), now()).dgram();
+    let stats2 = client.stats().frame_tx;
+    assert_eq!(stats2.all, stats1.all * 2);
+    assert_eq!(stats2.crypto, stats1.crypto * 2);
+    assert_eq!(stats2.stream, stats1.stream * 2);
 }
 
 #[test]

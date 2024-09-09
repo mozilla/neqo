@@ -1659,6 +1659,12 @@ impl SendStreams {
         }
     }
 
+    pub fn mark_all_as_lost(&mut self) {
+        for stream in self.map.values_mut() {
+            stream.mark_as_lost(0, usize::MAX, true);
+        }
+    }
+
     pub fn clear(&mut self) {
         self.map.clear();
         self.sendordered.clear();
