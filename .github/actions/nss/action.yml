@@ -155,7 +155,7 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        echo CC="sccache cc" CXX="sccache c++" $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        CC="sccache cc" CXX="sccache c++" $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
