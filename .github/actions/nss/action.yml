@@ -72,6 +72,8 @@ runs:
           # TODO: Figure out if Windows can be supported
           echo "CC=sccache cc" >> "$GITHUB_ENV"
           echo "CXX=sccache c++" >> "$GITHUB_ENV"
+          echo "DCMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "DCMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         fi
         echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
