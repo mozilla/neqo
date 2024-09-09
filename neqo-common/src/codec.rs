@@ -204,9 +204,7 @@ impl<'a> Encoder<'a> {
     pub fn new_with_buffer(buf: &'a mut Vec<u8>) -> Self {
         Self { buf }
     }
-}
 
-impl<'a> Encoder<'a> {
     /// Static helper function for previewing the results of encoding without doing it.
     ///
     /// # Panics
