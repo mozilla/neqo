@@ -1256,6 +1256,33 @@ fn server_initial_retransmits_identical() {
 }
 
 #[test]
+fn server_triggered_initial_retransmits_identical() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+
+    let ci = client.process(None, now).dgram();
+    now += DEFAULT_RTT / 2;
+    let si1 = server.process(ci.as_ref(), now);
+    let stats1 = server.stats().frame_tx;
+
+    // Drop si and wait for client to retransmit.
+    let pto = client.process_output(now).callback();
+    now += pto;
+    let ci = client.process_output(now).dgram();
+
+    // Feed the RTX'ed ci into the server before its PTO fires. The server
+    // should process it and then retransmit its Initial packet including
+    // any coalesced Handshake data.
+    let si2 = server.process(ci.as_ref(), now);
+    let stats2 = server.stats().frame_tx;
+    assert_eq!(si1.dgram().unwrap().len(), si2.dgram().unwrap().len());
+    assert_eq!(stats2.all, stats1.all * 2);
+    assert_eq!(stats2.crypto, stats1.crypto * 2);
+    assert_eq!(stats2.ack, stats1.ack * 2);
+}
+
+#[test]
 fn client_handshake_retransmits_identical() {
     let mut now = now();
     let mut client = default_client();
@@ -1288,24 +1315,4 @@ fn client_handshake_retransmits_identical() {
             }
         );
     }
-}
-
-#[test]
-fn quicgo() {
-    let mut now = now();
-    let mut client = default_client();
-    let mut server = default_server();
-
-    let ci = client.process(None, now).dgram();
-    now += DEFAULT_RTT / 2;
-    _ = server.process(ci.as_ref(), now);
-
-    // Drop si and wait for client to retransmit.
-    let pto = client.process_output(now).callback();
-    now += pto;
-    let ci = client.process_output(now).dgram();
-
-    // Server processes the retransmitted Initial packet.
-    // now += DEFAULT_RTT / 2;
-    _ = server.process(ci.as_ref(), now);
 }
