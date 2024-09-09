@@ -68,6 +68,13 @@ runs:
     - name: Enable sscache
       shell: bash
       run: |
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          echo "SCCACHE_CC=sccache cl" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache cl" >> "$GITHUB_ENV"
+        else
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
         echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         if [ "$GITHUB_WORKFLOW" ]; then
@@ -155,7 +162,7 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        CC="sccache cc" CXX="sccache c++" $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        CC="$SCCACHE_CC" CXX="$SCCACHE_CXX" $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
