@@ -730,25 +730,25 @@ impl Connection {
         let version = Version::try_from(u32::try_from(
             dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)?,
         )?)?;
-        qtrace!([self], "  version {:?}", version);
+        qdebug!([self], "  version {:?}", version);
         if !self.conn_params.get_versions().all().contains(&version) {
             return Err(Error::DisabledVersion);
         }
 
         let rtt = Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
-        qtrace!([self], "  RTT {:?}", rtt);
+        qdebug!([self], "  RTT {:?}", rtt);
 
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!([self], "  transport parameters {}", hex(tp_slice));
+        qdebug!([self], "  transport parameters {}", hex(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp =
             TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!([self], "  Initial token {}", hex(init_token));
+        qdebug!([self], "  Initial token {}", hex(init_token));
 
         let tok = dec.decode_remainder();
-        qtrace!([self], "  TLS token {}", hex(tok));
+        qdebug!([self], "  TLS token {}", hex(tok));
 
         match self.crypto.tls {
             Agent::Client(ref mut c) => {
