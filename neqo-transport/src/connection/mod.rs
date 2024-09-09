@@ -3093,7 +3093,7 @@ impl Connection {
         stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
     }
 
-        // Tell 0-RTT packets that they were "lost".
+    // Tell 0-RTT packets that they were "lost".
     fn drop_0rtt(&mut self, now: Instant) {
         // Tell 0-RTT packets that they were "lost".
         if let Some(path) = self.paths.primary() {
