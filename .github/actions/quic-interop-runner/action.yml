@@ -85,7 +85,7 @@ runs:
         MAX_SIZE=1M
         echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
         echo "Removing these log files > $MAX_SIZE:"
-        SUCCEEDED=$(jq < ../result.json '. | .results[][] | select(.result == "succeeded").name')
+        SUCCEEDED=$(jq < ../result.json '. | .results[][] | select(.result == "succeeded").name' | tr -d '"')
         for TEST in $SUCCEEDED; do
           find "../logs/$TEST" -type f -size +$MAX_SIZE -ls -exec cp note.txt {} \;
         done
