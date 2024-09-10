@@ -262,8 +262,8 @@ impl Args {
                 self.resume = true;
                 // PMTUD probes inflate what we sent in 1-RTT, causing QNS to fail the test.
                 self.shared.quic_parameters.no_pmtud = true;
-                // If we pace, we might get the initial server flight before sending sufficient 0-RTT
-                // data to pass the QNS check.
+                // If we pace, we might get the initial server flight before sending sufficient
+                // 0-RTT data to pass the QNS check.
                 self.shared.quic_parameters.no_pacing = true;
             }
             "multiconnect" => {
