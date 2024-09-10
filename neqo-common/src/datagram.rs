@@ -34,7 +34,8 @@ impl Datagram {
 
 impl<'a> Datagram<&'a [u8]> {
     // TODO: Rename
-    pub fn new_2(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a [u8]) -> Self {
+    #[must_use]
+    pub const fn new_2(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a [u8]) -> Self {
         Self {
             src,
             dst,
@@ -45,7 +46,8 @@ impl<'a> Datagram<&'a [u8]> {
     }
 
     // TODO: Rename
-    pub fn new_2_with_segment_size(
+    #[must_use]
+    pub const fn new_2_with_segment_size(
         src: SocketAddr,
         dst: SocketAddr,
         tos: IpTos,
@@ -83,7 +85,7 @@ impl<D> Datagram<D> {
     }
 
     #[must_use]
-    pub fn segment_size(&self) -> Option<usize> {
+    pub const fn segment_size(&self) -> Option<usize> {
         self.segment_size
     }
 }
@@ -95,7 +97,7 @@ impl<D: Deref<Target = [u8]>> Deref for Datagram<D> {
     type Target = [u8];
     #[must_use]
     fn deref(&self) -> &Self::Target {
-        self.d.deref()
+        &self.d
     }
 }
 
@@ -120,7 +122,7 @@ impl<'a> From<&'a Datagram> for Datagram<&'a [u8]> {
 }
 
 // TODO: Remove
-impl<'a> From<Datagram<&[u8]>> for Datagram {
+impl From<Datagram<&[u8]>> for Datagram {
     fn from(value: Datagram<&[u8]>) -> Self {
         let Datagram {
             src,
@@ -129,7 +131,7 @@ impl<'a> From<Datagram<&[u8]>> for Datagram {
             segment_size,
             d,
         } = value;
-        Datagram {
+        Self {
             src,
             dst,
             tos,

@@ -448,7 +448,7 @@ impl<'a> From<Encoder<'a>> for &'a [u8] {
 // TODO: Should this be test only?
 impl<'a> From<Encoder<'a>> for Vec<u8> {
     #[must_use]
-    fn from(buf: Encoder) -> Vec<u8> {
+    fn from(buf: Encoder) -> Self {
         // TODO: Is allocation intuitive here?
         buf.buf.clone()
     }
@@ -781,8 +781,8 @@ mod tests {
     #[test]
     fn varint_decode_short() {
         for c in &["40", "800000", "c0000000000000"] {
-            let mut _write_buffer = vec![];
-            let encoded = Encoder::new_with_buffer(&mut _write_buffer).from_hex(c);
+            let mut write_buffer = vec![];
+            let encoded = Encoder::new_with_buffer(&mut write_buffer).from_hex(c);
             let mut dec = encoded.as_decoder();
             assert!(dec.decode_varint().is_none());
         }

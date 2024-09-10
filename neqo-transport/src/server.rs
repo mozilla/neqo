@@ -454,7 +454,7 @@ impl Server {
                 // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
                 //
                 // Find alternative.
-                .process_into(None, now, unsafe { &mut *(write_buffer as *mut _) })
+                .process_into(None, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
             {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
@@ -477,6 +477,9 @@ impl Server {
             .map_datagram(Into::into)
     }
 
+    /// # Panics
+    ///
+    /// TODO
     #[must_use]
     pub fn process_2<'a>(
         &mut self,
@@ -491,7 +494,7 @@ impl Server {
                 // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
                 //
                 // Find alternative.
-                self.process_input(d, now, unsafe { &mut *(write_buffer as *mut _) })
+                self.process_input(d, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
             })
             .or_else(|| self.process_next_output(now, write_buffer));
 

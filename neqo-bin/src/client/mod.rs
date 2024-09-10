@@ -487,6 +487,8 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     .map_err(Error::QlogError)
 }
 
+// TODO: Reconsider allow.
+#[allow(clippy::too_many_lines)]
 pub async fn client(mut args: Args) -> Res<()> {
     neqo_common::log::init(
         args.shared

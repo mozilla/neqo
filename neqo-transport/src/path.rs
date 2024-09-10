@@ -713,11 +713,7 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<'a>(
-        &mut self,
-        payload: &'a mut Vec<u8>,
-        stats: &mut Stats,
-    ) -> Datagram<&'a [u8]> {
+    pub fn datagram<'a>(&mut self, payload: &'a [u8], stats: &mut Stats) -> Datagram<&'a [u8]> {
         // Make sure to use the TOS value from before calling EcnInfo::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.

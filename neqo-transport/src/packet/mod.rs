@@ -132,8 +132,9 @@ impl<'a> PacketBuilder<'a> {
     /// The minimum useful frame size.  If space is less than this, we will claim to be full.
     pub const MINIMUM_FRAME_SIZE: usize = 2;
 
-    fn infer_limit(limit: usize) -> usize {
-        // TODO: I don't know what the 64 is all about. Thus leaving the infer_limit function intact for now.
+    const fn infer_limit(limit: usize) -> usize {
+        // TODO: I don't know what the 64 is all about. Thus leaving the infer_limit function intact
+        // for now.
         if limit > 64 {
             limit
         } else {
@@ -1351,7 +1352,7 @@ mod tests {
             PacketBuilder::retry(version, &[], SERVER_CID, RETRY_TOKEN, CLIENT_CID, &mut buf)
                 .unwrap();
 
-        let (packet, remainder) = PublicPacket::decode(&retry, &cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(retry, &cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert!(remainder.is_empty());
 

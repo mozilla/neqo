@@ -867,9 +867,9 @@ impl Http3Client {
         // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
         //
         // Find alternative.
-        let out = self
-            .conn
-            .process_into(input, now, unsafe { &mut *(write_buffer as *mut _) });
+        let out = self.conn.process_into(input, now, unsafe {
+            &mut *std::ptr::from_mut(write_buffer)
+        });
         self.process_http3(now);
         if matches!(out, Output::Datagram(_)) {
             return out;

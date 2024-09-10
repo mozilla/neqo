@@ -1175,6 +1175,10 @@ impl Connection {
 
     // TODO: For the lack of a better name, `process_into` for now.
     /// Process input and generate output.
+    ///
+    /// # Panics
+    ///
+    /// TODO
     #[must_use = "Output of the process function must be handled"]
     pub fn process_into<'a>(
         &mut self,
@@ -1572,10 +1576,12 @@ impl Connection {
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
+    // TODO: Reconsider allow.
+    #[allow(clippy::too_many_lines)]
     fn input_path(&mut self, path: &PathRef, d: Datagram<&[u8]>, now: Instant) -> Res<()> {
         for mut slc in d
             .as_ref()
-            .chunks(d.segment_size().unwrap_or(d.as_ref().len()))
+            .chunks(d.segment_size().unwrap_or_else(|| d.as_ref().len()))
         {
             let mut dcid = None;
 
@@ -1658,8 +1664,9 @@ impl Connection {
                     Err(e) => {
                         match e {
                             Error::KeysPending(cspace) => {
-                                // This packet can't be decrypted because we don't have the keys yet.
-                                // Don't check this packet for a stateless reset, just return.
+                                // This packet can't be decrypted because we don't have the keys
+                                // yet. Don't check this packet for
+                                // a stateless reset, just return.
                                 let remaining = slc.len();
                                 self.save_datagram(cspace, d, remaining, now);
                                 return Ok(());
@@ -2036,6 +2043,8 @@ impl Connection {
         res.unwrap_or_default()
     }
 
+    // TODO: Reconsider allow
+    #[allow(clippy::too_many_arguments)]
     fn build_packet_header<'a>(
         path: &Path,
         cspace: CryptoSpace,

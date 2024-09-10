@@ -125,13 +125,15 @@ impl Http3Server {
             // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
             //
             // Find alternative.
-            .process_2(dgram, now, unsafe { &mut *(write_buffer as *mut _) });
+            .process_2(dgram, now, unsafe {
+                &mut *std::ptr::from_mut(write_buffer)
+            });
         self.process_http3(now);
         // If we do not have a dgram already try again after process_http3.
         match out {
             Output::Datagram(d) => {
                 qtrace!([self], "Send packet: {:?}", d);
-                return Output::Datagram(d);
+                Output::Datagram(d)
             }
             _ => self.server.process_2(None, now, write_buffer),
         }

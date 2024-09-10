@@ -117,6 +117,9 @@ pub fn recv_inner(
 }
 
 // TODO: replace recv_inner in favor of this one.
+/// # Panics
+///
+/// TODO
 pub fn recv_inner_2<'a>(
     local_address: &SocketAddr,
     state: &UdpSocketState,
@@ -135,13 +138,11 @@ pub fn recv_inner_2<'a>(
     loop {
         meta = RecvMeta::default();
 
-        if let Err(e) = state.recv(
+        state.recv(
             (&socket).into(),
             &mut [IoSliceMut::new(recv_buf.as_mut())],
             slice::from_mut(&mut meta),
-        ) {
-            return Err(e);
-        }
+        )?;
 
         if meta.len == 0 || meta.stride == 0 {
             qdebug!(
@@ -222,15 +223,15 @@ mod tests {
         let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::<Vec<u8>>::new(
+        let payload = vec![];
+        let datagram = Datagram::new_2(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::default(),
-            vec![],
+            &payload,
         );
 
-        // TODO
-        // sender.send(&datagram)?;
+        sender.send(datagram)?;
         let res = receiver.recv(&receiver_addr);
         assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
 
@@ -243,15 +244,15 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::<Vec<u8>>::new(
+        let payload = b"Hello, world!".to_vec();
+        let datagram = Datagram::new_2(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            b"Hello, world!".to_vec(),
+            &payload,
         );
 
-        // TODO
-        // sender.send(&datagram)?;
+        sender.send(datagram)?;
 
         let received_datagram = receiver
             .recv(&receiver_addr)

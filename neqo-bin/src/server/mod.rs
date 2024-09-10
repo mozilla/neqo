@@ -317,7 +317,7 @@ impl ServerRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => {
                     // TODO: Passing the index here to only borrow &mut self in process. Better way?
-                    self.process(Some(inx)).await?
+                    self.process(Some(inx)).await?;
                 }
                 Ready::Timeout => {
                     self.timeout = None;
