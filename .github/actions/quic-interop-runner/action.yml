@@ -82,14 +82,12 @@ runs:
           fi
         done
         # Remove all log files > $MAX_SIZE for succeeded tests to make the artifacts smaller.
-        MAX_SIZE=1M
+        MAX_SIZE=2M
         echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
         echo "Removing these log files > $MAX_SIZE:"
         SUCCEEDED=$(jq < ../result.json '. | .results[][] | select(.result == "succeeded").name' | tr -d '"')
         for run in ../logs/*; do
-          echo "$run"
           for test in $SUCCEEDED; do
-            echo "$run/$test"
             find "$run/$test" -type f -size +$MAX_SIZE -ls -exec cp note.txt {} \;
           done
         done
