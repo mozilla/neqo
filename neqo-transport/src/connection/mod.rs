@@ -2422,13 +2422,15 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent);
             }
 
-            if *space == PacketNumberSpace::Handshake
-                && self.role == Role::Server
-                && self.state == State::Confirmed
-            {
-                // We could discard handshake keys in set_state,
-                // but wait until after sending an ACK.
-                self.discard_keys(PacketNumberSpace::Handshake, now);
+            if *space == PacketNumberSpace::Handshake {
+                if self.role == Role::Server && self.state == State::Confirmed {
+                    // We could discard handshake keys in set_state,
+                    // but wait until after sending an ACK.
+                    self.discard_keys(PacketNumberSpace::Handshake, now);
+                } else if self.role == Role::Client {
+                    // We just sent a Handshake packet, so we can discard the Initial keys.
+                    self.discard_keys(PacketNumberSpace::Initial, now);
+                }
             }
         }
 
@@ -2779,11 +2781,6 @@ impl Connection {
                 self.set_initial_limits();
             }
             if self.crypto.install_keys(self.role)? {
-                if self.role == Role::Client {
-                    // We won't acknowledge Initial packets as a result of this, but the
-                    // server can rely on implicit acknowledgment.
-                    self.discard_keys(PacketNumberSpace::Initial, now);
-                }
                 self.saved_datagrams.make_available(CryptoSpace::Handshake);
             }
         }
