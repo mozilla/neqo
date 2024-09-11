@@ -2783,6 +2783,9 @@ impl Connection {
                     // We won't acknowledge Initial packets as a result of this, but the
                     // server can rely on implicit acknowledgment.
                     self.discard_keys(PacketNumberSpace::Initial, now);
+                    // If the PTO was armed for the Initial space, also arm it for the Handshake
+                    // space, so we send probes there if needed.
+                    self.received_untracked = true;
                 }
                 self.saved_datagrams.make_available(CryptoSpace::Handshake);
             }
