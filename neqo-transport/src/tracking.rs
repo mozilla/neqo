@@ -287,7 +287,12 @@ impl RecvdPackets {
             ack_frequency_seqno: 0,
             ack_delay: DEFAULT_ACK_DELAY,
             unacknowledged_count: 0,
-            unacknowledged_tolerance: DEFAULT_ACK_PACKET_TOLERANCE,
+            unacknowledged_tolerance: if space == PacketNumberSpace::ApplicationData {
+                DEFAULT_ACK_PACKET_TOLERANCE
+            } else {
+                // ACK more aggressively
+                0
+            },
             ignore_order: false,
             ecn_count: EcnCount::default(),
         }
