@@ -28,6 +28,7 @@ use crate::{
     pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
+    tparams::GREASE_QUIC_BIT,
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
     Version,
 };
@@ -677,4 +678,11 @@ fn create_server() {
     assert_default_stats(&stats);
     // Server won't have a default path, so no RTT.
     assert_eq!(stats.rtt, Duration::from_secs(0));
+}
+
+#[test]
+fn no_grease() {
+    let client = new_client(ConnectionParameters::default().grease(false));
+    let grease = client.tps.borrow_mut().local.get_empty(GREASE_QUIC_BIT);
+    assert!(!grease);
 }
