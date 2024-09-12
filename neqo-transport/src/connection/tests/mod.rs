@@ -690,10 +690,6 @@ fn tp_grease_false() {
 #[test]
 fn tp_disable_migration_true() {
     let client = new_client(ConnectionParameters::default().disable_migration(true));
-    let disable_migration = client
-        .tps
-        .borrow_mut()
-        .local
-        .get_empty(DISABLE_MIGRATION);
+    let disable_migration = client.tps.borrow_mut().local.get_empty(DISABLE_MIGRATION);
     assert!(disable_migration);
 }
