@@ -681,7 +681,6 @@ fn create_server() {
 }
 
 #[test]
-#[test]
 fn tp_grease() {
     for enable in [true, false] {
         let client = new_client(ConnectionParameters::default().grease(enable));

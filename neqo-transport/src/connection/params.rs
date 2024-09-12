@@ -44,6 +44,7 @@ pub enum PreferredAddressConfig {
 /// `ConnectionParameters` use for setting intitial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
+#[allow(clippy::struct_excessive_bools)] // We need that many, sorry.
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     versions: VersionConfig,
