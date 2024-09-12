@@ -681,10 +681,13 @@ fn create_server() {
 }
 
 #[test]
-fn tp_grease_false() {
-    let client = new_client(ConnectionParameters::default().grease(false));
-    let grease = client.tps.borrow_mut().local.get_empty(GREASE_QUIC_BIT);
-    assert!(!grease);
+#[test]
+fn tp_grease() {
+    for enable in [true, false] {
+        let client = new_client(ConnectionParameters::default().grease(enable));
+        let grease = client.tps.borrow_mut().local.get_empty(GREASE_QUIC_BIT);
+        assert_eq!(enable, grease);
+    }
 }
 
 #[test]
