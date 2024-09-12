@@ -78,7 +78,8 @@ impl Crypto {
         ])?;
         match &mut agent {
             Agent::Server(c) => {
-                // Clients do not send mlkem768x25519 shares by default, but servers should accept them.
+                // Clients do not send mlkem768x25519 shares by default, but servers should accept
+                // them.
                 c.set_groups(&[
                     TLS_GRP_KEM_MLKEM768X25519,
                     TLS_GRP_EC_X25519,
