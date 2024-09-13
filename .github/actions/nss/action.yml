@@ -64,8 +64,7 @@ runs:
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nss
-        # ref: c631e9cb5ed1806038f7b85fbbc825f856c9d133 works
-        ref: fd36e7f300e1bc7fa933faa6aa55424f81d34426
+        ref: c631e9cb5ed1806038f7b85fbbc825f856c9d133 # later revisions hang when building on Windows
         path: nss
 
     - name: Checkout NSPR
