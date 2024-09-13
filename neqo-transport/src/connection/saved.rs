@@ -41,10 +41,10 @@ impl SavedDatagrams {
         let store = self.store(cspace);
 
         if store.len() < MAX_SAVED_DATAGRAMS {
-            qdebug!("saving {:?} datagram of {} bytes", cspace, d.len());
+            qdebug!("saving datagram of {} bytes", d.len());
             store.push(SavedDatagram { d, t });
         } else {
-            qinfo!("not saving {:?} datagram of {} bytes", cspace, d.len());
+            qinfo!("not saving datagram of {} bytes", d.len());
         }
     }
 
