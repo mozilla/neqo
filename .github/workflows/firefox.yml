@@ -118,7 +118,7 @@ jobs:
           cd mozilla-unified
           # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
           if [ "${{ runner.os }}" == "Windows" ]; then
-            unset WINDOWSSDKDIR
+            unset WindowsSdkDir
             env
           fi
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
