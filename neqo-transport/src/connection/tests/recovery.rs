@@ -291,16 +291,16 @@ fn pto_handshake_complete() {
     // The server discarded the Handshake keys already, therefore they are dropped.
     // Note that these don't include 1-RTT packets, because 1-RTT isn't send on PTO.
     let dropped_before1 = server.stats().dropped_rx;
-    let server_frames = server.stats().frame_rx.all;
+    let server_frames = server.stats().frame_rx.all();
     server.process_input(&pkt2_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before1);
-    assert_eq!(server.stats().frame_rx.all, server_frames);
+    assert_eq!(server.stats().frame_rx.all(), server_frames);
 
-    let server_frames2 = server.stats().frame_rx.all;
+    let server_frames2 = server.stats().frame_rx.all();
     let dropped_before2 = server.stats().dropped_rx;
     server.process_input(&pkt2_hs, now);
     assert_eq!(1, server.stats().dropped_rx - dropped_before2);
-    assert_eq!(server.stats().frame_rx.all, server_frames2);
+    assert_eq!(server.stats().frame_rx.all(), server_frames2);
 
     now += HALF_RTT;
 
@@ -488,10 +488,10 @@ fn ack_after_pto() {
     assert!(ack.is_some());
 
     // Make sure that the packet only contained an ACK frame.
-    let all_frames_before = server.stats().frame_rx.all;
+    let all_frames_before = server.stats().frame_rx.all();
     let ack_before = server.stats().frame_rx.ack;
     server.process_input(&ack.unwrap(), now);
-    assert_eq!(server.stats().frame_rx.all, all_frames_before + 1);
+    assert_eq!(server.stats().frame_rx.all(), all_frames_before + 1);
     assert_eq!(server.stats().frame_rx.ack, ack_before + 1);
 }
 
