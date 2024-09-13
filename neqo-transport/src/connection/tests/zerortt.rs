@@ -331,7 +331,7 @@ fn zero_rtt_loss_accepted() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn picoquic() {
+fn zerortt_reorder_frames() {
     const ACK_FRAME: &[u8] = &[3, 0, 0, 0, 0, 1, 0, 0];
     const ACK_FRAME_2: &[u8] = &[3, 1, 0, 0, 1, 2, 0, 0];
 
@@ -340,7 +340,11 @@ fn picoquic() {
             .versions(Version::Version1, vec![Version::Version1])
             .grease(false),
     );
-    let mut server = default_server();
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .versions(Version::Version1, vec![Version::Version1])
+            .grease(false),
+    );
     let mut now = now();
     connect(&mut client, &mut server);
 
