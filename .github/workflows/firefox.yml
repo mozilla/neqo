@@ -63,6 +63,12 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install -y mozillabuild
 
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified

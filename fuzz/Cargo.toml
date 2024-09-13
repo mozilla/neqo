@@ -22,7 +22,7 @@ neqo-transport = { path = "../neqo-transport" }
 test-fixture = { path = "../test-fixture" }
 
 [target.'cfg(not(windows))'.dependencies]
-libfuzzer-sys = { version = "0.4" }
+libfuzzer-sys = { version = "0.4", default-features = false }
 
 [lints]
 workspace = true
