@@ -811,9 +811,7 @@ impl Path {
             builder.encode(&challenge[..]);
 
             // These frames are not retransmitted in the usual fashion.
-            // There is no token, therefore we need to count `all` specially.
             stats.path_response += 1;
-            stats.all += 1;
 
             if builder.remaining() < 9 {
                 return true;
@@ -832,7 +830,6 @@ impl Path {
 
             // As above, no recovery token.
             stats.path_challenge += 1;
-            stats.all += 1;
 
             self.state = ProbeState::Probing {
                 probe_count,
