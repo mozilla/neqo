@@ -2157,7 +2157,6 @@ impl Connection {
             builder.encode_varint(crate::frame::FRAME_TYPE_PING);
             let stats = &mut self.stats.borrow_mut().frame_tx;
             stats.ping += 1;
-            stats.all += 1;
         }
         probe
     }
@@ -2244,13 +2243,11 @@ impl Connection {
         let stats = &mut self.stats.borrow_mut().frame_tx;
         let padded = if ack_eliciting && full_mtu && builder.pad() {
             stats.padding += 1;
-            stats.all += 1;
             true
         } else {
             false
         };
 
-        stats.all += tokens.len();
         (tokens, ack_eliciting, padded)
     }
 
@@ -2824,7 +2821,6 @@ impl Connection {
             qinfo!("frame not allowed: {:?} {:?}", frame, packet_type);
             return Err(Error::ProtocolViolation);
         }
-        self.stats.borrow_mut().frame_rx.all += 1;
         let space = PacketNumberSpace::from(packet_type);
         if frame.is_stream() {
             return self
