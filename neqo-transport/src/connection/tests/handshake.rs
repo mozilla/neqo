@@ -591,7 +591,8 @@ fn reorder_1rtt() {
     now += RTT / 2;
     let s2 = server.process(c2.as_ref(), now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/ NEW_CONNECTION_ID).
+    // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/
+    // NEW_CONNECTION_ID).
     assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 1);
@@ -1253,7 +1254,7 @@ fn client_triggered_zerortt_retransmits_identical() {
     // Passing only the server handshake packet to the client should trigger a retransmit.
     _ = client.process(s_hs.as_ref(), now()).dgram();
     let stats2 = client.stats().frame_tx;
-    assert_eq!(stats2.all, stats1.all * 2);
+    assert_eq!(stats2.all(), stats1.all() * 2);
     assert_eq!(stats2.crypto, stats1.crypto * 2);
     assert_eq!(stats2.stream, stats1.stream * 2);
 }
@@ -1314,7 +1315,7 @@ fn server_triggered_initial_retransmits_identical() {
     let si2 = server.process(ci.as_ref(), now);
     let stats2 = server.stats().frame_tx;
     assert_eq!(si1.dgram().unwrap().len(), si2.dgram().unwrap().len());
-    assert_eq!(stats2.all, stats1.all * 2);
+    assert_eq!(stats2.all(), stats1.all() * 2);
     assert_eq!(stats2.crypto, stats1.crypto * 2);
     assert_eq!(stats2.ack, stats1.ack * 2);
 }
@@ -1347,7 +1348,6 @@ fn client_handshake_retransmits_identical() {
                 crypto: i + 1,
                 ack: i + 1,
                 new_connection_id: i * 7,
-                all: i * 9 + 2,
                 ..Default::default()
             }
         );
