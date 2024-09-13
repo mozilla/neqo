@@ -65,12 +65,14 @@ runs:
       with:
         repository: nss-dev/nss
         ref: c631e9cb5ed1806038f7b85fbbc825f856c9d133
+        path: nss
 
     - name: Checkout NSPR
       if: env.BUILD_NSS == '1'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nspr
+        path: nspr
 
     - name: Install build dependencies (Linux)
       shell: bash
