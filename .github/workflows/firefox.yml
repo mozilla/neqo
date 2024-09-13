@@ -116,6 +116,8 @@ jobs:
           EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
+          # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
+          [ "${{ runner.os }}" == "Windows" ] && unset WINDOWSSDKDIR
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
           exit 0
 
