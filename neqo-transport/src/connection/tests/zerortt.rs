@@ -340,7 +340,7 @@ fn picoquic() {
             .versions(Version::Version1, vec![Version::Version1])
             .grease(false),
     );
-    let mut server = new_server(ConnectionParameters::default().grease(false));
+    let mut server = default_server();
     let mut now = now();
     connect(&mut client, &mut server);
 
@@ -470,5 +470,10 @@ fn picoquic() {
     // application space PTO.
     now += DEFAULT_RTT * 5;
     let probe = client.process(Some(&modified), now).dgram().unwrap();
-    assertions::assert_handshake(&probe[..]);
+    assertions::assert_initial(&probe[..], true);
+
+    now += client.process(None, now).callback();
+    let probe = client.process(None, now).dgram().unwrap();
+    assertions::assert_initial(&probe[..], true);
+    assertions::assert_coalesced_0rtt(&probe[..]);
 }
