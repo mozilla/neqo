@@ -798,13 +798,13 @@ fn anti_amplification() {
     client.process_input(&s_init1, now);
     client.process_input(&s_init2, now);
     let ack_count = client.stats().frame_tx.ack;
-    let frame_count = client.stats().frame_tx.all;
+    let frame_count = client.stats().frame_tx.all();
     let ack = client.process(Some(&s_init3), now).dgram().unwrap();
     assert!(!maybe_authenticate(&mut client)); // No need yet.
 
     // The client sends a padded datagram, with just ACK for Handshake.
     assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
-    assert_eq!(client.stats().frame_tx.all, frame_count + 1);
+    assert_eq!(client.stats().frame_tx.all(), frame_count + 1);
     assert_ne!(ack.len(), client.plpmtu()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
@@ -1210,7 +1210,6 @@ fn client_initial_retransmits_identical() {
             client.stats().frame_tx,
             FrameStats {
                 crypto: i,
-                all: i,
                 ..Default::default()
             }
         );
@@ -1238,7 +1237,6 @@ fn server_initial_retransmits_identical() {
             FrameStats {
                 crypto: i * 2,
                 ack: i,
-                all: i * 3,
                 ..Default::default()
             }
         );
