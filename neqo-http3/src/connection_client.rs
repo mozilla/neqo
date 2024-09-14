@@ -865,7 +865,7 @@ impl Http3Client {
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
         if let Some(d) = input {
-            self.process_input_2(d, now);
+            self.process_input(d, now);
         }
         self.process_http3(now);
 
@@ -893,14 +893,10 @@ impl Http3Client {
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input_2(&mut self, dgram: Datagram<&[u8]>, now: Instant) {
+    pub fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
         qtrace!([self], "Process input");
-        self.conn.process_input_2(dgram, now);
+        self.conn.process_input(dgram, now);
         self.process_http3(now);
-    }
-
-    pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
-        self.process_input_2(dgram.into(), now);
     }
 
     /// Process HTTP3 layer.
@@ -930,7 +926,6 @@ impl Http3Client {
         }
     }
 
-    // TODO: Why not call process_into without a datagram?
     /// The function should be called to check if there is a new UDP packet to be sent. It should
     /// be called after a new packet is received and processed and after a timer expires (QUIC
     /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
@@ -960,16 +955,7 @@ impl Http3Client {
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "Process output.");
-
-        // Maybe send() stuff on http3-managed streams
-        self.process_http3(now);
-
-        let out = self.conn.process_output(now);
-
-        // Update H3 for any transport state changes and events
-        self.process_http3(now);
-
-        out
+        self.process(None, now)
     }
 
     /// This function takes the provided result and check for an error.
@@ -1886,7 +1872,7 @@ mod tests {
                 _ => {}
             }
         }
-        let dgram = server.conn.process_output(now()).dgram();
+        let dgram = server.conn.process(None, now()).dgram();
         if let Some(d) = dgram {
             client.process_input(&d, now());
         }
@@ -2618,7 +2604,7 @@ mod tests {
         fn dgram(c: &mut Connection) -> Datagram {
             let stream = c.stream_create(StreamType::UniDi).unwrap();
             _ = c.stream_send(stream, &[0xc0]).unwrap();
-            c.process_output(now()).dgram().unwrap()
+            c.process(None, now()).dgram().unwrap()
         }
 
         let d1 = dgram(&mut client.conn);
@@ -4160,11 +4146,11 @@ mod tests {
 
     fn exchange_token(client: &mut Http3Client, server: &mut Connection) -> ResumptionToken {
         server.send_ticket(now(), &[]).expect("can send ticket");
-        let out = server.process_output(now());
+        let out = server.process(None, now());
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.as_dgram_ref().unwrap(), now());
         // We do not have a token so we need to wait for a resumption token timer to trigger.
-        client.process_output(now() + Duration::from_millis(250));
+        client.process(None, now() + Duration::from_millis(250));
         assert_eq!(client.state(), Http3State::Connected);
         client
             .events()
@@ -4985,7 +4971,7 @@ mod tests {
         // Send a zero-length frame at the end of the stream.
         _ = server.conn.stream_send(request_stream_id, &[0, 0]).unwrap();
         server.conn.stream_close_send(request_stream_id).unwrap();
-        let dgram = server.conn.process_output(now()).dgram();
+        let dgram = server.conn.process(None, now()).dgram();
         client.process_input(&dgram.unwrap(), now());
 
         let data_readable_event = |e: &_| matches!(e, Http3ClientEvent::DataReadable { stream_id } if *stream_id == request_stream_id);
@@ -5137,7 +5123,7 @@ mod tests {
 
         // Reading push data will stop the client from being idle.
         _ = send_push_data(&mut server.conn, 0, false);
-        let out = server.conn.process_output(now());
+        let out = server.conn.process(None, now());
         client.process_input(out.as_dgram_ref().unwrap(), now());
 
         let mut buf = [0; 16];

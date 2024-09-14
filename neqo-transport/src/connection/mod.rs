@@ -97,6 +97,7 @@ pub enum ZeroRttState {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+// TODO: Update docs
 /// Type returned from `process()` and `process_output()`. Users are required to
 /// call these repeatedly until `Callback` or `None` is returned.
 // TODO: Make `&[u8]` the default.
@@ -1025,15 +1026,10 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input_2(&mut self, d: Datagram<&[u8]>, now: Instant) {
-        self.input(d, now, now);
+    pub fn process_input<'a>(&mut self, d: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+        self.input(d.into(), now, now);
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
-    }
-
-    /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: &Datagram, now: Instant) {
-        self.process_input_2(d.into(), now);
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
@@ -1104,15 +1100,7 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     #[must_use = "Output of the process_output function must be handled"]
-    pub fn process_output(&mut self, now: Instant) -> Output {
-        let mut write_buffer = vec![];
-        self.process_output_2(now, &mut write_buffer)
-            // TODO: Yet another allocation.
-            .map_datagram(Into::into)
-    }
-
-    #[must_use = "Output of the process_output function must be handled"]
-    pub fn process_output_2<'a>(
+    fn process_output<'a>(
         &mut self,
         now: Instant,
         write_buffer: &'a mut Vec<u8>,
@@ -1144,23 +1132,12 @@ impl Connection {
         }
     }
 
-    // TODO: Either replace with, or at least use `process_into`.
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        if let Some(d) = dgram {
-            self.input(d.into(), now, now);
-            self.process_saved(now);
-        }
-        #[allow(clippy::let_and_return)]
-        let output = self.process_output(now);
-        #[cfg(all(feature = "build-fuzzing-corpus", test))]
-        if self.test_frame_writer.is_none() {
-            if let Some(d) = output.clone().dgram() {
-                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
-            }
-        }
-        output
+        let mut write_buffer = vec![];
+        self.process_into(dgram.map(Into::into), now, &mut write_buffer)
+            .map_datagram(Into::into)
     }
 
     // TODO: For the lack of a better name, `process_into` for now.
@@ -1187,7 +1164,7 @@ impl Connection {
             self.process_saved(now);
         }
         #[allow(clippy::let_and_return)]
-        let output = self.process_output_2(now, write_buffer);
+        let output = self.process_output(now, write_buffer);
         // TODO
         // #[cfg(all(feature = "build-fuzzing-corpus", test))]
         // if self.test_frame_writer.is_none() {
