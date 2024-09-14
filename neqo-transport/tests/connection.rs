@@ -71,12 +71,14 @@ fn reorder_server_initial() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process_output(now());
+    let client_initial = client.process_alloc(None, now());
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();
 
-    let server_packet = server.process_alloc(client_initial.as_dgram_ref(), now()).dgram();
+    let server_packet = server
+        .process_alloc(client_initial.as_dgram_ref(), now())
+        .dgram();
     let (server_initial, server_hs) = split_datagram(server_packet.as_ref().unwrap());
     let (protected_header, _, _, payload) =
         decode_initial_header(&server_initial, Role::Server).unwrap();
@@ -122,7 +124,7 @@ fn reorder_server_initial() {
     client.process_input(&reordered, now());
     client.process_input(&server_hs.unwrap(), now());
     assert!(test_fixture::maybe_authenticate(&mut client));
-    let finished = client.process_output(now());
+    let finished = client.process_alloc(None, now());
     assert_eq!(*client.state(), State::Connected);
 
     let done = server.process_alloc(finished.as_dgram_ref(), now());
@@ -170,11 +172,13 @@ fn packet_without_frames() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process_output(now());
+    let client_initial = client.process_alloc(None, now());
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
 
-    let server_packet = server.process_alloc(client_initial.as_dgram_ref(), now()).dgram();
+    let server_packet = server
+        .process_alloc(client_initial.as_dgram_ref(), now())
+        .dgram();
     let modified = set_payload(&server_packet, client_dcid, &[]);
     client.process_input(&modified, now());
     assert_eq!(
@@ -191,11 +195,13 @@ fn packet_with_only_padding() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process_output(now());
+    let client_initial = client.process_alloc(None, now());
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
 
-    let server_packet = server.process_alloc(client_initial.as_dgram_ref(), now()).dgram();
+    let server_packet = server
+        .process_alloc(client_initial.as_dgram_ref(), now())
+        .dgram();
     let modified = set_payload(&server_packet, client_dcid, &[0]);
     client.process_input(&modified, now());
     assert_eq!(client.state(), &State::WaitInitial);
@@ -210,7 +216,7 @@ fn overflow_crypto() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process_output(now()).dgram();
+    let client_initial = client.process_alloc(None, now()).dgram();
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();

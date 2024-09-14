@@ -563,7 +563,7 @@ impl Http3Client {
         output
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1] on next `Http3Client::process_output()` call.
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next `Http3Client::process_alloc(None, )` call.
     /// Returns if the priority got changed.
     ///
     /// # Errors
@@ -928,6 +928,7 @@ impl Http3Client {
         }
     }
 
+    // TODO: Remove?
     /// The function should be called to check if there is a new UDP packet to be sent. It should
     /// be called after a new packet is received and processed and after a timer expires (QUIC
     /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
@@ -2617,7 +2618,7 @@ mod tests {
         let d4 = dgram(&mut server.conn);
         client.process_input(&d4, now());
         client.process_input(&d3, now());
-        let ack = client.process_output(now()).dgram();
+        let ack = client.process_alloc(None, now()).dgram();
         server.conn.process_input(&ack.unwrap(), now());
     }
 
@@ -2628,7 +2629,7 @@ mod tests {
         force_idle(&mut client, &mut server);
 
         let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-        assert_eq!(client.process_output(now()).callback(), idle_timeout);
+        assert_eq!(client.process_alloc(None, now()).callback(), idle_timeout);
     }
 
     // Helper function: read response when a server sends HTTP_RESPONSE_2.
@@ -5121,7 +5122,7 @@ mod tests {
 
         // The client will become idle here.
         force_idle(&mut client, &mut server);
-        assert_eq!(client.process_output(now()).callback(), idle_timeout);
+        assert_eq!(client.process_alloc(None, now()).callback(), idle_timeout);
 
         // Reading push data will stop the client from being idle.
         _ = send_push_data(&mut server.conn, 0, false);
@@ -5134,7 +5135,7 @@ mod tests {
         assert!(!fin);
 
         force_idle(&mut client, &mut server);
-        assert_eq!(client.process_output(now()).callback(), idle_timeout);
+        assert_eq!(client.process_alloc(None, now()).callback(), idle_timeout);
     }
 
     #[test]

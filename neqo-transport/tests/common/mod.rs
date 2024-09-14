@@ -111,7 +111,7 @@ pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
 
     // Have the client close the connection and then let the server clean up.
     client.close(now(), 0, "got a ticket");
-    let out = client.process_output(now());
+    let out = client.process_alloc(None, now());
     mem::drop(server.process_alloc(out.as_dgram_ref(), now()));
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);

@@ -207,7 +207,7 @@ fn single_packet_on_recovery() {
     assert_eq!(cwnd_avail(&client), 0);
 
     // The client should send one packet, ignoring the cwnd.
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     assert!(dgram.is_some());
 }
 
@@ -443,14 +443,14 @@ fn pace() {
     // The first packet is not subject to pacing as there are no bytes in flight.
     // After that we allow the burst to continue up to a number of packets (2).
     for _ in 0..=PACING_BURST_SIZE {
-        let dgram = client.process_output(now).dgram();
+        let dgram = client.process_alloc(None, now).dgram();
         assert!(dgram.is_some());
         count += 1;
     }
-    let gap = client.process_output(now).callback();
+    let gap = client.process_alloc(None, now).callback();
     assert_ne!(gap, Duration::new(0, 0));
     for _ in (1 + PACING_BURST_SIZE)..cwnd_packets(POST_HANDSHAKE_CWND, client.plpmtu()) {
-        match client.process_output(now) {
+        match client.process_alloc(None, now) {
             Output::Callback(t) => assert_eq!(t, gap),
             Output::Datagram(_) => {
                 // The last packet might not be paced.
@@ -460,14 +460,14 @@ fn pace() {
             Output::None => panic!(),
         }
         now += gap;
-        let dgram = client.process_output(now).dgram();
+        let dgram = client.process_alloc(None, now).dgram();
         assert!(dgram.is_some());
         count += 1;
     }
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     assert!(dgram.is_none());
     assert_eq!(count, cwnd_packets(POST_HANDSHAKE_CWND, client.plpmtu()));
-    let fin = client.process_output(now).callback();
+    let fin = client.process_alloc(None, now).callback();
     assert_ne!(fin, Duration::new(0, 0));
     assert_ne!(fin, gap);
 }

@@ -109,7 +109,7 @@ fn connect_single_version_server() {
 
         if client.version() != version {
             // Run the version negotiation exchange if necessary.
-            let out = client.process_output(now());
+            let out = client.process_alloc(None, now());
             assert!(out.as_dgram_ref().is_some());
             let dgram = server.process_alloc(out.as_dgram_ref(), now()).dgram();
             assertions::assert_vn(dgram.as_ref().unwrap());
@@ -635,7 +635,7 @@ fn version_negotiation() {
     let mut client = default_client();
 
     // `connect()` runs a fixed exchange, so manually run the Version Negotiation.
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     assert!(dgram.is_some());
     let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
     assertions::assert_vn(dgram.as_ref().unwrap());
@@ -670,7 +670,7 @@ fn version_negotiation_and_compatible() {
     // Run the full exchange so that we can observe the versions in use.
 
     // Version Negotiation
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     assert!(dgram.is_some());
     assertions::assert_version(dgram.as_ref().unwrap(), ORIG_VERSION.wire_version());
     let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
@@ -684,7 +684,7 @@ fn version_negotiation_and_compatible() {
     client.process_input(&dgram.unwrap(), now());
 
     client.authenticated(AuthenticationStatus::Ok, now());
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process_alloc(dgram.as_ref(), now()).dgram(); // ACK + HANDSHAKE_DONE + NST
@@ -732,7 +732,7 @@ fn compatible_upgrade_resumption_and_vn() {
     client.enable_resumption(now(), ticket).unwrap();
 
     // The version negotiation exchange.
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     assert!(dgram.is_some());
     assertions::assert_version(dgram.as_ref().unwrap(), COMPAT_VERSION.wire_version());
     let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
@@ -846,7 +846,7 @@ fn max_streams_after_0rtt_rejection() {
     let mut client = default_client();
     client.enable_resumption(now(), &token).unwrap();
     _ = client.stream_create(StreamType::BiDi).unwrap();
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
     let dgram = client.process_alloc(dgram.as_ref(), now()).dgram();
     assert!(dgram.is_some()); // We're far enough along to complete the test now.

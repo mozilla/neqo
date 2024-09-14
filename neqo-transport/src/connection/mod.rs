@@ -96,11 +96,9 @@ pub enum ZeroRttState {
     Rejected,
 }
 
+/// Type returned from [`Connection::process()`]. Users are required to call
+/// these repeatedly until [`Output::Callback`] or [`Output::None`] is returned.
 #[derive(Clone, PartialEq, Eq)]
-// TODO: Update docs
-/// Type returned from `process_alloc()` and `process_output()`. Users are required to
-/// call these repeatedly until `Callback` or `None` is returned.
-// TODO: Make `&[u8]` the default.
 pub enum Output<D = Vec<u8>> {
     /// Connection requires no action.
     None,

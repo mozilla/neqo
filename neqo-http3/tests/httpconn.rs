@@ -528,7 +528,7 @@ fn fetch_noresponse_will_idletimeout() {
             }
         }
 
-        if let Output::Callback(t) = hconn_c.process_output(now) {
+        if let Output::Callback(t) = hconn_c.process_alloc(None, now) {
             now += t;
         }
     }

@@ -52,7 +52,7 @@ fn remember_smoothed_rtt() {
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(&validation);
     server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process_output(now).dgram();
+    let ticket = server.process_alloc(None, now).dgram();
     assert!(ticket.is_some());
     now += RTT1 / 2;
     client.process_input(&ticket.unwrap(), now);
@@ -106,7 +106,7 @@ fn address_validation_token_resume() {
 fn can_resume(token: impl AsRef<[u8]>, initial_has_token: bool) {
     let mut client = default_client();
     client.enable_resumption(now(), token).unwrap();
-    let initial = client.process_output(now()).dgram();
+    let initial = client.process_alloc(None, now()).dgram();
     assertions::assert_initial(initial.as_ref().unwrap(), initial_has_token);
 }
 
@@ -223,7 +223,7 @@ fn resume_after_packet() {
     let token = exchange_ticket(&mut client, &mut server, now());
 
     let mut client = default_client();
-    mem::drop(client.process_output(now()).dgram().unwrap());
+    mem::drop(client.process_alloc(None, now()).dgram().unwrap());
     assert_eq!(
         client.enable_resumption(now(), token).unwrap_err(),
         Error::ConnectionState

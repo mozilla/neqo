@@ -1635,7 +1635,7 @@ mod tests {
             ]
         );
         // Also check that ther is no new instruction send by the encoder.
-        assert!(encoder.conn.process_output(now()).dgram().is_none());
+        assert!(encoder.conn.process_alloc(None, now()).dgram().is_none());
     }
 
     #[test]

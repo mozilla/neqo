@@ -39,7 +39,7 @@ fn receive_stream() {
 
     let id = client.stream_create(StreamType::UniDi).unwrap();
     assert_eq!(MESSAGE.len(), client.stream_send(id, MESSAGE).unwrap());
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
 
     server.process_input(&dgram.unwrap(), now());
     assert_eq!(
@@ -82,7 +82,7 @@ fn relative() {
         )
         .unwrap();
 
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     server.process_input(&dgram.unwrap(), now());
 
     // The "id_normal" stream will get a `NewStream` event, but no data.
@@ -113,7 +113,7 @@ fn reprioritize() {
         )
         .unwrap();
 
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     server.process_input(&dgram.unwrap(), now());
 
     // The "id_normal" stream will get a `NewStream` event, but no data.
@@ -132,7 +132,7 @@ fn reprioritize() {
             RetransmissionPriority::default(),
         )
         .unwrap();
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     server.process_input(&dgram.unwrap(), now());
 
     for e in server.events() {
@@ -161,9 +161,9 @@ fn repairing_loss() {
         )
         .unwrap();
 
-    let _lost = client.process_output(now).dgram();
+    let _lost = client.process_alloc(None, now).dgram();
     for _ in 0..5 {
-        match client.process_output(now) {
+        match client.process_alloc(None, now) {
             Output::Datagram(d) => server.process_input(&d, now),
             Output::Callback(delay) => now += delay,
             Output::None => unreachable!(),
@@ -171,7 +171,7 @@ fn repairing_loss() {
     }
 
     // Generate an ACK.  The first packet is now considered lost.
-    let ack = server.process_output(now).dgram();
+    let ack = server.process_alloc(None, now).dgram();
     _ = server.events().count(); // Drain events.
 
     let id_normal = client.stream_create(StreamType::UniDi).unwrap();
@@ -194,7 +194,7 @@ fn repairing_loss() {
     // Though this might contain some retransmitted data, as other frames might push
     // the retransmitted data into a second packet, it will also contain data from the
     // normal priority stream.
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     server.process_input(&dgram.unwrap(), now);
     assert!(server.events().any(
         |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == id_normal),
@@ -209,7 +209,7 @@ fn critical() {
 
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that critical streams pre-empt most frame types.
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     let dgram = server.process_alloc(dgram.as_ref(), now).dgram();
     client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
@@ -229,7 +229,7 @@ fn critical() {
 
     fill_stream(&mut server, id);
     let stats_before = server.stats().frame_tx;
-    let dgram = server.process_output(now).dgram();
+    let dgram = server.process_alloc(None, now).dgram();
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 0);
@@ -260,7 +260,7 @@ fn important() {
 
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that important streams pre-empt most frame types.
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     let dgram = server.process_alloc(dgram.as_ref(), now).dgram();
     client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
@@ -280,7 +280,7 @@ fn important() {
     while server.stream_create(StreamType::UniDi).is_ok() {}
 
     let stats_before = server.stats().frame_tx;
-    let dgram = server.process_output(now).dgram();
+    let dgram = server.process_alloc(None, now).dgram();
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 1);
@@ -313,7 +313,7 @@ fn high_normal() {
 
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that important streams pre-empt most frame types.
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     let dgram = server.process_alloc(dgram.as_ref(), now).dgram();
     client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
@@ -333,7 +333,7 @@ fn high_normal() {
     while server.stream_create(StreamType::UniDi).is_ok() {}
 
     let stats_before = server.stats().frame_tx;
-    let dgram = server.process_output(now).dgram();
+    let dgram = server.process_alloc(None, now).dgram();
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 1);
@@ -387,7 +387,7 @@ fn low() {
     // The resulting CRYPTO frame beats out the stream data.
     let stats_before = server.stats().frame_tx;
     server.send_ticket(now, &vec![0; server.plpmtu()]).unwrap();
-    mem::drop(server.process_output(now));
+    mem::drop(server.process_alloc(None, now));
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto + 1);
     assert_eq!(stats_after.stream, stats_before.stream);
@@ -396,7 +396,7 @@ fn low() {
     // it is very hard to ensure that the STREAM frame won't also fit.
     // However, we can ensure that the next packet doesn't consist of just STREAM.
     let stats_before = server.stats().frame_tx;
-    mem::drop(server.process_output(now));
+    mem::drop(server.process_alloc(None, now));
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto + 1);
     assert_eq!(stats_after.new_token, 1);

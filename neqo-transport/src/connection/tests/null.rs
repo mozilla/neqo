@@ -23,7 +23,7 @@ fn no_encryption() {
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
 
     client.stream_send(stream_id, DATA_CLIENT).unwrap();
-    let client_pkt = client.process_output(now()).dgram().unwrap();
+    let client_pkt = client.process_alloc(None, now()).dgram().unwrap();
     assert!(client_pkt[..client_pkt.len() - AEAD_NULL_TAG.len()].ends_with(DATA_CLIENT));
 
     server.process_input(&client_pkt, now());
@@ -32,7 +32,7 @@ fn no_encryption() {
     assert_eq!(len, DATA_CLIENT.len());
     assert_eq!(&buf[..len], DATA_CLIENT);
     server.stream_send(stream_id, DATA_SERVER).unwrap();
-    let server_pkt = server.process_output(now()).dgram().unwrap();
+    let server_pkt = server.process_alloc(None, now()).dgram().unwrap();
     assert!(server_pkt[..server_pkt.len() - AEAD_NULL_TAG.len()].ends_with(DATA_SERVER));
 
     client.process_input(&server_pkt, now());

@@ -87,7 +87,7 @@ fn datagram_enabled_on_client() {
     );
     let dgram_sent = server.stats().frame_tx.datagram;
     assert_eq!(server.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)), Ok(()));
-    let out = server.process_output(now()).dgram().unwrap();
+    let out = server.process_alloc(None, now()).dgram().unwrap();
     assert_eq!(server.stats().frame_tx.datagram, dgram_sent + 1);
 
     client.process_input(&out, now());
@@ -115,7 +115,7 @@ fn datagram_enabled_on_server() {
     );
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(client.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)), Ok(()));
-    let out = client.process_output(now()).dgram().unwrap();
+    let out = client.process_alloc(None, now()).dgram().unwrap();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     server.process_input(&out, now());
@@ -160,7 +160,7 @@ fn limit_data_size() {
 
     let dgram_dropped_s = server.stats().datagram_tx.dropped_too_big;
     let dgram_sent_s = server.stats().frame_tx.datagram;
-    assert!(server.process_output(now()).dgram().is_none());
+    assert!(server.process_alloc(None, now()).dgram().is_none());
     assert_eq!(
         server.stats().datagram_tx.dropped_too_big,
         dgram_dropped_s + 1
@@ -174,7 +174,7 @@ fn limit_data_size() {
     // The same test for the client side.
     assert_eq!(client.send_datagram(DATA_BIGGER_THAN_MTU, Some(1)), Ok(()));
     let dgram_sent_c = client.stats().frame_tx.datagram;
-    assert!(client.process_output(now()).dgram().is_none());
+    assert!(client.process_alloc(None, now()).dgram().is_none());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent_c);
     assert!(matches!(
         client.next_event().unwrap(),
@@ -200,7 +200,7 @@ fn after_dgram_dropped_continue_writing_frames() {
     let dgram_dropped_c = client.stats().datagram_tx.dropped_too_big;
     let dgram_sent_c = client.stats().frame_tx.datagram;
 
-    assert!(client.process_output(now()).dgram().is_some());
+    assert!(client.process_alloc(None, now()).dgram().is_some());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent_c + 1);
     assert_eq!(
         client.stats().datagram_tx.dropped_too_big,
@@ -215,7 +215,7 @@ fn datagram_acked() {
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(client.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)), Ok(()));
-    let out = client.process_output(now()).dgram();
+    let out = client.process_alloc(None, now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     let dgram_received = server.stats().frame_rx.datagram;
@@ -224,7 +224,7 @@ fn datagram_acked() {
     let now = now() + AT_LEAST_PTO;
     // Ack should be sent
     let ack_sent = server.stats().frame_tx.ack;
-    let out = server.process_output(now).dgram();
+    let out = server.process_alloc(None, now).dgram();
     assert_eq!(server.stats().frame_tx.ack, ack_sent + 1);
 
     assert!(matches!(
@@ -243,7 +243,7 @@ fn send_packet_and_get_server_event(
     client: &mut Connection,
     server: &mut Connection,
 ) -> ConnectionEvent {
-    let out = client.process_output(now()).dgram();
+    let out = client.process_alloc(None, now()).dgram();
     server.process_input(&out.unwrap(), now());
     let mut events: Vec<_> = server
         .events()
@@ -332,7 +332,7 @@ fn datagram_lost() {
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(client.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)), Ok(()));
-    let _out = client.process_output(now()).dgram(); // This packet will be lost.
+    let _out = client.process_alloc(None, now()).dgram(); // This packet will be lost.
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     // Wait for PTO
@@ -340,7 +340,7 @@ fn datagram_lost() {
     let dgram_sent2 = client.stats().frame_tx.datagram;
     let pings_sent = client.stats().frame_tx.ping;
     let dgram_lost = client.stats().datagram_tx.lost;
-    let out = client.process_output(now).dgram();
+    let out = client.process_alloc(None, now).dgram();
     assert!(out.is_some()); // PING probing
                             // Datagram is not sent again.
     assert_eq!(client.stats().frame_tx.ping, pings_sent + 1);
@@ -359,11 +359,11 @@ fn datagram_sent_once() {
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(client.send_datagram(DATA_SMALLER_THAN_MTU, Some(1)), Ok(()));
-    let _out = client.process_output(now()).dgram();
+    let _out = client.process_alloc(None, now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
     // Call process_output again should not send any new Datagram.
-    assert!(client.process_output(now()).dgram().is_none());
+    assert!(client.process_alloc(None, now()).dgram().is_none());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
@@ -373,7 +373,7 @@ fn dgram_no_allowed() {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
     server.test_frame_writer = Some(Box::new(InsertDatagram { data: DATA_MTU }));
-    let out = server.process_output(now()).dgram().unwrap();
+    let out = server.process_alloc(None, now()).dgram().unwrap();
     server.test_frame_writer = None;
 
     client.process_input(&out, now());
@@ -389,7 +389,7 @@ fn dgram_too_big() {
     connect_force_idle(&mut client, &mut server);
 
     server.test_frame_writer = Some(Box::new(InsertDatagram { data: DATA_MTU }));
-    let out = server.process_output(now()).dgram().unwrap();
+    let out = server.process_alloc(None, now()).dgram().unwrap();
     server.test_frame_writer = None;
 
     client.process_input(&out, now());
@@ -422,7 +422,7 @@ fn outgoing_datagram_queue_full() {
     );
 
     // Send DATA_SMALLER_THAN_MTU_2 datagram
-    let out = client.process_output(now()).dgram();
+    let out = client.process_alloc(None, now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
     server.process_input(&out.unwrap(), now());
     assert!(matches!(
@@ -432,7 +432,7 @@ fn outgoing_datagram_queue_full() {
 
     // Send DATA_SMALLER_THAN_MTU_2 datagram
     let dgram_sent2 = client.stats().frame_tx.datagram;
-    let out = client.process_output(now()).dgram();
+    let out = client.process_alloc(None, now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent2 + 1);
     server.process_input(&out.unwrap(), now());
     assert!(matches!(
@@ -444,7 +444,7 @@ fn outgoing_datagram_queue_full() {
 fn send_datagram(sender: &mut Connection, receiver: &mut Connection, data: &[u8]) {
     let dgram_sent = sender.stats().frame_tx.datagram;
     assert_eq!(sender.send_datagram(data, Some(1)), Ok(()));
-    let out = sender.process_output(now()).dgram().unwrap();
+    let out = sender.process_alloc(None, now()).dgram().unwrap();
     assert_eq!(sender.stats().frame_tx.datagram, dgram_sent + 1);
 
     let dgram_received = receiver.stats().frame_rx.datagram;
@@ -560,7 +560,7 @@ fn multiple_quic_datagrams_in_one_packet() {
         Ok(())
     );
 
-    let out = client.process_output(now()).dgram();
+    let out = client.process_alloc(None, now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 2);
     server.process_input(&out.unwrap(), now());
     let datagram = |e: &_| matches!(e, ConnectionEvent::Datagram(..));

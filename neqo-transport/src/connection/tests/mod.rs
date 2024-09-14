@@ -296,7 +296,7 @@ fn exchange_ticket(
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(&validation);
     server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process_output(now).dgram();
+    let ticket = server.process_alloc(None, now).dgram();
     assert!(ticket.is_some());
     client.process_input(&ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
@@ -313,10 +313,13 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
     );
     // Client started its idle period half an RTT before now.
     assert_eq!(
-        client.process_output(now),
+        client.process_alloc(None, now),
         Output::Callback(idle_timeout - rtt / 2)
     );
-    assert_eq!(server.process_output(now), Output::Callback(idle_timeout));
+    assert_eq!(
+        server.process_alloc(None, now),
+        Output::Callback(idle_timeout)
+    );
 }
 
 /// Connect with an RTT and then force both peers to be idle.
@@ -374,7 +377,7 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
 
     let mut total_dgrams = Vec::new();
     loop {
-        let pkt = c.process_output(now);
+        let pkt = c.process_alloc(None, now);
         qtrace!(
             "fill_cwnd cwnd remaining={}, output: {:?}",
             cwnd_avail(c),
@@ -411,7 +414,7 @@ fn increase_cwnd(
 ) -> Instant {
     fill_stream(sender, stream);
     loop {
-        let pkt = sender.process_output(now);
+        let pkt = sender.process_alloc(None, now);
         match pkt {
             Output::Datagram(dgram) => {
                 receiver.process_input(&dgram, now + DEFAULT_RTT / 2);
@@ -429,7 +432,7 @@ fn increase_cwnd(
 
     // Now acknowledge all those packets at once.
     now += DEFAULT_RTT / 2;
-    let ack = receiver.process_output(now).dgram();
+    let ack = receiver.process_alloc(None, now).dgram();
     now += DEFAULT_RTT / 2;
     sender.process_input(&ack.unwrap(), now);
     now
@@ -463,7 +466,7 @@ where
         }
     }
 
-    dest.process_output(now).dgram().unwrap()
+    dest.process_alloc(None, now).dgram().unwrap()
 }
 
 // Get the current congestion window for the connection.
@@ -577,12 +580,12 @@ fn send_something_paced_with_modifier(
     assert!(sender.stream_send(stream_id, DEFAULT_STREAM_DATA).is_ok());
     assert!(sender.stream_close_send(stream_id).is_ok());
     qdebug!([sender], "send_something on {}", stream_id);
-    let dgram = match sender.process_output(now) {
+    let dgram = match sender.process_alloc(None, now) {
         Output::Callback(t) => {
             assert!(allow_pacing, "send_something: unexpected delay");
             now += t;
             sender
-                .process_output(now)
+                .process_alloc(None, now)
                 .dgram()
                 .expect("send_something: should have something to send")
         }

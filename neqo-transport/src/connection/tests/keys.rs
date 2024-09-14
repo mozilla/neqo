@@ -30,7 +30,7 @@ fn check_discarded(
     dups: usize,
 ) {
     // Make sure to flush any saved datagrams before doing this.
-    mem::drop(peer.process_output(now()));
+    mem::drop(peer.process_alloc(None, now()));
 
     let before = peer.stats();
     let out = peer.process_alloc(Some(pkt), now());
@@ -267,7 +267,7 @@ fn exhaust_write_keys() {
     overwrite_invocations(0);
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     assert!(client.stream_send(stream_id, b"explode!").is_ok());
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     assert!(dgram.is_none());
     assert!(matches!(
         client.state(),
@@ -338,7 +338,7 @@ fn automatic_update_write_keys_blocked() {
     overwrite_invocations(UPDATE_WRITE_KEYS_AT);
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     assert!(client.stream_send(stream_id, b"explode!").is_ok());
-    let dgram = client.process_output(now()).dgram();
+    let dgram = client.process_alloc(None, now()).dgram();
     // Not being able to update is fatal.
     assert!(dgram.is_none());
     assert!(matches!(

@@ -589,7 +589,7 @@ fn loss_time_past_largest_acked() {
     assert!(s_hs3.is_some());
 
     // We are blocked by the amplification limit now.
-    let cb = server.process_output(now).callback();
+    let cb = server.process_alloc(None, now).callback();
     assert_eq!(cb, server.conn_params.get_idle_timeout());
 
     // Get some Handshake packets from the client.
@@ -692,9 +692,9 @@ fn ping_with_ack(fast: bool) {
     now += receiver.pto() + Duration::from_micros(1);
     trickle(&mut sender, &mut receiver, 1, now);
     assert_eq!(receiver.stats().frame_tx.ping, 1);
-    if let Output::Callback(t) = sender.process_output(now) {
+    if let Output::Callback(t) = sender.process_alloc(None, now) {
         assert_eq!(t, DEFAULT_ACK_DELAY);
-        assert!(sender.process_output(now + t).dgram().is_some());
+        assert!(sender.process_alloc(None, now + t).dgram().is_some());
     }
     assert_eq!(sender.stats().frame_tx.ack, sender_acks_before + 1);
 }
@@ -759,11 +759,11 @@ fn fast_pto() {
 
     // Send a packet after some time.
     now += idle_timeout / 2;
-    let dgram = client.process_output(now).dgram();
+    let dgram = client.process_alloc(None, now).dgram();
     assert!(dgram.is_some());
 
     // Nothing to do, should return a callback.
-    let cb = client.process_output(now).callback();
+    let cb = client.process_alloc(None, now).callback();
     assert_eq!(expected_pto(DEFAULT_RTT) / 2, cb);
 
     // Once the PTO timer expires, a PTO packet should be sent should want to send PTO packet.
@@ -800,7 +800,7 @@ fn fast_pto_persistent_congestion() {
     let _drop1 = send_something(&mut client, now);
 
     // Check that the PTO matches expectations.
-    let cb = client.process_output(now).callback();
+    let cb = client.process_alloc(None, now).callback();
     assert_eq!(expected_pto(DEFAULT_RTT) * 2, cb);
 
     now += pc_interval;

@@ -110,7 +110,7 @@ fn migration_delay_to_ecn_blackhole() {
     // MAX_PATH_PROBES without ECN.
     let mut probes = 0;
     while probes < MAX_PATH_PROBES * 2 {
-        match client.process_output(now) {
+        match client.process_alloc(None, now) {
             crate::Output::Callback(t) => {
                 now += t;
             }
@@ -231,7 +231,7 @@ pub fn migration_with_modifiers(
         server.process_input(&client_pkt, now);
     }
 
-    if let Some(ack) = server.process_output(now).dgram() {
+    if let Some(ack) = server.process_alloc(None, now).dgram() {
         client.process_input(&ack, now);
     }
 
@@ -244,7 +244,7 @@ pub fn migration_with_modifiers(
         .unwrap();
 
     let mut migrated = false;
-    let probe = new_path_modifier(client.process_output(now).dgram().unwrap());
+    let probe = new_path_modifier(client.process_alloc(None, now).dgram().unwrap());
     if let Some(probe) = probe {
         assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
         assert_eq!(client.stats().frame_tx.path_challenge, 1);
@@ -296,7 +296,7 @@ pub fn migration_with_modifiers(
     if migrated {
         // The server then sends data on the new path.
         let migrate_server =
-            new_path_modifier(server.process_output(now).dgram().unwrap()).unwrap();
+            new_path_modifier(server.process_alloc(None, now).dgram().unwrap()).unwrap();
         assert_v4_path(&migrate_server, false);
         assert_eq!(server.stats().frame_tx.path_challenge, 2);
         assert_eq!(server.stats().frame_tx.stream, stream_before + 1);
@@ -306,11 +306,11 @@ pub fn migration_with_modifiers(
         client.process_input(&probe_old_server, now);
         let old_probe_resp = send_something_with_modifier(&mut client, now, new_path_modifier);
         assert_v6_path(&old_probe_resp, true);
-        let client_confirmation = client.process_output(now).dgram().unwrap();
+        let client_confirmation = client.process_alloc(None, now).dgram().unwrap();
         assert_v4_path(&client_confirmation, false);
 
         // The server has now sent 2 packets, so it is blocked on the pacer.  Wait.
-        let server_pacing = server.process_output(now).callback();
+        let server_pacing = server.process_alloc(None, now).callback();
         assert_ne!(server_pacing, Duration::new(0, 0));
         // ... then confirm that the server sends on the new path still.
         let server_confirmation =
@@ -320,17 +320,17 @@ pub fn migration_with_modifiers(
 
         // Send some data on the new path.
         for _ in 0..burst {
-            now += client.process_output(now).callback();
+            now += client.process_alloc(None, now).callback();
             let client_pkt = send_something_with_modifier(&mut client, now, new_path_modifier);
             server.process_input(&client_pkt, now);
         }
 
-        if let Some(ack) = server.process_output(now).dgram() {
+        if let Some(ack) = server.process_alloc(None, now).dgram() {
             client.process_input(&ack, now);
         }
     }
 
-    now += client.process_output(now).callback();
+    now += client.process_alloc(None, now).callback();
     let mut client_pkt = send_something(&mut client, now);
     while !migrated && client_pkt.source() == DEFAULT_ADDR_V4 {
         client_pkt = send_something(&mut client, now);
