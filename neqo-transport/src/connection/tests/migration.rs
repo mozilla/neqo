@@ -971,7 +971,7 @@ fn error_on_new_path_with_no_connection_id() {
     client.process_input(&dgram, now());
 
     // See issue #1697. We had a crash when the client had a temporary path and
-    // process_output is called.
+    // process (previously process_output) is called.
     let closing_frames = client.stats().frame_tx.connection_close;
     mem::drop(client.process_alloc(None, now()));
     assert!(matches!(

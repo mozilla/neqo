@@ -55,7 +55,7 @@ impl Http3ServerHandler {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub(crate) fn send_data(
@@ -170,7 +170,7 @@ impl Http3ServerHandler {
     ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn webtransport_close_session(

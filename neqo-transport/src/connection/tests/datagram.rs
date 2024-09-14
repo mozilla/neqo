@@ -362,7 +362,7 @@ fn datagram_sent_once() {
     let _out = client.process_alloc(None, now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 
-    // Call process_output again should not send any new Datagram.
+    // Calling process again should not send any new Datagram.
     assert!(client.process_alloc(None, now()).dgram().is_none());
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }

@@ -250,7 +250,7 @@ impl SendStream for SendMessage {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let sent = Error::map_error(self.stream.send_buffer(conn), Error::HttpInternal(5))?;

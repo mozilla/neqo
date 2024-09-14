@@ -89,7 +89,6 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::take_resumption_token`]
 ///   - [`Http3Client::tls_info`]
 /// - driving HTTP/3 session:
-///   - [`Http3Client::process_output`]
 ///   - [`Http3Client::process_input`]
 ///   - [`Http3Client::process`]
 /// - create requests, send/receive data, and cancel requests:
@@ -625,7 +624,7 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8]) -> Res<usize> {
@@ -736,7 +735,7 @@ impl Http3Client {
     ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn webtransport_close_session(
@@ -891,7 +890,7 @@ impl Http3Client {
     /// First, the payload will be handled by the QUIC layer. Afterward, `process_http3` will be
     /// called to handle new [`ConnectionEvent`][1]s.
     ///
-    /// After this function is called `process_output` should be called to check whether new
+    /// After this function is called `process` should be called to check whether new
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
@@ -902,7 +901,7 @@ impl Http3Client {
     }
 
     /// Process HTTP3 layer.
-    /// When `process_output`, `process_input`, or `process` is called we must call this function
+    /// When `process`, or `process_input` is called we must call this function
     /// as well. The functions calls `Http3Client::check_connection_events` to handle events from
     /// the QUC layer and calls `Http3Connection::process_sending` to ensure that HTTP/3 layer
     /// data, e.g. control frames, are sent.
@@ -926,39 +925,6 @@ impl Http3Client {
                 _ = self.check_result(now, &res);
             }
         }
-    }
-
-    // TODO: Remove?
-    /// The function should be called to check if there is a new UDP packet to be sent. It should
-    /// be called after a new packet is received and processed and after a timer expires (QUIC
-    /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
-    /// library, but instead must be driven by the application).
-    ///
-    /// `process_output` can return:
-    /// - a [`Output::Datagram(Datagram)`][1]: data that should be sent as a UDP payload,
-    /// - a [`Output::Callback(Duration)`][1]: the duration of a  timer. `process_output` should be
-    ///   called at least after the time expires,
-    /// - [`Output::None`][1]: this is returned when `Nttp3Client` is done and can be destroyed.
-    ///
-    /// The application should call this function repeatedly until a timer value or None is
-    /// returned. After that, the application should call the function again if a new UDP packet is
-    /// received and processed or the timer value expires.
-    ///
-    /// The HTTP/3 neqo implementation drives the HTTP/3 and QUIC layers, therefore this function
-    /// will call both layers:
-    ///  - First it calls HTTP/3 layer processing (`process_http3`) to make sure the layer writes
-    ///    data to QUIC layer or cancels streams if needed.
-    ///  - Then QUIC layer processing is called - [`Connection::process_output`][3]. This produces a
-    ///    packet or a timer value. It may also produce new [`ConnectionEvent`][2]s, e.g. connection
-    ///    state-change event.
-    ///  - Therefore the HTTP/3 layer processing (`process_http3`) is called again.
-    ///
-    /// [1]: ../neqo_transport/enum.Output.html
-    /// [2]: ../neqo_transport/struct.ConnectionEvents.html
-    /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
-    pub fn process_output(&mut self, now: Instant) -> Output {
-        qtrace!([self], "Process output.");
-        self.process_alloc(None, now)
     }
 
     /// This function takes the provided result and check for an error.

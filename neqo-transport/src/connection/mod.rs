@@ -241,7 +241,7 @@ impl AddressValidationInfo {
 /// 1. Perform operations using the `stream_*()` methods.
 /// 1. Call `process_input()` when a datagram is received or the timer expires. Obtain information
 ///    on connection state changes by checking `events()`.
-/// 1. Having completed handling current activity, repeatedly call `process_output()` for packets to
+/// 1. Having completed handling current activity, repeatedly call `process()` for packets to
 ///    send, until it returns `Output::Callback` or `Output::None`.
 ///
 /// After the connection is closed (either by calling `close()` or by the
