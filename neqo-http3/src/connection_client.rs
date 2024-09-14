@@ -867,6 +867,8 @@ impl Http3Client {
         if let Some(d) = input {
             self.process_input(d, now);
         }
+        // TODO: Consider only calling this again if input is None. Already
+        // called by process_input otherwise.
         self.process_http3(now);
 
         // TODO: The order in which to call process_2 and process_http3 is
