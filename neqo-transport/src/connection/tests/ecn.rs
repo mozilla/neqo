@@ -250,7 +250,8 @@ pub fn migration_with_modifiers(
         assert_eq!(client.stats().frame_tx.path_challenge, 1);
         let probe_cid = ConnectionId::from(get_cid(&probe));
 
-        let resp = new_path_modifier(server.process_alloc(Some(&probe), now).dgram().unwrap()).unwrap();
+        let resp =
+            new_path_modifier(server.process_alloc(Some(&probe), now).dgram().unwrap()).unwrap();
         assert_v4_path(&resp, true);
         assert_eq!(server.stats().frame_tx.path_response, 1);
         assert_eq!(server.stats().frame_tx.path_challenge, 1);

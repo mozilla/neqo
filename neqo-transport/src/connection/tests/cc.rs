@@ -413,7 +413,9 @@ fn ack_are_not_cc() {
 
     // The client can ack the server packet even if cc windows is full.
     qdebug!([client], "Process ack-eliciting");
-    let ack_pkt = client.process_alloc(ack_eliciting_packet.as_ref(), now).dgram();
+    let ack_pkt = client
+        .process_alloc(ack_eliciting_packet.as_ref(), now)
+        .dgram();
     assert!(ack_pkt.is_some());
     qdebug!([server], "Handle ACK");
     let prev_ack_count = server.stats().frame_rx.ack;

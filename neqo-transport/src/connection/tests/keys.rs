@@ -116,7 +116,10 @@ fn key_update_client() {
 
     // Initiating an update should only increase the write epoch.
     let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-    assert_eq!(Output::Callback(idle_timeout), client.process_alloc(None, now));
+    assert_eq!(
+        Output::Callback(idle_timeout),
+        client.process_alloc(None, now)
+    );
     assert_eq!(client.get_epochs(), (Some(4), Some(3)));
 
     // Send something to propagate the update.

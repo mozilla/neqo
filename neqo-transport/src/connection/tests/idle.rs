@@ -120,7 +120,10 @@ fn asymmetric_idle_timeout() {
         server.process_alloc(ack.as_ref(), now()),
         Output::Callback(LOWER_TIMEOUT)
     );
-    assert_eq!(client.process_alloc(None, now()), Output::Callback(LOWER_TIMEOUT));
+    assert_eq!(
+        client.process_alloc(None, now()),
+        Output::Callback(LOWER_TIMEOUT)
+    );
 }
 
 #[test]

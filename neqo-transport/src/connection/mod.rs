@@ -1132,22 +1132,21 @@ impl Connection {
         }
     }
 
-    /// Process input and generate output.
+    /// Same as [`Connection::process`] but allocating output into new [`Vec`].
     #[must_use = "Output of the process function must be handled"]
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process_into(dgram.map(Into::into), now, &mut write_buffer)
+        self.process(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 
-    // TODO: For the lack of a better name, `process_into` for now.
     /// Process input and generate output.
     ///
     /// # Panics
     ///
     /// TODO
     #[must_use = "Output of the process function must be handled"]
-    pub fn process_into<'a>(
+    pub fn process<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,

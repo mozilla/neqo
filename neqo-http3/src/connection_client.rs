@@ -857,7 +857,7 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
-    pub fn process_into<'a>(
+    pub fn process<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
@@ -871,18 +871,18 @@ impl Http3Client {
 
         // TODO: The order in which to call process_2 and process_http3 is
         // not obvious. Clean up needed.
-        let out = self.conn.process_into(None, now, write_buffer);
+        let out = self.conn.process(None, now, write_buffer);
         self.process_http3(now);
         out
     }
 
+    /// Same as [`Http3Client::process`] but allocating output into new [`Vec`].
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process_into(dgram.map(Into::into), now, &mut write_buffer)
+        self.process(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 
-    // TODO: Remove in favor of `process_into`?
     /// The function should be called when there is a new UDP packet available. The function will
     /// handle the packet payload.
     ///

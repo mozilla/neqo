@@ -113,7 +113,7 @@ impl Http3Server {
         self.server.ech_config()
     }
 
-    pub fn process_into<'a>(
+    pub fn process<'a>(
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
@@ -139,10 +139,10 @@ impl Http3Server {
         }
     }
 
-    // TODO: Remove in favor of `process_into`?
+    /// Same as [`Connection::process`] but allocating output into new [`Vec`].
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process_into(dgram.map(Into::into), now, &mut write_buffer)
+        self.process(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 

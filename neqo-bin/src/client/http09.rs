@@ -183,7 +183,7 @@ impl super::Client for Connection {
         now: Instant,
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        self.process_into(input, now, write_buffer)
+        self.process(input, now, write_buffer)
     }
 
     fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)

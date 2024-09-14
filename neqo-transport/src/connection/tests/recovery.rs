@@ -608,9 +608,13 @@ fn loss_time_past_largest_acked() {
     // The we need the outstanding packet to be sent after the
     // application data packet, so space these out a tiny bit.
     let _p1 = send_something(&mut client, now + INCR);
-    let c_hs3 = client.process_alloc(s_hs2.as_ref(), now + (INCR * 2)).dgram();
+    let c_hs3 = client
+        .process_alloc(s_hs2.as_ref(), now + (INCR * 2))
+        .dgram();
     assert!(c_hs3.is_some()); // This will be left outstanding.
-    let c_hs4 = client.process_alloc(s_hs3.as_ref(), now + (INCR * 3)).dgram();
+    let c_hs4 = client
+        .process_alloc(s_hs3.as_ref(), now + (INCR * 3))
+        .dgram();
     assert!(c_hs4.is_some()); // This will be acknowledged.
 
     // Process c_hs2 and c_hs4, but skip c_hs3.

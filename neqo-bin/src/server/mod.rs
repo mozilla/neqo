@@ -194,7 +194,7 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
-    fn process_into<'a>(
+    fn process<'a>(
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
@@ -248,7 +248,7 @@ impl ServerRunner {
 
             match self
                 .server
-                .process_into(dgram.take(), (self.now)(), &mut self.send_buf)
+                .process(dgram.take(), (self.now)(), &mut self.send_buf)
             {
                 Output::Datagram(dgram) => {
                     let socket = {

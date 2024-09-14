@@ -130,7 +130,7 @@ impl super::Client for Http3Client {
         now: Instant,
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        self.process_into(input, now, write_buffer)
+        self.process(input, now, write_buffer)
     }
 
     fn is_closed(&self) -> Result<CloseState, CloseReason> {

@@ -189,7 +189,9 @@ fn closing_and_draining() {
     assert!(server.state().closed());
     assert!(server_close.is_some());
     // .. but it ignores any further close packets.
-    let server_close_timer = server.process_alloc(client_close2.as_ref(), now()).callback();
+    let server_close_timer = server
+        .process_alloc(client_close2.as_ref(), now())
+        .callback();
     assert_ne!(server_close_timer, Duration::from_secs(0));
     // Even a legitimate packet without a close in it.
     let server_close_timer2 = server.process_alloc(Some(&p1), now()).callback();

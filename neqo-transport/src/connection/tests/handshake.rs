@@ -1231,7 +1231,10 @@ fn server_initial_retransmits_identical() {
     let mut server = default_server();
     let mut total_ptos: Duration = Duration::from_secs(0);
     for i in 1..=3 {
-        let si = server.process_alloc(ci.take().as_ref(), now).dgram().unwrap();
+        let si = server
+            .process_alloc(ci.take().as_ref(), now)
+            .dgram()
+            .unwrap();
         assert_eq!(si.len(), server.plpmtu());
         assert_eq!(
             server.stats().frame_tx,

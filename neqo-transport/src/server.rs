@@ -328,7 +328,7 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process_into(Some(dgram), now, write_buffer);
+                let out = c.process(Some(dgram), now, write_buffer);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -369,7 +369,7 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process_into(Some(dgram), now, write_buffer);
+            return c.borrow_mut().process(Some(dgram), now, write_buffer);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -454,7 +454,7 @@ impl Server {
                 // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
                 //
                 // Find alternative.
-                .process_into(None, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
+                .process(None, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
             {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,

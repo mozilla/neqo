@@ -570,7 +570,9 @@ fn simultaneous_stop_sending_and_reset() {
     server.stream_stop_sending(stream_id, 0).unwrap();
     // Receive the second data frame. The frame should be ignored and
     // DataReadable events shouldn't be posted.
-    let ack = server.process_alloc(out_reset_frame.as_ref(), now()).dgram();
+    let ack = server
+        .process_alloc(out_reset_frame.as_ref(), now())
+        .dgram();
     assert!(ack.is_some());
     assert!(!server.events().any(stream_readable));
 
