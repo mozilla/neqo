@@ -864,22 +864,10 @@ impl Http3Client {
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        // TODO: Previously we would only call process_input here, then process
-        // http3 and ONLY THEN allow the client to send output. Thus
-        // process_http3 would influence what the client would send on the wire.
-        // The change in behavior here requires a bunch of tests to be adjusted.
-        // But there might be more to it. Maybe this new behavior is undesired?
-        //
-        // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
-        //
-        // Find alternative.
-        let out = self.conn.process_into(input, now, unsafe {
-            &mut *std::ptr::from_mut(write_buffer)
-        });
-        self.process_http3(now);
-        if matches!(out, Output::Datagram(_)) {
-            return out;
+        if let Some(input) = input {
+            self.conn.process_input_2(input, now);
         }
+        self.process_http3(now);
 
         // TODO: The order in which to call process_2 and process_http3 is
         // not obvious. Clean up needed.
