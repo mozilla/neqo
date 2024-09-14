@@ -468,11 +468,10 @@ impl Server {
         callback.map_or(Output::None, Output::Callback)
     }
 
-    // TODO: Still needed?
     #[must_use]
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process_2(dgram.map(Into::into), now, &mut write_buffer)
+        self.process(dgram.map(Into::into), now, &mut write_buffer)
             // TODO: Yet another allocation.
             .map_datagram(Into::into)
     }
@@ -481,7 +480,7 @@ impl Server {
     ///
     /// TODO
     #[must_use]
-    pub fn process_2<'a>(
+    pub fn process<'a>(
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,

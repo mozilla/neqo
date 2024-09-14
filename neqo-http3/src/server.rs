@@ -120,23 +120,27 @@ impl Http3Server {
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        let out = self
+        let mut out = self
             .server
             // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
             //
             // Find alternative.
-            .process_2(dgram, now, unsafe {
+            .process(dgram, now, unsafe {
                 &mut *std::ptr::from_mut(write_buffer)
             });
+
         self.process_http3(now);
+
         // If we do not have a dgram already try again after process_http3.
-        match out {
-            Output::Datagram(d) => {
-                qtrace!([self], "Send packet: {:?}", d);
-                Output::Datagram(d)
-            }
-            _ => self.server.process_2(None, now, write_buffer),
+        if !matches!(out, Output::Datagram(_)) {
+            out = self.server.process(None, now, write_buffer);
         }
+
+        if let Output::Datagram(d) = out {
+            qtrace!([self], "Send packet: {:?}", d);
+        }
+
+        out
     }
 
     /// Same as [`Connection::process`] but allocating output into new [`Vec`].

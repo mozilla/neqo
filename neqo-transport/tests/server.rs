@@ -207,14 +207,18 @@ fn same_initial_after_connected() {
     let client_initial = client.process_alloc(None, now());
     assert!(client_initial.as_dgram_ref().is_some());
 
-    let server_initial = server.process_alloc(client_initial.as_dgram_ref(), now()).dgram();
+    let server_initial = server
+        .process_alloc(client_initial.as_dgram_ref(), now())
+        .dgram();
     assert!(server_initial.is_some());
     complete_connection(&mut client, &mut server, server_initial);
     assert_eq!(server.active_connections().len(), 1);
 
     // Now make a new connection using the exact same initial as before.
     // The server should respond to an attempt to connect with the same Initial.
-    let dgram = server.process_alloc(client_initial.as_dgram_ref(), now()).dgram();
+    let dgram = server
+        .process_alloc(client_initial.as_dgram_ref(), now())
+        .dgram();
     assert!(dgram.is_some());
     // The server should make a new connection object.
     assert_eq!(server.active_connections().len(), 2);

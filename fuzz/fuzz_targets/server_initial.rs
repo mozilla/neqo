@@ -17,7 +17,10 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let mut client = default_client();
-    let ci = client.process_alloc(None, now()).dgram().expect("a datagram");
+    let ci = client
+        .process_alloc(None, now())
+        .dgram()
+        .expect("a datagram");
     let mut server = default_server();
     let si = server
         .process_alloc(Some(&ci), now())

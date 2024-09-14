@@ -17,7 +17,10 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let mut client = default_client();
-    let ci = client.process_alloc(None, now()).dgram().expect("a datagram");
+    let ci = client
+        .process_alloc(None, now())
+        .dgram()
+        .expect("a datagram");
     let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&ci, Role::Client) else {
         return;
     };

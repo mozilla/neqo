@@ -287,7 +287,9 @@ fn retry_bad_token() {
     let client_initial2 = client.process_alloc(retry.as_ref(), now()).dgram();
     assert!(client_initial2.is_some());
 
-    let dgram = server.process_alloc(client_initial2.as_ref(), now()).dgram();
+    let dgram = server
+        .process_alloc(client_initial2.as_ref(), now())
+        .dgram();
     assert!(dgram.is_none());
 }
 

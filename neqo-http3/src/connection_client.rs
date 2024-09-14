@@ -865,10 +865,12 @@ impl Http3Client {
         qtrace!([self], "Process.");
         if let Some(d) = input {
             self.process_input(d, now);
+        } else {
+            // TODO: Optimization worth it? Given that process_input calls
+            // process_http3, moving the line below outside of conditional makes
+            // it run twice when input is some.
+            self.process_http3(now);
         }
-        // TODO: Consider only calling this again if input is None. Already
-        // called by process_input otherwise.
-        self.process_http3(now);
 
         // TODO: The order in which to call process_2 and process_http3 is
         // not obvious. Clean up needed.
