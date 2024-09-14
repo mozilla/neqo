@@ -14,6 +14,9 @@ inputs:
   token:
     description: 'A Github PAT'
     required: true
+  targets:
+    description: Comma-separated list of target triples to install for this toolchain
+    required: false
 
 runs:
   using: composite
@@ -28,6 +31,7 @@ runs:
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'

@@ -28,7 +28,7 @@ jobs:
         # Don't increase beyond what Firefox is currently using:
         # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
         # Keep in sync with Cargo.toml
-        rust-toolchain: [1.76.0, stable, nightly]
+        rust-toolchain: [1.76.0, stable, nightly-2024-09-01]
         type: [debug]
         include:
           - os: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
+          if [ "${{ startsWith(matrix.rust-toolchain, 'nightly') && 'nightly' }}" != "nightly" ]; then
             CONFIG_PATH="--config-path=$(mktemp)"
           fi
           # shellcheck disable=SC2086
@@ -112,7 +112,7 @@ jobs:
           # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
           cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
           # Check that the fuzz targets also build
-          if [ ${{ matrix.rust-toolchain }} == 'nightly' ]; then
+          if [ ${{ startsWith(matrix.rust-toolchain, 'nightly') && 'nightly' }} == 'nightly' ]; then
             cargo +${{ matrix.rust-toolchain }} fuzz check
           fi
         if: success() || failure()
