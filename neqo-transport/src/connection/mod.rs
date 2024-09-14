@@ -98,7 +98,7 @@ pub enum ZeroRttState {
 
 #[derive(Clone, PartialEq, Eq)]
 // TODO: Update docs
-/// Type returned from `process()` and `process_output()`. Users are required to
+/// Type returned from `process_alloc()` and `process_output()`. Users are required to
 /// call these repeatedly until `Callback` or `None` is returned.
 // TODO: Make `&[u8]` the default.
 pub enum Output<D = Vec<u8>> {
@@ -1134,7 +1134,7 @@ impl Connection {
 
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
         self.process_into(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)

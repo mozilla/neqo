@@ -470,7 +470,7 @@ impl Server {
 
     // TODO: Still needed?
     #[must_use]
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
         self.process_2(dgram.map(Into::into), now, &mut write_buffer)
             // TODO: Yet another allocation.
@@ -506,7 +506,7 @@ impl Server {
     }
 
     /// This lists the connections that have received new events
-    /// as a result of calling `process()`.
+    /// as a result of calling `process_alloc()`.
     // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
     #[allow(clippy::mutable_key_type)]
     #[must_use]
@@ -519,7 +519,7 @@ impl Server {
     }
 
     /// Whether any connections have received new events as a result of calling
-    /// `process()`.
+    /// `process_alloc()`.
     #[must_use]
     pub fn has_active_connections(&self) -> bool {
         self.connections.iter().any(|c| c.borrow().has_events())

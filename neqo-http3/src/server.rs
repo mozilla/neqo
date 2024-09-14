@@ -140,7 +140,7 @@ impl Http3Server {
     }
 
     // TODO: Remove in favor of `process_into`?
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
         self.process_into(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
@@ -415,28 +415,28 @@ mod tests {
     const SERVER_SIDE_DECODER_STREAM_ID: StreamId = StreamId::new(11);
 
     fn connect_transport(server: &mut Http3Server, client: &mut Connection, resume: bool) {
-        let c1 = client.process(None, now());
-        let s1 = server.process(c1.as_dgram_ref(), now());
-        let c2 = client.process(s1.as_dgram_ref(), now());
+        let c1 = client.process_alloc(None, now());
+        let s1 = server.process_alloc(c1.as_dgram_ref(), now());
+        let c2 = client.process_alloc(s1.as_dgram_ref(), now());
         let needs_auth = client
             .events()
             .any(|e| e == ConnectionEvent::AuthenticationNeeded);
         let c2 = if needs_auth {
             assert!(!resume);
             // c2 should just be an ACK, so absorb that.
-            let s_ack = server.process(c2.as_dgram_ref(), now());
+            let s_ack = server.process_alloc(c2.as_dgram_ref(), now());
             assert!(s_ack.as_dgram_ref().is_none());
 
             client.authenticated(AuthenticationStatus::Ok, now());
-            client.process(None, now())
+            client.process_alloc(None, now())
         } else {
             assert!(resume);
             c2
         };
         assert!(client.state().connected());
-        let s2 = server.process(c2.as_dgram_ref(), now());
+        let s2 = server.process_alloc(c2.as_dgram_ref(), now());
         assert_connected(server);
-        let c3 = client.process(s2.as_dgram_ref(), now());
+        let c3 = client.process_alloc(s2.as_dgram_ref(), now());
         assert!(c3.as_dgram_ref().is_none());
     }
 
@@ -571,9 +571,9 @@ mod tests {
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
         assert_eq!(sent, Ok(1));
-        let out1 = neqo_trans_conn.process(None, now());
-        let out2 = server.process(out1.as_dgram_ref(), now());
-        mem::drop(neqo_trans_conn.process(out2.as_dgram_ref(), now()));
+        let out1 = neqo_trans_conn.process_alloc(None, now());
+        let out2 = server.process_alloc(out1.as_dgram_ref(), now());
+        mem::drop(neqo_trans_conn.process_alloc(out2.as_dgram_ref(), now()));
 
         // assert no error occured.
         assert_not_closed(server);
@@ -603,8 +603,8 @@ mod tests {
         let (mut hconn, mut peer_conn) = connect();
         let control = peer_conn.control_stream_id;
         peer_conn.stream_close_send(control).unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -618,8 +618,8 @@ mod tests {
         // Send a MAX_PUSH_ID frame instead.
         let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0xd, 0x1, 0xf]);
         assert_eq!(sent, Ok(4));
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = neqo_trans_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpMissingSettings);
     }
 
@@ -630,8 +630,8 @@ mod tests {
         let (mut hconn, mut peer_conn) = connect();
         // send the second SETTINGS frame.
         peer_conn.control_send(&[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpFrameUnexpected);
     }
 
@@ -647,8 +647,8 @@ mod tests {
         let mut e = Encoder::new_with_buffer(&mut write_buffer);
         frame.encode(&mut e);
         peer_conn.control_send(e.as_ref());
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         // check if the given connection got closed on invalid stream ids
         if valid {
             assert_not_closed(&hconn);
@@ -690,8 +690,8 @@ mod tests {
         // receive a frame that is not allowed on the control stream.
         peer_conn.control_send(v);
 
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpFrameUnexpected);
     }
 
@@ -724,11 +724,11 @@ mod tests {
         _ = peer_conn
             .stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0])
             .unwrap();
-        let out = peer_conn.process(None, now());
-        let out = hconn.process(out.as_dgram_ref(), now());
-        mem::drop(peer_conn.process(out.as_dgram_ref(), now()));
-        let out = hconn.process(None, now());
-        mem::drop(peer_conn.process(out.as_dgram_ref(), now()));
+        let out = peer_conn.process_alloc(None, now());
+        let out = hconn.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(peer_conn.process_alloc(out.as_dgram_ref(), now()));
+        let out = hconn.process_alloc(None, now());
+        mem::drop(peer_conn.process_alloc(out.as_dgram_ref(), now()));
 
         // check for stop-sending with Error::HttpStreamCreation.
         let mut stop_sending_event_found = false;
@@ -755,9 +755,9 @@ mod tests {
         // create a push stream.
         let push_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
         _ = peer_conn.stream_send(push_stream_id, &[0x1]).unwrap();
-        let out = peer_conn.process(None, now());
-        let out = hconn.process(out.as_dgram_ref(), now());
-        mem::drop(peer_conn.conn.process(out.as_dgram_ref(), now()));
+        let out = peer_conn.process_alloc(None, now());
+        let out = hconn.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(peer_conn.conn.process_alloc(out.as_dgram_ref(), now()));
         assert_closed(&hconn, &Error::HttpStreamCreation);
     }
 
@@ -772,77 +772,77 @@ mod tests {
         // send the stream type
         let mut sent = peer_conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         // start sending SETTINGS frame
         sent = peer_conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x6]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x8]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         assert_not_closed(&hconn);
 
         // Now test PushPromise
         sent = peer_conn.stream_send(control_stream, &[0x5]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x5]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x61]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x62]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x63]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         sent = peer_conn.stream_send(control_stream, &[0x64]);
         assert_eq!(sent, Ok(1));
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         // PUSH_PROMISE on a control stream will cause an error
         assert_closed(&hconn, &Error::HttpFrameUnexpected);
@@ -857,8 +857,8 @@ mod tests {
         peer_conn.stream_send(stream_id, res).unwrap();
         peer_conn.stream_close_send(stream_id).unwrap();
 
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         assert_closed(&hconn, &Error::HttpFrame);
     }
@@ -909,8 +909,8 @@ mod tests {
         peer_conn.stream_send(stream_id, REQUEST_WITH_BODY).unwrap();
         peer_conn.stream_close_send(stream_id).unwrap();
 
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         // Check connection event. There should be 1 Header and 2 data events.
         let mut headers_frames = 0;
@@ -956,8 +956,8 @@ mod tests {
             .stream_send(stream_id, &REQUEST_WITH_BODY[..20])
             .unwrap();
 
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         // Check connection event. There should be 1 Header and no data events.
         let mut headers_frames = 0;
@@ -993,7 +993,7 @@ mod tests {
                 | Http3ServerEvent::WebTransport(_) => {}
             }
         }
-        let out = hconn.process(None, now());
+        let out = hconn.process_alloc(None, now());
 
         // Send data.
         peer_conn
@@ -1001,8 +1001,8 @@ mod tests {
             .unwrap();
         peer_conn.stream_close_send(stream_id).unwrap();
 
-        let out = peer_conn.process(out.as_dgram_ref(), now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(out.as_dgram_ref(), now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         while let Some(event) = hconn.next_event() {
             match event {
@@ -1033,8 +1033,8 @@ mod tests {
             .stream_send(request_stream_id, &REQUEST_WITH_BODY[..20])
             .unwrap();
 
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         // Check connection event. There should be 1 Header and no data events.
         // The server will reset the stream.
@@ -1064,10 +1064,10 @@ mod tests {
                 | Http3ServerEvent::WebTransport(_) => {}
             }
         }
-        let out = hconn.process(None, now());
+        let out = hconn.process_alloc(None, now());
 
-        let out = peer_conn.process(out.as_dgram_ref(), now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(out.as_dgram_ref(), now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         // Check that STOP_SENDING and REET has been received.
         let mut reset = 0;
@@ -1098,8 +1098,8 @@ mod tests {
         peer_conn
             .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -1111,8 +1111,8 @@ mod tests {
         peer_conn
             .stream_reset_send(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -1124,8 +1124,8 @@ mod tests {
         peer_conn
             .stream_reset_send(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -1138,8 +1138,8 @@ mod tests {
         peer_conn
             .stream_stop_sending(SERVER_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -1151,8 +1151,8 @@ mod tests {
         peer_conn
             .stream_stop_sending(SERVER_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -1164,8 +1164,8 @@ mod tests {
         peer_conn
             .stream_stop_sending(SERVER_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
@@ -1272,8 +1272,8 @@ mod tests {
             .stream_send(request_stream_id_2, REQUEST_WITH_BODY)
             .unwrap();
 
-        let out = peer_conn.process(None, now());
-        hconn.process(out.as_dgram_ref(), now());
+        let out = peer_conn.process_alloc(None, now());
+        hconn.process_alloc(out.as_dgram_ref(), now());
 
         let mut requests = HashMap::new();
         while let Some(event) = hconn.next_event() {

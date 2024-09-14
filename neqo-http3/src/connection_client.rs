@@ -876,7 +876,7 @@ impl Http3Client {
         out
     }
 
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
         self.process_into(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
@@ -955,7 +955,7 @@ impl Http3Client {
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "Process output.");
-        self.process(None, now)
+        self.process_alloc(None, now)
     }
 
     /// This function takes the provided result and check for an error.
@@ -1639,15 +1639,15 @@ mod tests {
 
     fn handshake_only(client: &mut Http3Client, server: &mut TestServer) -> Output {
         assert_eq!(client.state(), Http3State::Initializing);
-        let out = client.process(None, now());
+        let out = client.process_alloc(None, now());
         assert_eq!(client.state(), Http3State::Initializing);
 
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
         assert_eq!(*server.conn.state(), State::Handshaking);
 
-        let out = client.process(out.as_dgram_ref(), now());
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
         assert!(out.as_dgram_ref().is_none());
 
         let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
@@ -1660,7 +1660,7 @@ mod tests {
     fn connect_only_transport_with(client: &mut Http3Client, server: &mut TestServer) {
         let out = handshake_only(client, server);
 
-        let out = client.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
         let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
         assert!(client.events().any(connected));
 
@@ -1681,7 +1681,7 @@ mod tests {
 
     fn send_and_receive_client_settings(client: &mut Http3Client, server: &mut TestServer) {
         // send and receive client settings
-        let out = client.process(None, now());
+        let out = client.process_alloc(None, now());
         server
             .conn
             .process_input(out.as_dgram_ref().unwrap(), now());
@@ -1698,7 +1698,7 @@ mod tests {
 
         server.create_qpack_streams();
         // Send the server's control and qpack streams data.
-        let out = server.conn.process(None, now());
+        let out = server.conn.process_alloc(None, now());
         client.process_input(out.as_dgram_ref().unwrap(), now());
 
         // assert no error occured.
@@ -1841,7 +1841,7 @@ mod tests {
     ) -> StreamId {
         let request_stream_id = make_request(client, close_sending_side, &[]);
 
-        let out = client.process(None, now());
+        let out = client.process_alloc(None, now());
         server
             .conn
             .process_input(out.as_dgram_ref().unwrap(), now());
@@ -1872,7 +1872,7 @@ mod tests {
                 _ => {}
             }
         }
-        let dgram = server.conn.process(None, now()).dgram();
+        let dgram = server.conn.process_alloc(None, now()).dgram();
         if let Some(d) = dgram {
             client.process_input(&d, now());
         }
@@ -1902,9 +1902,9 @@ mod tests {
         if close_stream {
             server.conn.stream_close_send(stream_id).unwrap();
         }
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
     }
 
     const PUSH_PROMISE_DATA: &[u8] = &[
@@ -1943,9 +1943,9 @@ mod tests {
     ) -> StreamId {
         let push_stream_id = send_push_data(&mut server.conn, push_id, close_push_stream);
 
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         push_stream_id
     }
@@ -1958,9 +1958,9 @@ mod tests {
     ) {
         send_push_promise(&mut server.conn, stream_id, push_id);
 
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
     }
 
     fn send_cancel_push_and_exchange_packets(
@@ -1978,9 +1978,9 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), d.as_ref())
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
     }
 
     const PUSH_DATA: &[u8] = &[
@@ -2146,8 +2146,8 @@ mod tests {
             .conn
             .stream_close_send(server.control_stream_id.unwrap())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2160,8 +2160,8 @@ mod tests {
             .conn
             .stream_reset_send(server.control_stream_id.unwrap(), Error::HttpNoError.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2174,8 +2174,8 @@ mod tests {
             .conn
             .stream_reset_send(server.encoder_stream_id.unwrap(), Error::HttpNoError.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2188,8 +2188,8 @@ mod tests {
             .conn
             .stream_reset_send(server.decoder_stream_id.unwrap(), Error::HttpNoError.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2202,8 +2202,8 @@ mod tests {
             .conn
             .stream_stop_sending(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2216,8 +2216,8 @@ mod tests {
             .conn
             .stream_stop_sending(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2230,8 +2230,8 @@ mod tests {
             .conn
             .stream_stop_sending(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
@@ -2247,8 +2247,8 @@ mod tests {
             .conn
             .stream_send(control_stream, &[0x0, 0x1, 0x3, 0x0, 0x1, 0x2]);
         assert_eq!(sent, Ok(6));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpMissingSettings);
     }
 
@@ -2263,8 +2263,8 @@ mod tests {
             &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(8));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpFrameUnexpected);
     }
 
@@ -2277,8 +2277,8 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), v)
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         assert_closed(&client, &Error::HttpFrameUnexpected);
     }
@@ -2326,9 +2326,9 @@ mod tests {
             .unwrap();
         _ = server.conn.stream_send(push_stream_id, v).unwrap();
 
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         assert_closed(&client, &Error::HttpFrameUnexpected);
     }
@@ -2386,9 +2386,9 @@ mod tests {
             .conn
             .stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0])
             .unwrap();
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // check for stop-sending with Error::HttpStreamCreation.
         let mut stop_sending_event_found = false;
@@ -2414,9 +2414,9 @@ mod tests {
         _ = server.conn.stream_send(request_stream_id, v).unwrap();
 
         // Generate packet with the above bad h3 input
-        let out = server.conn.process(None, now());
+        let out = server.conn.process_alloc(None, now());
         // Process bad input and close the connection.
-        mem::drop(client.process(out.as_dgram_ref(), now()));
+        mem::drop(client.process_alloc(out.as_dgram_ref(), now()));
 
         assert_closed(&client, &Error::HttpFrameUnexpected);
     }
@@ -2462,77 +2462,77 @@ mod tests {
         // send the stream type
         let mut sent = server.conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // start sending SETTINGS frame
         sent = server.conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x6]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x8]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         assert_eq!(client.state(), Http3State::Connected);
 
         // Now test PushPromise
         sent = server.conn.stream_send(control_stream, &[0x5]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x5]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x61]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x62]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x63]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         sent = server.conn.stream_send(control_stream, &[0x64]);
         assert_eq!(sent, Ok(1));
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // PUSH_PROMISE on a control stream will cause an error
         assert_closed(&client, &Error::HttpFrameUnexpected);
@@ -2604,7 +2604,7 @@ mod tests {
         fn dgram(c: &mut Connection) -> Datagram {
             let stream = c.stream_create(StreamType::UniDi).unwrap();
             _ = c.stream_send(stream, &[0xc0]).unwrap();
-            c.process(None, now()).dgram().unwrap()
+            c.process_alloc(None, now()).dgram().unwrap()
         }
 
         let d1 = dgram(&mut client.conn);
@@ -2635,8 +2635,8 @@ mod tests {
         server: &mut Connection,
         request_stream_id: StreamId,
     ) {
-        let out = server.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         while let Some(e) = client.next_event() {
             match e {
@@ -2692,8 +2692,8 @@ mod tests {
         assert_eq!(sent, REQUEST_BODY.len());
         client.stream_close_send(request_stream_id).unwrap();
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // find the new request/response stream and send response on it.
         while let Some(e) = server.conn.next_event() {
@@ -2741,10 +2741,10 @@ mod tests {
         client.stream_close_send(request_stream_id).unwrap();
 
         // We need to loop a bit until all data has been sent.
-        let mut out = client.process(None, now());
+        let mut out = client.process_alloc(None, now());
         for _i in 0..20 {
-            out = server.conn.process(out.as_dgram_ref(), now());
-            out = client.process(out.as_dgram_ref(), now());
+            out = server.conn.process_alloc(out.as_dgram_ref(), now());
+            out = client.process_alloc(out.as_dgram_ref(), now());
         }
 
         // check request body is received.
@@ -2832,12 +2832,12 @@ mod tests {
         // Close stream.
         client.stream_close_send(request_stream_id).unwrap();
 
-        let mut out = client.process(None, now());
+        let mut out = client.process_alloc(None, now());
         // We need to loop a bit until all data has been sent. Once for every 1K
         // of data.
         for _i in 0..SEND_BUFFER_SIZE / 1000 {
-            out = server.conn.process(out.as_dgram_ref(), now());
-            out = client.process(out.as_dgram_ref(), now());
+            out = server.conn.process_alloc(out.as_dgram_ref(), now());
+            out = client.process_alloc(out.as_dgram_ref(), now());
         }
 
         // Check received frames and send a response.
@@ -3057,8 +3057,8 @@ mod tests {
                 .stream_reset_send(request_stream_id, Error::HttpRequestRejected.code())
         );
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let mut reset = false;
         let mut stop_sending = false;
@@ -3114,8 +3114,8 @@ mod tests {
                 .stream_stop_sending(request_stream_id, Error::HttpRequestRejected.code())
         );
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let mut stop_sending = false;
 
@@ -3179,8 +3179,8 @@ mod tests {
                 .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let mut reset = false;
 
@@ -3247,8 +3247,8 @@ mod tests {
                 .stream_stop_sending(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let mut stop_sending = false;
         let mut header_ready = false;
@@ -3300,8 +3300,8 @@ mod tests {
                 .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let mut reset = false;
 
@@ -3390,8 +3390,8 @@ mod tests {
         let request_stream_id_3 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_3, 8);
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         _ = server
             .conn
@@ -3412,8 +3412,8 @@ mod tests {
                 }
             }
         }
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let mut stream_reset = false;
         while let Some(e) = client.next_event() {
@@ -3474,8 +3474,8 @@ mod tests {
         let request_stream_id_3 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_3, 8);
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // First send a Goaway frame with an higher number
         _ = server
@@ -3483,8 +3483,8 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), &[0x7, 0x1, 0x8])
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Check that there is one reset for stream_id 8
         let mut stream_reset_1 = 0;
@@ -3569,8 +3569,8 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), &[0x7, 0x1, 0x4])
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(4)));
 
@@ -3580,8 +3580,8 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), &[0x7, 0x1, 0x8])
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         assert_closed(&client, &Error::HttpGeneralProtocol);
     }
@@ -3595,8 +3595,8 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), &[0x7, 0x1, 0x9])
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         assert_closed(&client, &Error::HttpId);
     }
@@ -3608,8 +3608,8 @@ mod tests {
         // send fin before sending any data.
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Recv HeaderReady wo headers with fin.
         let e = client.events().next().unwrap();
@@ -3706,8 +3706,8 @@ mod tests {
         // ok NOW send fin
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Recv DataReadable wo data with fin
         while let Some(e) = client.next_event() {
@@ -3753,8 +3753,8 @@ mod tests {
         // ok NOW send fin
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Recv HeaderReady with fin.
         while let Some(e) = client.next_event() {
@@ -3804,8 +3804,8 @@ mod tests {
             .stream_send(request_stream_id, &[0x00, 0x00])
             .unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Recv headers wo fin
         while let Some(e) = client.next_event() {
@@ -3831,8 +3831,8 @@ mod tests {
         // ok NOW send fin
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Recv no data, but do get fin
         while let Some(e) = client.next_event() {
@@ -3901,8 +3901,8 @@ mod tests {
 
         // ok NOW send fin
         server.conn.stream_close_send(request_stream_id).unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // fin wo data should generate DataReadable
         let e = client.events().next().unwrap();
@@ -4030,7 +4030,7 @@ mod tests {
 
         // Send the encoder instructions, but delay them so that the stream is blocked on decoding
         // headers.
-        let encoder_inst_pkt = server.conn.process(None, now());
+        let encoder_inst_pkt = server.conn.process_alloc(None, now());
 
         // Send response
         // TODO: separate write buffer needed?
@@ -4052,11 +4052,11 @@ mod tests {
         assert!(!client.events().any(header_ready_event));
 
         // Let client receive the encoder instructions.
-        mem::drop(client.process(encoder_inst_pkt.as_dgram_ref(), now()));
+        mem::drop(client.process_alloc(encoder_inst_pkt.as_dgram_ref(), now()));
 
-        let out = server.conn.process(None, now());
-        mem::drop(client.process(out.as_dgram_ref(), now()));
-        mem::drop(client.process(None, now()));
+        let out = server.conn.process_alloc(None, now());
+        mem::drop(client.process_alloc(out.as_dgram_ref(), now()));
+        mem::drop(client.process_alloc(None, now()));
 
         let mut recv_header = false;
         let mut recv_data = false;
@@ -4101,7 +4101,7 @@ mod tests {
 
         // Send the encoder instructions, but delay them so that the stream is blocked on decoding
         // headers.
-        let encoder_inst_pkt = server.conn.process(None, now());
+        let encoder_inst_pkt = server.conn.process_alloc(None, now());
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
@@ -4120,7 +4120,7 @@ mod tests {
         assert!(!hconn.events().any(header_ready_event));
 
         // Let client receive the encoder instructions.
-        let _out = hconn.process(encoder_inst_pkt.as_dgram_ref(), now());
+        let _out = hconn.process_alloc(encoder_inst_pkt.as_dgram_ref(), now());
 
         let mut recv_header = false;
         // Now the stream is unblocked. After headers we will receive a fin.
@@ -4146,11 +4146,11 @@ mod tests {
 
     fn exchange_token(client: &mut Http3Client, server: &mut Connection) -> ResumptionToken {
         server.send_ticket(now(), &[]).expect("can send ticket");
-        let out = server.process(None, now());
+        let out = server.process_alloc(None, now());
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.as_dgram_ref().unwrap(), now());
         // We do not have a token so we need to wait for a resumption token timer to trigger.
-        client.process(None, now() + Duration::from_millis(250));
+        client.process_alloc(None, now() + Duration::from_millis(250));
         assert_eq!(client.state(), Http3State::Connected);
         client
             .events()
@@ -4188,11 +4188,11 @@ mod tests {
     fn zero_rtt_negotiated() {
         let (mut client, mut server) = start_with_0rtt();
 
-        let out = client.process(None, now());
+        let out = client.process_alloc(None, now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
 
         // Check that control and qpack streams are received and a
         // SETTINGS frame has been received.
@@ -4205,10 +4205,10 @@ mod tests {
         );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
-        let out = client.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
         assert_eq!(client.state(), Http3State::Connected);
 
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         assert!(server.conn.state().connected());
 
         assert!(client.tls_info().unwrap().resumed());
@@ -4223,11 +4223,11 @@ mod tests {
             make_request(&mut client, true, &[Header::new("myheaders", "myvalue")]);
         assert_eq!(request_stream_id, 0);
 
-        let out = client.process(None, now());
+        let out = client.process_alloc(None, now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
 
         // Check that control and qpack streams are received and a
         // SETTINGS frame has been received.
@@ -4240,11 +4240,11 @@ mod tests {
         );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
-        let out = client.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
         assert_eq!(client.state(), Http3State::Connected);
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
         assert!(server.conn.state().connected());
-        let out = client.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
         assert!(out.as_dgram_ref().is_none());
 
         // After the server has been connected, send a response.
@@ -4301,19 +4301,19 @@ mod tests {
         assert!(client.events().any(zerortt_event));
 
         // Send ClientHello.
-        let client_hs = client.process(None, now());
+        let client_hs = client.process_alloc(None, now());
         assert!(client_hs.as_dgram_ref().is_some());
 
         // Create a request
         let request_stream_id = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id, 0);
 
-        let client_0rtt = client.process(None, now());
+        let client_0rtt = client.process_alloc(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
-        let server_hs = server.process(client_hs.as_dgram_ref(), now());
+        let server_hs = server.process_alloc(client_hs.as_dgram_ref(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
-        let server_ignored = server.process(client_0rtt.as_dgram_ref(), now());
+        let server_ignored = server.process_alloc(client_0rtt.as_dgram_ref(), now());
         assert!(server_ignored.as_dgram_ref().is_none());
 
         // The server shouldn't receive that 0-RTT data.
@@ -4321,7 +4321,7 @@ mod tests {
         assert!(!server.events().any(recvd_stream_evt));
 
         // Client should get a rejection.
-        let client_out = client.process(server_hs.as_dgram_ref(), now());
+        let client_out = client.process_alloc(server_hs.as_dgram_ref(), now());
         assert!(client_out.as_dgram_ref().is_some());
         let recvd_0rtt_reject = |e| e == Http3ClientEvent::ZeroRttRejected;
         assert!(client.events().any(recvd_0rtt_reject));
@@ -4332,7 +4332,7 @@ mod tests {
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
         // Client will send Setting frame and open new qpack streams.
-        mem::drop(server.process(client_out.as_dgram_ref(), now()));
+        mem::drop(server.process_alloc(client_out.as_dgram_ref(), now()));
         TestServer::new_with_conn(server).check_client_control_qpack_streams_no_resumption();
 
         // Check that we can send a request and that the stream_id starts again from 0.
@@ -4359,11 +4359,11 @@ mod tests {
             .enable_resumption(now(), &token)
             .expect("Set resumption token.");
         assert_eq!(client.state(), Http3State::ZeroRtt);
-        let out = client.process(None, now());
+        let out = client.process_alloc(None, now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
         assert_eq!(*server.conn.state(), State::Init);
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
 
         // Check that control and qpack streams anda SETTINGS frame are received.
         // Also qpack encoder stream will send "change capacity" instruction because it has
@@ -4375,10 +4375,10 @@ mod tests {
         );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
-        let out = client.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
         assert_eq!(client.state(), Http3State::Connected);
 
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         assert!(server.conn.state().connected());
 
         assert!(client.tls_info().unwrap().resumed());
@@ -4395,8 +4395,8 @@ mod tests {
         sent = server.conn.stream_send(control_stream, enc.as_ref());
         assert_eq!(sent.unwrap(), enc.len());
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         assert_eq!(&client.state(), expected_client_state);
         assert!(server.conn.state().connected());
@@ -4755,8 +4755,8 @@ mod tests {
 
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         let events: Vec<Http3ClientEvent> = client.events().collect();
 
@@ -4863,7 +4863,7 @@ mod tests {
             Ok((3, true))
         );
 
-        client.process(None, now());
+        client.process_alloc(None, now());
     }
 
     #[test]
@@ -4971,7 +4971,7 @@ mod tests {
         // Send a zero-length frame at the end of the stream.
         _ = server.conn.stream_send(request_stream_id, &[0, 0]).unwrap();
         server.conn.stream_close_send(request_stream_id).unwrap();
-        let dgram = server.conn.process(None, now()).dgram();
+        let dgram = server.conn.process_alloc(None, now()).dgram();
         client.process_input(&dgram.unwrap(), now());
 
         let data_readable_event = |e: &_| matches!(e, Http3ClientEvent::DataReadable { stream_id } if *stream_id == request_stream_id);
@@ -4995,16 +4995,16 @@ mod tests {
 
         server.create_control_stream();
         // Send the server's control stream data.
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         server.create_qpack_streams();
-        let qpack_pkt1 = server.conn.process(None, now());
+        let qpack_pkt1 = server.conn.process_alloc(None, now());
         // delay delivery of this packet.
 
         let request_stream_id = make_request(&mut client, true, &[]);
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         setup_server_side_encoder(&mut client, &mut server);
 
@@ -5023,8 +5023,8 @@ mod tests {
         };
 
         // Send the encoder instructions,
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Send response
         // TODO: separate write buffer needed?
@@ -5040,14 +5040,14 @@ mod tests {
             .unwrap();
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = server.conn.process(None, now());
-        mem::drop(client.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        mem::drop(client.process_alloc(out.as_dgram_ref(), now()));
 
         let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!client.events().any(header_ready_event));
 
         // Let client receive the encoder instructions.
-        mem::drop(client.process(qpack_pkt1.as_dgram_ref(), now()));
+        mem::drop(client.process_alloc(qpack_pkt1.as_dgram_ref(), now()));
 
         assert!(client.events().any(header_ready_event));
     }
@@ -5123,7 +5123,7 @@ mod tests {
 
         // Reading push data will stop the client from being idle.
         _ = send_push_data(&mut server.conn, 0, false);
-        let out = server.conn.process(None, now());
+        let out = server.conn.process_alloc(None, now());
         client.process_input(out.as_dgram_ref().unwrap(), now());
 
         let mut buf = [0; 16];
@@ -5433,8 +5433,8 @@ mod tests {
         let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
@@ -5469,8 +5469,8 @@ mod tests {
         let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
@@ -5517,8 +5517,8 @@ mod tests {
         let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
@@ -5610,8 +5610,8 @@ mod tests {
             request_stream_id,
         );
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // Check max_push_id frame has been received
         let control_stream_readable =
@@ -5628,9 +5628,9 @@ mod tests {
         send_push_promise(&mut server.conn, request_stream_id, 8);
         send_push_data(&mut server.conn, 8, true);
 
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         assert_eq!(client.state(), Http3State::Connected);
 
@@ -5797,8 +5797,8 @@ mod tests {
             .conn
             .stream_reset_send(push_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         // Assert that we do not have any push event.
         assert!(!check_push_events(&mut client));
@@ -5824,8 +5824,8 @@ mod tests {
             .conn
             .stream_reset_send(push_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
 
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
 
@@ -5871,8 +5871,8 @@ mod tests {
             send_push_data_and_exchange_packets(&mut client, &mut server, 0, false);
 
         assert!(client.cancel_push(0).is_ok());
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // Assert that we do not have any push event.
         assert!(!check_push_events(&mut client));
@@ -5902,8 +5902,8 @@ mod tests {
             send_push_data_and_exchange_packets(&mut client, &mut server, 0, false);
 
         assert!(client.cancel_push(0).is_ok());
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
 
@@ -5944,8 +5944,8 @@ mod tests {
             .borrow_mut()
             .send_encoder_updates(&mut server.conn)
             .unwrap();
-        let out = server.conn.process(None, now());
-        mem::drop(client.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        mem::drop(client.process_alloc(out.as_dgram_ref(), now()));
     }
 
     fn setup_server_side_encoder(client: &mut Http3Client, server: &mut TestServer) {
@@ -5995,7 +5995,7 @@ mod tests {
 
         // Send the encoder instructions, but delay them so that the stream is blocked on decoding
         // headers.
-        let encoder_inst_pkt = server.conn.process(None, now()).dgram();
+        let encoder_inst_pkt = server.conn.process_alloc(None, now()).dgram();
         assert!(encoder_inst_pkt.is_some());
 
         // TODO: separate write buffer needed?
@@ -6020,7 +6020,7 @@ mod tests {
         assert!(!check_push_events(&mut client));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt.as_ref(), now());
+        let _out = client.process_alloc(encoder_inst_pkt.as_ref(), now());
 
         // PushPromise is blocked wathing for encoder instructions.
         assert!(check_push_events(&mut client));
@@ -6060,7 +6060,7 @@ mod tests {
         assert!(check_data_readable(&mut client));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt.as_ref(), now());
+        let _out = client.process_alloc(encoder_inst_pkt.as_ref(), now());
 
         // PushPromise is blocked wathing for encoder instructions.
         assert!(check_push_events(&mut client));
@@ -6102,7 +6102,7 @@ mod tests {
         assert!(check_header_ready(&mut client));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt.as_ref(), now());
+        let _out = client.process_alloc(encoder_inst_pkt.as_ref(), now());
 
         // PushPromise is blocked wathing for encoder instructions.
         assert!(check_push_events(&mut client));
@@ -6122,8 +6122,8 @@ mod tests {
             .borrow_mut()
             .send_and_insert(&mut server.conn, b"content-length", b"1234")
             .unwrap();
-        let encoder_inst_pkt1 = server.conn.process(None, now()).dgram();
-        let _out = client.process(encoder_inst_pkt1.as_ref(), now());
+        let encoder_inst_pkt1 = server.conn.process_alloc(None, now()).dgram();
+        let _out = client.process_alloc(encoder_inst_pkt1.as_ref(), now());
 
         // Send a PushPromise that is blocked until encoder_inst_pkt2 is process by the client.
         let encoder_inst_pkt2 =
@@ -6160,7 +6160,7 @@ mod tests {
         assert!(!check_header_ready(&mut client));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt2.as_ref(), now());
+        let _out = client.process_alloc(encoder_inst_pkt2.as_ref(), now());
 
         // The response headers are blocked.
         assert!(check_header_ready_and_push_promise(&mut client));
@@ -6235,12 +6235,12 @@ mod tests {
         assert!(!check_header_ready(&mut client));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt1.as_ref(), now());
+        let _out = client.process_alloc(encoder_inst_pkt1.as_ref(), now());
 
         assert!(check_push_events(&mut client));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt2.as_ref(), now());
+        let _out = client.process_alloc(encoder_inst_pkt2.as_ref(), now());
 
         assert!(check_header_ready_and_push_promise(&mut client));
     }
@@ -6274,8 +6274,8 @@ mod tests {
             .read_data(now(), request_stream_id, &mut buf)
             .unwrap();
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         // Check that encoder got stream_canceled instruction.
         let mut inst = [0_u8; 100];
         let (amount, fin) = server
@@ -6308,7 +6308,7 @@ mod tests {
         };
 
         // Delay encoder instruction so that the stream will be blocked.
-        let encoder_insts = server.conn.process(None, now());
+        let encoder_insts = server.conn.process_alloc(None, now());
 
         // Send response headers.
         // TODO: separate write buffer needed?
@@ -6343,7 +6343,7 @@ mod tests {
         );
 
         // Now read headers.
-        mem::drop(client.process(encoder_insts.as_dgram_ref(), now()));
+        mem::drop(client.process_alloc(encoder_insts.as_dgram_ref(), now()));
     }
 
     #[test]
@@ -6353,8 +6353,8 @@ mod tests {
         // Cancel request.
         mem::drop(client.cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code()));
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         mem::drop(server.encoder_receiver.receive(&mut server.conn));
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
@@ -6375,7 +6375,7 @@ mod tests {
             header_block: encoded_headers.to_vec(),
         };
 
-        let out = server.conn.process(None, now());
+        let out = server.conn.process_alloc(None, now());
 
         // Send response
         // TODO: separate write buffer needed?
@@ -6403,9 +6403,9 @@ mod tests {
             .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
-        let out = server.conn.process(None, now());
-        let out = client.process(out.as_dgram_ref(), now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         mem::drop(server.encoder_receiver.receive(&mut server.conn));
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
@@ -6440,8 +6440,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
@@ -6465,7 +6465,7 @@ mod tests {
         );
 
         // Exchange encoder instructions
-        mem::drop(client.process(encoder_instruct.as_ref(), now()));
+        mem::drop(client.process_alloc(encoder_instruct.as_ref(), now()));
 
         let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(client.events().any(header_ready_event));
@@ -6477,8 +6477,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
     }
@@ -6503,8 +6503,8 @@ mod tests {
         };
 
         // Send the encoder instructions.
-        let out = server.conn.process(None, now());
-        mem::drop(client.process(out.as_dgram_ref(), now()));
+        let out = server.conn.process_alloc(None, now());
+        mem::drop(client.process_alloc(out.as_dgram_ref(), now()));
 
         // Send PushPromise that will be blocked waiting for decoder instructions.
         mem::drop(
@@ -6535,8 +6535,8 @@ mod tests {
             .cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
@@ -6549,8 +6549,8 @@ mod tests {
             .cancel_fetch(request_stream_id, Error::HttpRequestCancelled.code())
             .unwrap();
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
         mem::drop(server.encoder_receiver.receive(&mut server.conn).unwrap());
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
     }
@@ -6576,7 +6576,7 @@ mod tests {
         };
 
         // Delay encoder instruction so that the stream will be blocked.
-        let encoder_insts = server.conn.process(None, now());
+        let encoder_insts = server.conn.process_alloc(None, now());
 
         // Send response headers.
         // TODO: separate write buffer needed?
@@ -6605,7 +6605,7 @@ mod tests {
         assert!(!client.events().any(header_ready_event));
 
         // Now make the encoder instructions available.
-        mem::drop(client.process(encoder_insts.as_dgram_ref(), now()));
+        mem::drop(client.process_alloc(encoder_insts.as_dgram_ref(), now()));
 
         // Header blocks for both streams should be ready.
         let mut count_responses = 0;
@@ -6652,8 +6652,8 @@ mod tests {
             enc.encode_varint(1_u64);
             let sent = server.conn.stream_send(control_stream, enc.as_ref());
             assert_eq!(sent, Ok(4));
-            let out = server.conn.process(None, now());
-            client.process(out.as_dgram_ref(), now());
+            let out = server.conn.process_alloc(None, now());
+            client.process_alloc(out.as_dgram_ref(), now());
             assert_closed(&client, &Error::HttpSettings);
         }
     }
@@ -6757,8 +6757,8 @@ mod tests {
             }
         );
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // Check that server has received a reset.
         let stop_sending_event = |e| {
@@ -6894,8 +6894,8 @@ mod tests {
 
         assert!(client.events().any(push_reset_event));
 
-        let out = client.process(None, now());
-        mem::drop(server.conn.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        mem::drop(server.conn.process_alloc(out.as_dgram_ref(), now()));
 
         // Check that server has received a reset.
         let stop_sending_event = |e| {
@@ -6909,7 +6909,7 @@ mod tests {
 
     fn handshake_client_error(client: &mut Http3Client, server: &mut TestServer, error: &Error) {
         let out = handshake_only(client, server);
-        client.process(out.as_dgram_ref(), now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(client, error);
     }
 
@@ -7074,14 +7074,14 @@ mod tests {
         let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
         while !is_done(&mut client) {
             maybe_authenticate(&mut client);
-            datagram = client.process(datagram.as_ref(), now()).dgram();
-            datagram = server.process(datagram.as_ref(), now()).dgram();
+            datagram = client.process_alloc(datagram.as_ref(), now()).dgram();
+            datagram = server.process_alloc(datagram.as_ref(), now()).dgram();
         }
 
         // exchange qpack settings, server will send a token as well.
-        datagram = client.process(datagram.as_ref(), now()).dgram();
-        datagram = server.process(datagram.as_ref(), now()).dgram();
-        mem::drop(client.process(datagram.as_ref(), now()).dgram());
+        datagram = client.process_alloc(datagram.as_ref(), now()).dgram();
+        datagram = server.process_alloc(datagram.as_ref(), now()).dgram();
+        mem::drop(client.process_alloc(datagram.as_ref(), now()).dgram());
 
         client
             .events()
@@ -7135,15 +7135,15 @@ mod tests {
         // Exchange packets until header-ack is received.
         // These many packet exchange is needed, to get a header-ack.
         // TODO this may be optimize at Http3Server.
-        let out = client.process(None, now());
-        let out = server.process(out.as_dgram_ref(), now());
-        let out = client.process(out.as_dgram_ref(), now());
-        let out = server.process(out.as_dgram_ref(), now());
-        let out = client.process(out.as_dgram_ref(), now());
-        let out = server.process(out.as_dgram_ref(), now());
-        let out = client.process(out.as_dgram_ref(), now());
-        let out = server.process(out.as_dgram_ref(), now());
-        mem::drop(client.process(out.as_dgram_ref(), now()));
+        let out = client.process_alloc(None, now());
+        let out = server.process_alloc(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        let out = server.process_alloc(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        let out = server.process_alloc(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        let out = server.process_alloc(out.as_dgram_ref(), now());
+        mem::drop(client.process_alloc(out.as_dgram_ref(), now()));
 
         // The header ack for the first request has been received.
         assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
@@ -7198,8 +7198,8 @@ mod tests {
             .unwrap();
         _ = server.conn.stream_send(push_stream_id, &[0]).unwrap();
         server.conn.stream_close_send(push_stream_id).unwrap();
-        let out = server.conn.process(None, now());
-        client.process(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(None, now());
+        client.process_alloc(out.as_dgram_ref(), now());
         assert_closed(&client, &Error::HttpGeneralProtocol);
     }
 
@@ -7224,14 +7224,14 @@ mod tests {
         let md_before = server.conn.stats().frame_tx.max_data;
 
         // sending the http request and most most of the request data
-        let out = client.process(None, now());
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(None, now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
 
         // the server responses with an ack, but the max_data didn't change
         assert_eq!(md_before, server.conn.stats().frame_tx.max_data);
 
-        let out = client.process(out.as_dgram_ref(), now());
-        let out = server.conn.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
+        let out = server.conn.process_alloc(out.as_dgram_ref(), now());
 
         // the server increased the max_data during the second read if that isn't the case
         // in the future and therefore this asserts fails, the request data on stream 0 could be
@@ -7247,7 +7247,7 @@ mod tests {
         );
 
         // the client now sends the priority update
-        let out = client.process(out.as_dgram_ref(), now());
+        let out = client.process_alloc(out.as_dgram_ref(), now());
         server
             .conn
             .process_input(out.as_dgram_ref().unwrap(), now());
@@ -7280,7 +7280,7 @@ mod tests {
 
         // Send the encoder instructions, but delay them so that the stream is blocked on decoding
         // headers.
-        let encoder_inst_pkt = server.conn.process(None, now());
+        let encoder_inst_pkt = server.conn.process_alloc(None, now());
 
         // Send response
         // TODO: separate write buffer needed?

@@ -177,7 +177,7 @@ fn repairing_loss() {
     let id_normal = client.stream_create(StreamType::UniDi).unwrap();
     fill_stream(&mut client, id_normal);
 
-    let dgram = client.process(ack.as_ref(), now).dgram();
+    let dgram = client.process_alloc(ack.as_ref(), now).dgram();
     assert_eq!(client.stats().lost, 1); // Client should have noticed the loss.
     server.process_input(&dgram.unwrap(), now);
 
@@ -210,7 +210,7 @@ fn critical() {
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that critical streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram.as_ref(), now).dgram();
+    let dgram = server.process_alloc(dgram.as_ref(), now).dgram();
     client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
 
@@ -238,7 +238,7 @@ fn critical() {
     assert_eq!(stats_after.handshake_done, 0);
 
     // Complete the handshake.
-    let dgram = client.process(dgram.as_ref(), now).dgram();
+    let dgram = client.process_alloc(dgram.as_ref(), now).dgram();
     server.process_input(&dgram.unwrap(), now);
 
     // Critical beats everything but HANDSHAKE_DONE.
@@ -261,7 +261,7 @@ fn important() {
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that important streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram.as_ref(), now).dgram();
+    let dgram = server.process_alloc(dgram.as_ref(), now).dgram();
     client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
 
@@ -290,7 +290,7 @@ fn important() {
     assert_eq!(stats_after.stream, stats_before.stream + 1);
 
     // Complete the handshake.
-    let dgram = client.process(dgram.as_ref(), now).dgram();
+    let dgram = client.process_alloc(dgram.as_ref(), now).dgram();
     server.process_input(&dgram.unwrap(), now);
 
     // Important beats everything but flow control.
@@ -314,7 +314,7 @@ fn high_normal() {
     // Rather than connect, send stream data in 0.5-RTT.
     // That allows this to test that important streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram.as_ref(), now).dgram();
+    let dgram = server.process_alloc(dgram.as_ref(), now).dgram();
     client.process_input(&dgram.unwrap(), now);
     maybe_authenticate(&mut client);
 
@@ -343,7 +343,7 @@ fn high_normal() {
     assert_eq!(stats_after.stream, stats_before.stream + 1);
 
     // Complete the handshake.
-    let dgram = client.process(dgram.as_ref(), now).dgram();
+    let dgram = client.process_alloc(dgram.as_ref(), now).dgram();
     server.process_input(&dgram.unwrap(), now);
 
     // High or Normal doesn't beat NEW_CONNECTION_ID,

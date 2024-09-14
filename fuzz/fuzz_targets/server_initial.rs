@@ -17,10 +17,10 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let mut client = default_client();
-    let ci = client.process(None, now()).dgram().expect("a datagram");
+    let ci = client.process_alloc(None, now()).dgram().expect("a datagram");
     let mut server = default_server();
     let si = server
-        .process(Some(&ci), now())
+        .process_alloc(Some(&ci), now())
         .dgram()
         .expect("a datagram");
 
@@ -64,7 +64,7 @@ fuzz_target!(|data: &[u8]| {
         (header_enc.len() - 1)..header_enc.len(),
     );
     let fuzzed_si = Datagram::new(si.source(), si.destination(), si.tos(), ciphertext);
-    let _response = client.process(Some(&fuzzed_si), now());
+    let _response = client.process_alloc(Some(&fuzzed_si), now());
 });
 
 #[cfg(any(not(fuzzing), windows))]

@@ -198,7 +198,7 @@ fn single_packet_on_recovery() {
 
     // Acknowledge just one packet and cause one packet to be declared lost.
     // The length is the amount of credit the client should have.
-    let ack = server.process(Some(&delivered), now).dgram();
+    let ack = server.process_alloc(Some(&delivered), now).dgram();
     assert!(ack.is_some());
 
     // The client should see the loss and enter recovery.
@@ -402,18 +402,18 @@ fn ack_are_not_cc() {
     let other_stream = server.stream_create(StreamType::BiDi).unwrap();
     assert_eq!(other_stream, 1);
     server.stream_send(other_stream, b"dropped").unwrap();
-    let dropped_packet = server.process(None, now).dgram();
+    let dropped_packet = server.process_alloc(None, now).dgram();
     assert!(dropped_packet.is_some()); // Now drop this one.
 
     // Now the server sends a packet that will force an ACK,
     // because the client will detect a gap.
     server.stream_send(other_stream, b"sent").unwrap();
-    let ack_eliciting_packet = server.process(None, now).dgram();
+    let ack_eliciting_packet = server.process_alloc(None, now).dgram();
     assert!(ack_eliciting_packet.is_some());
 
     // The client can ack the server packet even if cc windows is full.
     qdebug!([client], "Process ack-eliciting");
-    let ack_pkt = client.process(ack_eliciting_packet.as_ref(), now).dgram();
+    let ack_pkt = client.process_alloc(ack_eliciting_packet.as_ref(), now).dgram();
     assert!(ack_pkt.is_some());
     qdebug!([server], "Handle ACK");
     let prev_ack_count = server.stats().frame_rx.ack;

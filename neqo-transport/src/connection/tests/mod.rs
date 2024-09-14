@@ -207,7 +207,7 @@ fn handshake_with_modifier(
         if should_ping {
             a.test_frame_writer = Some(Box::new(PingWriter {}));
         }
-        let output = a.process(input.as_ref(), now).dgram();
+        let output = a.process_alloc(input.as_ref(), now).dgram();
         if should_ping {
             a.test_frame_writer = None;
             did_ping[a.role()] = true;
@@ -623,7 +623,7 @@ fn send_with_modifier_and_receive(
     modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Option<Datagram> {
     let dgram = send_something_with_modifier(sender, now, modifier);
-    receiver.process(Some(&dgram), now).dgram()
+    receiver.process_alloc(Some(&dgram), now).dgram()
 }
 
 /// Send something on a stream from `sender` to `receiver`.
