@@ -864,8 +864,8 @@ impl Http3Client {
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        if let Some(input) = input {
-            self.conn.process_input_2(input, now);
+        if let Some(d) = input {
+            self.process_input_2(d, now);
         }
         self.process_http3(now);
 
@@ -893,10 +893,14 @@ impl Http3Client {
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
+    pub fn process_input_2(&mut self, dgram: Datagram<&[u8]>, now: Instant) {
         qtrace!([self], "Process input");
-        self.conn.process_input(dgram, now);
+        self.conn.process_input_2(dgram, now);
         self.process_http3(now);
+    }
+
+    pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
+        self.process_input_2(dgram.into(), now);
     }
 
     /// Process HTTP3 layer.
@@ -926,6 +930,7 @@ impl Http3Client {
         }
     }
 
+    // TODO: Why not call process_into without a datagram?
     /// The function should be called to check if there is a new UDP packet to be sent. It should
     /// be called after a new packet is received and processed and after a timer expires (QUIC
     /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
