@@ -8,8 +8,7 @@ use std::{net::SocketAddr, ops::Deref};
 
 use crate::{hex_with_len, IpTos};
 
-// TODO: Copy sane here? Should only implement Copy if D is Copy, e.g. &[u8].
-#[derive(Clone, PartialEq, Eq, Copy)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
@@ -19,6 +18,8 @@ pub struct Datagram<D = Vec<u8>> {
     tos: IpTos,
     d: D,
 }
+
+impl Copy for Datagram<&[u8]> {}
 
 impl Datagram {
     pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
