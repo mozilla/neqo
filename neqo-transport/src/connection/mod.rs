@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min},
     fmt::{self, Debug},
-    iter, mem,
+    mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
     ops::RangeInclusive,
@@ -1026,48 +1026,14 @@ impl Connection {
 
     /// Process new input datagrams on the connection.
     pub fn process_input_2(&mut self, d: Datagram<&[u8]>, now: Instant) {
-        self.process_multiple_input_2(iter::once(d), now);
-    }
-
-    /// Process new input datagrams on the connection.
-    fn process_multiple_input_2<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = Datagram<&'a [u8]>>,
-    {
-        let mut dgrams = dgrams.into_iter().peekable();
-        if dgrams.peek().is_none() {
-            return;
-        }
-
-        for d in dgrams {
-            self.input(d, now, now);
-        }
+        self.input(d, now, now);
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
     }
 
-    /// TODO: Should call process_input_2
     /// Process new input datagrams on the connection.
     pub fn process_input(&mut self, d: &Datagram, now: Instant) {
-        self.process_multiple_input(iter::once(d), now);
-    }
-
-    /// TODO: Should call process_multiple_input_2
-    /// Process new input datagrams on the connection.
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
-        let mut dgrams = dgrams.into_iter().peekable();
-        if dgrams.peek().is_none() {
-            return;
-        }
-
-        for d in dgrams {
-            self.input(d.into(), now, now);
-        }
-        self.process_saved(now);
-        self.streams.cleanup_closed_streams();
+        self.process_input_2(d.into(), now);
     }
 
     /// Get the time that we next need to be called back, relative to `now`.

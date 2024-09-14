@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     fmt::{Debug, Display},
-    iter, mem,
+    mem,
     net::SocketAddr,
     rc::Rc,
     time::Instant,
@@ -894,20 +894,8 @@ impl Http3Client {
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
     pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
-        self.process_multiple_input(iter::once(dgram), now);
-    }
-
-    // TODO: Remove in favor of `process_into`?
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
-        let mut dgrams = dgrams.into_iter().peekable();
-        qtrace!([self], "Process multiple datagrams");
-        if dgrams.peek().is_none() {
-            return;
-        }
-        self.conn.process_multiple_input(dgrams, now);
+        qtrace!([self], "Process input");
+        self.conn.process_input(dgram, now);
         self.process_http3(now);
     }
 
