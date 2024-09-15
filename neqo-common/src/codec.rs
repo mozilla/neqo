@@ -201,6 +201,7 @@ pub struct Encoder<'a> {
 }
 
 impl<'a> Encoder<'a> {
+    // TODO: Idiomatic would be with_buffer?!
     pub fn new_with_buffer(buf: &'a mut Vec<u8>) -> Self {
         Self { buf }
     }
