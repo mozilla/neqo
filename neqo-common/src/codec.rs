@@ -413,11 +413,6 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    pub fn clone_into<'b>(&'a self, write_buffer: &'b mut Vec<u8>) -> Encoder<'b> {
-        write_buffer.extend_from_slice(self.buf);
-        Encoder { buf: write_buffer }
-    }
-
     #[must_use]
     pub fn to_vec(&self) -> Vec<u8> {
         self.buf.clone()

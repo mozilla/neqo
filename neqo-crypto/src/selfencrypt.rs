@@ -92,8 +92,8 @@ impl SelfEncrypt {
         enc.encode_byte(self.key_id);
         enc.encode(&salt);
 
-        let mut write_buffer_2 = Vec::with_capacity(encoded_len);
-        let mut extended_aad = enc.clone_into(&mut write_buffer_2);
+        let mut write_buffer_2 = enc.to_vec();
+        let mut extended_aad = Encoder::new(&mut write_buffer_2);
         extended_aad.encode(aad);
 
         let offset = enc.len();
