@@ -8,7 +8,6 @@
 #![allow(clippy::missing_errors_doc)]
 
 use std::{
-    cell::RefCell,
     fmt::{self, Display},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -24,10 +23,6 @@ use neqo_transport::{
 pub mod client;
 pub mod server;
 pub mod udp;
-
-std::thread_local! {
-    static RECV_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0; neqo_udp::RECV_BUF_SIZE]);
-}
 
 /// Firefox default value
 ///
