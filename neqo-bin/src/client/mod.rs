@@ -387,6 +387,25 @@ struct Runner<'a, H: Handler> {
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
+    fn new(
+        local_addr: SocketAddr,
+        socket: &'a mut crate::udp::Socket,
+        client: H::Client,
+        handler: H,
+        args: &'a Args,
+    ) -> Self {
+        Self {
+            local_addr,
+            socket,
+            client,
+            handler,
+            args,
+            timeout: None,
+            recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
+            send_buf: Vec::new(),
+        }
+    }
+
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
@@ -487,8 +506,6 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     .map_err(Error::QlogError)
 }
 
-// TODO: Reconsider allow.
-#[allow(clippy::too_many_lines)]
 pub async fn client(mut args: Args) -> Res<()> {
     neqo_common::log::init(
         args.shared
@@ -569,36 +586,18 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http09::Handler::new(to_request, &args);
 
-                Runner {
-                    args: &args,
-                    client,
-                    handler,
-                    local_addr: real_local,
-                    socket: &mut socket,
-                    timeout: None,
-                    recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
-                    send_buf: Vec::new(),
-                }
-                .run()
-                .await?
+                Runner::new(real_local, &mut socket, client, handler, &args)
+                    .run()
+                    .await?
             } else {
                 let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
                     .expect("failed to create client");
 
                 let handler = http3::Handler::new(to_request, &args);
 
-                Runner {
-                    args: &args,
-                    client,
-                    handler,
-                    local_addr: real_local,
-                    socket: &mut socket,
-                    timeout: None,
-                    recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
-                    send_buf: Vec::new(),
-                }
-                .run()
-                .await?
+                Runner::new(real_local, &mut socket, client, handler, &args)
+                    .run()
+                    .await?
             };
         }
     }
