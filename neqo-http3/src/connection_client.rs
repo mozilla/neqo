@@ -870,8 +870,6 @@ impl Http3Client {
             self.process_http3(now);
         }
 
-        // TODO: The order in which to call process_2 and process_http3 is
-        // not obvious. Clean up needed.
         let out = self.conn.process(None, now, write_buffer);
         self.process_http3(now);
         out
