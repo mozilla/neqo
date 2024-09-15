@@ -231,15 +231,14 @@ impl ServerRunner {
         }
     }
 
-    // TODO: Could as well call it UDP IO now, given that it does both in and output.
-    async fn process(&mut self, mut inx: Option<usize>) -> Result<(), io::Error> {
+    async fn process(&mut self, mut socket_inx: Option<usize>) -> Result<(), io::Error> {
         loop {
-            let mut dgram = if let Some(i) = inx {
-                let (host, socket) = self.sockets.get_mut(i).unwrap();
+            let mut dgram = if let Some(inx) = socket_inx {
+                let (host, socket) = self.sockets.get_mut(inx).unwrap();
                 let dgram = socket.recv(host, &mut self.recv_buf)?;
                 if dgram.is_none() {
-                    // TODO: Better way to not try reading again?
-                    inx.take();
+                    // Done reading.
+                    socket_inx.take();
                 }
                 dgram
             } else {
@@ -251,22 +250,22 @@ impl ServerRunner {
                 .process(dgram.take(), (self.now)(), &mut self.send_buf)
             {
                 Output::Datagram(dgram) => {
-                    let socket = {
-                        let addr = dgram.source();
-                        let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
-                        rest.iter_mut()
-                            .map(|(_host, socket)| socket)
-                            .find(|socket| {
-                                socket
-                                    .local_addr()
-                                    .ok()
-                                    .map_or(false, |socket_addr| socket_addr == addr)
-                            })
-                            .unwrap_or(first_socket)
+                    // Find outbound socket. If none match, take the first.
+                    let socket = if let Some(socket) =
+                        self.sockets.iter_mut().find_map(|(_host, socket)| {
+                            socket
+                                .local_addr()
+                                .ok()
+                                .map_or(false, |socket_addr| socket_addr == dgram.source())
+                                .then_some(socket)
+                        }) {
+                        socket
+                    } else {
+                        &mut self.sockets.iter_mut().next().unwrap().1
                     };
+
                     socket.writable().await?;
                     socket.send(dgram)?;
-                    // TODO: Or should we do this right after using it?
                     self.send_buf.clear();
                     continue;
                 }
@@ -277,7 +276,8 @@ impl ServerRunner {
                 Output::None => {}
             }
 
-            if inx.is_none() {
+            if socket_inx.is_none() {
+                // No socket to read and nothing to write.
                 break;
             }
         }
@@ -315,9 +315,8 @@ impl ServerRunner {
             }
 
             match self.ready().await? {
-                Ready::Socket(inx) => {
-                    // TODO: Passing the index here to only borrow &mut self in process. Better way?
-                    self.process(Some(inx)).await?;
+                Ready::Socket(socket) => {
+                    self.process(Some(socket)).await?;
                 }
                 Ready::Timeout => {
                     self.timeout = None;
