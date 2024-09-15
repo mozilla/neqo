@@ -73,10 +73,7 @@ impl<D: AsRef<[u8]>> Datagram<D> {
     }
 }
 
-// TODO: Should we really implement Deref here?
-// https://doc.rust-lang.org/std/ops/trait.Deref.html#when-to-implement-deref-or-derefmut
 impl<D: Deref<Target = [u8]>> Deref for Datagram<D> {
-    // TODO: Target still correct?
     type Target = [u8];
     #[must_use]
     fn deref(&self) -> &Self::Target {
@@ -84,7 +81,6 @@ impl<D: Deref<Target = [u8]>> Deref for Datagram<D> {
     }
 }
 
-// TODO: Remove
 impl<'a> From<&'a Datagram> for Datagram<&'a [u8]> {
     fn from(value: &'a Datagram) -> Self {
         let Datagram {
@@ -104,7 +100,6 @@ impl<'a> From<&'a Datagram> for Datagram<&'a [u8]> {
     }
 }
 
-// TODO: Remove
 impl From<Datagram<&[u8]>> for Datagram {
     fn from(value: Datagram<&[u8]>) -> Self {
         let Datagram {
