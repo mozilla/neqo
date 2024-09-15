@@ -235,7 +235,6 @@ fn overflow_crypto() {
 
     // Send in 100 packets, each with 1000 bytes of crypto frame data each,
     // eventually this will overrun the buffer we keep for crypto data.
-    // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(1024);
     let mut payload = Encoder::new(&mut write_buffer);
     for pn in 0..100_u64 {

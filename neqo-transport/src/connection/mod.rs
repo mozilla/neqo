@@ -802,7 +802,6 @@ impl Connection {
 
         let tps = &self.tps;
         if let Agent::Server(ref mut s) = self.crypto.tls {
-            // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
             let mut enc = Encoder::new(&mut write_buffer);
             enc.encode_vvec_with(|enc_inner| {

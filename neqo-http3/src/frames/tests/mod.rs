@@ -17,7 +17,6 @@ use crate::frames::{
 
 pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {
     // For data, headers and push_promise we do not read all bytes from the buffer
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let d2 = Encoder::new(&mut write_buffer).from_hex(st);
     assert_eq!(d.as_ref(), &d2.as_ref()[..d.as_ref().len()]);
@@ -38,7 +37,6 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     let mut fr: FrameReader = FrameReader::new();
 
     // conver string into u8 vector
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let buf = Encoder::new(&mut write_buffer).from_hex(st);
     conn_s.stream_send(stream_id, buf.as_ref()).unwrap();
@@ -63,7 +61,6 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
 }
 
 pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let mut d = Encoder::new(&mut write_buffer);
 
@@ -75,7 +72,6 @@ pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
 }
 
 pub fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let mut d = Encoder::new(&mut write_buffer);
 

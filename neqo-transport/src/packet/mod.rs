@@ -722,7 +722,6 @@ impl<'a> PublicPacket<'a> {
             return false;
         }
         let (header, tag) = self.data.split_at(self.data.len() - expansion);
-        // TODO: separate write buffer needed?
         let mut write_buffer = Vec::with_capacity(self.data.len());
         let mut encoder = Encoder::new(&mut write_buffer);
         encoder.encode_vec(1, odcid);
@@ -1049,7 +1048,6 @@ mod tests {
 
     #[test]
     fn disallow_long_dcid() {
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
@@ -1063,7 +1061,6 @@ mod tests {
 
     #[test]
     fn disallow_long_scid() {
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
@@ -1549,7 +1546,6 @@ mod tests {
         const BIG_DCID: &[u8] = &[0x44; MAX_CONNECTION_ID_LEN + 1];
         const BIG_SCID: &[u8] = &[0xee; 255];
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![0xff, 0x00, 0x00, 0x00, 0x00];
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vec(1, BIG_DCID);

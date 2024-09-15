@@ -145,7 +145,6 @@ impl SendMessage {
         let hframe = HFrame::Headers {
             header_block: header_block.to_vec(),
         };
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
@@ -212,7 +211,6 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: to_send as u64,
         };
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         data_frame.encode(&mut enc);
@@ -305,7 +303,6 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
         };
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         data_frame.encode(&mut enc);

@@ -447,7 +447,6 @@ fn bad_client_initial() {
     payload_enc.encode(&[0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
 
     // Make a new header with a 1 byte packet number length.
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let mut header_enc = Encoder::new(&mut write_buffer);
     header_enc
@@ -459,7 +458,7 @@ fn bad_client_initial() {
         .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
         .encode_byte(u8::try_from(pn).unwrap());
 
-    let mut ciphertext = header_enc.as_ref().to_vec();
+    let mut ciphertext = header_enc.to_vec();
     ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
     let v = aead
         .encrypt(
@@ -536,12 +535,10 @@ fn bad_client_initial_connection_close() {
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 
-    // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
     let mut payload_enc = Encoder::new(&mut write_buffer);
     payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
 
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     // Make a new header with a 1 byte packet number length.
     let mut header_enc = Encoder::new(&mut write_buffer);

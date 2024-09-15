@@ -384,7 +384,6 @@ impl WebTransportSession {
             error,
             message: message.to_string(),
         };
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut encoder = Encoder::new(&mut write_buffer);
         close_frame.encode(&mut encoder);
@@ -414,7 +413,6 @@ impl WebTransportSession {
     ) -> Res<()> {
         qtrace!([self], "send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {
-            // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
             let mut dgram_data = Encoder::new(&mut write_buffer);
             dgram_data.encode_varint(self.session_id.as_u64() / 4);

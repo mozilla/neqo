@@ -362,7 +362,6 @@ fn vn_after_retry() {
     let dgram = client.process_alloc(dgram.as_ref(), now()).dgram(); // Initial w/token
     assert!(dgram.is_some());
 
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let mut encoder = Encoder::new(&mut write_buffer);
     encoder.encode_byte(0x80);
@@ -423,7 +422,6 @@ fn mitm_retry() {
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)
         .unwrap();
 
-    // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(header.len());
     // Now re-encode without the token.
     let mut enc = Encoder::new(&mut write_buffer);
@@ -436,7 +434,6 @@ fn mitm_retry() {
     let notoken_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
     qtrace!("notoken_header={}", hex_with_len(&notoken_header));
 
-    // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
     // Encrypt.
     let mut notoken_packet = Encoder::new(&mut write_buffer)

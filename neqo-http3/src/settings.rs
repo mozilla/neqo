@@ -233,7 +233,6 @@ impl HttpZeroRttChecker {
     /// Save the settings that matter for 0-RTT.
     #[must_use]
     pub fn save(settings: &Http3Parameters) -> Vec<u8> {
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION)

@@ -688,7 +688,6 @@ impl ExtensionHandler for TransportParametersHandler {
         qdebug!("Writing transport parameters, msg={:?}", msg);
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         self.local.encode(&mut enc);
@@ -807,7 +806,6 @@ mod tests {
         tps.params
             .insert(INITIAL_MAX_STREAMS_BIDI, TransportParameter::Integer(10));
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         tps.encode(&mut enc);
@@ -829,7 +827,6 @@ mod tests {
         assert!(!tps2.has_value(RETRY_SOURCE_CONNECTION_ID));
         assert!(tps2.has_value(STATELESS_RESET_TOKEN));
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         tps.encode(&mut enc);
@@ -860,7 +857,6 @@ mod tests {
             0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
         ];
         let spa = make_spa();
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
@@ -895,7 +891,6 @@ mod tests {
     /// It then encodes it, working from the knowledge that the `encode` function
     /// doesn't care about validity, and decodes it.  The result should be failure.
     fn assert_invalid_spa(spa: &TransportParameter) {
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
@@ -907,7 +902,6 @@ mod tests {
 
     /// This is for those rare mutations that are acceptable.
     fn assert_valid_spa(spa: &TransportParameter) {
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
@@ -960,7 +954,6 @@ mod tests {
     #[test]
     fn preferred_address_truncated() {
         let spa = make_spa();
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         spa.encode(&mut enc, PREFERRED_ADDRESS);
@@ -1087,7 +1080,6 @@ mod tests {
         tps.params
             .insert(ACTIVE_CONNECTION_ID_LIMIT, TransportParameter::Integer(1));
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         tps.encode(&mut enc);
@@ -1108,7 +1100,6 @@ mod tests {
             other: vec![0x1a2a_3a4a, 0x5a6a_7a8a],
         };
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         vn.encode(&mut enc, VERSION_INFORMATION);

@@ -411,7 +411,6 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Headers {
         header_block: HEADER_BLOCK.to_vec(),
     };
-    // TODO: separate write buffer needed?
     let mut buf = vec![];
     let mut enc = Encoder::new(&mut buf);
     f.encode(&mut enc);
@@ -419,7 +418,6 @@ fn complete_and_incomplete_frames() {
 
     // H3_FRAME_TYPE_CANCEL_PUSH
     let f = HFrame::CancelPush { push_id: 5 };
-    // TODO: separate write buffer needed?
     let mut buf = vec![];
     let mut enc = Encoder::new(&mut buf);
     f.encode(&mut enc);
@@ -429,7 +427,6 @@ fn complete_and_incomplete_frames() {
     let f = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::MaxHeaderListSize, 4)]),
     };
-    // TODO: separate write buffer needed?
     let mut buf = vec![];
     let mut enc = Encoder::new(&mut buf);
     f.encode(&mut enc);

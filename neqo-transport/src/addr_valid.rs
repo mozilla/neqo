@@ -78,7 +78,6 @@ impl AddressValidation {
         // Let's be "clever" by putting the peer's address in the AAD.
         // We don't need to encode these into the token as they should be
         // available when we need to check the token.
-        // TODO: separate write buffer needed?
         if retry {
             aad.encode(TOKEN_IDENTIFIER_RETRY);
         } else {
@@ -111,7 +110,6 @@ impl AddressValidation {
         // TODO(mt) rotate keys on a fixed schedule.
         let retry = dcid.is_some();
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
         let mut data = Encoder::new(&mut write_buffer);
         let end = now
