@@ -136,4 +136,5 @@ jobs:
 
   bench:
     name: "Benchmark"
+    needs: [check]
     uses: ./.github/workflows/bench.yml

@@ -1147,13 +1147,8 @@ impl Connection {
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
-        // TODO: Could this as well be an &mut [u8]?
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        // TODO: Where is the best place?
-        //
-        // TODO: Maybe we should really be taking an &mut [u8] instead of a &mut
-        // Vec<u8>.
         assert!(write_buffer.is_empty());
         if let Some(d) = input {
             self.input(d, now, now);
@@ -1161,13 +1156,12 @@ impl Connection {
         }
         #[allow(clippy::let_and_return)]
         let output = self.process_output(now, write_buffer);
-        // TODO
-        // #[cfg(all(feature = "build-fuzzing-corpus", test))]
-        // if self.test_frame_writer.is_none() {
-        //     if let Some(d) = output.clone().dgram() {
-        //         neqo_common::write_item_to_fuzzing_corpus("packet", &d);
-        //     }
-        // }
+        #[cfg(all(feature = "build-fuzzing-corpus", test))]
+        if self.test_frame_writer.is_none() {
+            if let Some(d) = output.clone().map_datagram(Into::into).dgram() {
+                neqo_common::write_item_to_fuzzing_corpus("packet", &d);
+            }
+        }
         output
     }
 
