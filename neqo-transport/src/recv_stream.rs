@@ -1486,7 +1486,7 @@ mod tests {
         // consume it
         // TODO: 0 ideal here?
         let mut builder = PacketBuilder::short(
-            Encoder::new_with_buffer(&mut write_buffer),
+            Encoder::new(&mut write_buffer),
             false,
             None::<&[u8]>,
             0,
@@ -1607,7 +1607,7 @@ mod tests {
         let mut write_buffer = vec![];
         // TODO: 0 ideal here?
         let mut builder = PacketBuilder::short(
-            Encoder::new_with_buffer(&mut write_buffer),
+            Encoder::new(&mut write_buffer),
             false,
             None::<&[u8]>,
             0,
@@ -1635,7 +1635,7 @@ mod tests {
         // consume it
         // TODO: 0 ideal here?
         let mut builder = PacketBuilder::short(
-            Encoder::new_with_buffer(&mut write_buffer),
+            Encoder::new(&mut write_buffer),
             false,
             None::<&[u8]>,
             0,
@@ -1890,7 +1890,7 @@ mod tests {
         // Write the fc update frame
         // TODO: 0 ideal here?
         let mut builder = PacketBuilder::short(
-            Encoder::new_with_buffer(&mut write_buffer),
+            Encoder::new(&mut write_buffer),
             false,
             None::<&[u8]>,
             0,

@@ -813,7 +813,7 @@ mod test {
         // consume the frame
         // TODO: 0 ideal here?
         let mut builder =
-            PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
+            PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
         let mut tokens = Vec::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);

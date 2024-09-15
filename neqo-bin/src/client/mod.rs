@@ -447,7 +447,6 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn process(&mut self) -> Result<(), io::Error> {
         let mut should_read = true;
         loop {
-            // TODO: Cleanup?
             let dgram = should_read
                 .then(|| self.socket.recv(&self.local_addr, &mut self.recv_buf))
                 .transpose()?
@@ -461,7 +460,6 @@ impl<'a, H: Handler> Runner<'a, H> {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
                     self.socket.send(dgram)?;
-                    // TODO: Or should we do this right after using it?
                     self.send_buf.clear();
                     continue;
                 }

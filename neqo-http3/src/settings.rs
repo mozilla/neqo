@@ -235,7 +235,7 @@ impl HttpZeroRttChecker {
     pub fn save(settings: &Http3Parameters) -> Vec<u8> {
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION)
             .encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)
             .encode_varint(settings.get_max_table_size_decoder())

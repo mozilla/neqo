@@ -476,7 +476,7 @@ impl<'a> PacketBuilder<'a> {
         odcid: &[u8],
         write_buffer: &'b mut Vec<u8>,
     ) -> Res<&'b [u8]> {
-        let mut encoder = Encoder::new_with_buffer(write_buffer);
+        let mut encoder = Encoder::new(write_buffer);
         encoder.encode_vec(1, odcid);
         let start = encoder.len();
         encoder.encode_byte(
@@ -510,7 +510,7 @@ impl<'a> PacketBuilder<'a> {
         versions: &[Version],
         write_buffer: &'b mut Vec<u8>,
     ) -> &'b [u8] {
-        let mut encoder = Encoder::new_with_buffer(write_buffer);
+        let mut encoder = Encoder::new(write_buffer);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
@@ -724,7 +724,7 @@ impl<'a> PublicPacket<'a> {
         let (header, tag) = self.data.split_at(self.data.len() - expansion);
         // TODO: separate write buffer needed?
         let mut write_buffer = Vec::with_capacity(self.data.len());
-        let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+        let mut encoder = Encoder::new(&mut write_buffer);
         encoder.encode_vec(1, odcid);
         encoder.encode(header);
         retry::use_aead(version, |aead| {
@@ -1012,7 +1012,7 @@ mod tests {
 
         let mut buf = vec![];
         let mut builder = PacketBuilder::long(
-            Encoder::new_with_buffer(&mut buf),
+            Encoder::new(&mut buf),
             PacketType::Initial,
             Version::default(),
             None::<&[u8]>,
@@ -1051,7 +1051,7 @@ mod tests {
     fn disallow_long_dcid() {
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
@@ -1065,7 +1065,7 @@ mod tests {
     fn disallow_long_scid() {
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[]);
@@ -1086,7 +1086,7 @@ mod tests {
         fixture_init();
         let mut buf = vec![];
         let mut builder = PacketBuilder::short(
-            Encoder::new_with_buffer(&mut buf),
+            Encoder::new(&mut buf),
             true,
             Some(ConnectionId::from(SERVER_CID)),
             0,
@@ -1106,7 +1106,7 @@ mod tests {
         for _ in 0..64 {
             let mut buf = vec![];
             let mut builder = PacketBuilder::short(
-                Encoder::new_with_buffer(&mut buf),
+                Encoder::new(&mut buf),
                 true,
                 Some(ConnectionId::from(SERVER_CID)),
                 // TODO: 0 ideal here?
@@ -1172,7 +1172,7 @@ mod tests {
         let mut prot = CryptoDxState::test_default();
         let mut buf = vec![];
         let mut builder = PacketBuilder::long(
-            Encoder::new_with_buffer(&mut buf),
+            Encoder::new(&mut buf),
             PacketType::Handshake,
             Version::default(),
             Some(ConnectionId::from(SERVER_CID)),
@@ -1212,7 +1212,7 @@ mod tests {
         fixture_init();
         let mut buf = vec![];
         let mut builder = PacketBuilder::long(
-            Encoder::new_with_buffer(&mut buf),
+            Encoder::new(&mut buf),
             PacketType::Handshake,
             Version::default(),
             None::<&[u8]>,
@@ -1234,7 +1234,7 @@ mod tests {
         for _ in 1..64 {
             let mut buf = vec![];
             let mut builder = PacketBuilder::long(
-                Encoder::new_with_buffer(&mut buf),
+                Encoder::new(&mut buf),
                 PacketType::Handshake,
                 Version::default(),
                 None::<&[u8]>,
@@ -1258,7 +1258,7 @@ mod tests {
     fn build_abort() {
         let mut buf = vec![];
         let mut builder = PacketBuilder::long(
-            Encoder::new_with_buffer(&mut buf),
+            Encoder::new(&mut buf),
             PacketType::Initial,
             Version::default(),
             None::<&[u8]>,
@@ -1281,7 +1281,7 @@ mod tests {
 
         let mut buf = vec![];
         let mut builder = PacketBuilder::short(
-            Encoder::new_with_buffer(&mut buf),
+            Encoder::new(&mut buf),
             true,
             Some(ConnectionId::from(SERVER_CID)),
             100,
@@ -1551,7 +1551,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![0xff, 0x00, 0x00, 0x00, 0x00];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vec(1, BIG_DCID);
         enc.encode_vec(1, BIG_SCID);
         enc.encode_uint(4, 0x1a2a_3a4a_u64);

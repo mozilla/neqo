@@ -233,7 +233,7 @@ fn drop_non_initial() {
     // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
     // This is big enough to look like an Initial, but it uses the Retry type.
-    let mut header = neqo_common::Encoder::new_with_buffer(&mut write_buffer);
+    let mut header = neqo_common::Encoder::new(&mut write_buffer);
     header
         .encode_byte(0xfa)
         .encode_uint(4, Version::default().wire_version())
@@ -254,7 +254,7 @@ fn drop_short_initial() {
     // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(1199);
     // This too small to be an Initial, but it is otherwise plausible.
-    let mut header = neqo_common::Encoder::new_with_buffer(&mut write_buffer);
+    let mut header = neqo_common::Encoder::new(&mut write_buffer);
     header
         .encode_byte(0xca)
         .encode_uint(4, Version::default().wire_version())
@@ -274,7 +274,7 @@ fn drop_short_header_packet_for_unknown_connection() {
 
     // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
-    let mut header = neqo_common::Encoder::new_with_buffer(&mut write_buffer);
+    let mut header = neqo_common::Encoder::new(&mut write_buffer);
     header
         .encode_byte(0x40) // short header
         .encode_vec(1, CID)
@@ -449,13 +449,13 @@ fn bad_client_initial() {
         .unwrap()
         .to_vec();
 
-    let mut payload_enc = Encoder::new_with_buffer(&mut plaintext);
+    let mut payload_enc = Encoder::new(&mut plaintext);
     payload_enc.encode(&[0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
 
     // Make a new header with a 1 byte packet number length.
     // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
-    let mut header_enc = Encoder::new_with_buffer(&mut write_buffer);
+    let mut header_enc = Encoder::new(&mut write_buffer);
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())
@@ -544,13 +544,13 @@ fn bad_client_initial_connection_close() {
 
     // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
-    let mut payload_enc = Encoder::new_with_buffer(&mut write_buffer);
+    let mut payload_enc = Encoder::new(&mut write_buffer);
     payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
 
     // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     // Make a new header with a 1 byte packet number length.
-    let mut header_enc = Encoder::new_with_buffer(&mut write_buffer);
+    let mut header_enc = Encoder::new(&mut write_buffer);
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())

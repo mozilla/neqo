@@ -39,7 +39,7 @@ impl ControlStreamLocal {
     pub fn queue_frame(&mut self, f: &HFrame) {
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         f.encode(&mut enc);
         self.stream.buffer(enc.as_ref());
     }
@@ -81,7 +81,7 @@ impl ControlStreamLocal {
             if let Some(hframe) = stream.priority_update_frame() {
                 // TODO: separate write buffer needed?
                 let mut write_buffer = vec![];
-                let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+                let mut enc = Encoder::new(&mut write_buffer);
                 hframe.encode(&mut enc);
                 if self.stream.send_atomic(conn, enc.as_ref())? {
                     stream.priority_update_sent();

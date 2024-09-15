@@ -386,7 +386,7 @@ impl WebTransportSession {
         };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+        let mut encoder = Encoder::new(&mut write_buffer);
         close_frame.encode(&mut encoder);
         self.control_stream_send
             .send_data_atomic(conn, encoder.as_ref())?;
@@ -416,7 +416,7 @@ impl WebTransportSession {
         if self.state == SessionState::Active {
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut dgram_data = Encoder::new_with_buffer(&mut write_buffer);
+            let mut dgram_data = Encoder::new(&mut write_buffer);
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
             dgram_data.encode(buf);
             conn.send_datagram(dgram_data.as_ref(), id)?;

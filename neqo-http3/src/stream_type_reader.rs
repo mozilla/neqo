@@ -320,7 +320,7 @@ mod tests {
         ) {
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             for i in to_encode {
                 enc.encode_varint(*i);
             }

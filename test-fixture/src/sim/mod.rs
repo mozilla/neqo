@@ -168,7 +168,7 @@ impl Simulator {
     pub fn seed_str(&mut self, seed: impl AsRef<str>) {
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let seed = Encoder::new_with_buffer(&mut write_buffer).from_hex(seed);
+        let seed = Encoder::new(&mut write_buffer).from_hex(seed);
         self.seed(<[u8; 32]>::try_from(seed.as_ref()).unwrap());
     }
 

@@ -648,7 +648,7 @@ mod tests {
         };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut e = Encoder::new_with_buffer(&mut write_buffer);
+        let mut e = Encoder::new(&mut write_buffer);
         frame.encode(&mut e);
         peer_conn.control_send(e.as_ref());
         let out = peer_conn.process_alloc(None, now());

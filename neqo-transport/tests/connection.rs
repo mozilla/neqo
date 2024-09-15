@@ -237,7 +237,7 @@ fn overflow_crypto() {
     // eventually this will overrun the buffer we keep for crypto data.
     // TODO: separate write buffer needed?
     let mut write_buffer = Vec::with_capacity(1024);
-    let mut payload = Encoder::new_with_buffer(&mut write_buffer);
+    let mut payload = Encoder::new(&mut write_buffer);
     for pn in 0..100_u64 {
         payload.truncate(0);
         payload
@@ -249,7 +249,7 @@ fn overflow_crypto() {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
-        let mut packet = Encoder::new_with_buffer(&mut write_buffer);
+        let mut packet = Encoder::new(&mut write_buffer);
         packet
             .encode_byte(0xc1) // Initial with packet number length of 2.
             .encode_uint(4, Version::Version1.wire_version())

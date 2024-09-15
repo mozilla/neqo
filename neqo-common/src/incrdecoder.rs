@@ -181,7 +181,7 @@ mod tests {
 
             let decoder = IncrementalDecoderUint::default();
             let mut write_buffer = vec![];
-            let mut db = Encoder::new_with_buffer(&mut write_buffer).from_hex(&self.b);
+            let mut db = Encoder::new(&mut write_buffer).from_hex(&self.b);
             // Add padding so that we can verify that the reader doesn't over-consume.
             db.encode_byte(0xff);
 
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn zero_len() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut dec = Decoder::new(enc.as_ref());
         let mut incr = IncrementalDecoderBuffer::new(0);
         assert_eq!(incr.consume(&mut dec), Some(Vec::new()));
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn ignore() {
         let mut write_buffer = vec![];
-        let db = Encoder::new_with_buffer(&mut write_buffer).from_hex("12345678ff");
+        let db = Encoder::new(&mut write_buffer).from_hex("12345678ff");
 
         let decoder = IncrementalDecoderIgnore::new(4);
 

@@ -202,7 +202,7 @@ pub struct Encoder<'a> {
 
 impl<'a> Encoder<'a> {
     // TODO: Idiomatic would be with_buffer?!
-    pub fn new_with_buffer(buf: &'a mut Vec<u8>) -> Self {
+    pub fn new(buf: &'a mut Vec<u8>) -> Self {
         Self { buf }
     }
 
@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn decode() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("012345");
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode(2).unwrap(), &[0x01, 0x23]);
         assert!(dec.decode(2).is_none());
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn decode_byte() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("0123");
+        let enc = Encoder::new(&mut write_buffer).from_hex("0123");
         let mut dec = enc.as_decoder();
 
         assert_eq!(dec.decode_byte().unwrap(), 0x01);
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn decode_byte_short() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("");
+        let enc = Encoder::new(&mut write_buffer).from_hex("");
         let mut dec = enc.as_decoder();
         assert!(dec.decode_byte().is_none());
     }
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn decode_remainder() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("012345");
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode_remainder(), &[0x01, 0x23, 0x45]);
         assert!(dec.decode(2).is_none());
@@ -509,13 +509,13 @@ mod tests {
     #[test]
     fn decode_vec() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("012345");
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode_vec(1).expect("read one octet length"), &[0x23]);
         assert_eq!(dec.remaining(), 1);
 
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("00012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("00012345");
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode_vec(2).expect("read two octet length"), &[0x23]);
         assert_eq!(dec.remaining(), 1);
@@ -525,13 +525,13 @@ mod tests {
     fn decode_vec_short() {
         // The length is too short.
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("02");
+        let enc = Encoder::new(&mut write_buffer).from_hex("02");
         let mut dec = enc.as_decoder();
         assert!(dec.decode_vec(2).is_none());
 
         // The body is too short.
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("0200");
+        let enc = Encoder::new(&mut write_buffer).from_hex("0200");
         let mut dec = enc.as_decoder();
         assert!(dec.decode_vec(1).is_none());
     }
@@ -539,13 +539,13 @@ mod tests {
     #[test]
     fn decode_vvec() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("012345");
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode_vvec().expect("read one octet length"), &[0x23]);
         assert_eq!(dec.remaining(), 1);
 
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("40012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("40012345");
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode_vvec().expect("read two octet length"), &[0x23]);
         assert_eq!(dec.remaining(), 1);
@@ -555,12 +555,12 @@ mod tests {
     fn decode_vvec_short() {
         // The length field is too short.
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut dec = enc.as_decoder();
         assert!(dec.decode_vvec().is_none());
 
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("405500");
+        let enc = Encoder::new(&mut write_buffer).from_hex("405500");
         let mut dec = enc.as_decoder();
         assert!(dec.decode_vvec().is_none());
     }
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn skip() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ffff");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ffff");
         let mut dec = enc.as_decoder();
         dec.skip(1);
         assert_eq!(dec.remaining(), 1);
@@ -578,7 +578,7 @@ mod tests {
     #[should_panic(expected = "insufficient data")]
     fn skip_too_much() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut dec = enc.as_decoder();
         dec.skip(2);
     }
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn skip_vec() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("012345");
         let mut dec = enc.as_decoder();
         dec.skip_vec(1);
         assert_eq!(dec.remaining(), 1);
@@ -596,7 +596,7 @@ mod tests {
     #[should_panic(expected = "insufficient data")]
     fn skip_vec_too_much() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff1234");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ff1234");
         let mut dec = enc.as_decoder();
         dec.skip_vec(1);
     }
@@ -605,14 +605,14 @@ mod tests {
     #[should_panic(expected = "invalid length")]
     fn skip_vec_short_length() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut dec = enc.as_decoder();
         dec.skip_vec(4);
     }
     #[test]
     fn skip_vvec() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("012345");
+        let enc = Encoder::new(&mut write_buffer).from_hex("012345");
         let mut dec = enc.as_decoder();
         dec.skip_vvec();
         assert_eq!(dec.remaining(), 1);
@@ -622,7 +622,7 @@ mod tests {
     #[should_panic(expected = "insufficient data")]
     fn skip_vvec_too_much() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("0f1234");
+        let enc = Encoder::new(&mut write_buffer).from_hex("0f1234");
         let mut dec = enc.as_decoder();
         dec.skip_vvec();
     }
@@ -631,7 +631,7 @@ mod tests {
     #[should_panic(expected = "invalid length")]
     fn skip_vvec_short_length() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut dec = enc.as_decoder();
         dec.skip_vvec();
     }
@@ -673,54 +673,54 @@ mod tests {
     #[test]
     fn encode_byte() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
 
         enc.encode_byte(1);
-        assert_eq!(enc, Encoder::new_with_buffer(&mut vec![]).from_hex("01"));
+        assert_eq!(enc, Encoder::new(&mut vec![]).from_hex("01"));
 
         enc.encode_byte(0xfe);
-        assert_eq!(enc, Encoder::new_with_buffer(&mut vec![]).from_hex("01fe"));
+        assert_eq!(enc, Encoder::new(&mut vec![]).from_hex("01fe"));
     }
 
     #[test]
     fn encode() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode(&[1, 2, 3]);
         assert_eq!(
             enc,
-            Encoder::new_with_buffer(&mut vec![]).from_hex("010203")
+            Encoder::new(&mut vec![]).from_hex("010203")
         );
     }
 
     #[test]
     fn encode_uint() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_uint(2, 10_u8); // 000a
         enc.encode_uint(1, 257_u16); // 01
         enc.encode_uint(3, 0xff_ffff_u32); // ffffff
         enc.encode_uint(8, 0xfedc_ba98_7654_3210_u64);
         assert_eq!(
             enc,
-            Encoder::new_with_buffer(&mut vec![]).from_hex("000a01fffffffedcba9876543210")
+            Encoder::new(&mut vec![]).from_hex("000a01fffffffedcba9876543210")
         );
     }
 
     #[test]
     fn builder_from_vec() {
         let mut v = vec![1, 2, 3];
-        let enc = Encoder::new_with_buffer(&mut v);
+        let enc = Encoder::new(&mut v);
         assert_eq!(
             enc,
-            Encoder::new_with_buffer(&mut vec![]).from_hex("010203")
+            Encoder::new(&mut vec![]).from_hex("010203")
         );
     }
 
     #[test]
     fn builder_inas_decoder() {
         let mut write_buffer = vec![];
-        let enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("010203");
+        let enc = Encoder::new(&mut write_buffer).from_hex("010203");
         let buf = &[1, 2, 3];
         assert_eq!(enc.as_decoder(), Decoder::new(buf));
     }
@@ -754,10 +754,10 @@ mod tests {
             assert_eq!(Encoder::varint_len(c.v), c.b.len() / 2);
 
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             enc.encode_varint(c.v);
             let mut write_buffer = vec![];
-            let encoded = Encoder::new_with_buffer(&mut write_buffer).from_hex(&c.b);
+            let encoded = Encoder::new(&mut write_buffer).from_hex(&c.b);
             assert_eq!(enc, encoded);
 
             let mut dec = encoded.as_decoder();
@@ -771,7 +771,7 @@ mod tests {
     fn varint_decode_long_zero() {
         for c in &["4000", "80000000", "c000000000000000"] {
             let mut write_buffer = vec![];
-            let encoded = Encoder::new_with_buffer(&mut write_buffer).from_hex(c);
+            let encoded = Encoder::new(&mut write_buffer).from_hex(c);
             let mut dec = encoded.as_decoder();
             let v = dec.decode_varint().expect("should decode");
             assert_eq!(dec.remaining(), 0);
@@ -783,7 +783,7 @@ mod tests {
     fn varint_decode_short() {
         for c in &["40", "800000", "c0000000000000"] {
             let mut write_buffer = vec![];
-            let encoded = Encoder::new_with_buffer(&mut write_buffer).from_hex(c);
+            let encoded = Encoder::new(&mut write_buffer).from_hex(c);
             let mut dec = encoded.as_decoder();
             assert!(dec.decode_varint().is_none());
         }
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn encode_vec() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vec(2, &[1, 2, 0x34]);
         assert_eq!(enc.to_hex(), "0003010234");
     }
@@ -800,12 +800,12 @@ mod tests {
     #[test]
     fn encode_vec_with() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vec_with(2, |enc_inner| {
             // TODO: Too complex.
             let mut write_buffer = vec![];
             enc_inner.encode(
-                Encoder::new_with_buffer(&mut write_buffer)
+                Encoder::new(&mut write_buffer)
                     .from_hex("02")
                     .as_ref(),
             );
@@ -817,7 +817,7 @@ mod tests {
     #[should_panic(expected = "assertion failed")]
     fn encode_vec_with_overflow() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vec_with(1, |enc_inner| {
             enc_inner.encode(&[0xb0; 256]);
         });
@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn encode_vvec() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vvec(&[1, 2, 0x34]);
         assert_eq!(enc.to_hex(), "03010234");
     }
@@ -834,11 +834,11 @@ mod tests {
     #[test]
     fn encode_vvec_with() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vvec_with(|enc_inner| {
             let mut write_buffer = vec![];
             enc_inner.encode(
-                Encoder::new_with_buffer(&mut write_buffer)
+                Encoder::new(&mut write_buffer)
                     .from_hex("02")
                     .as_ref(),
             );
@@ -849,7 +849,7 @@ mod tests {
     #[test]
     fn encode_vvec_with_longer() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vvec_with(|enc_inner| {
             enc_inner.encode(&[0xa5; 65]);
         });
@@ -861,9 +861,9 @@ mod tests {
     #[test]
     fn encode_builder() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let mut enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut write_buffer = vec![];
-        let enc2 = Encoder::new_with_buffer(&mut write_buffer).from_hex("010234");
+        let enc2 = Encoder::new(&mut write_buffer).from_hex("010234");
         enc.encode(enc2.as_ref());
         assert_eq!(enc.to_hex(), "ff010234");
     }
@@ -872,9 +872,9 @@ mod tests {
     #[test]
     fn encode_view() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("ff");
+        let mut enc = Encoder::new(&mut write_buffer).from_hex("ff");
         let mut write_buffer = vec![];
-        let enc2 = Encoder::new_with_buffer(&mut write_buffer).from_hex("010234");
+        let enc2 = Encoder::new(&mut write_buffer).from_hex("010234");
         let v = enc2.as_decoder();
         enc.encode(v.as_ref());
         assert_eq!(enc.to_hex(), "ff010234");
@@ -883,7 +883,7 @@ mod tests {
     #[test]
     fn encode_mutate() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("010234");
+        let mut enc = Encoder::new(&mut write_buffer).from_hex("010234");
         enc.as_mut()[0] = 0xff;
         assert_eq!(enc.to_hex(), "ff0234");
     }
@@ -891,7 +891,7 @@ mod tests {
     #[test]
     fn pad() {
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer).from_hex("010234");
+        let mut enc = Encoder::new(&mut write_buffer).from_hex("010234");
         enc.pad_to(5, 0);
         assert_eq!(enc.to_hex(), "0102340000");
         enc.pad_to(4, 0);
@@ -899,7 +899,7 @@ mod tests {
         enc.pad_to(7, 0xc2);
         assert_eq!(
             enc,
-            Encoder::new_with_buffer(&mut vec![]).from_hex("0102340000c2c2")
+            Encoder::new(&mut vec![]).from_hex("0102340000c2c2")
         );
     }
 }

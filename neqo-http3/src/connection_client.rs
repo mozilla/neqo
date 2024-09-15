@@ -411,7 +411,7 @@ impl Http3Client {
         self.base_handler.get_settings().map(|settings| {
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
             // TODO: Not great to use the write buffer here.
@@ -1455,7 +1455,7 @@ mod tests {
             // Encode a settings frame and send it.
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             self.settings.encode(&mut enc);
             assert_eq!(
                 self.conn
@@ -1901,7 +1901,7 @@ mod tests {
         };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         frame.encode(&mut d);
         _ = conn.stream_send(stream_id, d.as_ref()).unwrap();
     }
@@ -1942,7 +1942,7 @@ mod tests {
         let frame = HFrame::CancelPush { push_id };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         frame.encode(&mut d);
         server
             .conn
@@ -2861,7 +2861,7 @@ mod tests {
         let data_frame = HFrame::Data { len: size as u64 };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         data_frame.encode(&mut enc);
 
         (vec![0_u8; size], enc.as_ref().to_vec())
@@ -3941,7 +3941,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_varint(1028_u64); // Arbitrary type.
         enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
         let mut buf: Vec<_> = enc.into();
@@ -4006,7 +4006,7 @@ mod tests {
         // Send response
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -4076,7 +4076,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
 
         server_send_response_and_exchange_packet(
@@ -4359,7 +4359,7 @@ mod tests {
         let control_stream = server.conn.stream_create(StreamType::UniDi).unwrap();
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+        let mut enc = Encoder::new(&mut write_buffer);
         server.settings.encode(&mut enc);
         let mut sent = server.conn.stream_send(control_stream, CONTROL_STREAM_TYPE);
         assert_eq!(sent.unwrap(), CONTROL_STREAM_TYPE.len());
@@ -5000,7 +5000,7 @@ mod tests {
         // Send response
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -5971,7 +5971,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         push_promise_frame.encode(&mut d);
         server_send_response_and_exchange_packet(client, server, stream_id, &d, false);
 
@@ -6117,7 +6117,7 @@ mod tests {
         };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         header_hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6192,7 +6192,7 @@ mod tests {
         };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         header_hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6284,7 +6284,7 @@ mod tests {
         // Send response headers.
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6301,7 +6301,7 @@ mod tests {
         // Now send data frame. This will trigger DataRead event.
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 0 };
         d_frame.encode(&mut d);
@@ -6351,7 +6351,7 @@ mod tests {
         // Send response
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data {
             len: u64::try_from(data.len()).unwrap(),
@@ -6486,7 +6486,7 @@ mod tests {
         // Send response
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 0 };
         d_frame.encode(&mut d);
@@ -6552,7 +6552,7 @@ mod tests {
         // Send response headers.
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6594,7 +6594,7 @@ mod tests {
         for f in H3_RESERVED_FRAME_TYPES {
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             enc.encode_varint(*f);
             test_wrong_frame_on_control_stream(enc.as_ref());
             test_wrong_frame_on_push_stream(enc.as_ref());
@@ -6615,7 +6615,7 @@ mod tests {
             // Create a settings frame of length 2.
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             enc.encode_varint(H3_FRAME_TYPE_SETTINGS);
             enc.encode_varint(2_u64);
             // The settings frame contains a reserved settings type and some value (0x1).
@@ -6637,7 +6637,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         let headers1xx: &[Header] = &[Header::new(":status", "103")];
         server.encode_headers(request_stream_id, headers1xx, &mut d);
 
@@ -6701,7 +6701,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         let headers = vec![
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6762,7 +6762,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         let headers1xx: &[Header] = &[Header::new(":status", "100")];
         server.encode_headers(push_stream_id, headers1xx, &mut d);
 
@@ -6832,7 +6832,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         let headers = vec![
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6913,7 +6913,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         server.encode_headers(request_stream_id, headers, &mut d);
 
         // Send response
@@ -6975,7 +6975,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         server.encode_headers(
             request_stream_id,
             &[
@@ -7256,7 +7256,7 @@ mod tests {
         // Send response
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -7284,7 +7284,7 @@ mod tests {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut d = Encoder::new_with_buffer(&mut write_buffer);
+        let mut d = Encoder::new(&mut write_buffer);
         let headers1xx = &[Header::new(":status", "101")];
         server.encode_headers(request_stream_id, headers1xx, &mut d);
 

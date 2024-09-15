@@ -57,7 +57,7 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
 
     // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
-    let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+    let mut encoder = Encoder::new(&mut write_buffer);
     encoder.encode_byte(PACKET_BIT_LONG);
     encoder.encode(&[0; 4]); // Zero version == VN.
     encoder.encode_vec(1, src_cid);

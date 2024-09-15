@@ -804,7 +804,7 @@ mod tests {
         let mut buf = vec![];
         // TODO: 0 ideal here?
         let mut builder =
-            PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
+            PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
         let mut stats = FrameStats::default();
         let mut tokens = Vec::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
@@ -955,7 +955,7 @@ mod tests {
         let mut buf = vec![];
         // TODO: 0 ideal here?
         let mut builder =
-            PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
+            PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
@@ -1023,7 +1023,7 @@ mod tests {
         // TODO: 0 ideal here?
         let mut buf = vec![];
         let mut builder =
-            PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
+            PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1057,7 +1057,7 @@ mod tests {
         // TODO: 0 ideal here?
         let mut buf = vec![];
         let mut builder =
-            PacketBuilder::short(Encoder::new_with_buffer(&mut buf), false, None::<&[u8]>, 0);
+            PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);

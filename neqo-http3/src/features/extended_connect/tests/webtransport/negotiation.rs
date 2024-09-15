@@ -256,7 +256,7 @@ fn wrong_setting_value() {
     // Encode a settings frame and send it.
     // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
-    let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+    let mut enc = Encoder::new(&mut write_buffer);
     let settings = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::EnableWebTransport, 2)]),
     };

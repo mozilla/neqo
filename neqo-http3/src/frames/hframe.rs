@@ -144,7 +144,7 @@ impl HFrame {
             } => {
                 // TODO: separate write buffer needed?
                 let mut write_buffer = vec![];
-                let mut update_frame = Encoder::new_with_buffer(&mut write_buffer);
+                let mut update_frame = Encoder::new(&mut write_buffer);
                 update_frame.encode_varint(*element_id);
 
                 let mut priority_enc: Vec<u8> = Vec::new();

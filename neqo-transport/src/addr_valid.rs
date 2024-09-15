@@ -113,7 +113,7 @@ impl AddressValidation {
 
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let mut data = Encoder::new_with_buffer(&mut write_buffer);
+        let mut data = Encoder::new(&mut write_buffer);
         let end = now
             + if retry {
                 EXPIRATION_RETRY
@@ -128,7 +128,7 @@ impl AddressValidation {
 
         // Include the token identifier ("Retry"/~) in the AAD, then keep it for plaintext.
         let mut write_buffer = vec![];
-        let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+        let mut encoder = Encoder::new(&mut write_buffer);
         Self::encode_aad(peer_address, retry, &mut encoder);
         let encrypted = self.self_encrypt.seal(encoder.as_ref(), data.as_ref())?;
         encoder.truncate(TOKEN_IDENTIFIER_RETRY.len());
@@ -169,7 +169,7 @@ impl AddressValidation {
         now: Instant,
     ) -> Option<ConnectionId> {
         let mut write_buffer = vec![];
-        let mut encoder = Encoder::new_with_buffer(&mut write_buffer);
+        let mut encoder = Encoder::new(&mut write_buffer);
         Self::encode_aad(peer_address, retry, &mut encoder);
         let data = self.self_encrypt.open(encoder.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);

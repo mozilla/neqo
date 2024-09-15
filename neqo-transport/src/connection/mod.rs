@@ -804,7 +804,7 @@ impl Connection {
         if let Agent::Server(ref mut s) = self.crypto.tls {
             // TODO: separate write buffer needed?
             let mut write_buffer = vec![];
-            let mut enc = Encoder::new_with_buffer(&mut write_buffer);
+            let mut enc = Encoder::new(&mut write_buffer);
             enc.encode_vvec_with(|enc_inner| {
                 tps.borrow().local.encode(enc_inner);
             });
@@ -2348,7 +2348,7 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         assert_eq!(write_buffer.len(), 0);
-        let mut encoder = Encoder::new_with_buffer(write_buffer);
+        let mut encoder = Encoder::new(write_buffer);
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
@@ -3468,7 +3468,7 @@ impl Connection {
         let mut tmp_write_buffer = vec![];
 
         // TODO: This was previously initialized with the mtu. Relevant?
-        let encoder = Encoder::new_with_buffer(&mut tmp_write_buffer);
+        let encoder = Encoder::new(&mut tmp_write_buffer);
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),
