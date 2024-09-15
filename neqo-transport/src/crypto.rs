@@ -383,7 +383,7 @@ impl Crypto {
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
                 qdebug!("resumption token {}", hex_snip_middle(enc.as_ref()));
-                ResumptionToken::new(enc.into(), t.expiration_time())
+                ResumptionToken::new(write_buffer, t.expiration_time())
             })
         } else {
             unreachable!("It is a server.");

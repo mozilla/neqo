@@ -149,8 +149,7 @@ impl SendMessage {
         let mut write_buffer = vec![];
         let mut d = Encoder::new(&mut write_buffer);
         hframe.encode(&mut d);
-        // TODO: Use write_buffer?
-        d.into()
+        write_buffer
     }
 
     fn stream_id(&self) -> StreamId {

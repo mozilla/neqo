@@ -193,7 +193,7 @@ impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
     }
 }
 
-// TODO: Should this be `&mut [u8]`? Does it need to be able to allocate?
+// TODO: Should this be `&mut [u8]` instead of `&mut Vec<u8>`? Does it need to be able to allocate?
 /// Encoder is good for building data structures.
 #[derive(PartialEq, Eq)]
 pub struct Encoder<'a> {
@@ -201,7 +201,6 @@ pub struct Encoder<'a> {
 }
 
 impl<'a> Encoder<'a> {
-    // TODO: Idiomatic would be with_buffer?!
     pub fn new(buf: &'a mut Vec<u8>) -> Self {
         Self { buf }
     }
@@ -414,10 +413,14 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    // TODO: rename function and arguments?
     pub fn clone_into<'b>(&'a self, write_buffer: &'b mut Vec<u8>) -> Encoder<'b> {
         write_buffer.extend_from_slice(self.buf);
         Encoder { buf: write_buffer }
+    }
+
+    #[must_use]
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.buf.clone()
     }
 }
 
@@ -443,15 +446,6 @@ impl<'a> From<Encoder<'a>> for &'a [u8] {
     #[must_use]
     fn from(encoder: Encoder<'a>) -> &'a [u8] {
         encoder.buf
-    }
-}
-
-// TODO: Should this be test only?
-impl<'a> From<Encoder<'a>> for Vec<u8> {
-    #[must_use]
-    fn from(buf: Encoder) -> Self {
-        // TODO: Is allocation intuitive here?
-        buf.buf.clone()
     }
 }
 
@@ -687,10 +681,7 @@ mod tests {
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode(&[1, 2, 3]);
-        assert_eq!(
-            enc,
-            Encoder::new(&mut vec![]).from_hex("010203")
-        );
+        assert_eq!(enc, Encoder::new(&mut vec![]).from_hex("010203"));
     }
 
     #[test]
@@ -711,10 +702,7 @@ mod tests {
     fn builder_from_vec() {
         let mut v = vec![1, 2, 3];
         let enc = Encoder::new(&mut v);
-        assert_eq!(
-            enc,
-            Encoder::new(&mut vec![]).from_hex("010203")
-        );
+        assert_eq!(enc, Encoder::new(&mut vec![]).from_hex("010203"));
     }
 
     #[test]
@@ -802,13 +790,9 @@ mod tests {
         let mut write_buffer = vec![];
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vec_with(2, |enc_inner| {
-            // TODO: Too complex.
             let mut write_buffer = vec![];
-            enc_inner.encode(
-                Encoder::new(&mut write_buffer)
-                    .from_hex("02")
-                    .as_ref(),
-            );
+            let hex = Encoder::new(&mut write_buffer).from_hex("02");
+            enc_inner.encode(hex.as_ref());
         });
         assert_eq!(enc.to_hex(), "000102");
     }
@@ -837,11 +821,8 @@ mod tests {
         let mut enc = Encoder::new(&mut write_buffer);
         enc.encode_vvec_with(|enc_inner| {
             let mut write_buffer = vec![];
-            enc_inner.encode(
-                Encoder::new(&mut write_buffer)
-                    .from_hex("02")
-                    .as_ref(),
-            );
+            let hex = Encoder::new(&mut write_buffer).from_hex("02");
+            enc_inner.encode(hex.as_ref());
         });
         assert_eq!(enc.to_hex(), "0102");
     }
@@ -853,8 +834,7 @@ mod tests {
         enc.encode_vvec_with(|enc_inner| {
             enc_inner.encode(&[0xa5; 65]);
         });
-        let v: Vec<u8> = enc.into();
-        assert_eq!(&v[..3], &[0x40, 0x41, 0xa5]);
+        assert_eq!(&write_buffer[..3], &[0x40, 0x41, 0xa5]);
     }
 
     // Test that Deref to &[u8] works for Encoder.
@@ -897,9 +877,6 @@ mod tests {
         enc.pad_to(4, 0);
         assert_eq!(enc.to_hex(), "0102340000");
         enc.pad_to(7, 0xc2);
-        assert_eq!(
-            enc,
-            Encoder::new(&mut vec![]).from_hex("0102340000c2c2")
-        );
+        assert_eq!(enc, Encoder::new(&mut vec![]).from_hex("0102340000c2c2"));
     }
 }

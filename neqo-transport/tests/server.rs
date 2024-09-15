@@ -230,16 +230,14 @@ fn drop_non_initial() {
     const CID: &[u8] = &[55; 8]; // not a real connection ID
     let mut server = default_server();
 
-    // TODO: separate write buffer needed?
-    let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    let mut bogus_data = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
     // This is big enough to look like an Initial, but it uses the Retry type.
-    let mut header = neqo_common::Encoder::new(&mut write_buffer);
+    let mut header = neqo_common::Encoder::new(&mut bogus_data);
     header
         .encode_byte(0xfa)
         .encode_uint(4, Version::default().wire_version())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
-    let mut bogus_data: Vec<u8> = header.into();
     bogus_data.resize(MIN_INITIAL_PACKET_SIZE, 66);
 
     let bogus = datagram(bogus_data);
@@ -251,16 +249,14 @@ fn drop_short_initial() {
     const CID: &[u8] = &[55; 8]; // not a real connection ID
     let mut server = default_server();
 
-    // TODO: separate write buffer needed?
-    let mut write_buffer = Vec::with_capacity(1199);
+    let mut bogus_data = Vec::with_capacity(1199);
     // This too small to be an Initial, but it is otherwise plausible.
-    let mut header = neqo_common::Encoder::new(&mut write_buffer);
+    let mut header = neqo_common::Encoder::new(&mut bogus_data);
     header
         .encode_byte(0xca)
         .encode_uint(4, Version::default().wire_version())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
-    let mut bogus_data: Vec<u8> = header.into();
     bogus_data.resize(1199, 66);
 
     let bogus = datagram(bogus_data);
@@ -272,14 +268,12 @@ fn drop_short_header_packet_for_unknown_connection() {
     const CID: &[u8] = &[55; 8]; // not a real connection ID
     let mut server = default_server();
 
-    // TODO: separate write buffer needed?
-    let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
-    let mut header = neqo_common::Encoder::new(&mut write_buffer);
+    let mut bogus_data = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    let mut header = neqo_common::Encoder::new(&mut bogus_data);
     header
         .encode_byte(0x40) // short header
         .encode_vec(1, CID)
         .encode_byte(1);
-    let mut bogus_data: Vec<u8> = header.into();
     bogus_data.resize(MIN_INITIAL_PACKET_SIZE, 66);
 
     let bogus = datagram(bogus_data);

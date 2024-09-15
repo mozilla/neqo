@@ -3939,12 +3939,10 @@ mod tests {
 
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // TODO: separate write buffer needed?
-        let mut write_buffer = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut buf = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+        let mut enc = Encoder::new(&mut buf);
         enc.encode_varint(1028_u64); // Arbitrary type.
         enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
-        let mut buf: Vec<_> = enc.into();
         buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
         _ = server.conn.stream_send(request_stream_id, &buf).unwrap();
 

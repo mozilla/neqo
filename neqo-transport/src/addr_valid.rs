@@ -133,8 +133,7 @@ impl AddressValidation {
         let encrypted = self.self_encrypt.seal(encoder.as_ref(), data.as_ref())?;
         encoder.truncate(TOKEN_IDENTIFIER_RETRY.len());
         encoder.encode(&encrypted);
-        // TODO: We could as well return write_buffer here.
-        Ok(encoder.into())
+        Ok(write_buffer)
     }
 
     /// This generates a token for use with Retry.

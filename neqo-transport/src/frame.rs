@@ -722,8 +722,7 @@ mod tests {
         };
         // TODO: separate write buffer needed?
         let mut write_buffer = vec![];
-        let enc =
-            Encoder::new(&mut write_buffer).from_hex("035234523502523601020304010203");
+        let enc = Encoder::new(&mut write_buffer).from_hex("035234523502523601020304010203");
         let mut dec = enc.as_decoder();
         assert_eq!(Frame::decode(&mut dec).unwrap(), fe);
     }

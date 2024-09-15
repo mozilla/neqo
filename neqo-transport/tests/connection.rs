@@ -247,7 +247,6 @@ fn overflow_crypto() {
         let plen = payload.len();
         payload.pad_to(plen + 1000, 44);
 
-        // TODO: separate write buffer needed?
         let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
         let mut packet = Encoder::new(&mut write_buffer);
         packet
@@ -260,7 +259,7 @@ fn overflow_crypto() {
         let pn_offset = packet.len();
         packet.encode_uint(2, pn);
 
-        let mut packet = Vec::from(packet);
+        let mut packet = write_buffer;
         let header = packet.clone();
         packet.resize(header.len() + payload.len() + aead.expansion(), 0);
         aead.encrypt(pn, &header, payload.as_ref(), &mut packet[header.len()..])

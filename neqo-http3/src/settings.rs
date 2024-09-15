@@ -248,7 +248,7 @@ impl HttpZeroRttChecker {
         if settings.get_http3_datagram() {
             enc.encode_varint(SETTINGS_H3_DATAGRAM).encode_varint(true);
         }
-        enc.into()
+        write_buffer
     }
 }
 

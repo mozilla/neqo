@@ -1485,12 +1485,8 @@ mod tests {
         let mut write_buffer = vec![];
         // consume it
         // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(
-            Encoder::new(&mut write_buffer),
-            false,
-            None::<&[u8]>,
-            0,
-        );
+        let mut builder =
+            PacketBuilder::short(Encoder::new(&mut write_buffer), false, None::<&[u8]>, 0);
         let mut token = Vec::new();
         s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
 
@@ -1606,12 +1602,8 @@ mod tests {
         // consume it
         let mut write_buffer = vec![];
         // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(
-            Encoder::new(&mut write_buffer),
-            false,
-            None::<&[u8]>,
-            0,
-        );
+        let mut builder =
+            PacketBuilder::short(Encoder::new(&mut write_buffer), false, None::<&[u8]>, 0);
         let mut token = Vec::new();
         session_fc
             .borrow_mut()
@@ -1634,12 +1626,8 @@ mod tests {
         let mut write_buffer = vec![];
         // consume it
         // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(
-            Encoder::new(&mut write_buffer),
-            false,
-            None::<&[u8]>,
-            0,
-        );
+        let mut builder =
+            PacketBuilder::short(Encoder::new(&mut write_buffer), false, None::<&[u8]>, 0);
         let mut token = Vec::new();
         session_fc
             .borrow_mut()
@@ -1889,12 +1877,8 @@ mod tests {
         let mut write_buffer = vec![];
         // Write the fc update frame
         // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(
-            Encoder::new(&mut write_buffer),
-            false,
-            None::<&[u8]>,
-            0,
-        );
+        let mut builder =
+            PacketBuilder::short(Encoder::new(&mut write_buffer), false, None::<&[u8]>, 0);
         let mut token = Vec::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut()

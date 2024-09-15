@@ -144,7 +144,7 @@ impl WebTransportSendStream {
                 }
                 d.encode_varint(session_id.as_u64());
                 WebTransportSenderStreamState::SendingInit {
-                    buf: d.into(),
+                    buf: write_buffer,
                     fin: false,
                 }
             } else {

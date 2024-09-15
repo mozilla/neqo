@@ -370,7 +370,7 @@ fn vn_after_retry() {
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
-    let vn = datagram(encoder.into());
+    let vn = datagram(write_buffer);
 
     assert_ne!(
         client.process_alloc(Some(&vn), now()).callback(),

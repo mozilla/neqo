@@ -55,7 +55,6 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     let dst_cid = dec.decode_vec(1).expect("client DCID");
     let src_cid = dec.decode_vec(1).expect("client SCID");
 
-    // TODO: separate write buffer needed?
     let mut write_buffer = vec![];
     let mut encoder = Encoder::new(&mut write_buffer);
     encoder.encode_byte(PACKET_BIT_LONG);
@@ -66,7 +65,7 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     for v in versions {
         encoder.encode_uint(4, *v);
     }
-    encoder.into()
+    write_buffer
 }
 
 #[test]
