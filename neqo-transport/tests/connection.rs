@@ -42,7 +42,8 @@ fn truncate_long_packet() {
         dupe.source(),
         dupe.destination(),
         dupe.tos(),
-        &dupe[..(dupe.len() - tail)],
+        dupe[..(dupe.len() - tail)].to_vec(),
+        None,
     );
     let hs_probe = client.process_alloc(Some(&truncated), now()).dgram();
     assert!(hs_probe.is_some());
@@ -116,6 +117,7 @@ fn reorder_server_initial() {
         server_initial.destination(),
         server_initial.tos(),
         packet,
+        None,
     );
 
     // Now a connection can be made successfully.
@@ -161,6 +163,7 @@ fn set_payload(server_packet: &Option<Datagram>, client_dcid: &[u8], payload: &[
         server_initial.destination(),
         server_initial.tos(),
         packet,
+        None,
     )
 }
 
@@ -270,6 +273,7 @@ fn overflow_crypto() {
             server_initial.destination(),
             server_initial.tos(),
             packet,
+            None,
         );
         client.process_input(&dgram, now());
         if let State::Closing { error, .. } = client.state() {

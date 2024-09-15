@@ -241,11 +241,12 @@ impl Server {
                             Output::None
                         },
                         |p| {
-                            Output::Datagram(Datagram::<&[u8]>::new_2(
+                            Output::Datagram(Datagram::new(
                                 dgram.destination(),
                                 dgram.source(),
                                 dgram.tos(),
                                 p,
+                                None,
                             ))
                         },
                     )
@@ -406,11 +407,12 @@ impl Server {
                 packet.wire_version(),
             );
 
-            return Output::Datagram(Datagram::<&[u8]>::new_2(
+            return Output::Datagram(Datagram::new(
                 dgram.destination(),
                 dgram.source(),
                 dgram.tos(),
                 vn,
+                None,
             ));
         }
 

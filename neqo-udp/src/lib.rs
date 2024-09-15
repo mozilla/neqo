@@ -103,12 +103,12 @@ pub fn recv_inner<'a>(
         meta.len.div_ceil(meta.stride),
     );
 
-    Ok(Datagram::new_2_with_segment_size(
+    Ok(Datagram::new(
         meta.addr,
         *local_address,
         meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-        meta.stride,
         recv_buf,
+        Some(meta.stride),
     ))
 }
 
@@ -163,11 +163,12 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let payload = vec![];
-        let datagram = Datagram::new_2(
+        let datagram = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::default(),
-            &payload,
+            payload.as_slice(),
+            None,
         );
 
         sender.send(datagram)?;
@@ -185,11 +186,12 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let payload = b"Hello, world!".to_vec();
-        let datagram = Datagram::new_2(
+        let datagram = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            &payload,
+            payload.as_slice(),
+            None,
         );
 
         sender.send(datagram)?;
@@ -244,11 +246,11 @@ mod tests {
                 .recv(&receiver_addr, &mut recv_buf)
                 .expect("receive to succeed");
             assert_eq!(
-                Some(SEGMENT_SIZE),
+                SEGMENT_SIZE,
                 dgram.segment_size(),
                 "Expect received datagrams to have same length as sent datagrams."
             );
-            num_received += dgram.len() / dgram.segment_size().unwrap();
+            num_received += dgram.num_segments();
         }
 
         Ok(())

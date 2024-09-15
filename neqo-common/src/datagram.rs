@@ -15,56 +15,12 @@ pub struct Datagram<D = Vec<u8>> {
     /// The segment size if this transmission contains multiple datagrams.
     /// This is `None` if the [`Datagram`] only contains a single datagram
     // TODO: Need to be an option?
-    segment_size: Option<usize>,
+    segment_size: usize,
     tos: IpTos,
     d: D,
 }
 
 impl Copy for Datagram<&[u8]> {}
-
-impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            segment_size: None,
-            d: d.into(),
-        }
-    }
-}
-
-impl<'a> Datagram<&'a [u8]> {
-    // TODO: Rename
-    #[must_use]
-    pub const fn new_2(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a [u8]) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            segment_size: None,
-            d,
-        }
-    }
-
-    // TODO: Rename
-    #[must_use]
-    pub const fn new_2_with_segment_size(
-        src: SocketAddr,
-        dst: SocketAddr,
-        tos: IpTos,
-        segment_size: usize,
-        d: &'a [u8],
-    ) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            segment_size: Some(segment_size),
-            d,
-        }
-    }
-}
 
 impl<D> Datagram<D> {
     #[must_use]
@@ -87,8 +43,33 @@ impl<D> Datagram<D> {
     }
 
     #[must_use]
-    pub const fn segment_size(&self) -> Option<usize> {
+    pub const fn segment_size(&self) -> usize {
         self.segment_size
+    }
+}
+
+impl<D: AsRef<[u8]>> Datagram<D> {
+    pub fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        d: D,
+        segment_size: Option<usize>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size: segment_size.unwrap_or_else(|| d.as_ref().len()),
+            d,
+        }
+    }
+    pub fn iter_segments(&self) -> impl Iterator<Item = &[u8]> {
+        self.d.as_ref().chunks(self.segment_size)
+    }
+
+    pub fn num_segments(&self) -> usize {
+        self.d.as_ref().len().div_ceil(self.segment_size)
     }
 }
 
@@ -153,6 +134,12 @@ impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
             self.dst,
             hex_with_len(&self.d)
         )
+    }
+}
+
+impl From<Datagram> for Vec<u8> {
+    fn from(value: Datagram) -> Self {
+        value.d
     }
 }
 

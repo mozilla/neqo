@@ -1289,12 +1289,12 @@ impl Connection {
         remaining: usize,
         now: Instant,
     ) {
-        let d = Datagram::<Vec<u8>>::new(
+        let d = Datagram::new(
             d.source(),
             d.destination(),
             d.tos(),
-            // TODO: can remaining ever be larger than len? See previous implementation.
-            &d[d.len() - remaining..],
+            d[d.len() - remaining..].to_vec(),
+            None,
         );
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
@@ -1543,10 +1543,7 @@ impl Connection {
     // TODO: Reconsider allow.
     #[allow(clippy::too_many_lines)]
     fn input_path(&mut self, path: &PathRef, d: Datagram<&[u8]>, now: Instant) -> Res<()> {
-        for mut slc in d
-            .as_ref()
-            .chunks(d.segment_size().unwrap_or_else(|| d.as_ref().len()))
-        {
+        for mut slc in d.iter_segments() {
             let mut dcid = None;
 
             qtrace!([self], "{} input {}", path.borrow(), hex(&*d));

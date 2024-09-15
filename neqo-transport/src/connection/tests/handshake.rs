@@ -637,7 +637,7 @@ fn corrupted_initial() {
         .find(|(_, &v)| v != 0)
         .unwrap();
     corrupted[idx] ^= 0x76;
-    let dgram = Datagram::new(d.source(), d.destination(), d.tos(), corrupted);
+    let dgram = Datagram::new(d.source(), d.destination(), d.tos(), corrupted, None);
     server.process_input(&dgram, now());
     // The server should have received two packets,
     // the first should be dropped, the second saved.
@@ -733,7 +733,7 @@ fn extra_initial_invalid_cid() {
     let mut copy = hs.to_vec();
     assert_ne!(copy[5], 0); // The DCID should be non-zero length.
     copy[6] ^= 0xc4;
-    let dgram_copy = Datagram::new(hs.destination(), hs.source(), hs.tos(), copy);
+    let dgram_copy = Datagram::new(hs.destination(), hs.source(), hs.tos(), copy, None);
     let nothing = client.process_alloc(Some(&dgram_copy), now).dgram();
     assert!(nothing.is_none());
 }
@@ -851,7 +851,8 @@ fn drop_initial_packet_from_wrong_address() {
         SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
         p.tos(),
-        &p[..],
+        p.into(),
+        None,
     );
 
     let out = client.process_alloc(Some(&dgram), now());
@@ -878,7 +879,8 @@ fn drop_handshake_packet_from_wrong_address() {
         SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)), 443),
         p.destination(),
         p.tos(),
-        &p[..],
+        p.into(),
+        None,
     );
 
     let out = client.process_alloc(Some(&dgram), now());
