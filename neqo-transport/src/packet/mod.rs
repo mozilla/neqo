@@ -1498,22 +1498,21 @@ mod tests {
     #[test]
     fn build_vn() {
         fixture_init();
-        // TODO
-        // let mut buf = vec![];
-        // let mut vn = PacketBuilder::version_negotiation(
-        //     SERVER_CID,
-        //     CLIENT_CID,
-        //     0x0a0a_0a0a,
-        //     &Version::all(),
-        //     &mut buf,
-        // );
-        // // Erase randomness from greasing...
-        // assert_eq!(vn.len(), SAMPLE_VN.len());
-        // vn[0] &= 0x80;
-        // for v in vn.iter_mut().skip(SAMPLE_VN.len() - 4) {
-        //     *v &= 0x0f;
-        // }
-        // assert_eq!(&vn, &SAMPLE_VN);
+        let mut buf = vec![];
+        let vn = PacketBuilder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+            &mut buf,
+        );
+        // Erase randomness from greasing...
+        assert_eq!(vn.len(), SAMPLE_VN.len());
+        buf[0] &= 0x80;
+        for v in buf.iter_mut().skip(SAMPLE_VN.len() - 4) {
+            *v &= 0x0f;
+        }
+        assert_eq!(&buf, &SAMPLE_VN);
     }
 
     #[test]
