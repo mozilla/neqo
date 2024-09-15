@@ -12,9 +12,9 @@ use crate::{hex_with_len, IpTos};
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
-    /// The segment size if this transmission contains multiple datagrams.
-    /// This is `None` if the [`Datagram`] only contains a single datagram
-    // TODO: Need to be an option?
+    /// The size of each segment within the [`Datagram`]. All segments, but the
+    /// last, have the same size. The last segment can be shorter than
+    /// [`Datagram::segment_size`].
     segment_size: usize,
     tos: IpTos,
     d: D,
