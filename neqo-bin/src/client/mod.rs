@@ -382,7 +382,6 @@ struct Runner<'a, H: Handler> {
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
-    recv_buf: Vec<u8>,
     send_buf: Vec<u8>,
 }
 
@@ -428,17 +427,22 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn process(&mut self) -> Result<(), io::Error> {
         let mut should_read = true;
         loop {
-            // TODO: Cleanup?
-            let dgram = should_read
-                .then(|| self.socket.recv(&self.local_addr, &mut self.recv_buf))
-                .transpose()?
-                .flatten();
-            should_read = dgram.is_some();
+            let output = crate::RECV_BUF.with_borrow_mut(
+                |recv_buf| -> Result<Output<&[u8]>, io::Error> {
+                    // TODO: Cleanup?
+                    let dgram = should_read
+                        .then(|| self.socket.recv(&self.local_addr, recv_buf))
+                        .transpose()?
+                        .flatten();
+                    should_read = dgram.is_some();
 
-            match self
-                .client
-                .process(dgram, Instant::now(), &mut self.send_buf)
-            {
+                    Ok(self
+                        .client
+                        .process(dgram, Instant::now(), &mut self.send_buf))
+                },
+            )?;
+
+            match output {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
                     self.socket.send(dgram)?;
@@ -576,7 +580,6 @@ pub async fn client(mut args: Args) -> Res<()> {
                     local_addr: real_local,
                     socket: &mut socket,
                     timeout: None,
-                    recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
                     send_buf: Vec::new(),
                 }
                 .run()
@@ -594,7 +597,6 @@ pub async fn client(mut args: Args) -> Res<()> {
                     local_addr: real_local,
                     socket: &mut socket,
                     timeout: None,
-                    recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
                     send_buf: Vec::new(),
                 }
                 .run()

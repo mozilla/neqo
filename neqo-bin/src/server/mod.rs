@@ -210,7 +210,6 @@ pub struct ServerRunner {
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
-    recv_buf: Vec<u8>,
     send_buf: Vec<u8>,
 }
 
@@ -226,7 +225,6 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
-            recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
             send_buf: vec![],
         }
     }
@@ -234,22 +232,26 @@ impl ServerRunner {
     // TODO: Could as well call it UDP IO now, given that it does both in and output.
     async fn process(&mut self, mut inx: Option<usize>) -> Result<(), io::Error> {
         loop {
-            let mut dgram = if let Some(i) = inx {
-                let (host, socket) = self.sockets.get_mut(i).unwrap();
-                let dgram = socket.recv(host, &mut self.recv_buf)?;
-                if dgram.is_none() {
-                    // TODO: Better way to not try reading again?
-                    inx.take();
-                }
-                dgram
-            } else {
-                None
-            };
+            let output = crate::RECV_BUF.with_borrow_mut(
+                |recv_buf| -> Result<Output<&[u8]>, io::Error> {
+                    let mut dgram = if let Some(i) = inx {
+                        let (host, socket) = self.sockets.get_mut(i).unwrap();
+                        let dgram = socket.recv(host, recv_buf)?;
+                        if dgram.is_none() {
+                            // TODO: Better way to not try reading again?
+                            inx.take();
+                        }
+                        dgram
+                    } else {
+                        None
+                    };
+                    Ok(self
+                        .server
+                        .process(dgram.take(), (self.now)(), &mut self.send_buf))
+                },
+            )?;
 
-            match self
-                .server
-                .process(dgram.take(), (self.now)(), &mut self.send_buf)
-            {
+            match output {
                 Output::Datagram(dgram) => {
                     let socket = {
                         let addr = dgram.source();
