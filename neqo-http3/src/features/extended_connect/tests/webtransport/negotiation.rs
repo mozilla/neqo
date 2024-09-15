@@ -253,7 +253,7 @@ fn wrong_setting_value() {
 
     let control = server.stream_create(StreamType::UniDi).unwrap();
     server.stream_send(control, CONTROL_STREAM_TYPE).unwrap();
-    //  a settings frame and send it.
+    //  Encode a settings frame and send it.
     let mut write_buffer = vec![];
     let mut enc = Encoder::new(&mut write_buffer);
     let settings = HFrame::Settings {
