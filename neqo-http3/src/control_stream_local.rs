@@ -81,7 +81,6 @@ impl ControlStreamLocal {
                 let mut write_buffer = vec![];
                 let mut enc = Encoder::new(&mut write_buffer);
                 hframe.encode(&mut enc);
-                // TODO: Could send_atomic as well take write_buffer?
                 if self.stream.send_atomic(conn, enc.as_ref())? {
                     stream.priority_update_sent();
                 } else {
