@@ -124,6 +124,10 @@ impl TryFrom<Http3State> for CloseState {
 }
 
 impl super::Client for Http3Client {
+    fn is_closed(&self) -> Result<CloseState, CloseReason> {
+        self.state().try_into()
+    }
+
     fn process<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
@@ -131,10 +135,6 @@ impl super::Client for Http3Client {
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         self.process(input, now, write_buffer)
-    }
-
-    fn is_closed(&self) -> Result<CloseState, CloseReason> {
-        self.state().try_into()
     }
 
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
