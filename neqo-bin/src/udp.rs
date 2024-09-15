@@ -62,7 +62,7 @@ impl Socket {
     ) -> Result<Option<Datagram<&'a [u8]>>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
-                neqo_udp::recv_inner_2(local_address, &self.state, &self.inner, recv_buf)
+                neqo_udp::recv_inner(local_address, &self.state, &self.inner, recv_buf)
             })
             .map(Some)
             .or_else(|e| {

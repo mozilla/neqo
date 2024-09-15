@@ -14,6 +14,7 @@ pub struct Datagram<D = Vec<u8>> {
     dst: SocketAddr,
     /// The segment size if this transmission contains multiple datagrams.
     /// This is `None` if the [`Datagram`] only contains a single datagram
+    // TODO: Need to be an option?
     segment_size: Option<usize>,
     tos: IpTos,
     d: D,
