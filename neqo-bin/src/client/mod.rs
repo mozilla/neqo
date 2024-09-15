@@ -409,7 +409,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
-            self.process().await?;
+            self.process(false).await?;
             if self.client.has_events() {
                 continue;
             }
@@ -430,7 +430,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
-                Ready::Socket => {}
+                Ready::Socket => self.process(true).await?,
                 Ready::Timeout => {
                     self.timeout = None;
                 }
@@ -444,8 +444,7 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(self.handler.take_token())
     }
 
-    async fn process(&mut self) -> Result<(), io::Error> {
-        let mut should_read = true;
+    async fn process(&mut self, mut should_read: bool) -> Result<(), io::Error> {
         loop {
             let dgram = should_read
                 .then(|| self.socket.recv(&self.local_addr, &mut self.recv_buf))
