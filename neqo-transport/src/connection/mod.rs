@@ -600,7 +600,7 @@ impl Connection {
             || Duration::from_millis(0),
             |p| {
                 let rtt = p.borrow().rtt().estimate();
-                if p.borrow().rtt().first_sample_time().is_none() {
+                if self.stats.borrow().frame_rx.ack == 0 {
                     // When we have no actual RTT sample, do not encode a guestimated RTT larger
                     // than the default initial RTT. (The guess can be very large under lossy
                     // conditions.)
