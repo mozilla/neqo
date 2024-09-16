@@ -59,9 +59,6 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
-    # Ideally, we'd use actions/checkout. But things are sufficiently flaky that we're better off
-    # trying both hg and git.
-
     - name: Use sccache
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
@@ -82,31 +79,31 @@ runs:
         echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
 
     - name: Checkout NSS
-      shell: bash
       if: env.BUILD_NSS == '1'
-      run: |
-        git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss" || \
-          hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss"
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        repository: nss-dev/nss
+        path: nss
 
     - name: Checkout NSPR
-      shell: bash
       if: env.BUILD_NSS == '1'
-      run: |
-        git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr" || \
-          hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr"
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        repository: nss-dev/nspr
+        path: nspr
 
     - name: Install build dependencies (Linux)
       shell: bash
       if: runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       env:
         DEBIAN_FRONTEND: noninteractive
-      run: sudo apt-get install -y --no-install-recommends git mercurial gyp ninja-build
+      run: sudo apt-get install -y --no-install-recommends gyp ninja-build
 
     - name: Install build dependencies (MacOS)
       shell: bash
       if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
       run: |
-        brew install mercurial ninja
+        brew install ninja
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install --user --break-system-packages -r req.txt
         echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
@@ -120,7 +117,7 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip mercurial nsinstall
+        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall
         echo "gyp-next>=0.18.1" > req.txt
         python3 -m pip install -r req.txt
 

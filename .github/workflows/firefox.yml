@@ -63,6 +63,12 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install -y mozillabuild
 
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
@@ -110,8 +116,10 @@ jobs:
           EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
+          # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
+          # (Capitalization "WindowsSdkDir" matters)
+          [ "${{ runner.os }}" == "Windows" ] && unset WindowsSdkDir
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
-          exit 0
 
       - name: Export binary
         id: upload
@@ -132,7 +140,7 @@ jobs:
 
   comment:
     name: Comment on PR
-    if: always()
+    if: github.event.pull_request.draft == false
     needs: firefox
     runs-on: ubuntu-latest
     steps:
