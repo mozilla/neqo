@@ -3436,7 +3436,7 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn send_datagram(&mut self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
+    pub fn send_datagram(&mut self, buf: Vec<u8>, id: impl Into<DatagramTracking>) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }
