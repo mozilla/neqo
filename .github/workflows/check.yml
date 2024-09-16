@@ -28,7 +28,7 @@ jobs:
         # Don't increase beyond what Firefox is currently using:
         # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
         # Keep in sync with Cargo.toml
-        rust-toolchain: [1.76.0, stable, nightly-2024-09-01]
+        rust-toolchain: [1.76.0, stable, nightly]
         type: [debug]
         include:
           - os: ubuntu-latest
