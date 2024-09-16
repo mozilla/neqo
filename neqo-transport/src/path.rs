@@ -1040,6 +1040,18 @@ impl Path {
         }
     }
 
+    /// Initiate a congestion response.
+    ///
+    /// Returns true if the congestion window was reduced.
+    pub fn on_congestion_event(&mut self, lost_packets: &[SentPacket], stats: &mut Stats) -> bool {
+        if let Some(last) = lost_packets.last() {
+            self.ecn_info.on_packets_lost(lost_packets, stats);
+            self.sender.on_congestion_event(last)
+        } else {
+            false
+        }
+    }
+
     /// Determine whether we should be setting a PTO for this path. This is true when either the
     /// path is valid or when there is enough remaining in the amplification limit to fit a
     /// full-sized path (i.e., the path MTU).
