@@ -67,8 +67,8 @@ runs:
       run: |
         if [ "${{ runner.os }}" != "Windows" ]; then
           # TODO: Figure out how to make this work on Windows
-          echo "CC=sccache cc" >> "$GITHUB_ENV"
-          echo "CXX=sccache c++" >> "$GITHUB_ENV"
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
         fi
         echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
@@ -157,6 +157,7 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
