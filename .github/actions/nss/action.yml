@@ -64,7 +64,6 @@ runs:
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nss
-        # ref: c631e9cb5ed1806038f7b85fbbc825f856c9d133 # later revisions hang when building on Windows
         path: nss
 
     - name: Checkout NSPR
@@ -139,7 +138,7 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v -j 1
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
