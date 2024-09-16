@@ -140,7 +140,7 @@ jobs:
 
   comment:
     name: Comment on PR
-    if: always()
+    if: github.event.pull_request.draft == false
     needs: firefox
     runs-on: ubuntu-latest
     steps:
