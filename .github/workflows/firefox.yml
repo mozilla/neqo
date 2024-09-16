@@ -116,8 +116,10 @@ jobs:
           EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
+          # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
+          # (Capitalization "WindowsSdkDir" matters)
+          [ "${{ runner.os }}" == "Windows" ] && unset WindowsSdkDir
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
-          exit 0
 
       - name: Export binary
         id: upload
@@ -138,7 +140,7 @@ jobs:
 
   comment:
     name: Comment on PR
-    if: always()
+    if: github.event.pull_request.draft == false
     needs: firefox
     runs-on: ubuntu-latest
     steps:
