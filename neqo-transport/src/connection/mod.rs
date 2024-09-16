@@ -48,7 +48,7 @@ use crate::{
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
     recv_stream::RecvStreamStats,
-    rtt::{RttEstimate, GRANULARITY},
+    rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
     send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -594,9 +594,25 @@ impl Connection {
     fn make_resumption_token(&mut self) -> ResumptionToken {
         debug_assert_eq!(self.role, Role::Client);
         debug_assert!(self.crypto.has_resumption_token());
+        // Values less than GRANULARITY are ignored when using the token, so use 0 where needed.
         let rtt = self.paths.primary().map_or_else(
-            || RttEstimate::default().estimate(),
-            |p| p.borrow().rtt().estimate(),
+            // If we don't have a path, we don't have an RTT.
+            || Duration::from_millis(0),
+            |p| {
+                let rtt = p.borrow().rtt().estimate();
+                if p.borrow().rtt().first_sample_time().is_none() {
+                    // When we have no actual RTT sample, do not encode a guestimated RTT larger
+                    // than the default initial RTT. (The guess can be very large under lossy
+                    // conditions.)
+                    if rtt < INITIAL_RTT {
+                        rtt
+                    } else {
+                        Duration::from_millis(0)
+                    }
+                } else {
+                    rtt
+                }
+            },
         );
 
         self.crypto
