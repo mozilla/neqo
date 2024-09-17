@@ -59,6 +59,25 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
+    - name: Use sccache
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+
+    - name: Enable sscache
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" != "Windows" ]; then
+          # TODO: Figure out how to make this work on Windows
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        if [ "$GITHUB_WORKFLOW" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+
     - name: Checkout NSS
       if: env.BUILD_NSS == '1'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -138,6 +157,7 @@ runs:
         echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
         echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
       env:
         NSS_DIR: ${{ github.workspace }}/nss
