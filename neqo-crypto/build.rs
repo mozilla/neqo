@@ -317,7 +317,10 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "The NSS_DIR environment variable is expected to be an absolute path."
     );
 
-    build_nss(nss.clone());
+    // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
+    if env::var("NSS_PREBUILT").unwrap_or_default() != "1" {
+        build_nss(nss.clone());
+    }
 
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
