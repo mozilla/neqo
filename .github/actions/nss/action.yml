@@ -169,8 +169,23 @@ runs:
         # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
         rm /usr/bin/link.exe || true
 
+    - name: Set up environment
+      shell: bash
+      run: |
+        NSS_TARGET="${{ inputs.type }}"
+        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
+        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
+        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+      env:
+        NSS_DIR: ${{ github.workspace }}/nss
+        NSPR_DIR: ${{ github.workspace }}/nspr
+
     - name: Build
       shell: bash
+      if: env.BUILD_NSS == '1'
       run: |
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
@@ -179,15 +194,5 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        NSS_TARGET="${{ inputs.type }}"
-        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
-        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
-        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
-        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
-        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
-        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
         [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-        [ "$BUILD_NSS" == "1" ] && $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-      env:
-        NSS_DIR: ${{ github.workspace }}/nss
-        NSPR_DIR: ${{ github.workspace }}/nspr
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
