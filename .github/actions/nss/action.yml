@@ -118,7 +118,6 @@ runs:
         github-token: ${{ inputs.token }}
 
     - name: Install build dependencies (Linux)
-      needs: prebuilt
       shell: bash
       if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       env:
@@ -126,7 +125,6 @@ runs:
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
 
     - name: Install build dependencies (MacOS)
-      needs: prebuilt
       shell: bash
       if: needs.prebuilt.outputs.download-path == '' && runner.os == 'MacOS' && env.BUILD_NSS == '1'
       run: |
@@ -136,7 +134,6 @@ runs:
         echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
 
     - name: Install build dependencies (Windows)
-      needs: prebuilt
       shell: bash
       if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
@@ -150,14 +147,12 @@ runs:
         python3 -m pip install -r req.txt
 
     - name: Set up MSVC (Windows)
-      needs: prebuilt
       if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Windows' && env.BUILD_NSS == '1'
       uses: ilammy/msvc-dev-cmd@v1
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
     - name: Set up build environment (Windows)
-      needs: prebuilt
       shell: bash
       if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
@@ -170,7 +165,6 @@ runs:
         rm /usr/bin/link.exe || true
 
     - name: Build
-      needs: prebuilt
       shell: bash
       if: needs.prebuilt.outputs.download-path == '' && env.BUILD_NSS == '1'
       run: |
@@ -195,7 +189,6 @@ runs:
         NSPR_DIR: ${{ github.workspace }}/nspr
 
     - name: Cache NSS build
-      needs: prebuilt
       if: needs.prebuilt.outputs.download-path == '' && env.BUILD_NSS == '1'
       uses: actions/upload-artifact@v4
       with:
