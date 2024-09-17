@@ -60,6 +60,10 @@ runs:
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
     - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the RUSTC_WRAPPER environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      if: env.RUSTC_WRAPPER != 'sccache'
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
