@@ -107,14 +107,14 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: env.BUILD_NSS == '1'
+      if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
         path: nss/dist
         key: nss-${{ runner.os }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
 
-    -name: Check if build is needed
-      if: env.BUILD_NSS == '1'
+    - name: Check if build is needed
+      if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       shell: bash
       run: |
         if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
