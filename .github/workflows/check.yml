@@ -61,6 +61,7 @@ jobs:
         uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: |
