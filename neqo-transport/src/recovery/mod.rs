@@ -153,11 +153,6 @@ impl LossRecoverySpace {
         }
     }
 
-    #[must_use]
-    pub const fn space(&self) -> PacketNumberSpace {
-        self.space
-    }
-
     /// Find the time we sent the first packet that is lower than the
     /// largest acknowledged and that isn't yet declared lost.
     /// Use the value we prepared earlier in `detect_lost_packets`.
@@ -871,14 +866,14 @@ impl LossRecovery {
             let pto = Self::pto_period_inner(
                 primary_path.borrow().rtt(),
                 self.pto_state.as_ref(),
-                space.space(),
+                space.space,
                 self.fast_pto,
             );
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(
                 space.largest_acked_sent_time,
-                space.space(),
+                space.space,
                 &lost_packets[first..],
                 &mut self.stats.borrow_mut(),
                 now,
