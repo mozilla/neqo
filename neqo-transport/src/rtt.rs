@@ -108,14 +108,16 @@ impl RttEstimate {
         source: RttSource,
         now: Instant,
     ) {
+        debug_assert!(source >= self.best_source);
+        self.best_source = max(self.best_source, source);
+
         // Limit ack delay by max_ack_delay if confirmed.
         let mad = self.ack_delay.max();
-        let ack_delay = if source == RttSource::AckConfirmed && ack_delay > mad {
+        let ack_delay = if self.best_source == RttSource::AckConfirmed && ack_delay > mad {
             mad
         } else {
             ack_delay
         };
-        self.best_source = max(self.best_source, source);
 
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, rtt_sample);
