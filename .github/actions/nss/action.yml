@@ -8,9 +8,6 @@ inputs:
   minimum-version:
     description: "Minimum required version of NSS"
     required: true
-  token:
-    description: 'A Github PAT'
-    required: true
 
 runs:
   using: composite
@@ -108,25 +105,33 @@ runs:
         echo "NSS_HEAD=$NSS_HEAD" >> "$GITHUB_ENV"
         echo "NSPR_HEAD=$NSPR_HEAD" >> "$GITHUB_ENV"
 
-    - name: Download prebuilt NSS
+    - name: Cache NSS
+      id: cache
       if: env.BUILD_NSS == '1'
-      id: prebuilt
-      uses: actions/download-artifact@v4
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
-        name: nss-{{ runner.os }}-{{ env.NSS_HEAD }}-{{ env.NSPR_HEAD }}
         path: nss/dist
-        github-token: ${{ inputs.token }}
+        key: nss-${{ runner.os }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
+
+    -name: Check if build is needed
+      if: env.BUILD_NSS == '1'
+      shell: bash
+      run: |
+        if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
+          echo "NSS build not needed"
+          echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        fi
 
     - name: Install build dependencies (Linux)
       shell: bash
-      if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      if: runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       env:
         DEBIAN_FRONTEND: noninteractive
       run: sudo apt-get install -y --no-install-recommends gyp ninja-build
 
     - name: Install build dependencies (MacOS)
       shell: bash
-      if: needs.prebuilt.outputs.download-path == '' && runner.os == 'MacOS' && env.BUILD_NSS == '1'
+      if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
       run: |
         brew install ninja
         echo "gyp-next>=0.18.1" > req.txt
@@ -135,7 +140,7 @@ runs:
 
     - name: Install build dependencies (Windows)
       shell: bash
-      if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Windows' && env.BUILD_NSS == '1'
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
         # shellcheck disable=SC2028
         {
@@ -147,14 +152,14 @@ runs:
         python3 -m pip install -r req.txt
 
     - name: Set up MSVC (Windows)
-      if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Windows' && env.BUILD_NSS == '1'
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       uses: ilammy/msvc-dev-cmd@v1
       # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
       # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
     - name: Set up build environment (Windows)
       shell: bash
-      if: needs.prebuilt.outputs.download-path == '' && runner.os == 'Windows' && env.BUILD_NSS == '1'
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
       run: |
         {
           echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
@@ -166,7 +171,7 @@ runs:
 
     - name: Build
       shell: bash
-      if: needs.prebuilt.outputs.download-path == '' && env.BUILD_NSS == '1'
+      if: env.BUILD_NSS == '1'
       run: |
         if [ "${{ inputs.type }}" != "Debug" ]; then
           # We want to do an optimized build for accurate CPU profiling, but
@@ -187,11 +192,3 @@ runs:
       env:
         NSS_DIR: ${{ github.workspace }}/nss
         NSPR_DIR: ${{ github.workspace }}/nspr
-
-    - name: Cache NSS build
-      if: needs.prebuilt.outputs.download-path == '' && env.BUILD_NSS == '1'
-      uses: actions/upload-artifact@v4
-      with:
-        name: nss-{{ runner.os }}-{{ env.NSS_HEAD }}-{{ env.NSPR_HEAD }}
-        path: nss/dist
-        github-token: ${{ inputs.token }}
