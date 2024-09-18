@@ -47,8 +47,6 @@ runs:
       if: env.RUSTC_WRAPPER != 'sccache' && runner.environment != 'github-hosted'
       shell: bash
       run: |
-        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         if [ "$GITHUB_WORKFLOW" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi

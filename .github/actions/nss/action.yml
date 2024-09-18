@@ -83,8 +83,6 @@ runs:
         if [ "$GITHUB_WORKFLOW" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
-        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
 
     - name: Checkout NSS
       if: env.BUILD_NSS == '1'
@@ -115,7 +113,7 @@ runs:
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
         path: dist
-        key: nss-${{ runner.os }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
+        key: nss-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
 
     - name: Check if build is needed
       if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
