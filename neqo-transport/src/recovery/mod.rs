@@ -958,7 +958,6 @@ mod tests {
         ecn::EcnCount,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
-        rtt::RttEstimate,
         stats::{Stats, StatsCell},
     };
 
@@ -969,8 +968,8 @@ mod tests {
 
     const ON_SENT_SIZE: usize = 100;
     /// An initial RTT for using with `setup_lr`.
-    const TEST_RTT: Duration = ms(80);
-    const TEST_RTTVAR: Duration = ms(40);
+    const TEST_RTT: Duration = ms(7000);
+    const TEST_RTTVAR: Duration = ms(3500);
 
     struct Fixture {
         lr: LossRecovery,
@@ -1041,6 +1040,7 @@ mod tests {
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
             );
             path.set_primary(true);
+            path.rtt_mut().set_initial(TEST_RTT);
             Self {
                 lr: LossRecovery::new(StatsCell::default(), FAST_PTO_SCALE),
                 path: Rc::new(RefCell::new(path)),
@@ -1518,13 +1518,13 @@ mod tests {
             ON_SENT_SIZE,
         ));
 
-        assert_eq!(lr.pto_time(PacketNumberSpace::ApplicationData), None);
+        assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_none()); // FIXME
         lr.discard(PacketNumberSpace::Initial, pn_time(1));
-        assert_eq!(lr.pto_time(PacketNumberSpace::ApplicationData), None);
+        assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_none()); // FIXME
 
         // Expiring state after the PTO on the ApplicationData space has
         // expired should result in setting a PTO state.
-        let default_pto = RttEstimate::default().pto(true);
+        let default_pto = lr.path.borrow().rtt().pto(true);
         let expected_pto = pn_time(2) + default_pto;
         lr.discard(PacketNumberSpace::Handshake, expected_pto);
         let profile = lr.send_profile(now());
@@ -1556,7 +1556,7 @@ mod tests {
             ON_SENT_SIZE,
         ));
 
-        let handshake_pto = RttEstimate::default().pto(false);
+        let handshake_pto = lr.path.borrow().rtt().pto(false);
         let expected_pto = now() + handshake_pto;
         assert_eq!(lr.pto_time(PacketNumberSpace::Initial), Some(expected_pto));
         let profile = lr.send_profile(now());
