@@ -90,21 +90,21 @@ runs:
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nss
-        path: nss
+        path: ../nss
 
     - name: Checkout NSPR
       if: env.BUILD_NSS == '1'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nspr
-        path: nspr
+        path: ../nspr
 
     - name: Get head revisions
       if: env.BUILD_NSS == '1'
       shell: bash
       run: |
-        NSS_HEAD=$(git -C nss rev-parse HEAD)
-        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
+        NSS_HEAD=$(git -C ../nss rev-parse HEAD)
+        NSPR_HEAD=$(git -C ../nspr rev-parse HEAD)
         echo "NSS_HEAD=$NSS_HEAD" >> "$GITHUB_ENV"
         echo "NSPR_HEAD=$NSPR_HEAD" >> "$GITHUB_ENV"
 
@@ -113,7 +113,7 @@ runs:
       if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
-        path: dist
+        path: ../dist
         key: nss-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
 
     - name: Check if build is needed
@@ -186,8 +186,8 @@ runs:
         echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
         echo "NSS_PREBUILT=1" >> "$GITHUB_ENV"
       env:
-        NSS_DIR: ${{ github.workspace }}/nss
-        NSPR_DIR: ${{ github.workspace }}/nspr
+        NSS_DIR: ${{ github.workspace }}/../nss
+        NSPR_DIR: ${{ github.workspace }}/../nspr
 
     - name: Build
       shell: bash
