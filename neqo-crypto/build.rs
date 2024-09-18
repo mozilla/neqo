@@ -318,7 +318,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
     );
 
     // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
-    if env::var("NSS_PREBUILT").unwrap_or_default() != "1" {
+    if env::var("NSS_PREBUILT").is_ok() {
         build_nss(nss.clone());
     }
 
