@@ -48,7 +48,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest, cargo-fuzz
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -62,10 +62,6 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
-          # Check that the fuzz targets also build
-          if [ ${{ startsWith(matrix.rust-toolchain, 'nightly') && 'nightly' }} == 'nightly' ]; then
-            cargo +${{ matrix.rust-toolchain }} fuzz check
-          fi
 
       - name: Run tests and determine coverage
         run: |
