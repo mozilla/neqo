@@ -27,7 +27,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           components: clippy
-          tools: cargo-hack, cargo-fuzz
+          tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version

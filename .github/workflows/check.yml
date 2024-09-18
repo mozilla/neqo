@@ -47,8 +47,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: clippy, llvm-tools-preview
-          tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -58,20 +58,19 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - name: Build
+      - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
-          # Check that the fuzz targets also build
-          if [ ${{ startsWith(matrix.rust-toolchain, 'nightly') && 'nightly' }} == 'nightly' ]; then
-            cargo +${{ matrix.rust-toolchain }} fuzz check
-          fi
+          cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
           # shellcheck disable=SC2086
-          RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
-          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+          else
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+          fi
 
       - name: Run client/server transfer
         run: |

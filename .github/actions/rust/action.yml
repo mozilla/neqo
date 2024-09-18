@@ -21,11 +21,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Upgrade rustup (MacOS)
-      shell: bash
-      if: runner.os == 'MacOS'
-      run: brew update && brew upgrade rustup
-
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
@@ -35,21 +30,24 @@ runs:
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if
-      # it's already installed by checking if the RUSTC_WRAPPER environment variable is set
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
       # (which every "use" of this action needs to therefore set)
-      if: env.RUSTC_WRAPPER != 'sccache'
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted'
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
+      if: runner.environment != 'github-hosted'
       shell: bash
       run: |
-        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-        if [ "$GITHUB_WORKFLOW" ]; then
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-        fi
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
         echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'
