@@ -27,7 +27,7 @@ use crate::{
     packet::PacketBuilder,
     pmtud::Pmtud,
     recovery::{RecoveryToken, SentPacket},
-    rtt::RttEstimate,
+    rtt::{RttEstimate, RttSource},
     sender::PacketSender,
     stats::FrameStats,
     tracking::PacketNumberSpace,
@@ -984,7 +984,7 @@ impl Path {
                 &self.qlog,
                 now - sent.time_sent(),
                 Duration::new(0, 0),
-                false,
+                RttSource::Guesstimate,
                 now,
             );
         }

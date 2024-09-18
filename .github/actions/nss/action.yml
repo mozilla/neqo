@@ -59,6 +59,32 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: env.SCCACHE_ENABLED != '1' && env.BUILD_NSS == '1' && runner.environment != 'github-hosted'
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+
+    - name: Enable sscache
+      if: env.BUILD_NSS == '1' && runner.environment != 'github-hosted'
+      shell: bash
+      run: |
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
+        if [ "${{ runner.os }}" != "Windows" ]; then
+          # TODO: Figure out how to make this work on Windows
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
+
     - name: Checkout NSS
       if: env.BUILD_NSS == '1'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -72,6 +98,34 @@ runs:
       with:
         repository: nss-dev/nspr
         path: nspr
+
+    - name: Get head revisions
+      if: env.BUILD_NSS == '1'
+      shell: bash
+      run: |
+        NSS_HEAD=$(git -C nss rev-parse HEAD)
+        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
+        echo "NSS_HEAD=$NSS_HEAD" >> "$GITHUB_ENV"
+        echo "NSPR_HEAD=$NSPR_HEAD" >> "$GITHUB_ENV"
+
+    - name: Cache NSS
+      id: cache
+      if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+      with:
+        path: dist
+        key: nss-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
+
+    - name: Check if build is needed
+      if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      shell: bash
+      run: |
+        if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
+          echo "Using cached prebuilt NSS"
+          echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        else
+          echo "Building NSS from source"
+        fi
 
     - name: Install build dependencies (Linux)
       shell: bash
@@ -120,6 +174,21 @@ runs:
         # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
         rm /usr/bin/link.exe || true
 
+    - name: Set up environment
+      shell: bash
+      run: |
+        NSS_TARGET="${{ inputs.type }}"
+        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
+        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
+        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        echo "NSS_PREBUILT=1" >> "$GITHUB_ENV"
+      env:
+        NSS_DIR: ${{ github.workspace }}/nss
+        NSPR_DIR: ${{ github.workspace }}/nspr
+
     - name: Build
       shell: bash
       if: env.BUILD_NSS == '1'
@@ -131,14 +200,5 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        NSS_TARGET="${{ inputs.type }}"
-        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
-        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
-        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
-        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
-        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
-        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-      env:
-        NSS_DIR: ${{ github.workspace }}/nss
-        NSPR_DIR: ${{ github.workspace }}/nspr
