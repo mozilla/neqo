@@ -47,7 +47,7 @@ runs:
       if: env.RUSTC_WRAPPER != 'sccache' && runner.environment != 'github-hosted'
       shell: bash
       run: |
-        if [ "$GITHUB_WORKFLOW" ]; then
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"

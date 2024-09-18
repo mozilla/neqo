@@ -80,7 +80,7 @@ runs:
         fi
         echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
         echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-        if [ "$GITHUB_WORKFLOW" ]; then
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
 

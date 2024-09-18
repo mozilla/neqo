@@ -47,8 +47,8 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: clippy, llvm-tools-preview
-          tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, '}} cargo-nextest, cargo-fuzz
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -70,7 +70,11 @@ jobs:
       - name: Run tests and determine coverage
         run: |
           # shellcheck disable=SC2086
-          RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+          else
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+          fi
           cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
