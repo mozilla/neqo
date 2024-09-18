@@ -786,19 +786,15 @@ impl LossRecovery {
 
     // Calculate PTO time for the given space.
     fn pto_time(&self, rtt: &RttEstimate, pn_space: PacketNumberSpace) -> Option<Instant> {
-        if self.confirmed_time.is_none() && pn_space == PacketNumberSpace::ApplicationData {
-            None
-        } else {
-            self.spaces
-                .get(pn_space)
-                .and_then(|space| space.pto_base_time().map(|t| t + self.pto_period(rtt)))
-        }
+        self.spaces
+            .get(pn_space)
+            .and_then(|space| space.pto_base_time().map(|t| t + self.pto_period(rtt)))
     }
 
     /// Find the earliest PTO time for all active packet number spaces.
     /// Ignore Application if either Initial or Handshake have an active PTO.
     fn earliest_pto(&self, rtt: &RttEstimate) -> Option<Instant> {
-        if self.confirmed_time.is_some() {
+        if self.confirmed() {
             self.pto_time(rtt, PacketNumberSpace::ApplicationData)
         } else {
             self.pto_time(rtt, PacketNumberSpace::Initial)
@@ -1518,9 +1514,9 @@ mod tests {
             ON_SENT_SIZE,
         ));
 
-        assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_none()); // FIXME
+        assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_some());
         lr.discard(PacketNumberSpace::Initial, pn_time(1));
-        assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_none()); // FIXME
+        assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_some());
 
         // Expiring state after the PTO on the ApplicationData space has
         // expired should result in setting a PTO state.
