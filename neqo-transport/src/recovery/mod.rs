@@ -877,14 +877,14 @@ impl LossRecovery {
             let pto = Self::pto_period_inner(
                 primary_path.borrow().rtt(),
                 self.pto_state.as_ref(),
-                space.space,
+                confirmed,
                 self.fast_pto,
             );
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(
                 space.largest_acked_sent_time,
-                space.space,
+                confirmed,
                 &lost_packets[first..],
                 &mut self.stats.borrow_mut(),
                 now,
