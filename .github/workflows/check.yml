@@ -71,7 +71,6 @@ jobs:
           else
             RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
           fi
-          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
 
       - name: Run client/server transfer
         run: |

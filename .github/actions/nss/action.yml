@@ -120,8 +120,10 @@ runs:
       shell: bash
       run: |
         if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
-          echo "NSS build not needed"
+          echo "Using cached prebuilt NSS"
           echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        else
+          echo "Building NSS from source"
         fi
 
     - name: Install build dependencies (Linux)

@@ -1,4 +1,4 @@
-name: Fuzz
+name: Fuzz & Bench
 on:
   workflow_dispatch:
   pull_request:
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  fuzz:
+  fuzz-bench:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -34,5 +34,6 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      # Check that the fuzz targets build
+      # Check that the fuzz and bench targets build
       - run: cargo fuzz check
+      - run: cargo bench --features bench --no-run
