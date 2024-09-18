@@ -7,6 +7,7 @@ on:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
+  workflow_dispatch:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -20,7 +21,6 @@ permissions:
 
 jobs:
   check:
-    name: Build & test
     strategy:
       fail-fast: false
       matrix:
@@ -28,7 +28,7 @@ jobs:
         # Don't increase beyond what Firefox is currently using:
         # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
         # Keep in sync with Cargo.toml
-        rust-toolchain: [1.76.0, stable, nightly-2024-09-01]
+        rust-toolchain: [1.76.0, stable, nightly]
         type: [debug]
         include:
           - os: ubuntu-latest
@@ -42,36 +42,35 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - name: Install Rust
-        uses: ./.github/actions/rust
+      - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
-          tools: cargo-llvm-cov, cargo-nextest, cargo-hack, cargo-fuzz, cargo-machete
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get minimum NSS version
-        id: nss-version
+      - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Install NSS
-        uses: ./.github/actions/nss
+      - uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - name: Build
+      - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
         run: |
           # shellcheck disable=SC2086
-          RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
-          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+          else
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+          fi
 
       - name: Run client/server transfer
         run: |
@@ -90,41 +89,7 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - name: Check formatting
-        run: |
-          if [ "${{ startsWith(matrix.rust-toolchain, 'nightly') && 'nightly' }}" != "nightly" ]; then
-            CONFIG_PATH="--config-path=$(mktemp)"
-          fi
-          # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
-        if: success() || failure()
-
-      - name: Check for unused dependencies
-        run: |
-          #  --with-metadata has false positives, see https://github.com/bnjbvr/cargo-machete/issues/127
-          cargo +${{ matrix.rust-toolchain }} machete
-
-      - name: Clippy
-        run: |
-          # Use cargo-hack to run clippy on each crate individually with its
-          # respective default features only. Can reveal warnings otherwise
-          # hidden given that a plain cargo clippy combines all features of the
-          # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
-          cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
-          # Check that the fuzz targets also build
-          if [ ${{ startsWith(matrix.rust-toolchain, 'nightly') && 'nightly' }} == 'nightly' ]; then
-            cargo +${{ matrix.rust-toolchain }} fuzz check
-          fi
-        if: success() || failure()
-
-      - name: Check rustdoc links
-        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
-        env:
-          RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
-        if: success() || failure()
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
+      - uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
         with:
           file: lcov.info
           fail_ci_if_error: false
@@ -135,6 +100,5 @@ jobs:
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
   bench:
-    name: "Benchmark"
     needs: [check]
     uses: ./.github/workflows/bench.yml

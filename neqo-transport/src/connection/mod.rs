@@ -595,19 +595,19 @@ impl Connection {
         debug_assert_eq!(self.role, Role::Client);
         debug_assert!(self.crypto.has_resumption_token());
         // Values less than GRANULARITY are ignored when using the token, so use 0 where needed.
-        let zero = Duration::from_millis(0);
         let rtt = self.paths.primary().map_or_else(
-            || zero,
+            // If we don't have a path, we don't have an RTT.
+            || Duration::from_millis(0),
             |p| {
                 let rtt = p.borrow().rtt().estimate();
-                // Do not encode a guestimated RTT if we have no actual samples and the guess is
-                // larger than the default initial RTT. (The guess can be very large under lossy
-                // conditions.)
-                if p.borrow().rtt().first_sample_time().is_none() {
+                if p.borrow().rtt().is_guesstimate() {
+                    // When we have no actual RTT sample, do not encode a guestimated RTT larger
+                    // than the default initial RTT. (The guess can be very large under lossy
+                    // conditions.)
                     if rtt < INITIAL_RTT {
                         rtt
                     } else {
-                        zero
+                        Duration::from_millis(0)
                     }
                 } else {
                     rtt
@@ -1419,7 +1419,7 @@ impl Connection {
                     && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
                 {
                     self.crypto.resend_unacked(PacketNumberSpace::Initial);
-                    self.drop_0rtt(now);
+                    self.resend_0rtt(now);
                 }
             }
             (PacketType::VersionNegotiation | PacketType::Retry | PacketType::OtherVersion, ..) => {
@@ -2873,7 +2873,7 @@ impl Connection {
                     self.crypto.resend_unacked(space);
                     if space == PacketNumberSpace::Initial {
                         self.crypto.resend_unacked(PacketNumberSpace::Handshake);
-                        self.drop_0rtt(now);
+                        self.resend_0rtt(now);
                     }
                 }
             }
@@ -3086,9 +3086,8 @@ impl Connection {
         stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
     }
 
-    // Tell 0-RTT packets that they were "lost".
-    fn drop_0rtt(&mut self, now: Instant) {
-        // Tell 0-RTT packets that they were "lost".
+    /// Tell 0-RTT packets that they were "lost".
+    fn resend_0rtt(&mut self, now: Instant) {
         if let Some(path) = self.paths.primary() {
             let dropped = self.loss_recovery.drop_0rtt(&path, now);
             self.handle_lost_packets(&dropped);
@@ -3101,9 +3100,8 @@ impl Connection {
             return;
         }
         qdebug!([self], "0-RTT rejected");
-        self.drop_0rtt(now);
+        self.resend_0rtt(now);
         self.streams.zero_rtt_rejected();
-
         self.crypto.states.discard_0rtt_keys();
         self.events.client_0rtt_rejected();
     }
@@ -3463,7 +3461,7 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn send_datagram(&mut self, buf: &[u8], id: impl Into<DatagramTracking>) -> Res<()> {
+    pub fn send_datagram(&mut self, buf: Vec<u8>, id: impl Into<DatagramTracking>) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
     }

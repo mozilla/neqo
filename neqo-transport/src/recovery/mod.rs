@@ -27,7 +27,7 @@ use crate::{
     packet::PacketNumber,
     path::{Path, PathRef},
     qlog::{self, QlogMetric},
-    rtt::RttEstimate,
+    rtt::{RttEstimate, RttSource},
     stats::{Stats, StatsCell},
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
 };
@@ -555,9 +555,13 @@ impl LossRecovery {
         now: Instant,
         ack_delay: Duration,
     ) {
-        let confirmed = self.confirmed_time.map_or(false, |t| t < send_time);
+        let source = if self.confirmed_time.map_or(false, |t| t < send_time) {
+            RttSource::AckConfirmed
+        } else {
+            RttSource::Ack
+        };
         if let Some(sample) = now.checked_duration_since(send_time) {
-            rtt.update(&self.qlog, sample, ack_delay, confirmed, now);
+            rtt.update(&self.qlog, sample, ack_delay, source, now);
         }
     }
 
@@ -873,14 +877,14 @@ impl LossRecovery {
             let pto = Self::pto_period_inner(
                 primary_path.borrow().rtt(),
                 self.pto_state.as_ref(),
-                confirmed,
+                space.space,
                 self.fast_pto,
             );
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(
                 space.largest_acked_sent_time,
-                confirmed,
+                space.space,
                 &lost_packets[first..],
                 &mut self.stats.borrow_mut(),
                 now,

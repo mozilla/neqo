@@ -36,7 +36,7 @@ use crate::{
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
-    tparams::{TransportParameter, MIN_ACK_DELAY},
+    tparams::{self, TransportParameter, MIN_ACK_DELAY},
     tracking::DEFAULT_ACK_DELAY,
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
     Version,
@@ -1351,5 +1351,29 @@ fn client_handshake_retransmits_identical() {
                 ..Default::default()
             }
         );
+    }
+}
+
+#[test]
+fn grease_quic_bit_transport_parameter() {
+    fn get_remote_tp(conn: &Connection) -> bool {
+        conn.tps
+            .borrow()
+            .remote
+            .as_ref()
+            .unwrap()
+            .get_empty(tparams::GREASE_QUIC_BIT)
+    }
+
+    for client_grease in [true, false] {
+        for server_grease in [true, false] {
+            let mut client = new_client(ConnectionParameters::default().grease(client_grease));
+            let mut server = new_server(ConnectionParameters::default().grease(server_grease));
+
+            connect(&mut client, &mut server);
+
+            assert_eq!(client_grease, get_remote_tp(&server));
+            assert_eq!(server_grease, get_remote_tp(&client));
+        }
     }
 }

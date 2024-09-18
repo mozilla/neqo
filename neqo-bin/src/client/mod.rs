@@ -255,7 +255,7 @@ impl Args {
             }
             "zerortt" => {
                 if self.urls.len() < 2 {
-                    qerror!("Warning: resumption tests won't work without >1 URL");
+                    qerror!("Warning: zerortt test won't work without >1 URL");
                     exit(127);
                 }
                 self.shared.use_old_http = true;
@@ -263,7 +263,7 @@ impl Args {
                 // PMTUD probes inflate what we sent in 1-RTT, causing QNS to fail the test.
                 self.shared.quic_parameters.no_pmtud = true;
                 // If we pace, we might get the initial server flight before sending sufficient
-                // 0-RTT data to pass the QNS check.
+                // 0-RTT data to pass the QNS check. So let's burst.
                 self.shared.quic_parameters.no_pacing = true;
             }
             "multiconnect" => {
