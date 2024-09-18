@@ -59,28 +59,32 @@ runs:
         echo "System NSS is suitable: $NSS_VERSION"
         echo "BUILD_NSS=0" >> "$GITHUB_ENV"
 
-    # - name: Use sccache
-    #   # Apparently the action can't be installed twice in the same workflow, so check if
-    #   # it's already installed by checking if the RUSTC_WRAPPER environment variable is set
-    #   # (which every "use" of this action needs to therefore set)
-    #   if: env.RUSTC_WRAPPER != 'sccache'
-    #   uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the RUSTC_WRAPPER environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: env.RUSTC_WRAPPER != 'sccache' && env.BUILD_NSS == '1' && runner.environment != 'github-hosted'
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-    # - name: Enable sscache
-    #   shell: bash
-    #   run: |
-    #     if [ "${{ runner.os }}" != "Windows" ]; then
-    #       # TODO: Figure out how to make this work on Windows
-    #       echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
-    #       echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
-    #     fi
-    #     echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-    #     echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
-    #     if [ "$GITHUB_WORKFLOW" ]; then
-    #       echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-    #     fi
-    #     echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-    #     echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+    - name: Enable sscache
+      if: env.RUSTC_WRAPPER != 'sccache' && env.BUILD_NSS == '1' && runner.environment != 'github-hosted'
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" != "Windows" ]; then
+          # TODO: Figure out how to make this work on Windows
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        if [ "$GITHUB_WORKFLOW" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
 
     - name: Checkout NSS
       if: env.BUILD_NSS == '1'
