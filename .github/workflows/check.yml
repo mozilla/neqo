@@ -89,6 +89,11 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
+      # It looks like the CodeCov action is uploading some files from the NSS source
+      # as part of the coverage report, and that makes it fail. Prevent that.
+      - run: rm -rf "$NSS_DIR"
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+
       - uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
         with:
           file: lcov.info
