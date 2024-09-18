@@ -568,6 +568,10 @@ impl LossRecovery {
         }
     }
 
+    const fn confirmed(&self) -> bool {
+        self.confirmed_time.is_some()
+    }
+
     /// Returns (acked packets, lost packets)
     #[allow(clippy::too_many_arguments)]
     pub fn on_ack_received<R>(
@@ -627,7 +631,7 @@ impl LossRecovery {
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
         let loss_delay = primary_path.borrow().rtt().loss_delay();
-        let cleanup_delay = self.pto_period(primary_path.borrow().rtt(), pn_space);
+        let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
         let mut lost = Vec::new();
         self.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
             now,
@@ -642,7 +646,7 @@ impl LossRecovery {
         // backoff, so that we can determine persistent congestion.
         primary_path.borrow_mut().on_packets_lost(
             prev_largest_acked,
-            pn_space,
+            self.confirmed(),
             &lost,
             &mut self.stats.borrow_mut(),
             now,
@@ -679,7 +683,7 @@ impl LossRecovery {
         dropped
     }
 
-    fn confirmed(&mut self, rtt: &RttEstimate, now: Instant) {
+    fn confirm(&mut self, rtt: &RttEstimate, now: Instant) {
         debug_assert!(self.confirmed_time.is_none());
         self.confirmed_time = Some(now);
         // Up until now, the ApplicationData space has been ignored for PTO.
@@ -716,7 +720,7 @@ impl LossRecovery {
         self.pto_state = None;
 
         if space == PacketNumberSpace::Handshake {
-            self.confirmed(path.rtt(), now);
+            self.confirm(path.rtt(), now);
         }
     }
 
@@ -757,22 +761,27 @@ impl LossRecovery {
     fn pto_period_inner(
         rtt: &RttEstimate,
         pto_state: Option<&PtoState>,
-        pn_space: PacketNumberSpace,
+        confirmed: bool,
         fast_pto: u8,
     ) -> Duration {
         // This is a complicated (but safe) way of calculating:
         //   base_pto * F * 2^pto_count
         // where F = fast_pto / FAST_PTO_SCALE (== 1 by default)
         let pto_count = pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0));
-        rtt.pto(pn_space)
+        rtt.pto(confirmed)
             .checked_mul(u32::from(fast_pto) << min(pto_count, u32::BITS - u8::BITS))
             .map_or(Duration::from_secs(3600), |p| p / u32::from(FAST_PTO_SCALE))
     }
 
     /// Get the current PTO period for the given packet number space.
     /// Unlike calling `RttEstimate::pto` directly, this includes exponential backoff.
-    fn pto_period(&self, rtt: &RttEstimate, pn_space: PacketNumberSpace) -> Duration {
-        Self::pto_period_inner(rtt, self.pto_state.as_ref(), pn_space, self.fast_pto)
+    fn pto_period(&self, rtt: &RttEstimate) -> Duration {
+        Self::pto_period_inner(
+            rtt,
+            self.pto_state.as_ref(),
+            self.confirmed(),
+            self.fast_pto,
+        )
     }
 
     // Calculate PTO time for the given space.
@@ -780,11 +789,9 @@ impl LossRecovery {
         if self.confirmed_time.is_none() && pn_space == PacketNumberSpace::ApplicationData {
             None
         } else {
-            self.spaces.get(pn_space).and_then(|space| {
-                space
-                    .pto_base_time()
-                    .map(|t| t + self.pto_period(rtt, pn_space))
-            })
+            self.spaces
+                .get(pn_space)
+                .and_then(|space| space.pto_base_time().map(|t| t + self.pto_period(rtt)))
         }
     }
 
@@ -859,6 +866,7 @@ impl LossRecovery {
         qtrace!([self], "timeout {:?}", now);
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
+        let confirmed = self.confirmed();
 
         let mut lost_packets = Vec::new();
         for space in self.spaces.iter_mut() {
@@ -866,14 +874,14 @@ impl LossRecovery {
             let pto = Self::pto_period_inner(
                 primary_path.borrow().rtt(),
                 self.pto_state.as_ref(),
-                space.space,
+                confirmed,
                 self.fast_pto,
             );
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
             primary_path.borrow_mut().on_packets_lost(
                 space.largest_acked_sent_time,
-                space.space,
+                confirmed,
                 &lost_packets[first..],
                 &mut self.stats.borrow_mut(),
                 now,
@@ -1516,7 +1524,7 @@ mod tests {
 
         // Expiring state after the PTO on the ApplicationData space has
         // expired should result in setting a PTO state.
-        let default_pto = RttEstimate::default().pto(PacketNumberSpace::ApplicationData);
+        let default_pto = RttEstimate::default().pto(true);
         let expected_pto = pn_time(2) + default_pto;
         lr.discard(PacketNumberSpace::Handshake, expected_pto);
         let profile = lr.send_profile(now());
@@ -1548,7 +1556,7 @@ mod tests {
             ON_SENT_SIZE,
         ));
 
-        let handshake_pto = RttEstimate::default().pto(PacketNumberSpace::Handshake);
+        let handshake_pto = RttEstimate::default().pto(false);
         let expected_pto = now() + handshake_pto;
         assert_eq!(lr.pto_time(PacketNumberSpace::Initial), Some(expected_pto));
         let profile = lr.send_profile(now());
