@@ -324,7 +324,7 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
 
     // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
-    if env::var("NSS_PREBUILT").is_ok() {
+    if env::var("NSS_PREBUILT").is_err() {
         build_nss(nss, &nsstarget);
     }
 
