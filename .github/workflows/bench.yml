@@ -10,7 +10,7 @@ env:
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  TOOLCHAIN: nightly-2024-09-01
+  TOOLCHAIN: nightly
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
 
@@ -58,8 +58,8 @@ jobs:
 
       - name: Build neqo
         run: |
-          cargo "+$TOOLCHAIN" bench --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release
+          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
+          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
