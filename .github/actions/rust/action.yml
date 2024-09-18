@@ -35,18 +35,19 @@ runs:
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if
-      # it's already installed by checking if the RUSTC_WRAPPER environment variable is set
+      # it's already installed by checking if the SCCACHE_INSTALLED environment variable is set
       # (which every "use" of this action needs to therefore set)
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: env.RUSTC_WRAPPER != 'sccache' && runner.environment != 'github-hosted'
+      if: env.SCCACHE_INSTALLED != '1' && runner.environment != 'github-hosted'
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
-      if: env.RUSTC_WRAPPER != 'sccache' && runner.environment != 'github-hosted'
+      if: env.SCCACHE_INSTALLED != 'sccache' && runner.environment != 'github-hosted'
       shell: bash
       run: |
+        echo "SCCACHE_INSTALLED=1" >> "$GITHUB_ENV"
         if [ "${{ runner.environment }}" == "github-hosted" ]; then
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         fi
