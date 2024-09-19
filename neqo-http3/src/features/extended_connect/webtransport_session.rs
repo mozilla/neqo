@@ -417,7 +417,7 @@ impl WebTransportSession {
             let mut dgram_data = Encoder::new(&mut write_buffer);
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
             dgram_data.encode(buf);
-            conn.send_datagram(dgram_data.as_ref(), id)?;
+            conn.send_datagram(write_buffer, id)?;
         } else {
             debug_assert!(false);
             return Err(Error::Unavailable);
