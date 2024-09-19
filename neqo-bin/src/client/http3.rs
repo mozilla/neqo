@@ -128,13 +128,13 @@ impl super::Client for Http3Client {
         self.state().try_into()
     }
 
-    fn process<'a>(
+    fn process_into_buffer<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
         write_buffer: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        self.process(input, now, write_buffer)
+        self.process_into_buffer(input, now, write_buffer)
     }
 
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)

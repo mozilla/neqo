@@ -113,7 +113,7 @@ impl Http3Server {
         self.server.ech_config()
     }
 
-    pub fn process<'a>(
+    pub fn process_into_buffer<'a>(
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
@@ -125,7 +125,7 @@ impl Http3Server {
             // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
             //
             // Find alternative.
-            .process(dgram, now, unsafe {
+            .process_into_buffer(dgram, now, unsafe {
                 &mut *std::ptr::from_mut(write_buffer)
             });
 
@@ -133,7 +133,7 @@ impl Http3Server {
 
         // If we do not have a dgram already try again after process_http3.
         if !matches!(out, Output::Datagram(_)) {
-            out = self.server.process(None, now, write_buffer);
+            out = self.server.process_into_buffer(None, now, write_buffer);
         }
 
         if let Output::Datagram(d) = out {
@@ -146,7 +146,7 @@ impl Http3Server {
     /// Same as [`Http3Server::process`] but allocating output into new [`Vec`].
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process(dgram.map(Into::into), now, &mut write_buffer)
+        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 

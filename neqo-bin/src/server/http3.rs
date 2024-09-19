@@ -79,13 +79,13 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process<'a>(
+    fn process_into_buffer<'a>(
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
         write_buffer: &'a mut Vec<u8>,
     ) -> neqo_http3::Output<&'a [u8]> {
-        self.server.process(dgram, now, write_buffer)
+        self.server.process_into_buffer(dgram, now, write_buffer)
     }
 
     fn process_events(&mut self, _now: Instant) {

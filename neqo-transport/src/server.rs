@@ -329,7 +329,7 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process(Some(dgram), now, write_buffer);
+                let out = c.process_into_buffer(Some(dgram), now, write_buffer);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -370,7 +370,9 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process(Some(dgram), now, write_buffer);
+            return c
+                .borrow_mut()
+                .process_into_buffer(Some(dgram), now, write_buffer);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -456,7 +458,7 @@ impl Server {
                 // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
                 //
                 // Find alternative.
-                .process(None, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
+                .process_into_buffer(None, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
             {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
@@ -474,7 +476,7 @@ impl Server {
     #[must_use]
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process(dgram.map(Into::into), now, &mut write_buffer)
+        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 
@@ -482,7 +484,7 @@ impl Server {
     ///
     /// TODO
     #[must_use]
-    pub fn process<'a>(
+    pub fn process_into_buffer<'a>(
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,

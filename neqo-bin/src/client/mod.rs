@@ -361,7 +361,7 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process<'a>(
+    fn process_into_buffer<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
@@ -454,7 +454,7 @@ impl<'a, H: Handler> Runner<'a, H> {
 
             match self
                 .client
-                .process(dgram, Instant::now(), &mut self.send_buf)
+                .process_into_buffer(dgram, Instant::now(), &mut self.send_buf)
             {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;

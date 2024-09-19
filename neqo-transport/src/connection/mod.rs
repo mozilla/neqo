@@ -1133,7 +1133,7 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process(dgram.map(Into::into), now, &mut write_buffer)
+        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 
@@ -1143,7 +1143,7 @@ impl Connection {
     ///
     /// TODO
     #[must_use = "Output of the process function must be handled"]
-    pub fn process<'a>(
+    pub fn process_into_buffer<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,

@@ -854,7 +854,7 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
-    pub fn process<'a>(
+    pub fn process_into_buffer<'a>(
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
@@ -870,7 +870,7 @@ impl Http3Client {
             self.process_http3(now);
         }
 
-        let out = self.conn.process(None, now, write_buffer);
+        let out = self.conn.process_into_buffer(None, now, write_buffer);
         self.process_http3(now);
         out
     }
@@ -878,7 +878,7 @@ impl Http3Client {
     /// Same as [`Http3Client::process`] but allocating output into new [`Vec`].
     pub fn process_alloc(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
-        self.process(dgram.map(Into::into), now, &mut write_buffer)
+        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
             .map_datagram(Into::into)
     }
 
