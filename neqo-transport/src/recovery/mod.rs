@@ -165,18 +165,15 @@ impl LossRecoverySpace {
         self.in_flight_outstanding > 0
     }
 
-    pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
-        self.sent_packets
-            .iter_mut()
-            .filter_map(|sent| {
-                if sent.pto() {
-                    qtrace!("PTO: marking packet {} lost ", sent.pn());
-                    Some(&*sent)
-                } else {
-                    None
-                }
-            })
-            .take(count)
+    pub fn pto_packets(&mut self) -> impl Iterator<Item = &SentPacket> {
+        self.sent_packets.iter_mut().filter_map(|sent| {
+            if sent.pto() {
+                qtrace!("PTO: marking packet {} lost ", sent.pn());
+                Some(&*sent)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn pto_base_time(&self) -> Option<Instant> {
@@ -823,7 +820,7 @@ impl LossRecovery {
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
-    /// When it has, mark a few packets as "lost" for the purposes of having frames
+    /// When it has, mark packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
     fn maybe_fire_pto(&mut self, rtt: &RttEstimate, now: Instant, lost: &mut Vec<SentPacket>) {
@@ -836,11 +833,7 @@ impl LossRecovery {
                 if t <= now {
                     qdebug!([self], "PTO timer fired for {}", pn_space);
                     let space = self.spaces.get_mut(*pn_space).unwrap();
-                    lost.extend(
-                        space
-                            .pto_packets(PtoState::pto_packet_count(*pn_space))
-                            .cloned(),
-                    );
+                    lost.extend(space.pto_packets().cloned());
 
                     pto_space = pto_space.or(Some(*pn_space));
                 }
