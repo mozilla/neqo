@@ -52,23 +52,23 @@ fn zero_rtt_send_recv() {
     let mut server = resumed_server(&client);
 
     // Send ClientHello.
-    let client_hs = client.process_alloc(None, now());
+    let client_hs = client.process(None, now());
     assert!(client_hs.as_dgram_ref().is_some());
 
     // Now send a 0-RTT packet.
     let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-    let client_0rtt = client.process_alloc(None, now());
+    let client_0rtt = client.process(None, now());
     assert!(client_0rtt.as_dgram_ref().is_some());
     // 0-RTT packets on their own shouldn't be padded to MIN_INITIAL_PACKET_SIZE.
     assert!(client_0rtt.as_dgram_ref().unwrap().len() < MIN_INITIAL_PACKET_SIZE);
 
-    let server_hs = server.process_alloc(client_hs.as_dgram_ref(), now());
+    let server_hs = server.process(client_hs.as_dgram_ref(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
 
     let all_frames = server.stats().frame_tx.all();
     let ack_frames = server.stats().frame_tx.ack;
-    let server_process_0rtt = server.process_alloc(client_0rtt.as_dgram_ref(), now());
+    let server_process_0rtt = server.process(client_0rtt.as_dgram_ref(), now());
     assert!(server_process_0rtt.as_dgram_ref().is_some());
     assert_eq!(server.stats().frame_tx.all(), all_frames + 1);
     assert_eq!(server.stats().frame_tx.ack, ack_frames + 1);
@@ -100,12 +100,12 @@ fn zero_rtt_send_coalesce() {
     // This should result in a datagram that coalesces Initial and 0-RTT.
     let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-    let client_0rtt = client.process_alloc(None, now());
+    let client_0rtt = client.process(None, now());
     assert!(client_0rtt.as_dgram_ref().is_some());
 
     assertions::assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
 
-    let server_hs = server.process_alloc(client_0rtt.as_dgram_ref(), now());
+    let server_hs = server.process(client_0rtt.as_dgram_ref(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
 
     let server_stream_id = server
@@ -153,18 +153,18 @@ fn zero_rtt_send_reject() {
         .expect("enable 0-RTT");
 
     // Send ClientHello.
-    let client_hs = client.process_alloc(None, now());
+    let client_hs = client.process(None, now());
     assert!(client_hs.as_dgram_ref().is_some());
 
     // Write some data on the client.
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(stream_id, MESSAGE).unwrap();
-    let client_0rtt = client.process_alloc(None, now());
+    let client_0rtt = client.process(None, now());
     assert!(client_0rtt.as_dgram_ref().is_some());
 
-    let server_hs = server.process_alloc(client_hs.as_dgram_ref(), now());
+    let server_hs = server.process(client_hs.as_dgram_ref(), now());
     assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
-    let server_ignored = server.process_alloc(client_0rtt.as_dgram_ref(), now());
+    let server_ignored = server.process(client_0rtt.as_dgram_ref(), now());
     assert!(server_ignored.as_dgram_ref().is_none());
 
     // The server shouldn't receive that 0-RTT data.
@@ -172,14 +172,14 @@ fn zero_rtt_send_reject() {
     assert!(!server.events().any(recvd_stream_evt));
 
     // Client should get a rejection.
-    let client_fin = client.process_alloc(server_hs.as_dgram_ref(), now());
+    let client_fin = client.process(server_hs.as_dgram_ref(), now());
     let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
     assert!(client.events().any(recvd_0rtt_reject));
 
     // Server consume client_fin
-    let server_ack = server.process_alloc(client_fin.as_dgram_ref(), now());
+    let server_ack = server.process(client_fin.as_dgram_ref(), now());
     assert!(server_ack.as_dgram_ref().is_some());
-    let client_out = client.process_alloc(server_ack.as_dgram_ref(), now());
+    let client_out = client.process(server_ack.as_dgram_ref(), now());
     assert!(client_out.as_dgram_ref().is_none());
 
     // ...and the client stream should be gone.
@@ -191,7 +191,7 @@ fn zero_rtt_send_reject() {
     let stream_id_after_reject = client.stream_create(StreamType::UniDi).unwrap();
     assert_eq!(stream_id, stream_id_after_reject);
     client.stream_send(stream_id_after_reject, MESSAGE).unwrap();
-    let client_after_reject = client.process_alloc(None, now()).dgram();
+    let client_after_reject = client.process(None, now()).dgram();
     assert!(client_after_reject.is_some());
 
     // The server should receive new stream
@@ -227,14 +227,14 @@ fn zero_rtt_update_flow_control() {
     );
 
     // Stream limits should be low for 0-RTT.
-    let client_hs = client.process_alloc(None, now()).dgram();
+    let client_hs = client.process(None, now()).dgram();
     let uni_stream = client.stream_create(StreamType::UniDi).unwrap();
     assert!(!client.stream_send_atomic(uni_stream, MESSAGE).unwrap());
     let bidi_stream = client.stream_create(StreamType::BiDi).unwrap();
     assert!(!client.stream_send_atomic(bidi_stream, MESSAGE).unwrap());
 
     // Now get the server transport parameters.
-    let server_hs = server.process_alloc(client_hs.as_ref(), now()).dgram();
+    let server_hs = server.process(client_hs.as_ref(), now()).dgram();
     client.process_input(&server_hs.unwrap(), now());
 
     // The streams should report a writeable event.
@@ -286,20 +286,20 @@ fn zero_rtt_loss_accepted() {
         // Make CI/0-RTT
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-        let mut ci = client.process_alloc(None, now);
+        let mut ci = client.process(None, now);
         assert!(ci.as_dgram_ref().is_some());
         assertions::assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
         qdebug!("Drop CI/0-RTT {i} extra times");
         for _ in 0..i {
-            now += client.process_alloc(None, now).callback();
-            ci = client.process_alloc(None, now);
+            now += client.process(None, now).callback();
+            ci = client.process(None, now);
             assert!(ci.as_dgram_ref().is_some());
         }
 
         // Process CI/0-RTT
-        let si = server.process_alloc(ci.as_dgram_ref(), now);
+        let si = server.process(ci.as_dgram_ref(), now);
         assert!(si.as_dgram_ref().is_some());
 
         let server_stream_id = server

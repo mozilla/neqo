@@ -52,7 +52,7 @@ fn remember_smoothed_rtt() {
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(&validation);
     server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process_alloc(None, now).dgram();
+    let ticket = server.process(None, now).dgram();
     assert!(ticket.is_some());
     now += RTT1 / 2;
     client.process_input(&ticket.unwrap(), now);
@@ -93,7 +93,7 @@ fn address_validation_token_resume() {
     let mut server = resumed_server(&client);
 
     // Grab an Initial packet from the client.
-    let dgram = client.process_alloc(None, now).dgram();
+    let dgram = client.process(None, now).dgram();
     assertions::assert_initial(dgram.as_ref().unwrap(), true);
 
     // Now try to complete the handshake after giving time for a client PTO.
@@ -106,7 +106,7 @@ fn address_validation_token_resume() {
 fn can_resume(token: impl AsRef<[u8]>, initial_has_token: bool) {
     let mut client = default_client();
     client.enable_resumption(now(), token).unwrap();
-    let initial = client.process_alloc(None, now()).dgram();
+    let initial = client.process(None, now()).dgram();
     assertions::assert_initial(initial.as_ref().unwrap(), initial_has_token);
 }
 
@@ -121,27 +121,27 @@ fn two_tickets_on_timer() {
     server.send_ticket(now(), &[]).expect("send ticket2");
     let pkt = send_something(&mut server, now());
 
-    // process_alloc() will return an ack first
-    assert!(client.process_alloc(Some(&pkt), now()).dgram().is_some());
+    // process() will return an ack first
+    assert!(client.process(Some(&pkt), now()).dgram().is_some());
     // We do not have a ResumptionToken event yet, because NEW_TOKEN was not sent.
     assert_eq!(get_tokens(&mut client).len(), 0);
 
     // We need to wait for release_resumption_token_timer to expire. The timer will be
     // set to 3 * PTO
     let mut now = now() + 3 * client.pto();
-    mem::drop(client.process_alloc(None, now));
+    mem::drop(client.process(None, now));
     let mut recv_tokens = get_tokens(&mut client);
     assert_eq!(recv_tokens.len(), 1);
     let token1 = recv_tokens.pop().unwrap();
     // Wai for anottheer 3 * PTO to get the nex okeen.
     now += 3 * client.pto();
-    mem::drop(client.process_alloc(None, now));
+    mem::drop(client.process(None, now));
     let mut recv_tokens = get_tokens(&mut client);
     assert_eq!(recv_tokens.len(), 1);
     let token2 = recv_tokens.pop().unwrap();
     // Wait for 3 * PTO, but now there are no more tokens.
     now += 3 * client.pto();
-    mem::drop(client.process_alloc(None, now));
+    mem::drop(client.process(None, now));
     assert_eq!(get_tokens(&mut client).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());
 
@@ -183,7 +183,7 @@ fn take_token() {
     connect(&mut client, &mut server);
 
     server.send_ticket(now(), &[]).unwrap();
-    let dgram = server.process_alloc(None, now()).dgram();
+    let dgram = server.process(None, now()).dgram();
     client.process_input(&dgram.unwrap(), now());
 
     // There should be no ResumptionToken event here.
@@ -223,7 +223,7 @@ fn resume_after_packet() {
     let token = exchange_ticket(&mut client, &mut server, now());
 
     let mut client = default_client();
-    mem::drop(client.process_alloc(None, now()).dgram().unwrap());
+    mem::drop(client.process(None, now()).dgram().unwrap());
     assert_eq!(
         client.enable_resumption(now(), token).unwrap_err(),
         Error::ConnectionState

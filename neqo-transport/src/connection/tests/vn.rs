@@ -27,11 +27,11 @@ const INITIAL_PTO: Duration = Duration::from_millis(300);
 fn unknown_version() {
     let mut client = default_client();
     // Start the handshake.
-    mem::drop(client.process_alloc(None, now()).dgram());
+    mem::drop(client.process(None, now()).dgram());
 
     let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
     unknown_version_packet.resize(MIN_INITIAL_PACKET_SIZE, 0x0);
-    mem::drop(client.process_alloc(Some(&datagram(unknown_version_packet)), now()));
+    mem::drop(client.process(Some(&datagram(unknown_version_packet)), now()));
     assert_eq!(1, client.stats().dropped_rx);
 }
 
@@ -43,7 +43,7 @@ fn server_receive_unknown_first_packet() {
     unknown_version_packet.resize(MIN_INITIAL_PACKET_SIZE, 0x0);
 
     assert_eq!(
-        server.process_alloc(Some(&datagram(unknown_version_packet)), now()),
+        server.process(Some(&datagram(unknown_version_packet)), now()),
         Output::None
     );
 
@@ -73,7 +73,7 @@ fn version_negotiation_current_version() {
     let mut client = default_client();
     // Start the handshake.
     let initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
@@ -84,7 +84,7 @@ fn version_negotiation_current_version() {
     );
 
     let dgram = datagram(vn);
-    let delay = client.process_alloc(Some(&dgram), now()).callback();
+    let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -95,7 +95,7 @@ fn version_negotiation_version0() {
     let mut client = default_client();
     // Start the handshake.
     let initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
@@ -103,7 +103,7 @@ fn version_negotiation_version0() {
     let vn = create_vn(&initial_pkt, &[0, 0x1a1a_1a1a]);
 
     let dgram = datagram(vn);
-    let delay = client.process_alloc(Some(&dgram), now()).callback();
+    let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -114,7 +114,7 @@ fn version_negotiation_only_reserved() {
     let mut client = default_client();
     // Start the handshake.
     let initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
@@ -122,7 +122,7 @@ fn version_negotiation_only_reserved() {
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
     let dgram = datagram(vn);
-    assert_eq!(client.process_alloc(Some(&dgram), now()), Output::None);
+    assert_eq!(client.process(Some(&dgram), now()), Output::None);
     match client.state() {
         State::Closed(err) => {
             assert_eq!(*err, CloseReason::Transport(Error::VersionNegotiation));
@@ -136,7 +136,7 @@ fn version_negotiation_corrupted() {
     let mut client = default_client();
     // Start the handshake.
     let initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
@@ -144,7 +144,7 @@ fn version_negotiation_corrupted() {
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
     let dgram = datagram(vn[..vn.len() - 1].to_vec());
-    let delay = client.process_alloc(Some(&dgram), now()).callback();
+    let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -155,7 +155,7 @@ fn version_negotiation_empty() {
     let mut client = default_client();
     // Start the handshake.
     let initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
@@ -163,7 +163,7 @@ fn version_negotiation_empty() {
     let vn = create_vn(&initial_pkt, &[]);
 
     let dgram = datagram(vn);
-    let delay = client.process_alloc(Some(&dgram), now()).callback();
+    let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -174,14 +174,14 @@ fn version_negotiation_not_supported() {
     let mut client = default_client();
     // Start the handshake.
     let initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
 
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
     let dgram = datagram(vn);
-    assert_eq!(client.process_alloc(Some(&dgram), now()), Output::None);
+    assert_eq!(client.process(Some(&dgram), now()), Output::None);
     match client.state() {
         State::Closed(err) => {
             assert_eq!(*err, CloseReason::Transport(Error::VersionNegotiation));
@@ -195,7 +195,7 @@ fn version_negotiation_bad_cid() {
     let mut client = default_client();
     // Start the handshake.
     let mut initial_pkt = client
-        .process_alloc(None, now())
+        .process(None, now())
         .dgram()
         .expect("a datagram")
         .to_vec();
@@ -204,7 +204,7 @@ fn version_negotiation_bad_cid() {
     let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
 
     let dgram = datagram(vn);
-    let delay = client.process_alloc(Some(&dgram), now()).callback();
+    let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, INITIAL_PTO);
     assert_eq!(*client.state(), State::WaitInitial);
     assert_eq!(1, client.stats().dropped_rx);
@@ -239,9 +239,9 @@ fn compatible_upgrade_large_initial() {
 
     // Client Initial should take 2 packets.
     // Each should elicit a Version 1 ACK from the server.
-    let dgram = client.process_alloc(None, now()).dgram();
+    let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
-    let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
+    let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert!(dgram.is_some());
     // The following uses the Version from *outside* this crate.
     assertions::assert_version(dgram.as_ref().unwrap(), Version::Version1.wire_version());
@@ -306,7 +306,7 @@ fn version_negotiation_downgrade() {
         new_server(ConnectionParameters::default().versions(DOWNGRADE, Version::all()));
 
     // Start the handshake and spoof a VN packet.
-    let initial = client.process_alloc(None, now()).dgram().unwrap();
+    let initial = client.process(None, now()).dgram().unwrap();
     let vn = create_vn(&initial, &[DOWNGRADE.wire_version()]);
     let dgram = datagram(vn);
     client.process_input(&dgram, now());
@@ -328,7 +328,7 @@ fn invalid_server_version() {
     let mut server =
         new_server(ConnectionParameters::default().versions(Version::Version2, Version::all()));
 
-    let dgram = client.process_alloc(None, now()).dgram();
+    let dgram = client.process(None, now()).dgram();
     server.process_input(&dgram.unwrap(), now());
 
     // One packet received.
@@ -467,9 +467,9 @@ fn compatible_upgrade_0rtt_rejected() {
 
     // Finalize the connection.  Don't use connect() because it uses
     // maybe_authenticate() too liberally and that eats the events we want to check.
-    let dgram = server.process_alloc(None, now()).dgram(); // ServerHello flight
-    let dgram = client.process_alloc(dgram.as_ref(), now()).dgram(); // Client Finished (note: no authentication)
-    let dgram = server.process_alloc(dgram.as_ref(), now()).dgram(); // HANDSHAKE_DONE
+    let dgram = server.process(None, now()).dgram(); // ServerHello flight
+    let dgram = client.process(dgram.as_ref(), now()).dgram(); // Client Finished (note: no authentication)
+    let dgram = server.process(dgram.as_ref(), now()).dgram(); // HANDSHAKE_DONE
     client.process_input(&dgram.unwrap(), now());
 
     assert!(matches!(client.state(), State::Confirmed));

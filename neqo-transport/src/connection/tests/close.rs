@@ -41,7 +41,7 @@ fn connection_close() {
     client.close(now, 42, "");
 
     let stats_before = client.stats().frame_tx;
-    let out = client.process_alloc(None, now);
+    let out = client.process(None, now);
     let stats_after = client.stats().frame_tx;
     assert_eq!(
         stats_after.connection_close,
@@ -65,7 +65,7 @@ fn connection_close_with_long_reason_string() {
     client.close(now, 42, long_reason);
 
     let stats_before = client.stats().frame_tx;
-    let out = client.process_alloc(None, now);
+    let out = client.process(None, now);
     let stats_after = client.stats().frame_tx;
     assert_eq!(
         stats_after.connection_close,
@@ -84,14 +84,14 @@ fn early_application_close() {
     let mut server = default_server();
 
     // One flight each.
-    let dgram = client.process_alloc(None, now()).dgram();
+    let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
-    let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
+    let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert!(dgram.is_some());
 
     server.close(now(), 77, String::new());
     assert!(server.state().closed());
-    let dgram = server.process_alloc(None, now()).dgram();
+    let dgram = server.process(None, now()).dgram();
     assert!(dgram.is_some());
 
     client.process_input(&dgram.unwrap(), now());
@@ -109,9 +109,9 @@ fn bad_tls_version() {
         .unwrap();
     let mut server = default_server();
 
-    let dgram = client.process_alloc(None, now()).dgram();
+    let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
-    let dgram = server.process_alloc(dgram.as_ref(), now()).dgram();
+    let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert_eq!(
         *server.state(),
         State::Closed(CloseReason::Transport(Error::ProtocolViolation))
@@ -134,21 +134,21 @@ fn closing_timers_interation() {
     // We're going to induce time-based loss recovery so that timer is set.
     let _p1 = send_something(&mut client, now);
     let p2 = send_something(&mut client, now);
-    let ack = server.process_alloc(Some(&p2), now).dgram();
+    let ack = server.process(Some(&p2), now).dgram();
     assert!(ack.is_some()); // This is an ACK.
 
     // After processing the ACK, we should be on the loss recovery timer.
-    let cb = client.process_alloc(ack.as_ref(), now).callback();
+    let cb = client.process(ack.as_ref(), now).callback();
     assert_ne!(cb, Duration::from_secs(0));
     now += cb;
 
     // Rather than let the timer pop, close the connection.
     client.close(now, 0, "");
-    let client_close = client.process_alloc(None, now).dgram();
+    let client_close = client.process(None, now).dgram();
     assert!(client_close.is_some());
     // This should now report the end of the closing period, not a
     // zero-duration wait driven by the (now defunct) loss recovery timer.
-    let client_close_timer = client.process_alloc(None, now).callback();
+    let client_close_timer = client.process(None, now).callback();
     assert_ne!(client_close_timer, Duration::from_secs(0));
 }
 
@@ -164,20 +164,20 @@ fn closing_and_draining() {
 
     // Close the connection.
     client.close(now(), APP_ERROR, "");
-    let client_close = client.process_alloc(None, now()).dgram();
+    let client_close = client.process(None, now()).dgram();
     assert!(client_close.is_some());
-    let client_close_timer = client.process_alloc(None, now()).callback();
+    let client_close_timer = client.process(None, now()).callback();
     assert_ne!(client_close_timer, Duration::from_secs(0));
     // The client will spit out the same packet in response to anything it receives.
     let p3 = send_something(&mut server, now());
-    let client_close2 = client.process_alloc(Some(&p3), now()).dgram();
+    let client_close2 = client.process(Some(&p3), now()).dgram();
     assert_eq!(
         client_close.as_ref().unwrap().len(),
         client_close2.as_ref().unwrap().len()
     );
 
     // After this time, the client should transition to closed.
-    let end = client.process_alloc(None, now() + client_close_timer);
+    let end = client.process(None, now() + client_close_timer);
     assert_eq!(end, Output::None);
     assert_eq!(
         *client.state(),
@@ -185,19 +185,17 @@ fn closing_and_draining() {
     );
 
     // When the server receives the close, it too should generate CONNECTION_CLOSE.
-    let server_close = server.process_alloc(client_close.as_ref(), now()).dgram();
+    let server_close = server.process(client_close.as_ref(), now()).dgram();
     assert!(server.state().closed());
     assert!(server_close.is_some());
     // .. but it ignores any further close packets.
-    let server_close_timer = server
-        .process_alloc(client_close2.as_ref(), now())
-        .callback();
+    let server_close_timer = server.process(client_close2.as_ref(), now()).callback();
     assert_ne!(server_close_timer, Duration::from_secs(0));
     // Even a legitimate packet without a close in it.
-    let server_close_timer2 = server.process_alloc(Some(&p1), now()).callback();
+    let server_close_timer2 = server.process(Some(&p1), now()).callback();
     assert_eq!(server_close_timer, server_close_timer2);
 
-    let end = server.process_alloc(None, now() + server_close_timer);
+    let end = server.process(None, now() + server_close_timer);
     assert_eq!(end, Output::None);
     assert_eq!(
         *server.state(),

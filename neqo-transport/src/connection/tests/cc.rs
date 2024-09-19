@@ -198,7 +198,7 @@ fn single_packet_on_recovery() {
 
     // Acknowledge just one packet and cause one packet to be declared lost.
     // The length is the amount of credit the client should have.
-    let ack = server.process_alloc(Some(&delivered), now).dgram();
+    let ack = server.process(Some(&delivered), now).dgram();
     assert!(ack.is_some());
 
     // The client should see the loss and enter recovery.
@@ -207,7 +207,7 @@ fn single_packet_on_recovery() {
     assert_eq!(cwnd_avail(&client), 0);
 
     // The client should send one packet, ignoring the cwnd.
-    let dgram = client.process_alloc(None, now).dgram();
+    let dgram = client.process(None, now).dgram();
     assert!(dgram.is_some());
 }
 
@@ -402,20 +402,18 @@ fn ack_are_not_cc() {
     let other_stream = server.stream_create(StreamType::BiDi).unwrap();
     assert_eq!(other_stream, 1);
     server.stream_send(other_stream, b"dropped").unwrap();
-    let dropped_packet = server.process_alloc(None, now).dgram();
+    let dropped_packet = server.process(None, now).dgram();
     assert!(dropped_packet.is_some()); // Now drop this one.
 
     // Now the server sends a packet that will force an ACK,
     // because the client will detect a gap.
     server.stream_send(other_stream, b"sent").unwrap();
-    let ack_eliciting_packet = server.process_alloc(None, now).dgram();
+    let ack_eliciting_packet = server.process(None, now).dgram();
     assert!(ack_eliciting_packet.is_some());
 
     // The client can ack the server packet even if cc windows is full.
     qdebug!([client], "Process ack-eliciting");
-    let ack_pkt = client
-        .process_alloc(ack_eliciting_packet.as_ref(), now)
-        .dgram();
+    let ack_pkt = client.process(ack_eliciting_packet.as_ref(), now).dgram();
     assert!(ack_pkt.is_some());
     qdebug!([server], "Handle ACK");
     let prev_ack_count = server.stats().frame_rx.ack;
@@ -443,14 +441,14 @@ fn pace() {
     // The first packet is not subject to pacing as there are no bytes in flight.
     // After that we allow the burst to continue up to a number of packets (2).
     for _ in 0..=PACING_BURST_SIZE {
-        let dgram = client.process_alloc(None, now).dgram();
+        let dgram = client.process(None, now).dgram();
         assert!(dgram.is_some());
         count += 1;
     }
-    let gap = client.process_alloc(None, now).callback();
+    let gap = client.process(None, now).callback();
     assert_ne!(gap, Duration::new(0, 0));
     for _ in (1 + PACING_BURST_SIZE)..cwnd_packets(POST_HANDSHAKE_CWND, client.plpmtu()) {
-        match client.process_alloc(None, now) {
+        match client.process(None, now) {
             Output::Callback(t) => assert_eq!(t, gap),
             Output::Datagram(_) => {
                 // The last packet might not be paced.
@@ -460,14 +458,14 @@ fn pace() {
             Output::None => panic!(),
         }
         now += gap;
-        let dgram = client.process_alloc(None, now).dgram();
+        let dgram = client.process(None, now).dgram();
         assert!(dgram.is_some());
         count += 1;
     }
-    let dgram = client.process_alloc(None, now).dgram();
+    let dgram = client.process(None, now).dgram();
     assert!(dgram.is_none());
     assert_eq!(count, cwnd_packets(POST_HANDSHAKE_CWND, client.plpmtu()));
-    let fin = client.process_alloc(None, now).callback();
+    let fin = client.process(None, now).callback();
     assert_ne!(fin, Duration::new(0, 0));
     assert_ne!(fin, gap);
 }
