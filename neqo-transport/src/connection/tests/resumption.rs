@@ -63,7 +63,7 @@ fn remember_smoothed_rtt() {
     let validation = Rc::new(RefCell::new(validation));
     server.set_validation(&validation);
     server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process(None, now).dgram();
+    let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
     now += RTT1 / 2;
     client.process_input(&ticket.unwrap(), now);
@@ -96,7 +96,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     let mut server = default_server();
     let mut now = now();
 
-    let client_initial = client.process(None, now);
+    let client_initial = client.process_output(now);
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();
@@ -147,7 +147,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     client.process_input(&si, now);
     client.process_input(&server_hs.unwrap(), now);
     client.authenticated(AuthenticationStatus::Ok, now);
-    let finished = client.process(None, now);
+    let finished = client.process_output(now);
 
     assert_eq!(*client.state(), State::Connected);
 
@@ -162,7 +162,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     server.set_validation(&validation);
     send_something(&mut server, now);
     server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process(None, now).dgram();
+    let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
     now += rtt / 2;
     client.process_input(&ticket.unwrap(), now);
@@ -227,7 +227,7 @@ fn address_validation_token_resume() {
 fn can_resume(token: impl AsRef<[u8]>, initial_has_token: bool) {
     let mut client = default_client();
     client.enable_resumption(now(), token).unwrap();
-    let initial = client.process(None, now()).dgram();
+    let initial = client.process_output(now()).dgram();
     assertions::assert_initial(initial.as_ref().unwrap(), initial_has_token);
 }
 
@@ -344,7 +344,7 @@ fn resume_after_packet() {
     let token = exchange_ticket(&mut client, &mut server, now());
 
     let mut client = default_client();
-    mem::drop(client.process(None, now()).dgram().unwrap());
+    mem::drop(client.process_output(now()).dgram().unwrap());
     assert_eq!(
         client.enable_resumption(now(), token).unwrap_err(),
         Error::ConnectionState

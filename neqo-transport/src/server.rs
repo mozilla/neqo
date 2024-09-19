@@ -473,6 +473,11 @@ impl Server {
             .map_datagram(Into::into)
     }
 
+    /// Shorthand for [`Server::process`] with no input `dgram`.
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
     /// # Panics
     ///
     /// TODO

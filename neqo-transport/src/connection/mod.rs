@@ -1108,12 +1108,22 @@ impl Connection {
         delay
     }
 
+    /// Shorthand for [`Connection::process`] with no input `dgram`.
+    #[must_use = "Output of the process function must be handled"]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
     /// Get output packets, as a result of receiving packets, or actions taken
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     #[must_use = "Output of the process_output function must be handled"]
-    fn process_output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> Output<&'a [u8]> {
+    fn process_output_into_buffer<'a>(
+        &mut self,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
         match (&self.state, self.role) {
@@ -1168,7 +1178,7 @@ impl Connection {
             self.process_saved(now);
         }
         #[allow(clippy::let_and_return)]
-        let output = self.process_output(now, out);
+        let output = self.process_output_into_buffer(now, out);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {
             if let Some(d) = output.clone().map_datagram(Into::into).dgram() {

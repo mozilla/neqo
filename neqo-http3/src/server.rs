@@ -149,6 +149,12 @@ impl Http3Server {
             .map_datagram(Into::into)
     }
 
+    /// Shorthand for [`Http3Server::process`] with no input `dgram`.
+    #[must_use = "Output of the process function must be handled"]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
     /// Process HTTP3 layer.
     fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");

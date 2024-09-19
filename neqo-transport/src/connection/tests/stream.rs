@@ -76,10 +76,10 @@ fn transfer() {
     client.stream_send(client_stream_id2, &[7; 50]).unwrap_err();
     // Sending this much takes a few datagrams.
     let mut datagrams = vec![];
-    let mut out = client.process(None, now());
+    let mut out = client.process_output(now());
     while let Some(d) = out.dgram() {
         datagrams.push(d);
-        out = client.process(None, now());
+        out = client.process_output(now());
     }
     assert_eq!(datagrams.len(), 4);
     assert_eq!(*client.state(), State::Confirmed);
@@ -142,10 +142,10 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     // Sending this much takes a few datagrams.
     // Note: this test uses an RTT of 0 which simplifies things (no pacing)
     let mut datagrams = Vec::new();
-    let mut out = client.process(None, now());
+    let mut out = client.process_output(now());
     while let Some(d) = out.dgram() {
         datagrams.push(d);
-        out = client.process(None, now());
+        out = client.process_output(now());
     }
     assert_eq!(*client.state(), State::Confirmed);
 
@@ -699,7 +699,7 @@ fn stream_data_blocked_generates_max_stream_data() {
     } else {
         panic!("unexpected stream state");
     }
-    let dgram = server.process(None, now).dgram();
+    let dgram = server.process_output(now).dgram();
     assert!(dgram.is_some());
 
     let sdb_before = client.stats().frame_rx.stream_data_blocked;
@@ -747,7 +747,7 @@ fn max_streams_after_bidi_closed() {
     // Now handle the stream and send an incomplete response.
     server.process_input(&dgram.unwrap(), now());
     server.stream_send(stream_id, RESPONSE).unwrap();
-    let dgram = server.process(None, now()).dgram();
+    let dgram = server.process_output(now()).dgram();
 
     // The server shouldn't have released more stream credit.
     client.process_input(&dgram.unwrap(), now());
@@ -756,7 +756,7 @@ fn max_streams_after_bidi_closed() {
 
     // Closing the stream isn't enough.
     server.stream_close_send(stream_id).unwrap();
-    let dgram = server.process(None, now()).dgram();
+    let dgram = server.process_output(now()).dgram();
     client.process_input(&dgram.unwrap(), now());
     assert!(client.stream_create(StreamType::BiDi).is_err());
 

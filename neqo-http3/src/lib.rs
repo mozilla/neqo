@@ -68,7 +68,7 @@ let mut client = Http3Client::new(...);
 
 // process can return 3 values, data to be sent, time duration when process should
 // be called, and None when Http3Client is done.
-match client.process(None, Instant::now(), &mut out) {
+match client.process_output(Instant::now(), &mut out) {
     Output::Datagram(dgram) => {
         // Send dgram on a socket.
         socket.send_to(&dgram[..], dgram.destination())

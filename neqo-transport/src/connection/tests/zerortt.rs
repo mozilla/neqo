@@ -286,15 +286,15 @@ fn zero_rtt_loss_accepted() {
         // Make CI/0-RTT
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
-        let mut ci = client.process(None, now);
+        let mut ci = client.process_output(now);
         assert!(ci.as_dgram_ref().is_some());
         assertions::assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
         qdebug!("Drop CI/0-RTT {i} extra times");
         for _ in 0..i {
-            now += client.process(None, now).callback();
-            ci = client.process(None, now);
+            now += client.process_output(now).callback();
+            ci = client.process_output(now);
             assert!(ci.as_dgram_ref().is_some());
         }
 

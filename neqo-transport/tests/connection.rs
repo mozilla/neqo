@@ -72,7 +72,7 @@ fn reorder_server_initial() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process(None, now());
+    let client_initial = client.process_output(now());
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();
@@ -124,7 +124,7 @@ fn reorder_server_initial() {
     client.process_input(&reordered, now());
     client.process_input(&server_hs.unwrap(), now());
     assert!(test_fixture::maybe_authenticate(&mut client));
-    let finished = client.process(None, now());
+    let finished = client.process_output(now());
     assert_eq!(*client.state(), State::Connected);
 
     let done = server.process(finished.as_dgram_ref(), now());
@@ -173,7 +173,7 @@ fn packet_without_frames() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process(None, now());
+    let client_initial = client.process_output(now());
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
 
@@ -194,7 +194,7 @@ fn packet_with_only_padding() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process(None, now());
+    let client_initial = client.process_output(now());
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
 
@@ -213,7 +213,7 @@ fn overflow_crypto() {
     );
     let mut server = default_server();
 
-    let client_initial = client.process(None, now()).dgram();
+    let client_initial = client.process_output(now()).dgram();
     let (_, client_dcid, _, _) =
         decode_initial_header(client_initial.as_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();

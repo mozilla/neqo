@@ -239,7 +239,7 @@ fn compatible_upgrade_large_initial() {
 
     // Client Initial should take 2 packets.
     // Each should elicit a Version 1 ACK from the server.
-    let dgram = client.process(None, now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     assert!(dgram.is_some());
     let dgram = server.process(dgram.as_ref(), now()).dgram();
     assert!(dgram.is_some());
@@ -306,7 +306,7 @@ fn version_negotiation_downgrade() {
         new_server(ConnectionParameters::default().versions(DOWNGRADE, Version::all()));
 
     // Start the handshake and spoof a VN packet.
-    let initial = client.process(None, now()).dgram().unwrap();
+    let initial = client.process_output(now()).dgram().unwrap();
     let vn = create_vn(&initial, &[DOWNGRADE.wire_version()]);
     let dgram = datagram(vn);
     client.process_input(&dgram, now());
@@ -328,7 +328,7 @@ fn invalid_server_version() {
     let mut server =
         new_server(ConnectionParameters::default().versions(Version::Version2, Version::all()));
 
-    let dgram = client.process(None, now()).dgram();
+    let dgram = client.process_output(now()).dgram();
     server.process_input(&dgram.unwrap(), now());
 
     // One packet received.
@@ -467,7 +467,7 @@ fn compatible_upgrade_0rtt_rejected() {
 
     // Finalize the connection.  Don't use connect() because it uses
     // maybe_authenticate() too liberally and that eats the events we want to check.
-    let dgram = server.process(None, now()).dgram(); // ServerHello flight
+    let dgram = server.process_output(now()).dgram(); // ServerHello flight
     let dgram = client.process(dgram.as_ref(), now()).dgram(); // Client Finished (note: no authentication)
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // HANDSHAKE_DONE
     client.process_input(&dgram.unwrap(), now());

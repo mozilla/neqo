@@ -875,6 +875,11 @@ impl Http3Client {
         out
     }
 
+    /// Shorthand for [`Http3Client::process`] with no input `dgram`.
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
     /// Same as [`Http3Client::process_into_buffer`] but allocating output into
     /// new [`Vec`].
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
@@ -1840,7 +1845,7 @@ mod tests {
                 _ => {}
             }
         }
-        let dgram = server.conn.process(None, now()).dgram();
+        let dgram = server.conn.process_output(now()).dgram();
         if let Some(d) = dgram {
             client.process_input(&d, now());
         }
@@ -2570,7 +2575,7 @@ mod tests {
         fn dgram(c: &mut Connection) -> Datagram {
             let stream = c.stream_create(StreamType::UniDi).unwrap();
             _ = c.stream_send(stream, &[0xc0]).unwrap();
-            c.process(None, now()).dgram().unwrap()
+            c.process_output(now()).dgram().unwrap()
         }
 
         let d1 = dgram(&mut client.conn);
@@ -2581,7 +2586,7 @@ mod tests {
         let d4 = dgram(&mut server.conn);
         client.process_input(&d4, now());
         client.process_input(&d3, now());
-        let ack = client.process(None, now()).dgram();
+        let ack = client.process_output(now()).dgram();
         server.conn.process_input(&ack.unwrap(), now());
     }
 
@@ -2592,7 +2597,7 @@ mod tests {
         force_idle(&mut client, &mut server);
 
         let idle_timeout = ConnectionParameters::default().get_idle_timeout();
-        assert_eq!(client.process(None, now()).callback(), idle_timeout);
+        assert_eq!(client.process_output(now()).callback(), idle_timeout);
     }
 
     // Helper function: read response when a server sends HTTP_RESPONSE_2.
@@ -4107,11 +4112,11 @@ mod tests {
 
     fn exchange_token(client: &mut Http3Client, server: &mut Connection) -> ResumptionToken {
         server.send_ticket(now(), &[]).expect("can send ticket");
-        let out = server.process(None, now());
+        let out = server.process_output(now());
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.as_dgram_ref().unwrap(), now());
         // We do not have a token so we need to wait for a resumption token timer to trigger.
-        client.process(None, now() + Duration::from_millis(250));
+        client.process_output(now() + Duration::from_millis(250));
         assert_eq!(client.state(), Http3State::Connected);
         client
             .events()
@@ -4931,7 +4936,7 @@ mod tests {
         // Send a zero-length frame at the end of the stream.
         _ = server.conn.stream_send(request_stream_id, &[0, 0]).unwrap();
         server.conn.stream_close_send(request_stream_id).unwrap();
-        let dgram = server.conn.process(None, now()).dgram();
+        let dgram = server.conn.process_output(now()).dgram();
         client.process_input(&dgram.unwrap(), now());
 
         let data_readable_event = |e: &_| matches!(e, Http3ClientEvent::DataReadable { stream_id } if *stream_id == request_stream_id);
@@ -5078,11 +5083,11 @@ mod tests {
 
         // The client will become idle here.
         force_idle(&mut client, &mut server);
-        assert_eq!(client.process(None, now()).callback(), idle_timeout);
+        assert_eq!(client.process_output(now()).callback(), idle_timeout);
 
         // Reading push data will stop the client from being idle.
         _ = send_push_data(&mut server.conn, 0, false);
-        let out = server.conn.process(None, now());
+        let out = server.conn.process_output(now());
         client.process_input(out.as_dgram_ref().unwrap(), now());
 
         let mut buf = [0; 16];
@@ -5091,7 +5096,7 @@ mod tests {
         assert!(!fin);
 
         force_idle(&mut client, &mut server);
-        assert_eq!(client.process(None, now()).callback(), idle_timeout);
+        assert_eq!(client.process_output(now()).callback(), idle_timeout);
     }
 
     #[test]

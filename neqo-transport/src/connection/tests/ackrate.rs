@@ -99,7 +99,7 @@ fn ack_rate_persistent_congestion() {
     let now = induce_persistent_congestion(&mut client, &mut server, stream, now);
 
     // The client sends a second ACK_FREQUENCY frame with an increased rate.
-    let af = client.process(None, now).dgram();
+    let af = client.process_output(now).dgram();
     assert!(af.is_some());
     assert_eq!(client.stats().frame_tx.ack_frequency, 2);
 }
