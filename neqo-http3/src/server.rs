@@ -143,7 +143,8 @@ impl Http3Server {
         out
     }
 
-    /// Same as [`Http3Server::process`] but allocating output into new [`Vec`].
+    /// Same as [`Http3Server::process_into_buffer`] but allocating output into
+    /// new [`Vec`].
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
         self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)

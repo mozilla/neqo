@@ -560,7 +560,7 @@ impl Http3Client {
         output
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1] on next `Http3Client::process(None, )` call.
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [`Http3Client::process`] call.
     /// Returns if the priority got changed.
     ///
     /// # Errors
@@ -622,7 +622,7 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
+    /// [`Http3Client::process`] has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8]) -> Res<usize> {
@@ -733,9 +733,9 @@ impl Http3Client {
     ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
+    /// [`Http3Client::process`] has not been called when needed, and HTTP3
+    /// layer has not picked up the info that the stream has been closed.)
+    /// `InvalidInput` if an empty buffer has been supplied.
     pub fn webtransport_close_session(
         &mut self,
         session_id: StreamId,
@@ -875,7 +875,8 @@ impl Http3Client {
         out
     }
 
-    /// Same as [`Http3Client::process`] but allocating output into new [`Vec`].
+    /// Same as [`Http3Client::process_into_buffer`] but allocating output into
+    /// new [`Vec`].
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
         self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
@@ -888,7 +889,7 @@ impl Http3Client {
     /// First, the payload will be handled by the QUIC layer. Afterward, `process_http3` will be
     /// called to handle new [`ConnectionEvent`][1]s.
     ///
-    /// After this function is called `process` should be called to check whether new
+    /// After this function is called [`Http3Client::process`] should be called to check whether new
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
@@ -899,9 +900,10 @@ impl Http3Client {
     }
 
     /// Process HTTP3 layer.
-    /// When `process`, or `process_input` is called we must call this function
-    /// as well. The functions calls `Http3Client::check_connection_events` to handle events from
-    /// the QUC layer and calls `Http3Connection::process_sending` to ensure that HTTP/3 layer
+    /// When [`Http3Client::process`], or [`Http3Client::process_input`] is
+    /// called we must call this function
+    /// as well. The functions calls [`Http3Client::check_connection_events`] to handle events from
+    /// the QUC layer and calls [`Http3Connection::process_sending`] to ensure that HTTP/3 layer
     /// data, e.g. control frames, are sent.
     fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");

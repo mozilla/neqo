@@ -472,7 +472,8 @@ impl Server {
         callback.map_or(Output::None, Output::Callback)
     }
 
-    /// Same as [`Server::process`] but allocating output into new [`Vec`].
+    /// Same as [`Server::process_into_buffer`] but allocating output into new
+    /// [`Vec`].
     #[must_use]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];

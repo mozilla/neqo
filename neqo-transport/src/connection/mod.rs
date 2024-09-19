@@ -1145,7 +1145,8 @@ impl Connection {
         }
     }
 
-    /// Same as [`Connection::process`] but allocating output into new [`Vec`].
+    /// Same as [`Connection::process_into_buffer`] but allocating output into
+    /// new [`Vec`].
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut write_buffer = vec![];
