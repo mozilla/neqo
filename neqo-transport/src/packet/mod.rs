@@ -474,9 +474,9 @@ impl<'a> PacketBuilder<'a> {
         scid: &[u8],
         token: &[u8],
         odcid: &[u8],
-        write_buffer: &'b mut Vec<u8>,
+        out: &'b mut Vec<u8>,
     ) -> Res<&'b [u8]> {
-        let mut encoder = Encoder::new(write_buffer);
+        let mut encoder = Encoder::new(out);
         encoder.encode_vec(1, odcid);
         let start = encoder.len();
         encoder.encode_byte(
@@ -508,9 +508,9 @@ impl<'a> PacketBuilder<'a> {
         scid: &[u8],
         client_version: u32,
         versions: &[Version],
-        write_buffer: &'b mut Vec<u8>,
+        out: &'b mut Vec<u8>,
     ) -> &'b [u8] {
-        let mut encoder = Encoder::new(write_buffer);
+        let mut encoder = Encoder::new(out);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(PACKET_BIT_LONG | (grease[3] & 0x7f));
@@ -722,8 +722,8 @@ impl<'a> PublicPacket<'a> {
             return false;
         }
         let (header, tag) = self.data.split_at(self.data.len() - expansion);
-        let mut write_buffer = Vec::with_capacity(self.data.len());
-        let mut encoder = Encoder::new(&mut write_buffer);
+        let mut out = Vec::with_capacity(self.data.len());
+        let mut encoder = Encoder::new(&mut out);
         encoder.encode_vec(1, odcid);
         encoder.encode(header);
         retry::use_aead(version, |aead| {
@@ -1048,8 +1048,8 @@ mod tests {
 
     #[test]
     fn disallow_long_dcid() {
-        let mut write_buffer = vec![];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
@@ -1061,8 +1061,8 @@ mod tests {
 
     #[test]
     fn disallow_long_scid() {
-        let mut write_buffer = vec![];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
         enc.encode_uint(4, Version::default().wire_version());
         enc.encode_vec(1, &[]);
@@ -1545,8 +1545,8 @@ mod tests {
         const BIG_DCID: &[u8] = &[0x44; MAX_CONNECTION_ID_LEN + 1];
         const BIG_SCID: &[u8] = &[0xee; 255];
 
-        let mut write_buffer = vec![0xff, 0x00, 0x00, 0x00, 0x00];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![0xff, 0x00, 0x00, 0x00, 0x00];
+        let mut enc = Encoder::new(&mut out);
         enc.encode_vec(1, BIG_DCID);
         enc.encode_vec(1, BIG_SCID);
         enc.encode_uint(4, 0x1a2a_3a4a_u64);

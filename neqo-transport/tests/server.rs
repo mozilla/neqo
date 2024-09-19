@@ -440,8 +440,8 @@ fn bad_client_initial() {
     payload_enc.encode(&[0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
 
     // Make a new header with a 1 byte packet number length.
-    let mut write_buffer = vec![];
-    let mut header_enc = Encoder::new(&mut write_buffer);
+    let mut out = vec![];
+    let mut header_enc = Encoder::new(&mut out);
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())
@@ -525,13 +525,13 @@ fn bad_client_initial_connection_close() {
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 
-    let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
-    let mut payload_enc = Encoder::new(&mut write_buffer);
+    let mut out = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    let mut payload_enc = Encoder::new(&mut out);
     payload_enc.encode(&[0x1c, 0x01, 0x00, 0x00]); // Add a CONNECTION_CLOSE frame.
 
-    let mut write_buffer = vec![];
+    let mut out = vec![];
     // Make a new header with a 1 byte packet number length.
-    let mut header_enc = Encoder::new(&mut write_buffer);
+    let mut header_enc = Encoder::new(&mut out);
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())

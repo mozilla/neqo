@@ -86,14 +86,14 @@ impl SelfEncrypt {
         let cipher = self.make_aead(&self.key, &salt)?;
         let encoded_len = 2 + salt.len() + plaintext.len() + cipher.expansion();
 
-        let mut write_buffer = Vec::with_capacity(encoded_len);
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = Vec::with_capacity(encoded_len);
+        let mut enc = Encoder::new(&mut out);
         enc.encode_byte(Self::VERSION);
         enc.encode_byte(self.key_id);
         enc.encode(&salt);
 
-        let mut write_buffer_2 = enc.to_vec();
-        let mut extended_aad = Encoder::new(&mut write_buffer_2);
+        let mut out_2 = enc.to_vec();
+        let mut extended_aad = Encoder::new(&mut out_2);
         extended_aad.encode(aad);
 
         let offset = enc.len();
@@ -139,8 +139,8 @@ impl SelfEncrypt {
         };
         let offset = 2 + Self::SALT_LENGTH;
 
-        let mut write_buffer = Vec::with_capacity(offset + aad.len());
-        let mut extended_aad = Encoder::new(&mut write_buffer);
+        let mut out = Vec::with_capacity(offset + aad.len());
+        let mut extended_aad = Encoder::new(&mut out);
         extended_aad.encode(&ciphertext[0..offset]);
         extended_aad.encode(aad);
 

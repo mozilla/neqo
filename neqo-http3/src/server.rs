@@ -117,37 +117,35 @@ impl Http3Server {
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        let mut out = self
+        let mut output = self
             .server
             // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
             //
             // Find alternative.
-            .process_into_buffer(dgram, now, unsafe {
-                &mut *std::ptr::from_mut(write_buffer)
-            });
+            .process_into_buffer(dgram, now, unsafe { &mut *std::ptr::from_mut(out) });
 
         self.process_http3(now);
 
         // If we do not have a dgram already try again after process_http3.
-        if !matches!(out, Output::Datagram(_)) {
-            out = self.server.process_into_buffer(None, now, write_buffer);
+        if !matches!(output, Output::Datagram(_)) {
+            output = self.server.process_into_buffer(None, now, out);
         }
 
-        if let Output::Datagram(d) = out {
+        if let Output::Datagram(d) = output {
             qtrace!([self], "Send packet: {:?}", d);
         }
 
-        out
+        output
     }
 
     /// Same as [`Http3Server::process_into_buffer`] but allocating output into
     /// new [`Vec`].
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        let mut write_buffer = vec![];
-        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
             .map_datagram(Into::into)
     }
 
@@ -647,8 +645,8 @@ mod tests {
             element_id: stream_id.as_u64(),
             priority: Priority::default(),
         };
-        let mut write_buffer = vec![];
-        let mut e = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut e = Encoder::new(&mut out);
         frame.encode(&mut e);
         peer_conn.control_send(e.as_ref());
         let out = peer_conn.process(None, now());

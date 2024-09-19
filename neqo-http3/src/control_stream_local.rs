@@ -37,8 +37,8 @@ impl ControlStreamLocal {
 
     /// Add a new frame that needs to be send.
     pub fn queue_frame(&mut self, f: &HFrame) {
-        let mut write_buffer = vec![];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         f.encode(&mut enc);
         self.stream.buffer(enc.as_ref());
     }
@@ -78,8 +78,8 @@ impl ControlStreamLocal {
 
             // in case multiple priority_updates were issued, ignore now irrelevant
             if let Some(hframe) = stream.priority_update_frame() {
-                let mut write_buffer = vec![];
-                let mut enc = Encoder::new(&mut write_buffer);
+                let mut out = vec![];
+                let mut enc = Encoder::new(&mut out);
                 hframe.encode(&mut enc);
                 if self.stream.send_atomic(conn, enc.as_ref())? {
                     stream.priority_update_sent();

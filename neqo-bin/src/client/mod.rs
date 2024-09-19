@@ -376,7 +376,7 @@ trait Client {
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]>;
     fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)

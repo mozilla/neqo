@@ -166,8 +166,8 @@ impl Simulator {
     /// # Panics
     /// When the provided string is not 32 bytes of hex (64 characters).
     pub fn seed_str(&mut self, seed: impl AsRef<str>) {
-        let mut write_buffer = vec![];
-        let seed = Encoder::new(&mut write_buffer).from_hex(seed);
+        let mut out = vec![];
+        let seed = Encoder::new(&mut out).from_hex(seed);
         self.seed(<[u8; 32]>::try_from(seed.as_ref()).unwrap());
     }
 

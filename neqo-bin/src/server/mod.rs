@@ -198,7 +198,7 @@ pub trait HttpServer: Display {
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;

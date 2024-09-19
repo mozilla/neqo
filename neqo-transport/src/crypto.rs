@@ -373,8 +373,8 @@ impl Crypto {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
                 qtrace!("TLS token {}", hex(t.as_ref()));
-                let mut write_buffer = vec![];
-                let mut enc = Encoder::new(&mut write_buffer);
+                let mut out = vec![];
+                let mut enc = Encoder::new(&mut out);
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
                 enc.encode_vvec_with(|enc_inner| {
@@ -383,7 +383,7 @@ impl Crypto {
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
                 qdebug!("resumption token {}", hex_snip_middle(enc.as_ref()));
-                ResumptionToken::new(write_buffer, t.expiration_time())
+                ResumptionToken::new(out, t.expiration_time())
             })
         } else {
             unreachable!("It is a server.");

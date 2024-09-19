@@ -197,9 +197,9 @@ impl Server {
         initial: InitialDetails,
         dgram: Datagram<&[u8]>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(write_buffer.is_empty());
+        assert!(out.is_empty());
 
         qdebug!([self], "Handle initial");
         let res = self
@@ -208,11 +208,9 @@ impl Server {
             .validate(&initial.token, dgram.source(), now);
         match res {
             AddressValidationResult::Invalid => Output::None,
-            AddressValidationResult::Pass => {
-                self.accept_connection(initial, dgram, None, now, write_buffer)
-            }
+            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now, out),
             AddressValidationResult::ValidRetry(orig_dcid) => {
-                self.accept_connection(initial, dgram, Some(orig_dcid), now, write_buffer)
+                self.accept_connection(initial, dgram, Some(orig_dcid), now, out)
             }
             AddressValidationResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", initial.dst_cid);
@@ -233,7 +231,7 @@ impl Server {
                         &new_dcid,
                         &token,
                         &initial.dst_cid,
-                        write_buffer,
+                        out,
                     );
                     packet.map_or_else(
                         |_| {
@@ -307,7 +305,7 @@ impl Server {
         dgram: Datagram<&[u8]>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qinfo!(
             [self],
@@ -329,7 +327,7 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process_into_buffer(Some(dgram), now, write_buffer);
+                let out = c.process_into_buffer(Some(dgram), now, out);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -351,9 +349,9 @@ impl Server {
         &mut self,
         dgram: Datagram<&[u8]>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(write_buffer.is_empty());
+        assert!(out.is_empty());
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -370,9 +368,7 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c
-                .borrow_mut()
-                .process_into_buffer(Some(dgram), now, write_buffer);
+            return c.borrow_mut().process_into_buffer(Some(dgram), now, out);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -400,7 +396,7 @@ impl Server {
                 &packet.dcid()[..],
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
-                write_buffer,
+                out,
             );
 
             crate::qlog::server_version_information_failed(
@@ -427,7 +423,7 @@ impl Server {
                 // Copy values from `packet` because they are currently still borrowing from
                 // `dgram`.
                 let initial = InitialDetails::new(&packet);
-                self.handle_initial(initial, dgram, now, write_buffer)
+                self.handle_initial(initial, dgram, now, out)
             }
             PacketType::ZeroRtt => {
                 let dcid = ConnectionId::from(packet.dcid());
@@ -444,12 +440,8 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output<'a>(
-        &mut self,
-        now: Instant,
-        write_buffer: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
-        assert!(write_buffer.is_empty());
+    fn process_next_output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> Output<&'a [u8]> {
+        assert!(out.is_empty());
         let mut callback = None;
 
         for connection in &mut self.connections {
@@ -458,7 +450,7 @@ impl Server {
                 // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
                 //
                 // Find alternative.
-                .process_into_buffer(None, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
+                .process_into_buffer(None, now, unsafe { &mut *std::ptr::from_mut(out) })
             {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
@@ -476,8 +468,8 @@ impl Server {
     /// [`Vec`].
     #[must_use]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        let mut write_buffer = vec![];
-        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
             .map_datagram(Into::into)
     }
 
@@ -489,18 +481,18 @@ impl Server {
         &mut self,
         dgram: Option<Datagram<&[u8]>>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         // TODO: This the right place?
-        assert!(write_buffer.is_empty());
+        assert!(out.is_empty());
         let out = dgram
             .map_or(Output::None, |d| {
                 // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
                 //
                 // Find alternative.
-                self.process_input(d, now, unsafe { &mut *std::ptr::from_mut(write_buffer) })
+                self.process_input(d, now, unsafe { &mut *std::ptr::from_mut(out) })
             })
-            .or_else(|| self.process_next_output(now, write_buffer));
+            .or_else(|| self.process_next_output(now, out));
 
         // Clean-up closed connections.
         self.connections

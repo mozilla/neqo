@@ -360,14 +360,14 @@ fn vn_after_retry() {
     let dgram = client.process(dgram.as_ref(), now()).dgram(); // Initial w/token
     assert!(dgram.is_some());
 
-    let mut write_buffer = vec![];
-    let mut encoder = Encoder::new(&mut write_buffer);
+    let mut out = vec![];
+    let mut encoder = Encoder::new(&mut out);
     encoder.encode_byte(0x80);
     encoder.encode(&[0; 4]); // Zero version == VN.
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
-    let vn = datagram(write_buffer);
+    let vn = datagram(out);
 
     assert_ne!(
         client.process(Some(&vn), now()).callback(),
@@ -420,9 +420,9 @@ fn mitm_retry() {
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)
         .unwrap();
 
-    let mut write_buffer = Vec::with_capacity(header.len());
+    let mut out = Vec::with_capacity(header.len());
     // Now re-encode without the token.
-    let mut enc = Encoder::new(&mut write_buffer);
+    let mut enc = Encoder::new(&mut out);
     enc.encode(&header[..5])
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
@@ -432,9 +432,9 @@ fn mitm_retry() {
     let notoken_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
     qtrace!("notoken_header={}", hex_with_len(&notoken_header));
 
-    let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    let mut out = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
     // Encrypt.
-    let mut notoken_packet = Encoder::new(&mut write_buffer)
+    let mut notoken_packet = Encoder::new(&mut out)
         .encode(&notoken_header)
         .as_ref()
         .to_vec();

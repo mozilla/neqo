@@ -318,8 +318,8 @@ mod tests {
             outcome: &Res<(ReceiveOutput, bool)>,
             done: bool,
         ) {
-            let mut write_buffer = vec![];
-            let mut enc = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             for i in to_encode {
                 enc.encode_varint(*i);
             }

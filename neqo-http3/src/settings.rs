@@ -233,8 +233,8 @@ impl HttpZeroRttChecker {
     /// Save the settings that matter for 0-RTT.
     #[must_use]
     pub fn save(settings: &Http3Parameters) -> Vec<u8> {
-        let mut write_buffer = vec![];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION)
             .encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)
             .encode_varint(settings.get_max_table_size_decoder())
@@ -247,7 +247,7 @@ impl HttpZeroRttChecker {
         if settings.get_http3_datagram() {
             enc.encode_varint(SETTINGS_H3_DATAGRAM).encode_varint(true);
         }
-        write_buffer
+        out
     }
 }
 

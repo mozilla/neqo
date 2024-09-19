@@ -229,8 +229,8 @@ fn overflow_crypto() {
 
     // Send in 100 packets, each with 1000 bytes of crypto frame data each,
     // eventually this will overrun the buffer we keep for crypto data.
-    let mut write_buffer = Vec::with_capacity(1024);
-    let mut payload = Encoder::new(&mut write_buffer);
+    let mut out = Vec::with_capacity(1024);
+    let mut payload = Encoder::new(&mut out);
     for pn in 0..100_u64 {
         payload.truncate(0);
         payload
@@ -240,8 +240,8 @@ fn overflow_crypto() {
         let plen = payload.len();
         payload.pad_to(plen + 1000, 44);
 
-        let mut write_buffer = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
-        let mut packet = Encoder::new(&mut write_buffer);
+        let mut out = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
+        let mut packet = Encoder::new(&mut out);
         packet
             .encode_byte(0xc1) // Initial with packet number length of 2.
             .encode_uint(4, Version::Version1.wire_version())
@@ -252,7 +252,7 @@ fn overflow_crypto() {
         let pn_offset = packet.len();
         packet.encode_uint(2, pn);
 
-        let mut packet = write_buffer;
+        let mut packet = out;
         let header = packet.clone();
         packet.resize(header.len() + payload.len() + aead.expansion(), 0);
         aead.encrypt(pn, &header, payload.as_ref(), &mut packet[header.len()..])

@@ -110,8 +110,8 @@ impl AddressValidation {
         // TODO(mt) rotate keys on a fixed schedule.
         let retry = dcid.is_some();
 
-        let mut write_buffer = vec![];
-        let mut data = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut data = Encoder::new(&mut out);
         let end = now
             + if retry {
                 EXPIRATION_RETRY
@@ -125,13 +125,13 @@ impl AddressValidation {
         }
 
         // Include the token identifier ("Retry"/~) in the AAD, then keep it for plaintext.
-        let mut write_buffer = vec![];
-        let mut encoder = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut encoder = Encoder::new(&mut out);
         Self::encode_aad(peer_address, retry, &mut encoder);
         let encrypted = self.self_encrypt.seal(encoder.as_ref(), data.as_ref())?;
         encoder.truncate(TOKEN_IDENTIFIER_RETRY.len());
         encoder.encode(&encrypted);
-        Ok(write_buffer)
+        Ok(out)
     }
 
     /// This generates a token for use with Retry.
@@ -165,8 +165,8 @@ impl AddressValidation {
         retry: bool,
         now: Instant,
     ) -> Option<ConnectionId> {
-        let mut write_buffer = vec![];
-        let mut encoder = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut encoder = Encoder::new(&mut out);
         Self::encode_aad(peer_address, retry, &mut encoder);
         let data = self.self_encrypt.open(encoder.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);

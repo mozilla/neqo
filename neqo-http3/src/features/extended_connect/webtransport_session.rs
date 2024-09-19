@@ -384,8 +384,8 @@ impl WebTransportSession {
             error,
             message: message.to_string(),
         };
-        let mut write_buffer = vec![];
-        let mut encoder = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut encoder = Encoder::new(&mut out);
         close_frame.encode(&mut encoder);
         self.control_stream_send
             .send_data_atomic(conn, encoder.as_ref())?;
@@ -413,11 +413,11 @@ impl WebTransportSession {
     ) -> Res<()> {
         qtrace!([self], "send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {
-            let mut write_buffer = vec![];
-            let mut dgram_data = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut dgram_data = Encoder::new(&mut out);
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
             dgram_data.encode(buf);
-            conn.send_datagram(write_buffer, id)?;
+            conn.send_datagram(out, id)?;
         } else {
             debug_assert!(false);
             return Err(Error::Unavailable);

@@ -409,11 +409,11 @@ impl Http3Client {
 
     fn encode_resumption_token(&self, token: &ResumptionToken) -> Option<ResumptionToken> {
         self.base_handler.get_settings().map(|settings| {
-            let mut write_buffer = vec![];
-            let mut enc = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            ResumptionToken::new(write_buffer, token.expiration_time())
+            ResumptionToken::new(out, token.expiration_time())
         })
     }
 
@@ -622,8 +622,8 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// [`Http3Client::process`] has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
+    /// [`Http3Client::process`] has not been called when needed, and HTTP3 layer has not picked up
+    /// the info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8]) -> Res<usize> {
         qinfo!(
@@ -858,7 +858,7 @@ impl Http3Client {
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
         if let Some(d) = input {
@@ -870,7 +870,7 @@ impl Http3Client {
             self.process_http3(now);
         }
 
-        let out = self.conn.process_into_buffer(None, now, write_buffer);
+        let out = self.conn.process_into_buffer(None, now, out);
         self.process_http3(now);
         out
     }
@@ -878,8 +878,8 @@ impl Http3Client {
     /// Same as [`Http3Client::process_into_buffer`] but allocating output into
     /// new [`Vec`].
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        let mut write_buffer = vec![];
-        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
             .map_datagram(Into::into)
     }
 
@@ -1451,8 +1451,8 @@ mod tests {
             );
 
             // Encode a settings frame and send it.
-            let mut write_buffer = vec![];
-            let mut enc = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             self.settings.encode(&mut enc);
             assert_eq!(
                 self.conn
@@ -1896,8 +1896,8 @@ mod tests {
             push_id,
             header_block: PUSH_PROMISE_DATA.to_vec(),
         };
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         frame.encode(&mut d);
         _ = conn.stream_send(stream_id, d.as_ref()).unwrap();
     }
@@ -1936,8 +1936,8 @@ mod tests {
         push_id: u64,
     ) {
         let frame = HFrame::CancelPush { push_id };
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         frame.encode(&mut d);
         server
             .conn
@@ -2854,11 +2854,11 @@ mod tests {
 
     fn alloc_buffer(size: usize) -> (Vec<u8>, Vec<u8>) {
         let data_frame = HFrame::Data { len: size as u64 };
-        let mut write_buffer = vec![];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         data_frame.encode(&mut enc);
 
-        (vec![0_u8; size], write_buffer)
+        (vec![0_u8; size], out)
     }
 
     // Send 2 frames. For the second one we can only send 63 bytes.
@@ -3996,8 +3996,8 @@ mod tests {
         let encoder_inst_pkt = server.conn.process(None, now());
 
         // Send response
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -4065,8 +4065,8 @@ mod tests {
         // headers.
         let encoder_inst_pkt = server.conn.process(None, now());
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
 
         server_send_response_and_exchange_packet(
@@ -4347,8 +4347,8 @@ mod tests {
 
         // Send new settings.
         let control_stream = server.conn.stream_create(StreamType::UniDi).unwrap();
-        let mut write_buffer = vec![];
-        let mut enc = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         server.settings.encode(&mut enc);
         let mut sent = server.conn.stream_send(control_stream, CONTROL_STREAM_TYPE);
         assert_eq!(sent.unwrap(), CONTROL_STREAM_TYPE.len());
@@ -4987,8 +4987,8 @@ mod tests {
         client.process(out.as_dgram_ref(), now());
 
         // Send response
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -5957,8 +5957,8 @@ mod tests {
         let encoder_inst_pkt = server.conn.process(None, now()).dgram();
         assert!(encoder_inst_pkt.is_some());
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         push_promise_frame.encode(&mut d);
         server_send_response_and_exchange_packet(client, server, stream_id, &d, false);
 
@@ -6102,8 +6102,8 @@ mod tests {
         let header_hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         header_hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6176,8 +6176,8 @@ mod tests {
         let header_hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         header_hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6267,8 +6267,8 @@ mod tests {
         let encoder_insts = server.conn.process(None, now());
 
         // Send response headers.
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6283,8 +6283,8 @@ mod tests {
         assert!(!client.events().any(header_ready_event));
 
         // Now send data frame. This will trigger DataRead event.
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 0 };
         d_frame.encode(&mut d);
@@ -6329,11 +6329,11 @@ mod tests {
             header_block: encoded_headers.to_vec(),
         };
 
-        let out = server.conn.process(None, now());
+        let output = server.conn.process(None, now());
 
         // Send response
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data {
             len: u64::try_from(data.len()).unwrap(),
@@ -6342,7 +6342,7 @@ mod tests {
         d.encode(data);
         server_send_response_and_exchange_packet(client, server, request_stream_id, &d, true);
 
-        out.dgram()
+        output.dgram()
     }
 
     #[test]
@@ -6466,8 +6466,8 @@ mod tests {
         );
 
         // Send response
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 0 };
         d_frame.encode(&mut d);
@@ -6531,8 +6531,8 @@ mod tests {
         let encoder_insts = server.conn.process(None, now());
 
         // Send response headers.
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6572,8 +6572,8 @@ mod tests {
     #[test]
     fn reserved_frames() {
         for f in H3_RESERVED_FRAME_TYPES {
-            let mut write_buffer = vec![];
-            let mut enc = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             enc.encode_varint(*f);
             test_wrong_frame_on_control_stream(enc.as_ref());
             test_wrong_frame_on_push_stream(enc.as_ref());
@@ -6592,8 +6592,8 @@ mod tests {
                 .stream_send(control_stream, CONTROL_STREAM_TYPE)
                 .unwrap();
             // Create a settings frame of length 2.
-            let mut write_buffer = vec![];
-            let mut enc = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             enc.encode_varint(H3_FRAME_TYPE_SETTINGS);
             enc.encode_varint(2_u64);
             // The settings frame contains a reserved settings type and some value (0x1).
@@ -6613,8 +6613,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers1xx: &[Header] = &[Header::new(":status", "103")];
         server.encode_headers(request_stream_id, headers1xx, &mut d);
 
@@ -6676,8 +6676,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers = vec![
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6736,8 +6736,8 @@ mod tests {
         // Create a push stream
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers1xx: &[Header] = &[Header::new(":status", "100")];
         server.encode_headers(push_stream_id, headers1xx, &mut d);
 
@@ -6805,8 +6805,8 @@ mod tests {
         // Create a push stream
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers = vec![
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6885,8 +6885,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         server.encode_headers(request_stream_id, headers, &mut d);
 
         // Send response
@@ -6946,8 +6946,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         server.encode_headers(
             request_stream_id,
             &[
@@ -7226,8 +7226,8 @@ mod tests {
         let encoder_inst_pkt = server.conn.process(None, now());
 
         // Send response
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -7253,8 +7253,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut write_buffer = vec![];
-        let mut d = Encoder::new(&mut write_buffer);
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers1xx = &[Header::new(":status", "101")];
         server.encode_headers(request_stream_id, headers1xx, &mut d);
 

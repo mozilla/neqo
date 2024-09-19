@@ -818,8 +818,8 @@ impl Connection {
 
         let tps = &self.tps;
         if let Agent::Server(ref mut s) = self.crypto.tls {
-            let mut write_buffer = vec![];
-            let mut enc = Encoder::new(&mut write_buffer);
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             enc.encode_vvec_with(|enc_inner| {
                 tps.borrow().local.encode(enc_inner);
             });
@@ -1113,11 +1113,7 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     #[must_use = "Output of the process_output function must be handled"]
-    fn process_output<'a>(
-        &mut self,
-        now: Instant,
-        write_buffer: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    fn process_output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> Output<&'a [u8]> {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
         match (&self.state, self.role) {
@@ -1133,7 +1129,7 @@ impl Connection {
             }
         }
 
-        match self.output(now, write_buffer) {
+        match self.output(now, out) {
             SendOption::Yes(dgram) => Output::Datagram(dgram),
             SendOption::No(paced) => match self.state {
                 State::Init | State::Closed(_) => Output::None,
@@ -1149,8 +1145,8 @@ impl Connection {
     /// new [`Vec`].
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        let mut write_buffer = vec![];
-        self.process_into_buffer(dgram.map(Into::into), now, &mut write_buffer)
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
             .map_datagram(Into::into)
     }
 
@@ -1164,15 +1160,15 @@ impl Connection {
         &mut self,
         input: Option<Datagram<&[u8]>>,
         now: Instant,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(write_buffer.is_empty());
+        assert!(out.is_empty());
         if let Some(d) = input {
             self.input(d, now, now);
             self.process_saved(now);
         }
         #[allow(clippy::let_and_return)]
-        let output = self.process_output(now, write_buffer);
+        let output = self.process_output(now, out);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {
             if let Some(d) = output.clone().map_datagram(Into::into).dgram() {
@@ -1978,7 +1974,7 @@ impl Connection {
         }
     }
 
-    fn output<'a>(&mut self, now: Instant, write_buffer: &'a mut Vec<u8>) -> SendOption<'a> {
+    fn output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> SendOption<'a> {
         qtrace!([self], "output {:?}", now);
         let res = match &self.state {
             State::Init
@@ -1989,7 +1985,7 @@ impl Connection {
             | State::Confirmed => self.paths.select_path().map_or_else(
                 || Ok(SendOption::default()),
                 |path| {
-                    let res = self.output_path(&path, now, &None, write_buffer);
+                    let res = self.output_path(&path, now, &None, out);
                     self.capture_error(Some(path), now, 0, res)
                 },
             ),
@@ -2006,7 +2002,7 @@ impl Connection {
                             qerror!([self], "Attempting to close with a temporary path");
                             Err(Error::InternalError)
                         } else {
-                            self.output_path(&path, now, &Some(details), write_buffer)
+                            self.output_path(&path, now, &Some(details), out)
                         };
                         self.capture_error(Some(path), now, 0, res)
                     },
@@ -2345,7 +2341,7 @@ impl Connection {
         path: &PathRef,
         now: Instant,
         closing_frame: &Option<ClosingFrame>,
-        write_buffer: &'a mut Vec<u8>,
+        out: &'a mut Vec<u8>,
     ) -> Res<SendOption<'a>> {
         let mut initial_sent = None;
         let mut needs_padding = false;
@@ -2359,8 +2355,8 @@ impl Connection {
         // TODO: epochs or packetnumberspaces below?
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        assert_eq!(write_buffer.len(), 0);
-        let mut encoder = Encoder::new(write_buffer);
+        assert_eq!(out.len(), 0);
+        let mut encoder = Encoder::new(out);
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
@@ -3483,10 +3479,10 @@ impl Connection {
         let mtu = path.borrow().plpmtu();
 
         // TODO: Is this the cleanest way?
-        let mut tmp_write_buffer = vec![];
+        let mut tmp_out = vec![];
 
         // TODO: This was previously initialized with the mtu. Relevant?
-        let encoder = Encoder::new(&mut tmp_write_buffer);
+        let encoder = Encoder::new(&mut tmp_out);
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),
