@@ -86,6 +86,7 @@ jobs:
       - if: matrix.os == 'solaris'
         uses: vmactions/solaris-vm@960d7483ffd6ac03397964cf6423a2f41332c9c8
         with:
+          release: "11.4-gcc"
           usesh: true
           copyback: false
           prepare: |
