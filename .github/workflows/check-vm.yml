@@ -26,8 +26,6 @@ jobs:
       matrix:
         os: [freebsd, openbsd, netbsd, solaris]
     runs-on: ubuntu-latest
-    env:
-      NSS_DIR: ${{ github.workspace }}/nss
 
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -45,12 +43,13 @@ jobs:
         with:
           usesh: true
           copyback: false
-          envs: NSS_DIR
           prepare: |
             pkg install -y rust
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
+            env | sort
+            export NSS_DIR=$(pwd)/nss
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -59,12 +58,13 @@ jobs:
         with:
           usesh: true
           copyback: false
-          envs: NSS_DIR
           prepare: |
             pkg_add rust
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
+            env | sort
+            export NSS_DIR=$(pwd)/nss
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -73,12 +73,13 @@ jobs:
         with:
           usesh: true
           copyback: false
-          envs: NSS_DIR
           prepare: |
             /usr/sbin/pkg_add rust
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
+            env | sort
+            export NSS_DIR=$(pwd)/nss
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -87,12 +88,13 @@ jobs:
         with:
           usesh: true
           copyback: false
-          envs: NSS_DIR
           prepare: |
-            pkg install –-accept curl
+            pkg install curl
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
+            env | sort
+            export NSS_DIR=$(pwd)/nss
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
