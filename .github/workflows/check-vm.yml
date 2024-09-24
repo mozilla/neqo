@@ -41,11 +41,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y curl bash ninja python3
+            pkg install -y curl rust bash ninja python3 py-pip
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-              sh -s -- --profile minimal --default-toolchain stable
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
@@ -58,11 +56,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg_add curl bash ninja python-3.10.14
+            pkg_add curl rust bash ninja python-3.10.14
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-              sh -s -- --profile minimal --default-toolchain stable
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
@@ -75,11 +71,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add curl bash ninja python312
+            /usr/sbin/pkg_add curl rust bash ninja python312
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-              sh -s -- --profile minimal --default-toolchain stable
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
@@ -93,11 +87,10 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install curl bash ninja python3
+            pkg install curl rust bash ninja python3
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-              sh -s -- --profile minimal --default-toolchain stable
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
