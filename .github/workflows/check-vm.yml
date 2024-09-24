@@ -26,19 +26,24 @@ jobs:
       matrix:
         os: [freebsd, openbsd, netbsd, solaris]
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+    env:
+      NSS_DIR: ${{ github.workspace }}/nss
 
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      # Force a download of the latest NSS sources.
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: 999.999
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@d7b8fcc7711aa41ad45e8d9b737cf90f035a7e3d
         with:
           usesh: true
+          envs: NSS_DIR
           prepare: |
-            pkg install -y rust nss pkgconf
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -48,8 +53,9 @@ jobs:
         uses: vmactions/openbsd-vm@ebafa4eac4adf5e7d04e5bbb4aa764b75dd160df
         with:
           usesh: true
+          envs: NSS_DIR
           prepare: |
-            pkg_add rust nss pkgconf
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -59,8 +65,9 @@ jobs:
         uses: vmactions/netbsd-vm@dd0161ecbb6386e562fd098acf367633501487a4
         with:
           usesh: true
+          envs: NSS_DIR
           prepare: |
-            /usr/sbin/pkg_add rust nss pkg-config
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -70,19 +77,13 @@ jobs:
         uses: vmactions/solaris-vm@960d7483ffd6ac03397964cf6423a2f41332c9c8
         with:
           usesh: true
+          envs: NSS_DIR
           prepare: |
-            pkgutil -y -i rust nss pkg-config
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
-
-      # - id: nss-version
-      #   run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
-      # - uses: ./.github/actions/nss
-      #   with:
-      #     minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       # - name: Run client/server transfer
       #   run: |
