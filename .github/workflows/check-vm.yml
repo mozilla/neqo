@@ -38,7 +38,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y rust nss
+            pkg install -y rust nss pkg-config
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -49,7 +49,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg_add -y rust nss
+            pkg_add rust nss pkg-config
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -60,7 +60,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg_add -y rust nss
+            pkg_add rust nss pkg-config
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -71,7 +71,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y rust nss
+            pkg install rust nss pkg-config
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
