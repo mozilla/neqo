@@ -41,9 +41,10 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y rust bash ninja python310 py310-pip
+            pkg install -y rust bash ninja python311 py311-pip
             echo "gyp-next>=0.18.1" > req.txt
-            python3 -m pip install -r req.txt
+            python3.11 -m pip install -r req.txt
+            cd /bin && ln -s python3.11 python
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
@@ -59,6 +60,7 @@ jobs:
             pkg_add rust bash ninja py3-pip
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
+            cd /bin && ln -s python3 python
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
@@ -74,6 +76,7 @@ jobs:
             /usr/sbin/pkg_add rust bash ninja python312 py312-pip
             echo "gyp-next>=0.18.1" > req.txt
             python3.12 -m pip install -r req.txt
+            cd /bin && ln -s python3.12 python
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
@@ -90,6 +93,7 @@ jobs:
             pkg install cargo bash ninja python-39 pip-39
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
+            cd /bin && ln -s python3 python
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
