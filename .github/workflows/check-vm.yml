@@ -37,7 +37,6 @@ jobs:
         with:
           repository: nss-dev/nspr
           path: nspr
-      - run: echo "gyp-next>=0.18.1" > req.txt
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@d7b8fcc7711aa41ad45e8d9b737cf90f035a7e3d
@@ -48,7 +47,8 @@ jobs:
           prepare: |
             pkg install -y rust bash ninja python311 py311-pip
             cd /bin && ln -s $(which python3.11) python
-            python -m pip install -r req.txt
+            echo "gyp-next>=0.18.1" > req.txt
+            python -m pip install -r req.txt --break-system-packages
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -62,7 +62,8 @@ jobs:
           prepare: |
             pkg_add rust bash ninja py3-pip
             cd /bin && ln -s $(which python3) python
-            python -m pip install -r req.txt
+            echo "gyp-next>=0.18.1" > req.txt
+            python -m pip install -r req.txt --break-system-packages
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -76,7 +77,8 @@ jobs:
           prepare: |
             /usr/sbin/pkg_add rust bash ninja python312 py312-pip
             cd /bin && ln -s $(which python3.12) python
-            python -m pip install -r req.txt
+            echo "gyp-next>=0.18.1" > req.txt
+            python -m pip install -r req.txt --break-system-packages
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -90,8 +92,9 @@ jobs:
           copyback: false
           prepare: |
             pkg install cargo bash ninja python-39 pip-39
-            cd /bin && ln -s $(which python3) python
-            python -m pip install -r req.txt
+            # cd /bin && ln -s $(which python3) python
+            echo "gyp-next>=0.18.1" > req.txt
+            python -m pip install -r req.txt --break-system-packages
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
