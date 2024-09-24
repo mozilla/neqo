@@ -49,6 +49,8 @@ jobs:
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
+            export BASH=$(which sh)
+            env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -63,6 +65,8 @@ jobs:
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
+            export BASH=$(which sh)
+            env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -77,6 +81,8 @@ jobs:
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
+            export BASH=$(which sh)
+            env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -91,6 +97,8 @@ jobs:
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
+            export BASH=$(which sh)
+            env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
