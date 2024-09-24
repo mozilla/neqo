@@ -47,9 +47,8 @@ jobs:
             pkg install -y rust
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
-            echo "Hello, ${{ matrix.os}}!"
-            env | sort
             export NSS_DIR=$(pwd)/nss
+            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -62,9 +61,8 @@ jobs:
             pkg_add rust
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
-            echo "Hello, ${{ matrix.os}}!"
-            env | sort
             export NSS_DIR=$(pwd)/nss
+            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -77,9 +75,8 @@ jobs:
             /usr/sbin/pkg_add rust
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
-            echo "Hello, ${{ matrix.os}}!"
-            env | sort
             export NSS_DIR=$(pwd)/nss
+            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -89,12 +86,11 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install curl
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+            pkg install rust
+            # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
-            echo "Hello, ${{ matrix.os}}!"
-            env | sort
             export NSS_DIR=$(pwd)/nss
+            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
