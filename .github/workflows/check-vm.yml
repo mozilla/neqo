@@ -1,0 +1,104 @@
+name: CI VM
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check-vm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [freebsd, openbsd, netbsd, solaris]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - if: matrix.os == 'freebsd'
+        uses: vmactions/freebsd-vm@d7b8fcc7711aa41ad45e8d9b737cf90f035a7e3d
+        with:
+          usesh: true
+          run: |
+            pkg install -y rust
+            pkg install -y nss
+            pkg install -y cmake
+            pkg install -y git
+
+      - if: matrix.os == 'openbsd'
+        uses: vmactions/openbsd-vm@ebafa4eac4adf5e7d04e5bbb4aa764b75dd160df
+        with:
+          usesh: true
+          run: |
+            pkg install -y rust
+            pkg install -y nss
+            pkg install -y cmake
+            pkg install -y git
+
+      - if: matrix.os == 'netbsd'
+        uses: vmactions/netbsd-vm@dd0161ecbb6386e562fd098acf367633501487a4
+        with:
+          usesh: true
+          run: |
+            pkg install -y rust
+            pkg install -y nss
+            pkg install -y cmake
+            pkg install -y git
+
+      - if: matrix.os == 'solaris'
+        uses: vmactions/solaris-vm@960d7483ffd6ac03397964cf6423a2f41332c9c8
+        with:
+          usesh: true
+          run: |
+            pkg install -y rust
+            pkg install -y nss
+            pkg install -y cmake
+            pkg install -y git
+
+      # - uses: ./.github/actions/rust
+      #   with:
+      #     tools: cargo-nextest
+      #     token: ${{ secrets.GITHUB_TOKEN }}
+
+      # - id: nss-version
+      #   run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      # - uses: ./.github/actions/nss
+      #   with:
+      #     minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      # - run: cargo check --all-targets --features ci
+      # - run: RUST_LOG=trace cargo nextest run --features ci --no-fail-fast
+
+      # - name: Run client/server transfer
+      #   run: |
+      #     cargo build --bin neqo-client --bin neqo-server
+      #     "target/debug/neqo-server" "$HOST:4433" &
+      #     PID=$!
+      #     # Give the server time to start.
+      #     sleep 1
+      #     "target/debug/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
+      #     kill $PID
+      #     [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+      #   env:
+      #     HOST: localhost
+      #     SIZE: 54321
+      #     RUST_LOG: warn
