@@ -31,19 +31,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-
-      # Force a download of the latest NSS sources.
-      - uses: ./.github/actions/nss
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
-          minimum-version: 999.999
+          repository: nss-dev/nss
+          path: nss
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: nss-dev/nspr
+          path: nspr
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@d7b8fcc7711aa41ad45e8d9b737cf90f035a7e3d
         with:
           usesh: true
+          copyback: false
           envs: NSS_DIR
           prepare: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+            pkg install -y rust
+            # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -53,9 +58,11 @@ jobs:
         uses: vmactions/openbsd-vm@ebafa4eac4adf5e7d04e5bbb4aa764b75dd160df
         with:
           usesh: true
+          copyback: false
           envs: NSS_DIR
           prepare: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+            pkg_add rust
+            # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -65,9 +72,11 @@ jobs:
         uses: vmactions/netbsd-vm@dd0161ecbb6386e562fd098acf367633501487a4
         with:
           usesh: true
+          copyback: false
           envs: NSS_DIR
           prepare: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+            /usr/sbin/pkg_add rust
+            # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
             cargo check --all-targets --features ci
@@ -77,8 +86,10 @@ jobs:
         uses: vmactions/solaris-vm@960d7483ffd6ac03397964cf6423a2f41332c9c8
         with:
           usesh: true
+          copyback: false
           envs: NSS_DIR
           prepare: |
+            pkg install –-accept curl
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             echo "Hello, ${{ matrix.os}}!"
