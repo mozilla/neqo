@@ -44,7 +44,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y bash ninja python gyp
+            pkg install -y curl bash ninja python gyp-next
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
@@ -59,7 +59,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg_add bash ninja python gyp
+            pkg_add curl bash ninja python-3.10.14 gyp
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
@@ -74,7 +74,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add bash ninja python gyp
+            /usr/sbin/pkg_add curl bash ninja python3 gyp-next
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
@@ -90,7 +90,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install bash ninja python gyp
+            pkg install curl bash ninja python3 gyp-next
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
