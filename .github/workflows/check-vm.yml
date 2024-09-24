@@ -44,12 +44,11 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y rust
+            pkg install -y rust bash
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
-            export BASH=$(which sh)
             env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -60,12 +59,11 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg_add rust
+            pkg_add rust bash
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
-            export BASH=$(which sh)
             env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -76,12 +74,11 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add rust
+            /usr/sbin/pkg_add rust bash
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
-            export BASH=$(which sh)
             env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -92,12 +89,11 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install rust
+            pkg install rust bash
             # curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
-            export BASH=$(which sh)
             env | sort
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
