@@ -8,9 +8,6 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -44,7 +41,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y curl bash ninja python gyp-next
+            pkg install -y curl bash ninja python3
+            echo "gyp-next>=0.18.1" > req.txt
+            python3 -m pip install -r req.txt
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
@@ -59,7 +58,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg_add curl bash ninja python-3.10.14 gyp
+            pkg_add curl bash ninja python-3.10.14
+            echo "gyp-next>=0.18.1" > req.txt
+            python3 -m pip install -r req.txt
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
@@ -74,7 +75,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add curl bash ninja python3 gyp-next
+            /usr/sbin/pkg_add curl bash ninja python312
+            echo "gyp-next>=0.18.1" > req.txt
+            python3 -m pip install -r req.txt
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
@@ -90,7 +93,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install curl bash ninja python3 gyp-next
+            pkg install curl bash ninja python3
+            echo "gyp-next>=0.18.1" > req.txt
+            python3 -m pip install -r req.txt
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
               sh -s -- --profile minimal --default-toolchain stable
           run: |
