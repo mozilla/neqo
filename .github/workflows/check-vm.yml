@@ -23,6 +23,9 @@ jobs:
       matrix:
         os: [freebsd, openbsd, netbsd, solaris]
     runs-on: ubuntu-latest
+    env:
+      NSS_DIR: ${{ github.workspace }}/nss
+      NSS_TARGET: Debug
 
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -34,20 +37,19 @@ jobs:
         with:
           repository: nss-dev/nspr
           path: nspr
+      - run: echo "gyp-next>=0.18.1" > req.txt
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@d7b8fcc7711aa41ad45e8d9b737cf90f035a7e3d
         with:
           usesh: true
+          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
             pkg install -y rust bash ninja python311 py311-pip
-            echo "gyp-next>=0.18.1" > req.txt
-            python3.11 -m pip install -r req.txt
-            cd /bin && ln -s python3.11 python
+            cd /bin && ln -s $(which python3.11) python
+            python -m pip install -r req.txt
           run: |
-            export NSS_DIR=$(pwd)/nss
-            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -55,15 +57,13 @@ jobs:
         uses: vmactions/openbsd-vm@ebafa4eac4adf5e7d04e5bbb4aa764b75dd160df
         with:
           usesh: true
+          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
             pkg_add rust bash ninja py3-pip
-            echo "gyp-next>=0.18.1" > req.txt
-            python3 -m pip install -r req.txt
-            cd /bin && ln -s python3 python
+            cd /bin && ln -s $(which python3) python
+            python -m pip install -r req.txt
           run: |
-            export NSS_DIR=$(pwd)/nss
-            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -71,15 +71,13 @@ jobs:
         uses: vmactions/netbsd-vm@dd0161ecbb6386e562fd098acf367633501487a4
         with:
           usesh: true
+          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
             /usr/sbin/pkg_add rust bash ninja python312 py312-pip
-            echo "gyp-next>=0.18.1" > req.txt
-            python3.12 -m pip install -r req.txt
-            cd /bin && ln -s python3.12 python
+            cd /bin && ln -s $(which python3.12) python
+            python -m pip install -r req.txt
           run: |
-            export NSS_DIR=$(pwd)/nss
-            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
 
@@ -88,14 +86,12 @@ jobs:
         with:
           release: "11.4-gcc"
           usesh: true
+          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
             pkg install cargo bash ninja python-39 pip-39
-            echo "gyp-next>=0.18.1" > req.txt
-            python3 -m pip install -r req.txt
-            cd /bin && ln -s python3 python
+            cd /bin && ln -s $(which python3) python
+            python -m pip install -r req.txt
           run: |
-            export NSS_DIR=$(pwd)/nss
-            export NSS_TARGET=Debug
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
