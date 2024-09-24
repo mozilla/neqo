@@ -45,7 +45,7 @@ jobs:
           envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            pkg install -y rust bash ninja python311 py311-pip
+            pkg install -y rust bash gmake ninja python311 py311-pip
             cd /bin && ln -s $(which python3.11) python
             echo "gyp-next>=0.18.1" > req.txt
             python -m pip install -r req.txt --break-system-packages
@@ -60,7 +60,7 @@ jobs:
           envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            pkg_add rust bash ninja py3-pip
+            pkg_add rust bash gmake ninja py3-pip
             cd /bin && ln -s $(which python3) python
             echo "gyp-next>=0.18.1" > req.txt
             python -m pip install -r req.txt --break-system-packages
@@ -75,7 +75,7 @@ jobs:
           envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add rust bash ninja python312 py312-pip
+            /usr/sbin/pkg_add rust bash gmake ninja python312 py312-pip
             cd /bin && ln -s $(which python3.12) python
             echo "gyp-next>=0.18.1" > req.txt
             python -m pip install -r req.txt --break-system-packages
@@ -91,10 +91,10 @@ jobs:
           envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            pkg install cargo bash ninja python-39 pip-39
+            pkg install cargo bash gmake ninja python-39 pip-39
             # cd /bin && ln -s $(which python3) python
             echo "gyp-next>=0.18.1" > req.txt
-            python -m pip install -r req.txt --break-system-packages
+            python -m pip install -r req.txt
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
