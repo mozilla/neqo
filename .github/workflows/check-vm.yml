@@ -41,7 +41,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y curl rust bash ninja python3 py-pip
+            pkg install -y -v rust bash ninja python310 py310-pip
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
           run: |
@@ -56,7 +56,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg_add curl rust bash ninja python-3.10.14
+            pkg_add -v rust bash ninja python-3.10 py3-pip
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
           run: |
@@ -71,7 +71,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add curl rust bash ninja python312
+            /usr/sbin/pkg_add -v rust bash ninja python312 py312-pip
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
           run: |
@@ -87,10 +87,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install curl rust bash ninja python3
+            pkg install -v cargo bash ninja python-39 pip-39
             echo "gyp-next>=0.18.1" > req.txt
             python3 -m pip install -r req.txt
-            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           run: |
             export NSS_DIR=$(pwd)/nss
             export NSS_TARGET=Debug
