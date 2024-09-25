@@ -142,17 +142,11 @@ impl HFrame {
                 element_id,
                 priority,
             } => {
-                let mut out = vec![];
-                // TODO: separate encoder needed?
-                let mut update_frame = Encoder::new(&mut out);
-                update_frame.encode_varint(*element_id);
-
-                let mut priority_enc: Vec<u8> = Vec::new();
-                write!(priority_enc, "{priority}").unwrap();
-
-                update_frame.encode(&priority_enc);
+                let mut update_frame = vec![];
+                Encoder::new(&mut update_frame).encode_varint(*element_id);
+                write!(update_frame, "{priority}").unwrap();
                 enc.encode_varint(update_frame.len() as u64);
-                enc.encode(update_frame.as_ref());
+                enc.encode(&update_frame);
             }
         }
     }
