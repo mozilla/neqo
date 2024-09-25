@@ -85,10 +85,19 @@ fn handshake_delay_with_ecn_blackhole() {
         drop_ecn_marked_datagrams(),
     );
 
+    let pto = DEFAULT_RTT * 3;
+    let half_rtt = DEFAULT_RTT / 2;
     assert_eq!(
-        (finish - start).as_millis() / DEFAULT_RTT.as_millis(),
-        15,
-        "expected 6 RTT for client to detect blackhole, 6 RTT for server to detect blackhole and 3 RTT for handshake to be confirmed.",
+        (finish - start),
+        (1 + 2 + 4) * pto + // Client RTOs its CI w/ECN twice (3x total)
+        half_rtt + // Fourth CI w/o ECN being delivered
+        (1 + 2 + 4) * pto + // Server RTOs its CI w/ECN twice (3x total)
+        half_rtt + // Fourth SI w/o ECN being delivered
+        half_rtt + // Client ACK
+        half_rtt + // Client Handshake/Short
+        half_rtt + // Server HandshakeDone
+        half_rtt + // Client ACK
+        half_rtt
     );
 }
 

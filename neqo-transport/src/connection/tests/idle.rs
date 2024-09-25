@@ -721,6 +721,8 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     assert!(retransmit.is_some());
     let retransmit = client.process_output(now).dgram();
     assert!(retransmit.is_some());
+    let retransmit = client.process_output(now).dgram();
+    assert!(retransmit.is_some());
 
     // The next callback will be an idle timeout.
     assert_eq!(

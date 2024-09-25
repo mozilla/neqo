@@ -634,8 +634,8 @@ impl Connection {
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
         self.paths.primary().map_or_else(
-            || RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
-            |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
+            || RttEstimate::default().pto(self.confirmed()),
+            |p| p.borrow().rtt().pto(self.confirmed()),
         )
     }
 
@@ -1058,7 +1058,7 @@ impl Connection {
         if let Some(p) = self.paths.primary() {
             let path = p.borrow();
             let rtt = path.rtt();
-            let pto = rtt.pto(PacketNumberSpace::ApplicationData);
+            let pto = rtt.pto(self.confirmed());
 
             let idle_time = self.idle_timeout.expiry(now, pto);
             qtrace!([self], "Idle/keepalive timer {:?}", idle_time);
@@ -1525,7 +1525,7 @@ impl Connection {
         let mut dcid = None;
 
         qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
-        let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
+        let pto = path.borrow().rtt().pto(self.confirmed());
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
@@ -2141,7 +2141,7 @@ impl Connection {
             // or the PTO timer fired: probe.
             true
         } else {
-            let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
+            let pto = path.borrow().rtt().pto(self.confirmed());
             if !builder.packet_empty() {
                 // The packet only contains an ACK.  Check whether we want to
                 // force an ACK with a PING so we can stop tracking packets.
@@ -2422,13 +2422,15 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, sent);
             }
 
-            if *space == PacketNumberSpace::Handshake
-                && self.role == Role::Server
-                && self.state == State::Confirmed
-            {
-                // We could discard handshake keys in set_state,
-                // but wait until after sending an ACK.
-                self.discard_keys(PacketNumberSpace::Handshake, now);
+            if *space == PacketNumberSpace::Handshake {
+                if self.role == Role::Client {
+                    // We're sending a Handshake packet, so we can discard Initial keys.
+                    self.discard_keys(PacketNumberSpace::Initial, now);
+                } else if self.role == Role::Server && self.state == State::Confirmed {
+                    // We could discard handshake keys in set_state,
+                    // but wait until after sending an ACK.
+                    self.discard_keys(PacketNumberSpace::Handshake, now);
+                }
             }
         }
 
@@ -2779,16 +2781,15 @@ impl Connection {
                 self.set_initial_limits();
             }
             if self.crypto.install_keys(self.role)? {
-                if self.role == Role::Client {
-                    // We won't acknowledge Initial packets as a result of this, but the
-                    // server can rely on implicit acknowledgment.
-                    self.discard_keys(PacketNumberSpace::Initial, now);
-                }
                 self.saved_datagrams.make_available(CryptoSpace::Handshake);
             }
         }
 
         Ok(())
+    }
+
+    fn confirmed(&self) -> bool {
+        self.state == State::Confirmed
     }
 
     fn set_confirmed(&mut self) -> Res<()> {

@@ -30,7 +30,7 @@ use super::{
 };
 use crate::{
     connection::{
-        tests::{new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server},
         AddressValidation,
     },
     events::ConnectionEvent,
@@ -591,8 +591,9 @@ fn reorder_1rtt() {
     now += RTT / 2;
     let s2 = server.process(c2.as_ref(), now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are a Handshake and a 1-RTT (w/ NEW_CONNECTION_ID).
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+    // The two additional are an Initial w/ACK, a Handshake w/ACK and a 1-RTT (w/
+    // NEW_CONNECTION_ID).
+    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(*server.state(), State::Confirmed);
@@ -802,9 +803,9 @@ fn anti_amplification() {
     let ack = client.process(Some(&s_init3), now).dgram().unwrap();
     assert!(!maybe_authenticate(&mut client)); // No need yet.
 
-    // The client sends a padded datagram, with just ACK for Handshake.
-    assert_eq!(client.stats().frame_tx.ack, ack_count + 1);
-    assert_eq!(client.stats().frame_tx.all(), frame_count + 1);
+    // The client sends a padded datagram, with just ACKs for Initial and Handshake.
+    assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
+    assert_eq!(client.stats().frame_tx.all(), frame_count + 2);
     assert_ne!(ack.len(), client.plpmtu()); // Not padded (it includes Handshake).
 
     now += DEFAULT_RTT / 2;
@@ -1047,29 +1048,28 @@ fn only_server_initial() {
     let server_dgram1 = server.process(client_dgram.as_ref(), now).dgram();
     let server_dgram2 = server.process_output(now + AT_LEAST_PTO).dgram();
 
-    // Only pass on the Initial from the first.  We should get a Handshake in return.
+    // Only pass on the Initial from the first.  We should get an ACK in return.
     let (initial, handshake) = split_datagram(&server_dgram1.unwrap());
     assert!(handshake.is_some());
 
-    // The client will not acknowledge the Initial as it discards keys.
-    // It sends a Handshake probe instead, containing just a PING frame.
-    assert_eq!(client.stats().frame_tx.ping, 0);
+    // The client sends an Initial ACK.
+    assert_eq!(client.stats().frame_tx.ack, 0);
     let probe = client.process(Some(&initial), now).dgram();
-    assertions::assert_handshake(&probe.unwrap());
+    assertions::assert_initial(&probe.unwrap(), false);
     assert_eq!(client.stats().dropped_rx, 0);
-    assert_eq!(client.stats().frame_tx.ping, 1);
+    assert_eq!(client.stats().frame_tx.ack, 1);
 
     let (initial, handshake) = split_datagram(&server_dgram2.unwrap());
     assert!(handshake.is_some());
 
-    // The same happens after a PTO, even though the client will discard the Initial packet.
+    // The same happens after a PTO.
     now += AT_LEAST_PTO;
-    assert_eq!(client.stats().frame_tx.ping, 1);
+    assert_eq!(client.stats().frame_tx.ack, 1);
     let discarded = client.stats().dropped_rx;
     let probe = client.process(Some(&initial), now).dgram();
-    assertions::assert_handshake(&probe.unwrap());
-    assert_eq!(client.stats().frame_tx.ping, 2);
-    assert_eq!(client.stats().dropped_rx, discarded + 1);
+    assertions::assert_initial(&probe.unwrap(), false);
+    assert_eq!(client.stats().frame_tx.ack, 2);
+    assert_eq!(client.stats().dropped_rx, discarded);
 
     // Pass the Handshake packet and complete the handshake.
     client.process_input(&handshake.unwrap(), now);
@@ -1136,7 +1136,9 @@ fn implicit_rtt_server() {
     let dgram = server.process(dgram.as_ref(), now).dgram();
     now += RTT / 2;
     let dgram = client.process(dgram.as_ref(), now).dgram();
-    assertions::assert_handshake(dgram.as_ref().unwrap());
+    let (initial, handshake) = split_datagram(dgram.as_ref().unwrap());
+    assertions::assert_initial(&initial, false);
+    assertions::assert_handshake(handshake.as_ref().unwrap());
     now += RTT / 2;
     server.process_input(&dgram.unwrap(), now);
 
@@ -1220,6 +1222,44 @@ fn client_initial_retransmits_identical() {
 }
 
 #[test]
+fn client_triggered_zerortt_retransmits_identical() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+    let mut server = resumed_server(&client);
+
+    // Write 0-RTT before generating any packets.
+    // This should result in a datagram that coalesces Initial and 0-RTT.
+    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
+    let client_0rtt = client.process(None, now());
+    assert!(client_0rtt.as_dgram_ref().is_some());
+    let stats1 = client.stats().frame_tx;
+
+    assertions::assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
+
+    let s1 = server.process(client_0rtt.as_dgram_ref(), now());
+    assert!(s1.as_dgram_ref().is_some()); // Should produce ServerHello etc...
+
+    // Drop the Initial packet from this.
+    let (_, s_hs) = split_datagram(s1.as_dgram_ref().unwrap());
+    assert!(s_hs.is_some());
+
+    // Passing only the server handshake packet to the client should trigger a retransmit.
+    _ = client.process(s_hs.as_ref(), now()).dgram();
+    let stats2 = client.stats().frame_tx;
+    assert_eq!(stats2.all(), stats1.all() * 2);
+    assert_eq!(stats2.crypto, stats1.crypto * 2);
+    assert_eq!(stats2.stream, stats1.stream * 2);
+}
+
+#[test]
 fn server_initial_retransmits_identical() {
     let mut now = now();
     let mut client = default_client();
@@ -1250,6 +1290,67 @@ fn server_initial_retransmits_identical() {
         }
         now += pto;
         total_ptos += pto;
+    }
+}
+
+#[test]
+fn server_triggered_initial_retransmits_identical() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+
+    let ci = client.process(None, now).dgram();
+    now += DEFAULT_RTT / 2;
+    let si1 = server.process(ci.as_ref(), now);
+    let stats1 = server.stats().frame_tx;
+
+    // Drop si and wait for client to retransmit.
+    let pto = client.process_output(now).callback();
+    now += pto;
+    let ci = client.process_output(now).dgram();
+
+    // Feed the RTX'ed ci into the server before its PTO fires. The server
+    // should process it and then retransmit its Initial packet including
+    // any coalesced Handshake data.
+    let si2 = server.process(ci.as_ref(), now);
+    let stats2 = server.stats().frame_tx;
+    assert_eq!(si1.dgram().unwrap().len(), si2.dgram().unwrap().len());
+    assert_eq!(stats2.all(), stats1.all() * 2);
+    assert_eq!(stats2.crypto, stats1.crypto * 2);
+    assert_eq!(stats2.ack, stats1.ack * 2);
+}
+
+#[test]
+fn client_handshake_retransmits_identical() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut ci = client.process(None, now).dgram();
+    let mut server = default_server();
+    let mut si = server.process(ci.take().as_ref(), now).dgram();
+
+    now += DEFAULT_RTT;
+
+    _ = client.process(si.take().as_ref(), now).callback();
+    maybe_authenticate(&mut client);
+
+    // Force the client to retransmit its coalesced Handshake/Short packet a number of times and
+    // make sure the retranmissions are identical to the original. Also, verify the PTO
+    // durations.
+    for i in 1..=3 {
+        _ = client.process(None, now).dgram().unwrap();
+        let pto = client.process(None, now).callback();
+        assert_eq!(pto, DEFAULT_RTT * 3 * (1 << (i - 1)));
+        now += pto;
+
+        assert_eq!(
+            client.stats().frame_tx,
+            FrameStats {
+                crypto: i + 1,
+                ack: i + 1,
+                new_connection_id: i * 7,
+                ..Default::default()
+            }
+        );
     }
 }
 

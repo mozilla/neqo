@@ -247,7 +247,7 @@ impl Args {
             }
             "resumption" => {
                 if self.urls.len() < 2 {
-                    qerror!("Warning: resumption test won't work without >1 URL");
+                    qerror!("Warning: resumption tests won't work without >1 URL");
                     exit(127);
                 }
                 self.shared.use_old_http = true;
