@@ -3425,7 +3425,7 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let encoder = Encoder::with_capacity(mtu);
+        let encoder = Encoder::default();
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),
