@@ -1181,21 +1181,20 @@ mod tests {
         builder.encode(&[0; 3]);
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(encoder.len(), 45);
-        // TODO
-        // let first = encoder.clone();
+        let first = encoder.to_vec();
 
-        // // TODO: 0 ideal here?
-        // let mut builder =
-        //     PacketBuilder::short(encoder, false, Some(ConnectionId::from(SERVER_CID)), 0);
-        // builder.pn(1, 3);
-        // builder.encode(&[0]); // Minimal size (packet number is big enough).
-        // let encoder = builder.build(&mut prot).expect("build");
-        // assert_eq!(
-        //     first.as_ref(),
-        //     &encoder.as_ref()[..first.len()],
-        //     "the first packet should be a prefix"
-        // );
-        // assert_eq!(encoder.len(), 45 + 29);
+        // TODO: 0 ideal here?
+        let mut builder =
+            PacketBuilder::short(encoder, false, Some(ConnectionId::from(SERVER_CID)), 0);
+        builder.pn(1, 3);
+        builder.encode(&[0]); // Minimal size (packet number is big enough).
+        let encoder = builder.build(&mut prot).expect("build");
+        assert_eq!(
+            first.as_slice(),
+            &encoder.as_ref()[..first.len()],
+            "the first packet should be a prefix"
+        );
+        assert_eq!(encoder.len(), 45 + 29);
     }
 
     #[test]
