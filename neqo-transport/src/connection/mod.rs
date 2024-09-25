@@ -2020,7 +2020,6 @@ impl Connection {
         res.unwrap_or_default()
     }
 
-    // TODO: Reconsider allow
     #[allow(clippy::too_many_arguments)]
     fn build_packet_header<'a>(
         path: &Path,
