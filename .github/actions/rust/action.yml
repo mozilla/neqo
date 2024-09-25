@@ -14,20 +14,40 @@ inputs:
   token:
     description: 'A Github PAT'
     required: true
+  targets:
+    description: Comma-separated list of target triples to install for this toolchain
+    required: false
 
 runs:
   using: composite
   steps:
-    - name: Upgrade rustup (MacOS)
-      shell: bash
-      if: runner.os == 'MacOS'
-      run: brew update && brew upgrade rustup
-
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted'
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
+
+    - name: Enable sscache
+      if: runner.environment != 'github-hosted'
+      shell: bash
+      run: |
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
 
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'
@@ -54,28 +74,3 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
       run: cargo +${{ inputs.version }} quickinstall $(echo ${{ inputs.tools }} | tr -d ",")
-
-    # sccache slows CI down, so we leave it disabled.
-    # Leaving the steps below commented out, so we can re-evaluate enabling it later.
-    # - name: Use sccache
-    #   uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
-
-    # - name: Enable sscache
-    #   shell: bash
-    #   run: |
-    #     if [ "${{ runner.os }}" = "Windows" ]; then
-    #       echo "CC=sccache cl" >> "$GITHUB_ENV"
-    #       echo "CXX=sccache cl" >> "$GITHUB_ENV"
-    #     else
-    #       echo "CC=sccache cc" >> "$GITHUB_ENV"
-    #       echo "CXX=sccache c++" >> "$GITHUB_ENV"
-    #     fi
-    #     echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-    #     echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-    #     echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-
-    # Ditto for rust-cache.
-    # - name: Use Rust cache
-    #   uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
-    #   with:
-    #     cache-all-crates: "true"

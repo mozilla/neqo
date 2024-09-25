@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   pull_request:
     branches: ["main"]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 
 concurrency:
@@ -18,10 +19,11 @@ env:
 jobs:
   firefox:
     name: Build Firefox
+    if: github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         type: [debug, release]
     runs-on: ${{ matrix.os }}
     defaults:
@@ -60,6 +62,12 @@ jobs:
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
         run: choco install -y mozillabuild
+
+      - name: Install Rust
+        uses: ./.github/actions/rust
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bootstrap Firefox
         run: |
@@ -108,12 +116,14 @@ jobs:
           EXT: ${{ runner.os == 'macOS' && '.app' || '' }}
         run: |
           cd mozilla-unified
+          # Work around "ERROR: WINDOWSSDKDIR cannot be set when using the bootstrapped WINSYSROOT"
+          # (Capitalization "WindowsSdkDir" matters)
+          [ "${{ runner.os }}" == "Windows" ] && unset WindowsSdkDir
           ./mach build && tar -cf "../$FIREFOX.tar" -C "../$FIREFOX/dist" "$NAME$TYPE$EXT"
-          exit 0
 
       - name: Export binary
         id: upload
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: ${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}.tgz
           path: ${{ env.FIREFOX }}.tar
@@ -122,7 +132,7 @@ jobs:
       - run: echo "${{ steps.upload.outputs.artifact-url }}" >> artifact
 
       - name: Export artifact URL
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: artifact-${{ runner.os }}-${{ env.FIREFOX }}-${{ matrix.type }}
           path: artifact
@@ -130,7 +140,7 @@ jobs:
 
   comment:
     name: Comment on PR
-    if: always()
+    if: github.event.pull_request.draft == false
     needs: firefox
     runs-on: ubuntu-latest
     steps:

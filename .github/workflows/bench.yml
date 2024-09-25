@@ -10,7 +10,7 @@ env:
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  TOOLCHAIN: nightly
+  TOOLCHAIN: stable
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
 
@@ -58,8 +58,8 @@ jobs:
 
       - name: Build neqo
         run: |
-          cargo "+$TOOLCHAIN" bench --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release
+          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
+          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -238,7 +238,7 @@ jobs:
 
       - name: Export perf data
         id: export
-        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a # v4.3.6
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |

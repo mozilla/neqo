@@ -28,6 +28,7 @@ use crate::{
     connection::tests::send_something_paced,
     frame::FRAME_TYPE_NEW_CONNECTION_ID,
     packet::PacketBuilder,
+    path::MAX_PATH_PROBES,
     pmtud::Pmtud,
     tparams::{self, PreferredAddress, TransportParameter},
     CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
@@ -190,11 +191,11 @@ fn migrate_immediate() {
     assert_v6_path(&server2, true);
 
     // The second packet has no real effect, it just elicits an ACK.
-    let all_before = server.stats().frame_tx.all;
+    let all_before = server.stats().frame_tx.all();
     let ack_before = server.stats().frame_tx.ack;
     let server3 = server.process(Some(&client2), now).dgram();
     assert!(server3.is_some());
-    assert_eq!(server.stats().frame_tx.all, all_before + 1);
+    assert_eq!(server.stats().frame_tx.all(), all_before + 1);
     assert_eq!(server.stats().frame_tx.ack, ack_before + 1);
 
     // Receiving a packet sent by the server before migration doesn't change path.
@@ -236,7 +237,8 @@ fn migrate_immediate_fail() {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
 
-    for _ in 0..2 {
+    // -1 because first PATH_CHALLENGE already sent above
+    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -247,14 +249,14 @@ fn migrate_immediate_fail() {
         let after = client.stats().frame_tx;
         assert_eq!(after.path_challenge, before.path_challenge + 1);
         assert_eq!(after.padding, before.padding + 1);
-        assert_eq!(after.all, before.all + 2);
+        assert_eq!(after.all(), before.all() + 2);
 
         // This might be a PTO, which will result in sending a probe.
         if let Some(probe) = client.process_output(now).dgram() {
             assert_v4_path(&probe, false); // Contains PATH_CHALLENGE.
             let after = client.stats().frame_tx;
             assert_eq!(after.ping, before.ping + 1);
-            assert_eq!(after.all, before.all + 3);
+            assert_eq!(after.all(), before.all() + 3);
         }
     }
 
@@ -311,7 +313,8 @@ fn migrate_same_fail() {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
 
-    for _ in 0..2 {
+    // -1 because first PATH_CHALLENGE already sent above
+    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -322,14 +325,14 @@ fn migrate_same_fail() {
         let after = client.stats().frame_tx;
         assert_eq!(after.path_challenge, before.path_challenge + 1);
         assert_eq!(after.padding, before.padding + 1);
-        assert_eq!(after.all, before.all + 2);
+        assert_eq!(after.all(), before.all() + 2);
 
         // This might be a PTO, which will result in sending a probe.
         if let Some(probe) = client.process_output(now).dgram() {
             assert_v6_path(&probe, false); // Contains PATH_CHALLENGE.
             let after = client.stats().frame_tx;
             assert_eq!(after.ping, before.ping + 1);
-            assert_eq!(after.all, before.all + 3);
+            assert_eq!(after.all(), before.all() + 3);
         }
     }
 

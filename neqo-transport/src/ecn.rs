@@ -163,6 +163,11 @@ impl EcnInfo {
         }
     }
 
+    /// Disable ECN.
+    pub fn disable_ecn(&mut self, stats: &mut Stats) {
+        self.state.set(EcnValidationState::Failed, stats);
+    }
+
     /// Process ECN counts from an ACK frame.
     ///
     /// Returns whether ECN counts contain new valid ECN CE marks.
@@ -197,7 +202,7 @@ impl EcnInfo {
                     "ECN validation failed, all {} initial marked packets were lost",
                     probes_lost
                 );
-                self.state.set(EcnValidationState::Failed, stats);
+                self.disable_ecn(stats);
             }
         }
     }
@@ -240,7 +245,7 @@ impl EcnInfo {
         // > corresponding ECN counts are not present in the ACK frame.
         let Some(ack_ecn) = ack_ecn else {
             qwarn!("ECN validation failed, no ECN counts in ACK frame");
-            self.state.set(EcnValidationState::Failed, stats);
+            self.disable_ecn(stats);
             return;
         };
 
@@ -257,7 +262,7 @@ impl EcnInfo {
             .unwrap();
         if newly_acked_sent_with_ect0 == 0 {
             qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
-            self.state.set(EcnValidationState::Failed, stats);
+            self.disable_ecn(stats);
             return;
         }
         let ecn_diff = ack_ecn - self.baseline;
@@ -268,10 +273,10 @@ impl EcnInfo {
                 sum_inc,
                 newly_acked_sent_with_ect0
             );
-            self.state.set(EcnValidationState::Failed, stats);
+            self.disable_ecn(stats);
         } else if ecn_diff[IpTosEcn::Ect1] > 0 {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
-            self.state.set(EcnValidationState::Failed, stats);
+            self.disable_ecn(stats);
         } else if self.state != EcnValidationState::Capable {
             qinfo!("ECN validation succeeded, path is capable");
             self.state.set(EcnValidationState::Capable, stats);
