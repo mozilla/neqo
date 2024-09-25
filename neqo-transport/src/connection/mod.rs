@@ -1164,7 +1164,7 @@ impl Connection {
     ///
     /// # Panics
     ///
-    /// TODO
+    /// Panics when `out` is not empty.
     #[must_use = "Output of the process function must be handled"]
     pub fn process_into_buffer<'a>(
         &mut self,
