@@ -58,7 +58,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkgin install rust nss pkgconf
+            /usr/sbin/pkg_add rust nss pkgconf
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -70,7 +70,7 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install cargo nss pkgconf
+            pkg install cargo nss pkg-config
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
