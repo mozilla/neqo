@@ -1289,19 +1289,19 @@ mod tests {
         builder.set_limit(75);
         builder.enable_padding(true);
         assert!(builder.pad());
-        // TODO
-        // let encoder = builder.build(&mut CryptoDxState::test_default()).unwrap();
-        // let encoder_copy = encoder.clone();
+        let encoder = builder.build(&mut CryptoDxState::test_default()).unwrap();
+        let encoder_copy = encoder.to_vec();
 
-        // let builder = PacketBuilder::long(
-        //     encoder,
-        //     PacketType::Initial,
-        //     Version::default(),
-        //     Some(ConnectionId::from(SERVER_CID)),
-        //     Some(ConnectionId::from(SERVER_CID)),
-        // );
-        // assert_eq!(builder.remaining(), 0);
-        // assert_eq!(builder.abort(), encoder_copy);
+        let builder = PacketBuilder::long(
+            encoder,
+            PacketType::Initial,
+            Version::default(),
+            Some(ConnectionId::from(SERVER_CID)),
+            Some(ConnectionId::from(SERVER_CID)),
+            100,
+        );
+        assert_eq!(builder.remaining(), 0);
+        assert_eq!(builder.abort().as_ref(), encoder_copy.as_slice());
     }
 
     const SAMPLE_RETRY_V2: &[u8] = &[

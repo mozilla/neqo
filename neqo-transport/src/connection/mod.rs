@@ -2359,7 +2359,6 @@ impl Connection {
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
-        // TODO: epochs or packetnumberspaces below?
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         assert_eq!(out.len(), 0);
