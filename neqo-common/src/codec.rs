@@ -193,7 +193,6 @@ impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
     }
 }
 
-// TODO: Should this be `&mut [u8]` instead of `&mut Vec<u8>`? Does it need to be able to allocate?
 /// Encoder is good for building data structures.
 #[derive(PartialEq, Eq)]
 pub struct Encoder<'a> {

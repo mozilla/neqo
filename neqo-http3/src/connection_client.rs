@@ -862,14 +862,9 @@ impl Http3Client {
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
         if let Some(d) = input {
-            self.process_input(d, now);
-        } else {
-            // TODO: Optimization worth it? Given that process_input calls
-            // process_http3, moving the line below outside of conditional makes
-            // it run twice when input is some.
-            self.process_http3(now);
+            self.conn.process_input(d, now);
         }
-
+        self.process_http3(now);
         let out = self.conn.process_into_buffer(None, now, out);
         self.process_http3(now);
         out
