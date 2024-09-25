@@ -1558,8 +1558,6 @@ impl Connection {
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
-    // TODO: Reconsider allow.
-    #[allow(clippy::too_many_lines)]
     fn input_path(&mut self, path: &PathRef, d: Datagram<&[u8]>, now: Instant) -> Res<()> {
         for mut slc in d.iter_segments() {
             let mut dcid = None;
