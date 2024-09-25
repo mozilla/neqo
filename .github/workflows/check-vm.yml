@@ -23,32 +23,20 @@ jobs:
       matrix:
         os: [freebsd, openbsd, netbsd, solaris]
     runs-on: ubuntu-latest
-    env:
-      NSS_DIR: ${{ github.workspace }}/nss
-      NSS_TARGET: Debug
 
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          repository: nss-dev/nss
-          path: nss
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          repository: nss-dev/nspr
-          path: nspr
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@d7b8fcc7711aa41ad45e8d9b737cf90f035a7e3d
         with:
           usesh: true
-          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            pkg install -y rust bash gmake ninja python311 py311-pip
-            cd /bin && ln -s $(which python3.11) python
-            echo "gyp-next>=0.18.1" > req.txt
-            python -m pip install -r req.txt --break-system-packages
+            mkdir -p /usr/local/etc/pkg/repos
+            sed 's/quarterly/latest/' /etc/pkg/FreeBSD.conf > /usr/local/etc/pkg/repos/FreeBSD.conf
+            pkg update
+            pkg install -y rust nss pkgconf
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -57,13 +45,9 @@ jobs:
         uses: vmactions/openbsd-vm@ebafa4eac4adf5e7d04e5bbb4aa764b75dd160df
         with:
           usesh: true
-          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            pkg_add rust bash gmake ninja py3-pip
-            cd /bin && ln -s $(which python3) python
-            echo "gyp-next>=0.18.1" > req.txt
-            python -m pip install -r req.txt --break-system-packages
+            pkg_add rust nss pkgconf
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -72,13 +56,9 @@ jobs:
         uses: vmactions/netbsd-vm@dd0161ecbb6386e562fd098acf367633501487a4
         with:
           usesh: true
-          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add rust bash gmake ninja python312 py312-pip
-            cd /bin && ln -s $(which python3.12) python
-            echo "gyp-next>=0.18.1" > req.txt
-            python -m pip install -r req.txt --break-system-packages
+            pkgin install rust nss pkgconf
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
@@ -88,13 +68,9 @@ jobs:
         with:
           release: "11.4-gcc"
           usesh: true
-          envs: 'NSS_DIR NSS_TARGET'
           copyback: false
           prepare: |
-            pkg install cargo bash gmake ninja python-39 pip-39
-            # cd /bin && ln -s $(which python3) python
-            echo "gyp-next>=0.18.1" > req.txt
-            python -m pip install -r req.txt
+            pkg install cargo nss pkgconf
           run: |
             cargo check --all-targets --features ci
             RUST_LOG=trace cargo test --features ci --no-fail-fast
