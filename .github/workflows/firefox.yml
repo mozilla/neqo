@@ -86,9 +86,10 @@ jobs:
 
       - name: Plumb in Neqo
         run: |
-          # Get qlog version used by neqo
+          # Get qlog and mtu version used by neqo
           cargo generate-lockfile
           QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
+          MTU_VERSION=$(cargo pkgid mtu | cut -d@ -f2)
           rm Cargo.lock
           cd mozilla-unified
           {
@@ -96,6 +97,10 @@ jobs:
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$QLOG_VERSION\""
+            echo '[[audits.mtu]]'
+            echo 'who = "CI"'
+            echo 'criteria = "safe-to-deploy"'
+            echo "version = \"$MTU_VERSION\""
           } >> supply-chain/audits.toml
           sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
           {
