@@ -2018,7 +2018,10 @@ impl Connection {
         // Count how many bytes in this range are non-zero.
         let pn_len = mem::size_of::<PacketNumber>()
             - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
-        // pn_len can't be zero (unacked_range is > 0)
+        assert!(
+            pn_len > 0,
+            "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
+        );
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
         builder.pn(pn, pn_len);
         pn
@@ -3424,7 +3427,7 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let encoder = Encoder::with_capacity(mtu);
+        let encoder = Encoder::default();
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),
