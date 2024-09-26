@@ -110,12 +110,6 @@ impl Pmtud {
         self.probe_state == Probe::Needed
     }
 
-    /// Returns true if a PMTUD probe was sent.
-    #[must_use]
-    pub fn probe_sent(&self) -> bool {
-        self.probe_state == Probe::Sent
-    }
-
     /// Returns the size of the current PMTUD probe.
     #[must_use]
     pub const fn probe_size(&self) -> usize {
