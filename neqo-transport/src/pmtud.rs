@@ -46,6 +46,7 @@ pub struct Pmtud {
     search_table: &'static [usize],
     header_size: usize,
     mtu: usize,
+    iface_mtu: usize,
     probe_index: usize,
     probe_count: usize,
     probe_state: Probe,
@@ -71,13 +72,14 @@ impl Pmtud {
     }
 
     #[must_use]
-    pub const fn new(remote_ip: IpAddr) -> Self {
+    pub const fn new(remote_ip: IpAddr, iface_mtu: usize) -> Self {
         let search_table = Self::search_table(remote_ip);
         let probe_index = 0;
         Self {
             search_table,
             header_size: Self::header_size(remote_ip),
             mtu: search_table[probe_index],
+            iface_mtu,
             probe_index,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
@@ -303,7 +305,10 @@ impl Pmtud {
 
     /// Starts the next upward PMTUD probe.
     pub fn start(&mut self) {
-        if self.probe_index < SEARCH_TABLE_LEN - 1 {
+        if self.probe_index < SEARCH_TABLE_LEN - 1 // Not at the end of the search table
+        // Next size is <= iface MTU
+            && self.search_table[self.probe_index + 1] <= self.iface_mtu
+        {
             self.probe_state = Probe::Needed; // We need to send a probe
             self.probe_count = 0; // For the first time
             self.probe_index += 1; // At this size
@@ -407,7 +412,7 @@ mod tests {
     fn find_pmtu(addr: IpAddr, mtu: usize) {
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr);
+        let mut pmtud = Pmtud::new(addr, mtu);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
@@ -445,7 +450,7 @@ mod tests {
 
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr);
+        let mut pmtud = Pmtud::new(addr, mtu);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
@@ -498,7 +503,7 @@ mod tests {
 
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr);
+        let mut pmtud = Pmtud::new(addr, larger_mtu);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
@@ -570,7 +575,7 @@ mod tests {
     #[test]
     fn pmtud_on_packets_lost() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4);
+        let mut pmtud = Pmtud::new(V4, 1500);
         let mut stats = Stats::default();
 
         // No packets lost, nothing should change.
@@ -638,7 +643,7 @@ mod tests {
     #[test]
     fn pmtud_on_packets_lost_and_acked() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4);
+        let mut pmtud = Pmtud::new(V4, 1500);
         let mut stats = Stats::default();
 
         // A packet of size 100 was ACKed, which is smaller than all probe sizes.

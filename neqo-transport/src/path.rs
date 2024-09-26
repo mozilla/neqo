@@ -569,7 +569,9 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
+        let iface_mtu =
+            mtu::interface_and_mtu(&(local, remote)).map_or_else(|_| usize::MAX, |(_, m)| m);
+        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,

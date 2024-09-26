@@ -23,6 +23,7 @@ use crate::{
 };
 
 const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+const MTU: usize = 1_500;
 const PTO: Duration = Duration::from_millis(100);
 const RTT: Duration = Duration::from_millis(98);
 const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
@@ -39,7 +40,7 @@ fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
 
 #[test]
 fn issue_876() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
     let time_now = now();
     let time_before = time_now.checked_sub(Duration::from_millis(100)).unwrap();
     let time_after = time_now + Duration::from_millis(150);
@@ -150,7 +151,7 @@ fn issue_876() {
 #[test]
 // https://github.com/mozilla/neqo/pull/1465
 fn issue_1465() {
-    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+    let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
     let mut pn = 0;
     let mut now = now();
     let max_datagram_size = cc.max_datagram_size();
