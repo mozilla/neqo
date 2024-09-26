@@ -96,6 +96,21 @@ impl IdleTimeout {
         self.start(now) + max(self.timeout / 2, pto)
     }
 
+    pub fn maybe_keep_alive_timeout(&self, now: Instant, pto: Duration) -> Option<Instant> {
+        if self.keep_alive_outstanding {
+            return None;
+        }
+
+        let timeout = self.keep_alive_timeout(now, pto);
+        // This could happen when the state is AckElicitingPacketSent(t) and
+        // the t exceeds keep_alive_timeout.
+        if timeout <= now {
+            return None;
+        }
+
+        Some(timeout)
+    }
+
     pub fn send_keep_alive(
         &mut self,
         now: Instant,
