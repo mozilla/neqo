@@ -488,22 +488,29 @@ impl Server {
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         assert!(out.is_empty());
-        let out = dgram
-            .map_or(Output::None, |d| {
-                self.process_input(
-                    d,
-                    now,
-                    // See .github/workflows/polonius.yml.
-                    unsafe { &mut *std::ptr::from_mut(out) },
-                )
-            })
-            .or_else(|| self.process_next_output(now, out));
+
+        let output = if let Some(dgram) = dgram {
+            self.process_input(
+                dgram,
+                now,
+                // See .github/workflows/polonius.yml.
+                unsafe { &mut *std::ptr::from_mut(out) },
+            )
+        } else {
+            Output::None
+        };
+
+        let output = if let Output::None = output {
+            self.process_next_output(now, out)
+        } else {
+            output
+        };
 
         // Clean-up closed connections.
         self.connections
             .retain(|c| !matches!(c.borrow().state(), State::Closed(_)));
 
-        out
+        output
     }
 
     /// This lists the connections that have received new events
