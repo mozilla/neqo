@@ -120,12 +120,12 @@ impl Http3Server {
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        let mut output = self
-            .server
-            // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
-            //
-            // Find alternative.
-            .process_into_buffer(dgram, now, unsafe { &mut *std::ptr::from_mut(out) });
+        let mut output = self.server.process_into_buffer(
+            dgram,
+            now,
+            // See .github/workflows/polonius.yml.
+            unsafe { &mut *std::ptr::from_mut(out) },
+        );
 
         self.process_http3(now);
 

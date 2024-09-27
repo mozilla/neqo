@@ -445,13 +445,12 @@ impl Server {
         let mut callback = None;
 
         for connection in &mut self.connections {
-            match connection
-                .borrow_mut()
-                // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
-                //
-                // Find alternative.
-                .process_into_buffer(None, now, unsafe { &mut *std::ptr::from_mut(out) })
-            {
+            match connection.borrow_mut().process_into_buffer(
+                None,
+                now,
+                // See .github/workflows/polonius.yml.
+                unsafe { &mut *std::ptr::from_mut(out) },
+            ) {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
                 Output::Callback(next) => match callback {
@@ -491,10 +490,12 @@ impl Server {
         assert!(out.is_empty());
         let out = dgram
             .map_or(Output::None, |d| {
-                // TODO: NLL borrow issue. See https://github.com/rust-lang/rust/issues/54663
-                //
-                // Find alternative.
-                self.process_input(d, now, unsafe { &mut *std::ptr::from_mut(out) })
+                self.process_input(
+                    d,
+                    now,
+                    // See .github/workflows/polonius.yml.
+                    unsafe { &mut *std::ptr::from_mut(out) },
+                )
             })
             .or_else(|| self.process_next_output(now, out));
 
