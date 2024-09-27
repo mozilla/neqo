@@ -160,7 +160,7 @@ mod tests {
         );
 
         sender.send(datagram)?;
-        let mut recv_buf = Vec::with_capacity(RECV_BUF_SIZE);
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
         let res = receiver.recv(&receiver_addr, &mut recv_buf);
         assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
 
@@ -184,7 +184,7 @@ mod tests {
 
         sender.send(datagram)?;
 
-        let mut recv_buf = Vec::with_capacity(RECV_BUF_SIZE);
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
         let received_datagram = receiver
             .recv(&receiver_addr, &mut recv_buf)
             .expect("receive to succeed");
@@ -227,7 +227,7 @@ mod tests {
 
         // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
         let mut num_received = 0;
-        let mut recv_buf = Vec::with_capacity(RECV_BUF_SIZE);
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
         while num_received < max_gso_segments {
             recv_buf.clear();
             let dgram = receiver
