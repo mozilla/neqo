@@ -17,7 +17,7 @@ index 9b73f2c7..d6cd39a2 100644
          self.process_http3(now);
  
 diff --git a/neqo-transport/src/server.rs b/neqo-transport/src/server.rs
-index 5659db0a..43b4345e 100644
+index 2446f8d3..25ceb2b0 100644
 --- a/neqo-transport/src/server.rs
 +++ b/neqo-transport/src/server.rs
 @@ -445,12 +445,7 @@ impl Server {
@@ -34,9 +34,9 @@ index 5659db0a..43b4345e 100644
                  Output::None => {}
                  d @ Output::Datagram(_) => return d,
                  Output::Callback(next) => match callback {
-@@ -490,12 +485,7 @@ impl Server {
-         assert!(out.is_empty());
+@@ -491,12 +486,7 @@ impl Server {
  
+         #[allow(clippy::option_if_let_else)]
          let output = if let Some(dgram) = dgram {
 -            self.process_input(
 -                dgram,
