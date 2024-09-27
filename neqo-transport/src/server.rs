@@ -480,7 +480,7 @@ impl Server {
 
     /// # Panics
     ///
-    /// TODO
+    /// Panics when `out` is not empty.
     #[must_use]
     pub fn process_into_buffer<'a>(
         &mut self,
@@ -488,7 +488,6 @@ impl Server {
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        // TODO: This the right place?
         assert!(out.is_empty());
         let out = dgram
             .map_or(Output::None, |d| {

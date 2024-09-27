@@ -500,7 +500,6 @@ impl<'a> PacketBuilder<'a> {
         })?;
         encoder.encode(&tag);
         let complete: &[u8] = encoder.into();
-        // TODO: previously this. is new right? Ok(complete.split_off(start))
         Ok(&complete[start..])
     }
 
