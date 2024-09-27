@@ -802,8 +802,7 @@ mod tests {
 
     fn write_frame_at(rp: &mut RecvdPackets, now: Instant) {
         let mut buf = vec![];
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         let mut stats = FrameStats::default();
         let mut tokens = Vec::new();
         rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
@@ -952,8 +951,7 @@ mod tests {
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
         let mut buf = vec![];
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         tracker
             .get_mut(PacketNumberSpace::Initial)
             .unwrap()
@@ -1018,9 +1016,8 @@ mod tests {
             .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
             .is_some());
 
-        // TODO: 0 ideal here?
         let mut buf = vec![];
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         builder.set_limit(10);
 
         let mut stats = FrameStats::default();
@@ -1051,9 +1048,8 @@ mod tests {
             .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
             .is_some());
 
-        // TODO: 0 ideal here?
         let mut buf = vec![];
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         // The code pessimistically assumes that each range needs 16 bytes to express.
         // So this won't be enough for a second range.
         builder.set_limit(RecvdPackets::USEFUL_ACK_LEN + 8);

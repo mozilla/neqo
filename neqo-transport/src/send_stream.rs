@@ -2597,8 +2597,7 @@ mod tests {
 
         let mut buf = vec![];
         let mut tokens = Vec::new();
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2687,8 +2686,7 @@ mod tests {
 
         let mut buf = vec![];
         let mut tokens = Vec::new();
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2767,8 +2765,7 @@ mod tests {
 
         let mut buf = vec![];
         // This doesn't report blocking yet.
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2822,8 +2819,7 @@ mod tests {
 
         let mut buf = vec![];
         // Assert that STREAM_DATA_BLOCKED is sent.
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2911,8 +2907,7 @@ mod tests {
 
         let mut buf = vec![];
         // No frame should be sent here.
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2973,8 +2968,7 @@ mod tests {
         }
 
         let mut buf = vec![];
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3076,8 +3070,8 @@ mod tests {
             s.close();
 
             let mut buf = vec![];
-            // TODO: 0 ideal here?
-            let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, 0);
+            let mut builder =
+                PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);

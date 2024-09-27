@@ -2034,7 +2034,7 @@ impl Connection {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
-            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid(), limit)
+            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid(), Some(limit))
         } else {
             qdebug!(
                 "Building {:?} dcid {:?} scid {:?}",
@@ -2048,7 +2048,7 @@ impl Connection {
                 version,
                 path.remote_cid(),
                 path.local_cid(),
-                limit,
+                Some(limit),
             )
         };
         if builder.remaining() > 0 {

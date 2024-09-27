@@ -123,6 +123,9 @@ pub struct PacketBuilder<'a> {
     pn: PacketNumber,
     header: Range<usize>,
     offsets: PacketBuilderOffsets,
+    /// The size limit of [`Self::encoder`], i.e. the maximum number of bytes to
+    /// be encoded into [`Self::encoder`]. Note that [`Self::encoder`] might
+    /// contain one or more packets already.
     limit: usize,
     /// Whether to pad the packet before construction.
     padding: bool,
@@ -132,14 +135,15 @@ impl<'a> PacketBuilder<'a> {
     /// The minimum useful frame size.  If space is less than this, we will claim to be full.
     pub const MINIMUM_FRAME_SIZE: usize = 2;
 
-    const fn infer_limit(limit: usize) -> usize {
+    const fn infer_limit(limit: Option<usize>) -> usize {
         // TODO: I don't know what the 64 is all about. Thus leaving the infer_limit function intact
         // for now.
-        if limit > 64 {
-            limit
-        } else {
-            2048
+        if let Some(limit) = limit {
+            if limit > 64 {
+                return limit;
+            }
         }
+        2048
     }
 
     /// Start building a short header packet.
@@ -155,7 +159,7 @@ impl<'a> PacketBuilder<'a> {
         mut encoder: Encoder<'a>,
         key_phase: bool,
         dcid: Option<impl AsRef<[u8]>>,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Self {
         let mut limit = Self::infer_limit(limit);
         let header_start = encoder.len();
@@ -198,7 +202,7 @@ impl<'a> PacketBuilder<'a> {
         version: Version,
         mut dcid: Option<impl AsRef<[u8]>>,
         mut scid: Option<impl AsRef<[u8]>>,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Self {
         let mut limit = Self::infer_limit(limit);
         let header_start = encoder.len();
@@ -1016,8 +1020,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             Some(ConnectionId::from(SERVER_CID)),
-            // TODO: 0 ideal here?
-            0,
+            None,
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
@@ -1086,7 +1089,7 @@ mod tests {
             Encoder::new(&mut buf),
             true,
             Some(ConnectionId::from(SERVER_CID)),
-            0,
+            None,
         );
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
@@ -1106,8 +1109,7 @@ mod tests {
                 Encoder::new(&mut buf),
                 true,
                 Some(ConnectionId::from(SERVER_CID)),
-                // TODO: 0 ideal here?
-                0,
+                None,
             );
             builder.scramble(true);
             builder.pn(0, 1);
@@ -1174,8 +1176,7 @@ mod tests {
             Version::default(),
             Some(ConnectionId::from(SERVER_CID)),
             Some(ConnectionId::from(CLIENT_CID)),
-            // TODO: 0 ideal here?
-            0,
+            None,
         );
         builder.pn(0, 1);
         builder.encode(&[0; 3]);
@@ -1183,9 +1184,8 @@ mod tests {
         assert_eq!(encoder.len(), 45);
         let first = encoder.to_vec();
 
-        // TODO: 0 ideal here?
         let mut builder =
-            PacketBuilder::short(encoder, false, Some(ConnectionId::from(SERVER_CID)), 0);
+            PacketBuilder::short(encoder, false, Some(ConnectionId::from(SERVER_CID)), None);
         builder.pn(1, 3);
         builder.encode(&[0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
@@ -1213,8 +1213,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             None::<&[u8]>,
-            // TODO: 0 ideal here?
-            0,
+            None,
         );
         builder.pn(0, 1);
         builder.encode(&[1, 2, 3]);
@@ -1235,8 +1234,7 @@ mod tests {
                 Version::default(),
                 None::<&[u8]>,
                 None::<&[u8]>,
-                // TODO: 0 ideal here?
-                0,
+                None,
             );
             builder.pn(0, 1);
             builder.scramble(true);
@@ -1259,8 +1257,7 @@ mod tests {
             Version::default(),
             None::<&[u8]>,
             Some(ConnectionId::from(SERVER_CID)),
-            // TODO: 0 ideal here?
-            0,
+            None,
         );
         assert_ne!(builder.remaining(), 0);
         builder.initial_token(&[]);
@@ -1280,7 +1277,7 @@ mod tests {
             Encoder::new(&mut buf),
             true,
             Some(ConnectionId::from(SERVER_CID)),
-            100,
+            Some(100),
         );
         builder.pn(0, 1);
         // Pad, but not up to the full capacity. Leave enough space for the
@@ -1297,7 +1294,7 @@ mod tests {
             Version::default(),
             Some(ConnectionId::from(SERVER_CID)),
             Some(ConnectionId::from(SERVER_CID)),
-            100,
+            Some(100),
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort().as_ref(), encoder_copy.as_slice());

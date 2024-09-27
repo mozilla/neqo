@@ -1484,8 +1484,7 @@ mod tests {
 
         let mut out = vec![];
         // consume it
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, None);
         let mut token = Vec::new();
         s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
 
@@ -1600,8 +1599,7 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut out = vec![];
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, None);
         let mut token = Vec::new();
         session_fc
             .borrow_mut()
@@ -1623,8 +1621,7 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         let mut out = vec![];
         // consume it
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, None);
         let mut token = Vec::new();
         session_fc
             .borrow_mut()
@@ -1873,8 +1870,7 @@ mod tests {
 
         let mut out = vec![];
         // Write the fc update frame
-        // TODO: 0 ideal here?
-        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, 0);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut out), false, None::<&[u8]>, None);
         let mut token = Vec::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut()
