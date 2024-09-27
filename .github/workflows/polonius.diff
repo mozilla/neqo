@@ -1,4 +1,7 @@
-modified   neqo-http3/src/server.rs
+diff --git a/neqo-http3/src/server.rs b/neqo-http3/src/server.rs
+index 9b73f2c7..d6cd39a2 100644
+--- a/neqo-http3/src/server.rs
++++ b/neqo-http3/src/server.rs
 @@ -120,12 +120,7 @@ impl Http3Server {
          out: &'a mut Vec<u8>,
      ) -> Output<&'a [u8]> {
@@ -13,7 +16,10 @@ modified   neqo-http3/src/server.rs
  
          self.process_http3(now);
  
-modified   neqo-transport/src/server.rs
+diff --git a/neqo-transport/src/server.rs b/neqo-transport/src/server.rs
+index 5659db0a..43b4345e 100644
+--- a/neqo-transport/src/server.rs
++++ b/neqo-transport/src/server.rs
 @@ -445,12 +445,7 @@ impl Server {
          let mut callback = None;
  
