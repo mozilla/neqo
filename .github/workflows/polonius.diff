@@ -1,0 +1,44 @@
+modified   neqo-http3/src/server.rs
+@@ -120,12 +120,7 @@ impl Http3Server {
+         out: &'a mut Vec<u8>,
+     ) -> Output<&'a [u8]> {
+         qtrace!([self], "Process.");
+-        let mut output = self.server.process_into_buffer(
+-            dgram,
+-            now,
+-            // See .github/workflows/polonius.yml.
+-            unsafe { &mut *std::ptr::from_mut(out) },
+-        );
++        let mut output = self.server.process_into_buffer(dgram, now, out);
+ 
+         self.process_http3(now);
+ 
+modified   neqo-transport/src/server.rs
+@@ -445,12 +445,7 @@ impl Server {
+         let mut callback = None;
+ 
+         for connection in &mut self.connections {
+-            match connection.borrow_mut().process_into_buffer(
+-                None,
+-                now,
+-                // See .github/workflows/polonius.yml.
+-                unsafe { &mut *std::ptr::from_mut(out) },
+-            ) {
++            match connection.borrow_mut().process_into_buffer(None, now, out) {
+                 Output::None => {}
+                 d @ Output::Datagram(_) => return d,
+                 Output::Callback(next) => match callback {
+@@ -490,12 +485,7 @@ impl Server {
+         assert!(out.is_empty());
+ 
+         let output = if let Some(dgram) = dgram {
+-            self.process_input(
+-                dgram,
+-                now,
+-                // See .github/workflows/polonius.yml.
+-                unsafe { &mut *std::ptr::from_mut(out) },
+-            )
++            self.process_input(dgram, now, out)
+         } else {
+             Output::None
+         };

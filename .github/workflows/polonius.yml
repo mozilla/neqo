@@ -1,0 +1,62 @@
+# Rustc by default uses the NLL borrow-checker. There are multiple cases where
+# NLL is too restrictive. An upcoming improvement to Rust's borrow-checker,
+# adressing these shortcomings, is Polonius. It ships with Nightly behind a
+# flag.
+#
+# This workflow first removes the workarounds necessary to please NLL and then
+# runs with Polonius to ensure each workaround only fixes the false-positive of
+# NLL only and doesn't mask an actually undefined behavior.
+#
+# See also:
+# - <https://blog.rust-lang.org/inside-rust/2023/10/06/polonius-update.html>
+# - <https://github.com/rust-lang/rust/issues/54663>
+
+name: Polonius
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  polonius:
+    strategy:
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: ./.github/actions/rust
+        with:
+          version: nightly
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - name: Apply patch, removing `unsafe` workarounds.
+        run: patch -p1 < .github/workflows/polonius.diff
+
+      - run: RUSTFLAGS="-Z polonius" cargo +nightly check
