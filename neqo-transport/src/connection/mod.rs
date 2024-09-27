@@ -2791,7 +2791,7 @@ impl Connection {
         Ok(())
     }
 
-    fn set_confirmed(&mut self) -> Res<()> {
+    fn set_confirmed(&mut self, now: Instant) -> Res<()> {
         self.set_state(State::Confirmed);
         if self.conn_params.pmtud_enabled() {
             self.paths
@@ -2799,7 +2799,7 @@ impl Connection {
                 .ok_or(Error::InternalError)?
                 .borrow_mut()
                 .pmtud_mut()
-                .start();
+                .start(now);
         }
         Ok(())
     }
@@ -2963,7 +2963,7 @@ impl Connection {
                 if self.role == Role::Server || !self.state.connected() {
                     return Err(Error::ProtocolViolation);
                 }
-                self.set_confirmed()?;
+                self.set_confirmed(now)?;
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
@@ -3155,7 +3155,7 @@ impl Connection {
             .resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
-            self.set_confirmed()?;
+            self.set_confirmed(now)?;
         }
         qinfo!([self], "Connection established");
         Ok(())
