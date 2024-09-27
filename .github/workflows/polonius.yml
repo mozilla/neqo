@@ -5,7 +5,7 @@
 #
 # This workflow first removes the workarounds necessary to please NLL and then
 # runs with Polonius to ensure each workaround only fixes the false-positive of
-# NLL only and doesn't mask an actually undefined behavior.
+# NLL and doesn't mask an actually undefined behavior.
 #
 # See also:
 # - <https://blog.rust-lang.org/inside-rust/2023/10/06/polonius-update.html>
