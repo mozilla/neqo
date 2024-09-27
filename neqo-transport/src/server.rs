@@ -489,6 +489,7 @@ impl Server {
     ) -> Output<&'a [u8]> {
         assert!(out.is_empty());
 
+        #[allow(clippy::option_if_let_else)]
         let output = if let Some(dgram) = dgram {
             self.process_input(
                 dgram,
@@ -500,6 +501,7 @@ impl Server {
             Output::None
         };
 
+        #[allow(clippy::option_if_let_else)]
         let output = if let Output::None = output {
             self.process_next_output(now, out)
         } else {
