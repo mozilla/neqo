@@ -226,7 +226,7 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
-            recv_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
+            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
             send_buf: vec![],
         }
     }

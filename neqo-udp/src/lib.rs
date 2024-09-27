@@ -52,25 +52,15 @@ use std::os::fd::AsFd as SocketRef;
 #[cfg(windows)]
 use std::os::windows::io::AsSocket as SocketRef;
 
-/// # Panics
-///
-/// TODO
 pub fn recv_inner<'a>(
     local_address: &SocketAddr,
     state: &UdpSocketState,
     socket: impl SocketRef,
     recv_buf: &'a mut Vec<u8>,
 ) -> Result<Datagram<&'a [u8]>, io::Error> {
-    // TODO: Worth it?
-    assert_eq!(recv_buf.capacity(), RECV_BUF_SIZE);
-    // TODO: unsafe worth it here?
-    unsafe {
-        recv_buf.set_len(RECV_BUF_SIZE);
-    }
-
     let mut meta;
 
-    loop {
+    let data = loop {
         meta = RecvMeta::default();
 
         state.recv(
@@ -90,14 +80,12 @@ pub fn recv_inner<'a>(
             continue;
         }
 
-        recv_buf.truncate(meta.len);
-
-        break;
-    }
+        break &recv_buf[..meta.len];
+    };
 
     qtrace!(
         "received {} bytes from {} to {} with {} segments",
-        recv_buf.len(),
+        data.len(),
         meta.addr,
         local_address,
         meta.len.div_ceil(meta.stride),
@@ -107,7 +95,7 @@ pub fn recv_inner<'a>(
         meta.addr,
         *local_address,
         meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-        recv_buf,
+        data,
         Some(meta.stride),
     ))
 }
