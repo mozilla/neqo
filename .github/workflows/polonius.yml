@@ -36,7 +36,6 @@ jobs:
   polonius:
     strategy:
       fail-fast: false
-    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
