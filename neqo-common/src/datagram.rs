@@ -46,6 +46,10 @@ impl<D> Datagram<D> {
     pub const fn segment_size(&self) -> usize {
         self.segment_size
     }
+
+    pub fn set_segment_size(&mut self, segment_size: usize) {
+        self.segment_size = segment_size;
+    }
 }
 
 impl<D: AsRef<[u8]>> Datagram<D> {

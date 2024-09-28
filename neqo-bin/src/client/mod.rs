@@ -413,7 +413,8 @@ impl<'a, H: Handler> Runner<'a, H> {
             args,
             timeout: None,
             recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
-            send_buf: Vec::new(),
+            // TODO
+            send_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
         }
     }
 

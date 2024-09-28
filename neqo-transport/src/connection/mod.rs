@@ -2343,9 +2343,8 @@ impl Connection {
         self.stats.borrow_mut().frame_tx.connection_close += 1;
     }
 
-    /// Build a datagram, possibly from multiple packets (for different PN
-    /// spaces) and each containing 1+ frames.
-    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
+    // TODO: There is a limit to the number of segments supported. E.g. you
+    // can't pass 200 segments to the Linux Kernel.
     fn output_path<'a>(
         &mut self,
         path: &PathRef,
@@ -2353,18 +2352,95 @@ impl Connection {
         closing_frame: &Option<ClosingFrame>,
         out: &'a mut Vec<u8>,
     ) -> Res<SendOption<'a>> {
+        assert_eq!(out.len(), 0);
+
+        qinfo!("\n===== output_path");
+        let mut initial_capacity = out.capacity();
+        // TODO
+        if initial_capacity == 0 {
+            initial_capacity = usize::MAX;
+        }
+        qinfo!("initial_capacity: {initial_capacity}");
+        let mut segment_size = None;
+
+        loop {
+            let limit = segment_size.map(|s| min(s, initial_capacity - out.len()));
+            if limit < segment_size {
+                qinfo!("no more space for another segment");
+                break;
+            }
+            qinfo!("limit: {limit:?}, out len: {}", out.len());
+            // Determine how we are sending packets (PTO, etc..).
+            let profile = self
+                .loss_recovery
+                .send_profile_2(limit, &path.borrow(), now);
+            qinfo!("output_path send_profile {:?}", profile);
+            qdebug!([self], "output_path send_profile {:?}", profile);
+
+            let start = out.len();
+            if let Some(pace) = self.output_path_segment(profile, path, now, closing_frame, out)? {
+                qinfo!("SendOption::No");
+                if segment_size.is_none() {
+                    return Ok(SendOption::No(pace));
+                }
+                break;
+            }
+            qinfo!("SendOption::Yes");
+
+            if segment_size.is_none() {
+                segment_size = Some(out.len());
+                if out.len() < path.borrow().plpmtu() / 2 {
+                    qinfo!("Segment is smaller than half of the mtu: {}", out.len());
+                    break;
+                }
+            }
+
+            if out.len() % segment_size.expect("TODO") != 0 {
+                qinfo!("Segment is smaller than previous");
+                break;
+            }
+
+            if path.borrow().pmtud().needs_probe() {
+                qinfo!("about to probe, thus larger than previous segment");
+                break;
+            }
+
+            assert!(out.len() - start <= segment_size.unwrap());
+        }
+
+        let mut dgram = path
+            .borrow_mut()
+            .datagram(out, &mut self.stats.borrow_mut());
+        dgram.set_segment_size(segment_size.expect("TODO"));
+
+        qinfo!(
+            "Sending datagram: {} size {} segments",
+            dgram.len(),
+            dgram.num_segments()
+        );
+
+        return Ok(SendOption::Yes(dgram));
+    }
+
+    /// Build a datagram, possibly from multiple packets (for different PN
+    /// spaces) and each containing 1+ frames.
+    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
+    fn output_path_segment<'a>(
+        &mut self,
+        profile: SendProfile,
+        path: &PathRef,
+        now: Instant,
+        closing_frame: &Option<ClosingFrame>,
+        out: &'a mut Vec<u8>,
+        // TODO: Option is misleading here.
+    ) -> Res<Option<bool>> {
         let mut initial_sent = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
-        // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
-        qdebug!([self], "output_path send_profile {:?}", profile);
-
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        assert_eq!(out.len(), 0);
         let mut encoder = Encoder::new(out);
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
@@ -2492,30 +2568,26 @@ impl Connection {
 
         if encoder.is_empty() {
             qdebug!("TX blocked, profile={:?}", profile);
-            Ok(SendOption::No(profile.paced()))
+            Ok(Some(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
-            let packets: &mut Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
                     qdebug!(
                         [self],
                         "pad Initial from {} to PLPMTU {}",
-                        packets.len(),
+                        encoder.len(),
                         profile.limit()
                     );
-                    initial.track_padding(profile.limit() - packets.len());
+                    initial.track_padding(profile.limit() - encoder.len());
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
-                    packets.resize(profile.limit(), 0);
+                    encoder.pad_to(profile.limit(), 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
             }
-            path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(
-                path.borrow_mut()
-                    .datagram(packets, &mut self.stats.borrow_mut()),
-            ))
+            path.borrow_mut().add_sent(encoder.len());
+            Ok(None)
         }
     }
 

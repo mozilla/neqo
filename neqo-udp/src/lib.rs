@@ -31,7 +31,7 @@ pub fn send_inner(
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
         contents: d.as_ref(),
-        segment_size: None,
+        segment_size: Some(d.segment_size()),
         src_ip: None,
     };
 
@@ -198,6 +198,36 @@ mod tests {
         Ok(())
     }
 
+    // TODO: Cleanup test
+    #[test]
+    fn gso() -> Result<(), io::Error> {
+        let sender = socket()?;
+        let receiver = socket()?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+        let payload = vec![0; 2 * 1500];
+
+        let datagram = Datagram::new(
+            sender.inner.local_addr()?,
+            receiver.inner.local_addr()?,
+            IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+            payload.as_slice(),
+            Some(1500),
+        );
+
+        sender.send(datagram)?;
+
+        let mut recv_buf = vec![0; RECV_BUF_SIZE * 2];
+        let received_datagram = receiver
+            .recv(&receiver_addr, &mut recv_buf)
+            .expect("receive to succeed");
+
+        // Assert that the ECN is correct.
+        assert_eq!(received_datagram.num_segments(), 2);
+
+        Ok(())
+    }
+
     /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
     #[test]
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), ignore)]
@@ -208,6 +238,7 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
+        // TODO: It does now.
         // `neqo_udp::Socket::send` does not yet
         // (https://github.com/mozilla/neqo/issues/1693) support GSO. Use
         // `quinn_udp` directly.

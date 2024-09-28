@@ -499,8 +499,10 @@ impl<'a> PacketBuilder<'a> {
             Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
         encoder.encode(&tag);
-        let complete: &[u8] = encoder.into();
-        Ok(&complete[start..])
+
+        // TODO: Tripple check that this is correct. Ideally improve Encoder instead of this hack here.
+        let encoder_len = encoder.len();
+        Ok(&out[out.len() - encoder_len + start..])
     }
 
     /// Make a Version Negotiation packet.
@@ -534,7 +536,9 @@ impl<'a> PacketBuilder<'a> {
         grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
         encoder.encode(&grease[..4]);
 
-        encoder.into()
+        // TODO
+        let encoder_len = encoder.len();
+        &out[(out.len() - encoder_len)..]
     }
 }
 

@@ -196,12 +196,16 @@ impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
 /// Encoder is good for building data structures.
 #[derive(PartialEq, Eq)]
 pub struct Encoder<'a> {
+    start: usize,
     buf: &'a mut Vec<u8>,
 }
 
 impl<'a> Encoder<'a> {
     pub fn new(buf: &'a mut Vec<u8>) -> Self {
-        Self { buf }
+        Self {
+            start: buf.len(),
+            buf,
+        }
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
@@ -234,20 +238,20 @@ impl<'a> Encoder<'a> {
     /// been written to the buffer.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.buf.len() - self.start
     }
 
     /// Returns true if the encoder buffer contains no elements.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.start == self.buf.len()
     }
 
     /// Create a view of the current contents of the buffer.
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])`
     #[must_use]
     pub fn as_decoder(&self) -> Decoder {
-        Decoder::new(self.buf)
+        Decoder::new(&self.buf[self.start..])
     }
 
     /// Don't use this except in testing.
@@ -272,7 +276,7 @@ impl<'a> Encoder<'a> {
 
     #[cfg(test)]
     fn to_hex(&self) -> String {
-        crate::hex(&self.buf)
+        crate::hex(&self.buf[self.start..])
     }
 
     /// Generic encode routine for arbitrary data.
@@ -402,19 +406,19 @@ impl<'a> Encoder<'a> {
 
     /// Truncate the encoder to the given size.
     pub fn truncate(&mut self, len: usize) {
-        self.buf.truncate(len);
+        self.buf.truncate(len + self.start);
     }
 
     /// Pad the buffer to `len` with bytes set to `v`.
     pub fn pad_to(&mut self, len: usize, v: u8) {
-        if len > self.buf.len() {
-            self.buf.resize(len, v);
+        if len > self.buf.len() - self.start {
+            self.buf.resize(len + self.start, v);
         }
     }
 
     #[must_use]
     pub fn to_vec(&self) -> Vec<u8> {
-        self.buf.clone()
+        self.buf[self.start..].to_vec()
     }
 }
 
@@ -426,29 +430,31 @@ impl<'a> Debug for Encoder<'a> {
 
 impl<'a> AsRef<[u8]> for Encoder<'a> {
     fn as_ref(&self) -> &[u8] {
-        self.buf
+        &self.buf[self.start..]
     }
 }
 
 impl<'a> AsMut<[u8]> for Encoder<'a> {
     fn as_mut(&mut self) -> &mut [u8] {
-        self.buf
+        &mut self.buf[self.start..]
     }
 }
 
-impl<'a> From<Encoder<'a>> for &'a [u8] {
-    #[must_use]
-    fn from(encoder: Encoder<'a>) -> &'a [u8] {
-        encoder.buf
-    }
-}
+// TODO: Needed? Non-intuiv at least.
+// impl<'a> From<Encoder<'a>> for &'a [u8] {
+//     #[must_use]
+//     fn from(encoder: Encoder<'a>) -> &'a [u8] {
+//         encoder.buf
+//     }
+// }
 
-impl<'a> From<Encoder<'a>> for &'a mut Vec<u8> {
-    #[must_use]
-    fn from(buf: Encoder<'a>) -> &'a mut Vec<u8> {
-        buf.buf
-    }
-}
+// TODO: Needed? Non-intuiv at least.
+// impl<'a> From<Encoder<'a>> for &'a mut Vec<u8> {
+//     #[must_use]
+//     fn from(buf: Encoder<'a>) -> &'a mut Vec<u8> {
+//         buf.buf
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
