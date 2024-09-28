@@ -1040,7 +1040,18 @@ impl Connection {
 
     /// Process new input datagrams on the connection.
     pub fn process_input<'a>(&mut self, d: impl Into<Datagram<&'a [u8]>>, now: Instant) {
-        self.input(d.into(), now, now);
+        self.input(std::iter::once(d.into()), now, now);
+        self.process_saved(now);
+        self.streams.cleanup_closed_streams();
+    }
+
+    /// Process new input datagrams on the connection.
+    pub fn process_input_2<'a, 'b>(
+        &mut self,
+        d: impl Iterator<Item = Datagram<&'b [u8]>>,
+        now: Instant,
+    ) {
+        self.input(d, now, now);
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
     }
@@ -1156,7 +1167,7 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut out = vec![];
-        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
+        self.process_into_buffer(dgram.map(Into::into).map(std::iter::once), now, &mut out)
             .map_datagram(Into::into)
     }
 
@@ -1166,9 +1177,9 @@ impl Connection {
     ///
     /// Panics when `out` is not empty.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process_into_buffer<'a>(
+    pub fn process_into_buffer<'a, 'b>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<impl Iterator<Item = Datagram<&'b [u8]>>>,
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
@@ -1291,7 +1302,7 @@ impl Connection {
             debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input((&saved.d).into(), saved.t, now);
+                self.input(std::iter::once((&saved.d).into()), saved.t, now);
             }
         }
     }
@@ -1544,18 +1555,25 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: Datagram<&[u8]>, received: Instant, now: Instant) {
-        // First determine the path.
-        let path = self.paths.find_path_with_rebinding(
-            d.destination(),
-            d.source(),
-            self.conn_params.get_cc_algorithm(),
-            self.conn_params.pacing_enabled(),
-            now,
-        );
-        path.borrow_mut().add_received(d.len());
-        let res = self.input_path(&path, d, received);
-        self.capture_error(Some(path), now, 0, res).ok();
+    fn input<'a>(
+        &mut self,
+        dgrams: impl Iterator<Item = Datagram<&'a [u8]>>,
+        received: Instant,
+        now: Instant,
+    ) {
+        for d in dgrams {
+            // First determine the path.
+            let path = self.paths.find_path_with_rebinding(
+                d.destination(),
+                d.source(),
+                self.conn_params.get_cc_algorithm(),
+                self.conn_params.pacing_enabled(),
+                now,
+            );
+            path.borrow_mut().add_received(d.len());
+            let res = self.input_path(&path, d, received);
+            self.capture_error(Some(path), now, 0, res).ok();
+        }
     }
 
     fn input_path(&mut self, path: &PathRef, d: Datagram<&[u8]>, now: Instant) -> Res<()> {

@@ -9,18 +9,18 @@
 use std::{
     io::{self, IoSliceMut},
     net::SocketAddr,
-    slice,
 };
 
-use neqo_common::{qdebug, qtrace, Datagram, IpTos};
-use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+use neqo_common::{qtrace, Datagram, IpTos};
+use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState, BATCH_SIZE};
 
 /// Socket receive buffer size.
 ///
 /// Allows reading multiple datagrams in a single [`Socket::recv`] call.
 //
 // TODO: Experiment with different values across platforms.
-pub const RECV_BUF_SIZE: usize = u16::MAX as usize;
+// TODO: This might be too large on e.g. Linux.
+pub const RECV_BUF_SIZE: usize = u16::MAX as usize * BATCH_SIZE;
 
 pub fn send_inner(
     state: &UdpSocketState,
@@ -53,51 +53,100 @@ use std::os::fd::AsFd as SocketRef;
 use std::os::windows::io::AsSocket as SocketRef;
 
 pub fn recv_inner<'a>(
+    // TODO Implements Copy
     local_address: &SocketAddr,
     state: &UdpSocketState,
     socket: impl SocketRef,
     recv_buf: &'a mut Vec<u8>,
-) -> Result<Datagram<&'a [u8]>, io::Error> {
-    let mut meta;
+) -> Result<Datagrams<'a>, io::Error> {
+    let mut metas = [RecvMeta::default(); BATCH_SIZE];
 
-    let data = loop {
-        meta = RecvMeta::default();
+    let mut iovs: [IoSliceMut; BATCH_SIZE] = {
+        let recv_buf_len = recv_buf.len();
+        let mut bufs = recv_buf
+            .chunks_mut(recv_buf_len / BATCH_SIZE)
+            .map(IoSliceMut::new);
 
-        state.recv(
-            (&socket).into(),
-            &mut [IoSliceMut::new(recv_buf.as_mut())],
-            slice::from_mut(&mut meta),
-        )?;
-
-        if meta.len == 0 || meta.stride == 0 {
-            qdebug!(
-                "ignoring datagram from {} to {} len {} stride {}",
-                meta.addr,
-                local_address,
-                meta.len,
-                meta.stride
-            );
-            continue;
-        }
-
-        break &recv_buf[..meta.len];
+        // TODO
+        // expect() safe as self.recv_buf is chunked into BATCH_SIZE items
+        // and iovs will be of size BATCH_SIZE, thus from_fn is called
+        // exactly BATCH_SIZE times.
+        std::array::from_fn(|_| bufs.next().expect("BATCH_SIZE elements"))
     };
 
+    let msgs = state.recv((&socket).into(), &mut iovs, &mut metas)?;
+
+    // TODO: What to do in the empty case?
+    // if meta.len == 0 || meta.stride == 0 {
+    //     qdebug!(
+    //         "ignoring datagram from {} to {} len {} stride {}",
+    //         meta.addr,
+    //         local_address,
+    //         meta.len,
+    //         meta.stride
+    //     );
+    //     continue;
+    // }
+
+    let len: usize = metas.iter().take(msgs).map(|m| m.len).sum();
+    let segments: usize = metas
+        .iter()
+        .take(msgs)
+        .map(|m| m.len.div_ceil(m.stride))
+        .sum();
+
+    // TODO
+    // TODO: segments across all datagrams is misleading.
     qtrace!(
-        "received {} bytes from {} to {} with {} segments",
-        data.len(),
-        meta.addr,
+        "received {} bytes from {} to {} in {} datagrams with {} segments total",
+        len,
+        metas[0].addr,
         local_address,
-        meta.len.div_ceil(meta.stride),
+        msgs,
+        segments,
     );
 
-    Ok(Datagram::new(
-        meta.addr,
-        *local_address,
-        meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-        data,
-        Some(meta.stride),
-    ))
+    Ok(Datagrams {
+        metas,
+        iovs,
+        msgs,
+        local_address: *local_address,
+    })
+}
+
+pub struct Datagrams<'a> {
+    metas: [RecvMeta; BATCH_SIZE],
+    iovs: [IoSliceMut<'a>; BATCH_SIZE],
+    msgs: usize,
+    local_address: SocketAddr,
+}
+
+// TODO: Rework.
+impl<'a> std::fmt::Debug for Datagrams<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Datagrams")
+            .field("msgs", &self.msgs)
+            .field("local_address", &self.local_address)
+            .finish()
+    }
+}
+
+impl<'a> Datagrams<'a> {
+    pub fn iter(&'a self) -> impl Iterator<Item = Datagram<&'a [u8]>> {
+        self.metas
+            .iter()
+            .zip(self.iovs.iter())
+            .take(self.msgs)
+            .map(|(meta, iov)| {
+                Datagram::new(
+                    meta.addr,
+                    self.local_address,
+                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+                    &iov[..meta.len],
+                    Some(meta.stride),
+                )
+            })
+    }
 }
 
 /// A wrapper around a UDP socket, sending and receiving [`Datagram`]s.
@@ -126,7 +175,7 @@ impl<S: SocketRef> Socket<S> {
         &self,
         local_address: &SocketAddr,
         recv_buf: &'a mut Vec<u8>,
-    ) -> Result<Datagram<&'a [u8]>, io::Error> {
+    ) -> Result<Datagrams<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
     }
 }
@@ -185,15 +234,55 @@ mod tests {
         sender.send(datagram)?;
 
         let mut recv_buf = vec![0; RECV_BUF_SIZE];
-        let received_datagram = receiver
+        let received_datagrams = receiver
             .recv(&receiver_addr, &mut recv_buf)
             .expect("receive to succeed");
+        let received_datagram = received_datagrams.iter().next().unwrap();
 
         // Assert that the ECN is correct.
         assert_eq!(
             IpTosEcn::from(datagram.tos()),
             IpTosEcn::from(received_datagram.tos())
         );
+
+        Ok(())
+    }
+
+    // TODO: Cleanup
+    #[test]
+    fn many_datagrams() -> Result<(), io::Error> {
+        let sender = socket()?;
+        // TODO: Otherwise socket blocks to fill all batches. Best way to use non-blocking?
+        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+        let batch = 4;
+
+        for i in 0..batch {
+            println!("{i}");
+            let payload = vec![0; 64000];
+            let datagram = Datagram::new(
+                sender.inner.local_addr()?,
+                receiver.inner.local_addr()?,
+                IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
+                payload.as_slice(),
+                None,
+            );
+
+            sender.send(datagram)?;
+        }
+
+        println!("reading");
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
+        let received_datagrams = receiver
+            .recv(&receiver_addr, &mut recv_buf)
+            .expect("receive to succeed");
+        assert_eq!(received_datagrams.iter().count(), batch);
+
+        println!("done");
 
         Ok(())
     }
@@ -230,15 +319,17 @@ mod tests {
         let mut recv_buf = vec![0; RECV_BUF_SIZE];
         while num_received < max_gso_segments {
             recv_buf.clear();
-            let dgram = receiver
+            let dgrams = receiver
                 .recv(&receiver_addr, &mut recv_buf)
                 .expect("receive to succeed");
-            assert_eq!(
-                SEGMENT_SIZE,
-                dgram.segment_size(),
-                "Expect received datagrams to have same length as sent datagrams."
-            );
-            num_received += dgram.num_segments();
+            for dgram in dgrams.iter() {
+                assert_eq!(
+                    SEGMENT_SIZE,
+                    dgram.segment_size(),
+                    "Expect received datagrams to have same length as sent datagrams."
+                );
+                num_received += dgram.num_segments();
+            }
         }
 
         Ok(())

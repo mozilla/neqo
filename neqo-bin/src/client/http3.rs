@@ -128,9 +128,9 @@ impl super::Client for Http3Client {
         self.state().try_into()
     }
 
-    fn process_into_buffer<'a>(
+    fn process_into_buffer<'a, 'b>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<impl Iterator<Item = Datagram<&'b [u8]>>>,
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {

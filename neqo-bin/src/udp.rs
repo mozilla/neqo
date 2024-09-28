@@ -55,11 +55,12 @@ impl Socket {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
+    // TODO: Option needed?
     pub fn recv<'a>(
         &self,
         local_address: &SocketAddr,
         recv_buf: &'a mut Vec<u8>,
-    ) -> Result<Option<Datagram<&'a [u8]>>, io::Error> {
+    ) -> Result<Option<neqo_udp::Datagrams<'a>>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
                 neqo_udp::recv_inner(local_address, &self.state, &self.inner, recv_buf)

@@ -327,7 +327,7 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process_into_buffer(Some(dgram), now, out);
+                let out = c.process_into_buffer(Some(std::iter::once(dgram)), now, out);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -368,7 +368,9 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process_into_buffer(Some(dgram), now, out);
+            return c
+                .borrow_mut()
+                .process_into_buffer(Some(std::iter::once(dgram)), now, out);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -446,7 +448,7 @@ impl Server {
 
         for connection in &mut self.connections {
             match connection.borrow_mut().process_into_buffer(
-                None,
+                None::<std::iter::Once<Datagram<&[u8]>>>,
                 now,
                 // See .github/workflows/polonius.yml.
                 unsafe { &mut *std::ptr::from_mut(out) },

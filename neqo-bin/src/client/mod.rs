@@ -374,7 +374,7 @@ enum CloseState {
 trait Client {
     fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<impl Iterator<Item = Datagram<&'a [u8]>>>,
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]>;
@@ -457,16 +457,17 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process(&mut self, mut should_read: bool) -> Result<(), io::Error> {
         loop {
-            let dgram = should_read
+            let dgrams = should_read
                 .then(|| self.socket.recv(&self.local_addr, &mut self.recv_buf))
                 .transpose()?
                 .flatten();
-            should_read = dgram.is_some();
+            should_read = dgrams.is_some();
 
-            match self
-                .client
-                .process_into_buffer(dgram, Instant::now(), &mut self.send_buf)
-            {
+            match self.client.process_into_buffer(
+                dgrams.as_ref().map(|d| d.iter()),
+                Instant::now(),
+                &mut self.send_buf,
+            ) {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
                     self.socket.send(dgram)?;

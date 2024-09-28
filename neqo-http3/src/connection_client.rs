@@ -854,18 +854,20 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
-    pub fn process_into_buffer<'a>(
+    pub fn process_into_buffer<'a, 'b>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<impl Iterator<Item = Datagram<&'b [u8]>>>,
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
         if let Some(d) = input {
-            self.conn.process_input(d, now);
+            self.conn.process_input_2(d, now);
         }
         self.process_http3(now);
-        let out = self.conn.process_into_buffer(None, now, out);
+        let out = self
+            .conn
+            .process_into_buffer(None::<std::iter::Once<Datagram<&[u8]>>>, now, out);
         self.process_http3(now);
         out
     }
@@ -879,7 +881,7 @@ impl Http3Client {
     /// new [`Vec`].
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
         let mut out = vec![];
-        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
+        self.process_into_buffer(dgram.map(Into::into).map(std::iter::once), now, &mut out)
             .map_datagram(Into::into)
     }
 

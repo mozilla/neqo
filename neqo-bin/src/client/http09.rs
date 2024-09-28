@@ -179,7 +179,7 @@ impl TryFrom<&State> for CloseState {
 impl super::Client for Connection {
     fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<impl Iterator<Item = Datagram<&'a [u8]>>>,
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {

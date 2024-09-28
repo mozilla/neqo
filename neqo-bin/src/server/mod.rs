@@ -232,57 +232,66 @@ impl ServerRunner {
     }
 
     async fn process(&mut self, mut socket_inx: Option<usize>) -> Result<(), io::Error> {
-        loop {
-            let mut dgram = if let Some(inx) = socket_inx {
+        // TODO: Cleanup! We should really be passing a set of datagrams to neqo_transport server!
+        'outer: loop {
+            let dgrams = if let Some(inx) = socket_inx {
                 let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                let dgram = socket.recv(host, &mut self.recv_buf)?;
-                if dgram.is_none() {
+                let dgrams = socket.recv(host, &mut self.recv_buf)?;
+                if dgrams.is_none() {
                     // Done reading.
                     socket_inx.take();
                 }
-                dgram
+                dgrams
             } else {
                 None
             };
 
-            match self
-                .server
-                .process_into_buffer(dgram.take(), (self.now)(), &mut self.send_buf)
-            {
-                Output::Datagram(dgram) => {
-                    // Find outbound socket. If none match, take the first.
-                    let socket = if let Some(socket) =
-                        self.sockets.iter_mut().find_map(|(_host, socket)| {
+            let mut dgrams = dgrams.iter().map(|d| d.iter()).flatten().peekable();
+
+            'inner: loop {
+                match self.server.process_into_buffer(
+                    dgrams.next(),
+                    (self.now)(),
+                    &mut self.send_buf,
+                ) {
+                    Output::Datagram(dgram) => {
+                        // Find outbound socket. If none match, take the first.
+                        let socket = if let Some(socket) =
+                            self.sockets.iter_mut().find_map(|(_host, socket)| {
+                                socket
+                                    .local_addr()
+                                    .ok()
+                                    .map_or(false, |socket_addr| socket_addr == dgram.source())
+                                    .then_some(socket)
+                            }) {
                             socket
-                                .local_addr()
-                                .ok()
-                                .map_or(false, |socket_addr| socket_addr == dgram.source())
-                                .then_some(socket)
-                        }) {
-                        socket
-                    } else {
-                        &mut self.sockets.iter_mut().next().unwrap().1
-                    };
+                        } else {
+                            &mut self.sockets.iter_mut().next().unwrap().1
+                        };
 
-                    socket.writable().await?;
-                    socket.send(dgram)?;
-                    self.send_buf.clear();
-                    continue;
+                        socket.writable().await?;
+                        socket.send(dgram)?;
+                        self.send_buf.clear();
+                        continue 'inner;
+                    }
+                    Output::Callback(new_timeout) => {
+                        qdebug!("Setting timeout of {:?}", new_timeout);
+                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    }
+                    Output::None => {}
                 }
-                Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
-                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                }
-                Output::None => {}
-            }
 
-            if socket_inx.is_none() {
-                // No socket to read and nothing to write.
-                break;
+                if dgrams.peek().is_some() {
+                    continue 'inner;
+                }
+
+                if socket_inx.is_some() {
+                    continue 'outer;
+                }
+
+                return Ok(());
             }
         }
-
-        Ok(())
     }
 
     // Wait for any of the sockets to be readable or the timeout to fire.
