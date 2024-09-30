@@ -336,8 +336,7 @@ impl<'a> Encoder<'a> {
     #[allow(clippy::cast_possible_truncation)]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
         let start = self.buf.len();
-        let len = self.buf.len();
-        self.buf.resize(len + n, 0);
+        self.buf.resize(self.buf.len() + n, 0);
         f(self);
         let len = self.buf.len() - start - n;
         assert!(len < (1 << (n * 8)));
@@ -365,8 +364,7 @@ impl<'a> Encoder<'a> {
     pub fn encode_vvec_with<F: FnOnce(&mut Self)>(&mut self, f: F) -> &mut Self {
         let start = self.buf.len();
         // Optimize for short buffers, reserve a single byte for the length.
-        let len = self.buf.len();
-        self.buf.resize(len + 1, 0);
+        self.buf.resize(self.buf.len() + 1, 0);
         f(self);
         let len = self.buf.len() - start - 1;
 
