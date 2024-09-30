@@ -1641,9 +1641,9 @@ impl Connection {
                     Err(e) => {
                         match e {
                             Error::KeysPending(cspace) => {
-                                // This packet can't be decrypted because we don't have the keys
-                                // yet. Don't check this packet for
-                                // a stateless reset, just return.
+                                // This packet can't be decrypted because we
+                                // don't have the keys yet. Don't check this
+                                // packet for a stateless reset, just return.
                                 let remaining = slc.len();
                                 self.save_datagram(cspace, d, remaining, now);
                                 return Ok(());
