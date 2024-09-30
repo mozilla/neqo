@@ -139,13 +139,62 @@ impl From<Datagram> for Vec<u8> {
 }
 
 #[cfg(test)]
-use test_fixture::datagram;
+mod tests {
+    use test_fixture::{datagram, DEFAULT_ADDR};
 
-#[test]
-fn fmt_datagram() {
-    let d = datagram([0; 1].to_vec());
-    assert_eq!(
-        &format!("{d:?}"),
-        "Datagram IpTos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
-    );
+    use super::Datagram;
+    use crate::IpTos;
+
+    #[test]
+    fn fmt_datagram() {
+        let d = datagram([0; 1].to_vec());
+        assert_eq!(
+            &format!("{d:?}"),
+            "Datagram IpTos(Cs0, Ect0) [fe80::1]:443->[fe80::1]:443: [1]: 00"
+        );
+    }
+
+    /// Expect segment to span whole datagram when no segment size specified.
+    #[test]
+    fn no_segment_size() {
+        let len = 42;
+        let d = datagram(vec![0; len].to_vec());
+        assert_eq!(d.segment_size(), len, "");
+        assert_eq!(d.num_segments(), 1);
+        assert_eq!(d.iter_segments().next(), Some(vec![0; len].as_slice()));
+    }
+
+    #[test]
+    fn equal_size_segments() {
+        let segment_size = 1_500;
+        let d = Datagram::new(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            IpTos::default(),
+            vec![0; segment_size * 2],
+            Some(segment_size),
+        );
+        assert_eq!(d.segment_size(), segment_size);
+        assert_eq!(d.num_segments(), 2);
+        let mut iter = d.iter_segments();
+        assert_eq!(iter.next(), Some(vec![0; segment_size].as_slice()));
+        assert_eq!(iter.next(), Some(vec![0; segment_size].as_slice()));
+    }
+
+    #[test]
+    fn unequal_size_segments() {
+        let segment_size = 1_500;
+        let d = Datagram::new(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            IpTos::default(),
+            vec![0; 2_000],
+            Some(segment_size),
+        );
+        assert_eq!(d.segment_size(), segment_size);
+        assert_eq!(d.num_segments(), 2);
+        let mut iter = d.iter_segments();
+        assert_eq!(iter.next(), Some(vec![0; segment_size].as_slice()));
+        assert_eq!(iter.next(), Some(vec![0; 500].as_slice()));
+    }
 }
