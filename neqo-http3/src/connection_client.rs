@@ -883,6 +883,22 @@ impl Http3Client {
             .map_datagram(Into::into)
     }
 
+    /// The function should be called when there is a new UDP packet available. The function will
+    /// handle the packet payload.
+    ///
+    /// First, the payload will be handled by the QUIC layer. Afterward, `process_http3` will be
+    /// called to handle new [`ConnectionEvent`][1]s.
+    ///
+    /// After this function is called [`Http3Client::process`] should be called to check whether new
+    /// packets need to be sent or if a timer needs to be updated.
+    ///
+    /// [1]: ../neqo_transport/enum.ConnectionEvent.html
+    pub fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+        qtrace!([self], "Process input");
+        self.conn.process_input(dgram, now);
+        self.process_http3(now);
+    }
+
     /// Process HTTP3 layer.
     /// When [`Http3Client::process`], or [`Http3Client::process_input`] is
     /// called we must call this function
