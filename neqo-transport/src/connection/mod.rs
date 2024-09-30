@@ -1310,7 +1310,7 @@ impl Connection {
             d.destination(),
             d.tos(),
             d[d.len() - remaining..].to_vec(),
-            None,
+            Some(d.segment_size()),
         );
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
