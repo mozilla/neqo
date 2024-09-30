@@ -102,8 +102,8 @@ impl IdleTimeout {
         }
 
         let timeout = self.keep_alive_timeout(now, pto);
-        // This could happen when the state is AckElicitingPacketSent(t) and
-        // the t exceeds keep_alive_timeout.
+        // Timer is in the past, i.e. we should have sent a keep alive,
+        // but we were unable to, e.g. due to CC.
         if timeout <= now {
             return None;
         }

@@ -1068,8 +1068,7 @@ impl Connection {
             qtrace!([self], "Idle timer {:?}", idle_time);
             delays.push(idle_time);
 
-            let keep_alive = self.streams.need_keep_alive();
-            if keep_alive {
+            if self.streams.need_keep_alive() {
                 if let Some(keep_alive_time) = self.idle_timeout.maybe_keep_alive_timeout(now, pto)
                 {
                     qtrace!([self], "Keep alive timer {:?}", keep_alive_time);
