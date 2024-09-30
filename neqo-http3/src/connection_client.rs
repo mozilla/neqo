@@ -89,7 +89,6 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::take_resumption_token`]
 ///   - [`Http3Client::tls_info`]
 /// - driving HTTP/3 session:
-///   - [`Http3Client::process_input`]
 ///   - [`Http3Client::process`]
 /// - create requests, send/receive data, and cancel requests:
 ///   - [`Http3Client::fetch`]
@@ -883,17 +882,8 @@ impl Http3Client {
             .map_datagram(Into::into)
     }
 
-    /// The function should be called when there is a new UDP packet available. The function will
-    /// handle the packet payload.
-    ///
-    /// First, the payload will be handled by the QUIC layer. Afterward, `process_http3` will be
-    /// called to handle new [`ConnectionEvent`][1]s.
-    ///
-    /// After this function is called [`Http3Client::process`] should be called to check whether new
-    /// packets need to be sent or if a timer needs to be updated.
-    ///
-    /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+    #[cfg(test)]
+    fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
         qtrace!([self], "Process input");
         self.conn.process_input(dgram, now);
         self.process_http3(now);
