@@ -45,13 +45,10 @@ instead informs the application when processing needs to be triggered.
 
 
 The core functions for driving HTTP/3 sessions are:
- - __On the client-side__ :
-   - [`process_input`](struct.Http3Client.html#method.process_input) consume UDP payload.
-   - [`process`](struct.Http3Client.html#method.process) consume UDP payload if
-     available and produces some UDP payload to be sent or returns a callback
-     time.
-- __On the server-side__ only [`process`](struct.Http3Server.html#method.process) is
-  available.
+- On the client-side [`Http3Client::process`] consume UDP payload if available
+  and produces some UDP payload to be sent or returns a callback time.
+- The same functionality is available on the server-side via
+  [`Http3Server::process`].
 
 An example interaction with a socket:
 
@@ -68,7 +65,7 @@ let mut client = Http3Client::new(...);
 
 // process can return 3 values, data to be sent, time duration when process should
 // be called, and None when Http3Client is done.
-match client.process_output(Instant::now(), &mut out) {
+match client.process(Instant::now(), None, now) {
     Output::Datagram(dgram) => {
         // Send dgram on a socket.
         socket.send_to(&dgram[..], dgram.destination())
@@ -89,8 +86,9 @@ match client.process_output(Instant::now(), &mut out) {
 // Reading new data coming for the network.
 match socket.recv_from(&mut buf[..]) {
      Ok((sz, remote)) => {
-        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
-        client.process_input(d, Instant::now());
+        let d = Datagram::new(remote, *local_addr, &buf[..sz], None);
+        let output = client.process(Some(d), Instant::now());
+        // Handle output.
     }
     Err(err) => {
          eprintln!("UDP error: {}", err);
