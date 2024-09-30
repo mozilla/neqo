@@ -501,8 +501,7 @@ impl Server {
             Output::None
         };
 
-        #[allow(clippy::option_if_let_else)]
-        let output = if let Output::None = output {
+        let output = if output == Output::None {
             self.process_next_output(now, out)
         } else {
             output
