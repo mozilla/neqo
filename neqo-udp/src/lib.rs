@@ -83,21 +83,23 @@ pub fn recv_inner<'a>(
         break &recv_buf[..meta.len];
     };
 
-    qtrace!(
-        "received {} bytes from {} to {} with {} segments",
-        data.len(),
-        meta.addr,
-        local_address,
-        meta.len.div_ceil(meta.stride),
-    );
-
-    Ok(Datagram::new(
+    let datagram = Datagram::new(
         meta.addr,
         *local_address,
         meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
         data,
         Some(meta.stride),
-    ))
+    );
+
+    qtrace!(
+        "received {} bytes from {} to {} with {} segments",
+        datagram.len(),
+        datagram.source(),
+        datagram.destination(),
+        datagram.num_segments(),
+    );
+
+    Ok(datagram)
 }
 
 /// A wrapper around a UDP socket, sending and receiving [`Datagram`]s.
