@@ -231,7 +231,6 @@ mod tests {
         let mut num_received = 0;
         let mut recv_buf = vec![0; RECV_BUF_SIZE];
         while num_received < max_gso_segments {
-            recv_buf.clear();
             let dgram = receiver
                 .recv(&receiver_addr, &mut recv_buf)
                 .expect("receive to succeed");
