@@ -890,11 +890,12 @@ impl Http3Client {
     }
 
     /// Process HTTP3 layer.
-    /// When [`Http3Client::process`], or [`Http3Client::process_input`] is
-    /// called we must call this function
-    /// as well. The functions calls [`Http3Client::check_connection_events`] to handle events from
-    /// the QUC layer and calls [`Http3Connection::process_sending`] to ensure that HTTP/3 layer
-    /// data, e.g. control frames, are sent.
+    ///
+    /// When [`Http3Client::process`] is called we must call this function as
+    /// well. The functions calls [`Http3Client::check_connection_events`] to
+    /// handle events from the QUC layer and calls
+    /// [`Http3Connection::process_sending`] to ensure that HTTP/3 layer data,
+    /// e.g. control frames, are sent.
     fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
         match self.base_handler.state() {
