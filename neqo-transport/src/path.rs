@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos, IpTosEcn};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos, IpTosEcn,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -569,8 +571,19 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let iface_mtu =
-            mtu::interface_and_mtu(&(local, remote)).map_or_else(|_| usize::MAX, |(_, m)| m);
+        // We're passing `None` into `mtu::interface_and_mtu` here, which force the lookup to only
+        // take the local address into account. Taking the remote address into account would require
+        // a call to `connect`, which Firefox blocklists for Rust dependencies.
+        let iface_mtu = match mtu::interface_and_mtu(&(local.ip(), remote)) {
+            Ok((name, mtu)) => {
+                qdebug!("Outbound interface {name} has MTU {mtu}");
+                mtu
+            }
+            Err(e) => {
+                qwarn!("Failed to determine outbound interface: {e}");
+                usize::MAX
+            }
+        };
         let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
