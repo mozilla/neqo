@@ -56,6 +56,6 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Apply patch, removing `unsafe` workarounds.
-        run: patch -p1 < .github/workflows/polonius.diff
+        run: git apply .github/workflows/polonius.diff
 
       - run: RUSTFLAGS="-Z polonius" cargo +nightly check
