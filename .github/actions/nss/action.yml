@@ -176,6 +176,7 @@ runs:
 
     - name: Set up environment
       shell: bash
+      if: env.BUILD_NSS == '1'
       run: |
         NSS_TARGET="${{ inputs.type }}"
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
