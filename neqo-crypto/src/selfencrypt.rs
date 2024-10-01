@@ -86,16 +86,18 @@ impl SelfEncrypt {
         let cipher = self.make_aead(&self.key, &salt)?;
         let encoded_len = 2 + salt.len() + plaintext.len() + cipher.expansion();
 
-        let mut enc = Encoder::with_capacity(encoded_len);
+        let mut out = Vec::with_capacity(encoded_len);
+        let mut enc = Encoder::new(&mut out);
         enc.encode_byte(Self::VERSION);
         enc.encode_byte(self.key_id);
         enc.encode(&salt);
 
-        let mut extended_aad = enc.clone();
+        let mut out_2 = enc.to_vec();
+        let mut extended_aad = Encoder::new(&mut out_2);
         extended_aad.encode(aad);
 
         let offset = enc.len();
-        let mut output: Vec<u8> = enc.into();
+        let mut output = enc.to_vec();
         output.resize(encoded_len, 0);
         cipher.encrypt(0, extended_aad.as_ref(), plaintext, &mut output[offset..])?;
         qtrace!(
@@ -137,7 +139,8 @@ impl SelfEncrypt {
         };
         let offset = 2 + Self::SALT_LENGTH;
 
-        let mut extended_aad = Encoder::with_capacity(offset + aad.len());
+        let mut out = Vec::with_capacity(offset + aad.len());
+        let mut extended_aad = Encoder::new(&mut out);
         extended_aad.encode(&ciphertext[0..offset]);
         extended_aad.encode(aad);
 

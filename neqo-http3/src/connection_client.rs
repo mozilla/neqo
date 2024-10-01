@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     fmt::{Debug, Display},
-    iter, mem,
+    mem,
     net::SocketAddr,
     rc::Rc,
     time::Instant,
@@ -89,7 +89,6 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::take_resumption_token`]
 ///   - [`Http3Client::tls_info`]
 /// - driving HTTP/3 session:
-///   - [`Http3Client::process_output`]
 ///   - [`Http3Client::process_input`]
 ///   - [`Http3Client::process`]
 /// - create requests, send/receive data, and cancel requests:
@@ -410,10 +409,11 @@ impl Http3Client {
 
     fn encode_resumption_token(&self, token: &ResumptionToken) -> Option<ResumptionToken> {
         self.base_handler.get_settings().map(|settings| {
-            let mut enc = Encoder::default();
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            ResumptionToken::new(enc.into(), token.expiration_time())
+            ResumptionToken::new(out, token.expiration_time())
         })
     }
 
@@ -560,7 +560,7 @@ impl Http3Client {
         output
     }
 
-    /// Send an [`PRIORITY_UPDATE`-frame][1] on next `Http3Client::process_output()` call.
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [`Http3Client::process`] call.
     /// Returns if the priority got changed.
     ///
     /// # Errors
@@ -622,8 +622,8 @@ impl Http3Client {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
+    /// [`Http3Client::process`] has not been called when needed, and HTTP3 layer has not picked up
+    /// the info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8]) -> Res<usize> {
         qinfo!(
@@ -733,9 +733,9 @@ impl Http3Client {
     ///
     /// `InvalidStreamId` if the stream does not exist,
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
+    /// [`Http3Client::process`] has not been called when needed, and HTTP3
+    /// layer has not picked up the info that the stream has been closed.)
+    /// `InvalidInput` if an empty buffer has been supplied.
     pub fn webtransport_close_session(
         &mut self,
         session_id: StreamId,
@@ -854,13 +854,35 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
-    /// This function combines  `process_input` and `process_output` function.
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_into_buffer<'a, 'b>(
+        &mut self,
+        input: Option<impl Iterator<Item = Datagram<&'b [u8]>>>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        if let Some(d) = dgram {
-            self.process_input(d, now);
+        if let Some(d) = input {
+            self.conn.process_input_2(d, now);
         }
-        self.process_output(now)
+        self.process_http3(now);
+        let out = self
+            .conn
+            .process_into_buffer(None::<std::iter::Once<Datagram<&[u8]>>>, now, out);
+        self.process_http3(now);
+        out
+    }
+
+    /// Shorthand for [`Http3Client::process`] with no input `dgram`.
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
+    /// Same as [`Http3Client::process_into_buffer`] but allocating output into
+    /// new [`Vec`].
+    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into).map(std::iter::once), now, &mut out)
+            .map_datagram(Into::into)
     }
 
     /// The function should be called when there is a new UDP packet available. The function will
@@ -869,31 +891,21 @@ impl Http3Client {
     /// First, the payload will be handled by the QUIC layer. Afterward, `process_http3` will be
     /// called to handle new [`ConnectionEvent`][1]s.
     ///
-    /// After this function is called `process_output` should be called to check whether new
+    /// After this function is called [`Http3Client::process`] should be called to check whether new
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
-        self.process_multiple_input(iter::once(dgram), now);
-    }
-
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
-        let mut dgrams = dgrams.into_iter().peekable();
-        qtrace!([self], "Process multiple datagrams");
-        if dgrams.peek().is_none() {
-            return;
-        }
-        self.conn.process_multiple_input(dgrams, now);
+    pub fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+        qtrace!([self], "Process input");
+        self.conn.process_input(dgram, now);
         self.process_http3(now);
     }
 
     /// Process HTTP3 layer.
-    /// When `process_output`, `process_input`, or `process` is called we must call this function
-    /// as well. The functions calls `Http3Client::check_connection_events` to handle events from
-    /// the QUC layer and calls `Http3Connection::process_sending` to ensure that HTTP/3 layer
+    /// When [`Http3Client::process`], or [`Http3Client::process_input`] is
+    /// called we must call this function
+    /// as well. The functions calls [`Http3Client::check_connection_events`] to handle events from
+    /// the QUC layer and calls [`Http3Connection::process_sending`] to ensure that HTTP/3 layer
     /// data, e.g. control frames, are sent.
     fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
@@ -915,47 +927,6 @@ impl Http3Client {
                 _ = self.check_result(now, &res);
             }
         }
-    }
-
-    /// The function should be called to check if there is a new UDP packet to be sent. It should
-    /// be called after a new packet is received and processed and after a timer expires (QUIC
-    /// needs timers to handle events like PTO detection and timers are not implemented by the neqo
-    /// library, but instead must be driven by the application).
-    ///
-    /// `process_output` can return:
-    /// - a [`Output::Datagram(Datagram)`][1]: data that should be sent as a UDP payload,
-    /// - a [`Output::Callback(Duration)`][1]: the duration of a  timer. `process_output` should be
-    ///   called at least after the time expires,
-    /// - [`Output::None`][1]: this is returned when `Nttp3Client` is done and can be destroyed.
-    ///
-    /// The application should call this function repeatedly until a timer value or None is
-    /// returned. After that, the application should call the function again if a new UDP packet is
-    /// received and processed or the timer value expires.
-    ///
-    /// The HTTP/3 neqo implementation drives the HTTP/3 and QUIC layers, therefore this function
-    /// will call both layers:
-    ///  - First it calls HTTP/3 layer processing (`process_http3`) to make sure the layer writes
-    ///    data to QUIC layer or cancels streams if needed.
-    ///  - Then QUIC layer processing is called - [`Connection::process_output`][3]. This produces a
-    ///    packet or a timer value. It may also produce new [`ConnectionEvent`][2]s, e.g. connection
-    ///    state-change event.
-    ///  - Therefore the HTTP/3 layer processing (`process_http3`) is called again.
-    ///
-    /// [1]: ../neqo_transport/enum.Output.html
-    /// [2]: ../neqo_transport/struct.ConnectionEvents.html
-    /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
-    pub fn process_output(&mut self, now: Instant) -> Output {
-        qtrace!([self], "Process output.");
-
-        // Maybe send() stuff on http3-managed streams
-        self.process_http3(now);
-
-        let out = self.conn.process_output(now);
-
-        // Update H3 for any transport state changes and events
-        self.process_http3(now);
-
-        out
     }
 
     /// This function takes the provided result and check for an error.
@@ -1482,7 +1453,8 @@ mod tests {
             );
 
             // Encode a settings frame and send it.
-            let mut enc = Encoder::default();
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             self.settings.encode(&mut enc);
             assert_eq!(
                 self.conn
@@ -1926,7 +1898,8 @@ mod tests {
             push_id,
             header_block: PUSH_PROMISE_DATA.to_vec(),
         };
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         frame.encode(&mut d);
         _ = conn.stream_send(stream_id, d.as_ref()).unwrap();
     }
@@ -1965,7 +1938,8 @@ mod tests {
         push_id: u64,
     ) {
         let frame = HFrame::CancelPush { push_id };
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         frame.encode(&mut d);
         server
             .conn
@@ -2882,10 +2856,11 @@ mod tests {
 
     fn alloc_buffer(size: usize) -> (Vec<u8>, Vec<u8>) {
         let data_frame = HFrame::Data { len: size as u64 };
-        let mut enc = Encoder::default();
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         data_frame.encode(&mut enc);
 
-        (vec![0_u8; size], enc.as_ref().to_vec())
+        (vec![0_u8; size], out)
     }
 
     // Send 2 frames. For the second one we can only send 63 bytes.
@@ -3960,10 +3935,10 @@ mod tests {
 
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+        let mut buf = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+        let mut enc = Encoder::new(&mut buf);
         enc.encode_varint(1028_u64); // Arbitrary type.
         enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
-        let mut buf: Vec<_> = enc.into();
         buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
         _ = server.conn.stream_send(request_stream_id, &buf).unwrap();
 
@@ -4023,7 +3998,8 @@ mod tests {
         let encoder_inst_pkt = server.conn.process(None, now());
 
         // Send response
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -4091,7 +4067,8 @@ mod tests {
         // headers.
         let encoder_inst_pkt = server.conn.process(None, now());
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
 
         server_send_response_and_exchange_packet(
@@ -4372,7 +4349,8 @@ mod tests {
 
         // Send new settings.
         let control_stream = server.conn.stream_create(StreamType::UniDi).unwrap();
-        let mut enc = Encoder::default();
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         server.settings.encode(&mut enc);
         let mut sent = server.conn.stream_send(control_stream, CONTROL_STREAM_TYPE);
         assert_eq!(sent.unwrap(), CONTROL_STREAM_TYPE.len());
@@ -5011,7 +4989,8 @@ mod tests {
         client.process(out.as_dgram_ref(), now());
 
         // Send response
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -5980,7 +5959,8 @@ mod tests {
         let encoder_inst_pkt = server.conn.process(None, now()).dgram();
         assert!(encoder_inst_pkt.is_some());
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         push_promise_frame.encode(&mut d);
         server_send_response_and_exchange_packet(client, server, stream_id, &d, false);
 
@@ -6124,7 +6104,8 @@ mod tests {
         let header_hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         header_hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6197,7 +6178,8 @@ mod tests {
         let header_hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         header_hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6287,7 +6269,8 @@ mod tests {
         let encoder_insts = server.conn.process(None, now());
 
         // Send response headers.
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6302,7 +6285,8 @@ mod tests {
         assert!(!client.events().any(header_ready_event));
 
         // Now send data frame. This will trigger DataRead event.
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 0 };
         d_frame.encode(&mut d);
@@ -6347,10 +6331,11 @@ mod tests {
             header_block: encoded_headers.to_vec(),
         };
 
-        let out = server.conn.process(None, now());
+        let output = server.conn.process(None, now());
 
         // Send response
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data {
             len: u64::try_from(data.len()).unwrap(),
@@ -6359,7 +6344,7 @@ mod tests {
         d.encode(data);
         server_send_response_and_exchange_packet(client, server, request_stream_id, &d, true);
 
-        out.dgram()
+        output.dgram()
     }
 
     #[test]
@@ -6483,7 +6468,8 @@ mod tests {
         );
 
         // Send response
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 0 };
         d_frame.encode(&mut d);
@@ -6547,7 +6533,8 @@ mod tests {
         let encoder_insts = server.conn.process(None, now());
 
         // Send response headers.
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
@@ -6587,7 +6574,8 @@ mod tests {
     #[test]
     fn reserved_frames() {
         for f in H3_RESERVED_FRAME_TYPES {
-            let mut enc = Encoder::default();
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             enc.encode_varint(*f);
             test_wrong_frame_on_control_stream(enc.as_ref());
             test_wrong_frame_on_push_stream(enc.as_ref());
@@ -6606,7 +6594,8 @@ mod tests {
                 .stream_send(control_stream, CONTROL_STREAM_TYPE)
                 .unwrap();
             // Create a settings frame of length 2.
-            let mut enc = Encoder::default();
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             enc.encode_varint(H3_FRAME_TYPE_SETTINGS);
             enc.encode_varint(2_u64);
             // The settings frame contains a reserved settings type and some value (0x1).
@@ -6626,7 +6615,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers1xx: &[Header] = &[Header::new(":status", "103")];
         server.encode_headers(request_stream_id, headers1xx, &mut d);
 
@@ -6688,7 +6678,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers = vec![
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6747,7 +6738,8 @@ mod tests {
         // Create a push stream
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers1xx: &[Header] = &[Header::new(":status", "100")];
         server.encode_headers(push_stream_id, headers1xx, &mut d);
 
@@ -6815,7 +6807,8 @@ mod tests {
         // Create a push stream
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers = vec![
             Header::new("my-header", "my-header"),
             Header::new("content-length", "3"),
@@ -6894,7 +6887,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         server.encode_headers(request_stream_id, headers, &mut d);
 
         // Send response
@@ -6954,7 +6948,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         server.encode_headers(
             request_stream_id,
             &[
@@ -7233,7 +7228,8 @@ mod tests {
         let encoder_inst_pkt = server.conn.process(None, now());
 
         // Send response
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
         d_frame.encode(&mut d);
@@ -7259,7 +7255,8 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         let headers1xx = &[Header::new(":status", "101")];
         server.encode_headers(request_stream_id, headers1xx, &mut d);
 

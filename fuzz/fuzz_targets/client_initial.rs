@@ -24,11 +24,13 @@ fuzz_target!(|data: &[u8]| {
     let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = remove_header_protection(&hp, header, payload);
 
-    let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    let mut out = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
+    let mut payload_enc = Encoder::new(&mut out);
     payload_enc.encode(data); // Add fuzzed data.
 
     // Make a new header with a 1 byte packet number length.
-    let mut header_enc = Encoder::new();
+    let mut out = Vec::new();
+    let mut header_enc = Encoder::new(&mut out);
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
         .encode_uint(4, Version::default().wire_version())
@@ -57,7 +59,7 @@ fuzz_target!(|data: &[u8]| {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext);
+    let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext, None);
 
     let mut server = default_server();
     let _response = server.process(Some(&fuzzed_ci), now());

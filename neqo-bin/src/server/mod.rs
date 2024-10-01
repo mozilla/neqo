@@ -194,7 +194,12 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    fn process_into_buffer<'a>(
+        &mut self,
+        dgram: Option<Datagram<&[u8]>>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -205,6 +210,8 @@ pub struct ServerRunner {
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
+    recv_buf: Vec<u8>,
+    send_buf: Vec<u8>,
 }
 
 impl ServerRunner {
@@ -219,42 +226,72 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
+            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
+            send_buf: vec![],
         }
     }
 
-    /// Tries to find a socket, but then just falls back to sending from the first.
-    fn find_socket(&mut self, addr: SocketAddr) -> &mut crate::udp::Socket {
-        let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
-        rest.iter_mut()
-            .map(|(_host, socket)| socket)
-            .find(|socket| {
-                socket
-                    .local_addr()
-                    .ok()
-                    .map_or(false, |socket_addr| socket_addr == addr)
-            })
-            .unwrap_or(first_socket)
-    }
+    async fn process(&mut self, mut socket_inx: Option<usize>) -> Result<(), io::Error> {
+        // TODO: Cleanup! We should really be passing a set of datagrams to neqo_transport server!
+        'outer: loop {
+            let dgrams = if let Some(inx) = socket_inx {
+                let (host, socket) = self.sockets.get_mut(inx).unwrap();
+                let dgrams = socket.recv(host, &mut self.recv_buf)?;
+                if dgrams.is_none() {
+                    // Done reading.
+                    socket_inx.take();
+                }
+                dgrams
+            } else {
+                None
+            };
 
-    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
-        loop {
-            match self.server.process(dgram.take(), (self.now)()) {
-                Output::Datagram(dgram) => {
-                    let socket = self.find_socket(dgram.source());
-                    socket.writable().await?;
-                    socket.send(&dgram)?;
+            let mut dgrams = dgrams.iter().map(|d| d.iter()).flatten().peekable();
+
+            'inner: loop {
+                match self.server.process_into_buffer(
+                    dgrams.next(),
+                    (self.now)(),
+                    &mut self.send_buf,
+                ) {
+                    Output::Datagram(dgram) => {
+                        // Find outbound socket. If none match, take the first.
+                        let socket = if let Some(socket) =
+                            self.sockets.iter_mut().find_map(|(_host, socket)| {
+                                socket
+                                    .local_addr()
+                                    .ok()
+                                    .map_or(false, |socket_addr| socket_addr == dgram.source())
+                                    .then_some(socket)
+                            }) {
+                            socket
+                        } else {
+                            &mut self.sockets.iter_mut().next().unwrap().1
+                        };
+
+                        socket.writable().await?;
+                        socket.send(dgram)?;
+                        self.send_buf.clear();
+                        continue 'inner;
+                    }
+                    Output::Callback(new_timeout) => {
+                        qdebug!("Setting timeout of {:?}", new_timeout);
+                        self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    }
+                    Output::None => {}
                 }
-                Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
-                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
+
+                if dgrams.peek().is_some() {
+                    continue 'inner;
                 }
-                Output::None => {
-                    break;
+
+                if socket_inx.is_some() {
+                    continue 'outer;
                 }
+
+                return Ok(());
             }
         }
-        Ok(())
     }
 
     // Wait for any of the sockets to be readable or the timeout to fire.
@@ -287,16 +324,9 @@ impl ServerRunner {
             }
 
             match self.ready().await? {
-                Ready::Socket(inx) => loop {
-                    let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgrams = socket.recv(host)?;
-                    if dgrams.is_empty() {
-                        break;
-                    }
-                    for dgram in dgrams {
-                        self.process(Some(&dgram)).await?;
-                    }
-                },
+                Ready::Socket(socket) => {
+                    self.process(Some(socket)).await?;
+                }
                 Ready::Timeout => {
                     self.timeout = None;
                     self.process(None).await?;
