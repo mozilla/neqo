@@ -318,7 +318,8 @@ mod tests {
             outcome: &Res<(ReceiveOutput, bool)>,
             done: bool,
         ) {
-            let mut enc = Encoder::default();
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             for i in to_encode {
                 enc.encode_varint(*i);
             }

@@ -9,23 +9,20 @@ use std::{net::SocketAddr, ops::Deref};
 use crate::{hex_with_len, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Datagram {
+pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
+    /// The size of each segment within the [`Datagram`]. All segments, but the
+    /// last, have the same size. The last segment can be shorter than
+    /// [`Datagram::segment_size`].
+    segment_size: usize,
     tos: IpTos,
-    d: Vec<u8>,
+    d: D,
 }
 
-impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            d: d.into(),
-        }
-    }
+impl Copy for Datagram<&[u8]> {}
 
+impl<D> Datagram<D> {
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
         self.src
@@ -44,17 +41,89 @@ impl Datagram {
     pub fn set_tos(&mut self, tos: IpTos) {
         self.tos = tos;
     }
+
+    #[must_use]
+    pub const fn segment_size(&self) -> usize {
+        self.segment_size
+    }
+
+    pub fn set_segment_size(&mut self, segment_size: usize) {
+        self.segment_size = segment_size;
+    }
 }
 
-impl Deref for Datagram {
-    type Target = Vec<u8>;
+impl<D: AsRef<[u8]>> Datagram<D> {
+    pub fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        d: D,
+        segment_size: Option<usize>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size: segment_size.unwrap_or_else(|| d.as_ref().len()),
+            d,
+        }
+    }
+    pub fn iter_segments(&self) -> impl Iterator<Item = &[u8]> {
+        self.d.as_ref().chunks(self.segment_size)
+    }
+
+    pub fn num_segments(&self) -> usize {
+        self.d.as_ref().len().div_ceil(self.segment_size)
+    }
+}
+
+impl<D: Deref<Target = [u8]>> Deref for Datagram<D> {
+    type Target = [u8];
     #[must_use]
     fn deref(&self) -> &Self::Target {
         &self.d
     }
 }
 
-impl std::fmt::Debug for Datagram {
+impl<'a> From<&'a Datagram> for Datagram<&'a [u8]> {
+    fn from(value: &'a Datagram) -> Self {
+        let Datagram {
+            src,
+            dst,
+            tos,
+            segment_size,
+            d,
+        } = value;
+        Datagram {
+            src: *src,
+            dst: *dst,
+            tos: *tos,
+            segment_size: *segment_size,
+            d,
+        }
+    }
+}
+
+impl From<Datagram<&[u8]>> for Datagram {
+    fn from(value: Datagram<&[u8]>) -> Self {
+        let Datagram {
+            src,
+            dst,
+            tos,
+            segment_size,
+            d,
+        } = value;
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size,
+            d: d.to_owned(),
+        }
+    }
+}
+
+impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -64,6 +133,12 @@ impl std::fmt::Debug for Datagram {
             self.dst,
             hex_with_len(&self.d)
         )
+    }
+}
+
+impl From<Datagram> for Vec<u8> {
+    fn from(value: Datagram) -> Self {
+        value.d
     }
 }
 

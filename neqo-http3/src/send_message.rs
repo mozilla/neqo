@@ -145,9 +145,10 @@ impl SendMessage {
         let hframe = HFrame::Headers {
             header_block: header_block.to_vec(),
         };
-        let mut d = Encoder::default();
+        let mut out = vec![];
+        let mut d = Encoder::new(&mut out);
         hframe.encode(&mut d);
-        d.into()
+        out
     }
 
     fn stream_id(&self) -> StreamId {
@@ -210,7 +211,8 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: to_send as u64,
         };
-        let mut enc = Encoder::default();
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         data_frame.encode(&mut enc);
         let sent_fh = self
             .stream
@@ -245,7 +247,7 @@ impl SendStream for SendMessage {
     /// `InvalidStreamId` if the stream does not exist,
     /// `AlreadyClosed` if the stream has already been closed.
     /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
+    /// `process` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let sent = Error::map_error(self.stream.send_buffer(conn), Error::HttpInternal(5))?;
@@ -301,7 +303,8 @@ impl SendStream for SendMessage {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
         };
-        let mut enc = Encoder::default();
+        let mut out = vec![];
+        let mut enc = Encoder::new(&mut out);
         data_frame.encode(&mut enc);
         self.stream.buffer(enc.as_ref());
         self.stream.buffer(buf);

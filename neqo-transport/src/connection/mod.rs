@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     cmp::{max, min},
     fmt::{self, Debug},
-    iter, mem,
+    mem,
     net::{IpAddr, SocketAddr},
     num::NonZeroUsize,
     ops::RangeInclusive,
@@ -96,17 +96,27 @@ pub enum ZeroRttState {
     Rejected,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// Type returned from `process()` and `process_output()`. Users are required to
-/// call these repeatedly until `Callback` or `None` is returned.
-pub enum Output {
+/// Type returned from [`Connection::process()`]. Users are required to call
+/// these repeatedly until [`Output::Callback`] or [`Output::None`] is returned.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Output<D = Vec<u8>> {
     /// Connection requires no action.
     None,
     /// Connection requires the datagram be sent.
-    Datagram(Datagram),
+    Datagram(Datagram<D>),
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
+}
+
+impl<D: AsRef<[u8]>> Debug for Output<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Datagram(arg0) => f.debug_tuple("Datagram").field(arg0).finish(),
+            Self::Callback(arg0) => f.debug_tuple("Callback").field(arg0).finish(),
+        }
+    }
 }
 
 impl Output {
@@ -136,6 +146,16 @@ impl Output {
             _ => Duration::new(0, 0),
         }
     }
+}
+
+impl<D> Output<D> {
+    pub fn map_datagram<U>(self, f: impl FnOnce(Datagram<D>) -> Datagram<U>) -> Output<U> {
+        match self {
+            Self::None => Output::None,
+            Self::Datagram(d) => Output::Datagram(f(d)),
+            Self::Callback(d) => Output::Callback(d),
+        }
+    }
 
     #[must_use]
     pub fn or_else<F>(self, f: F) -> Self
@@ -150,14 +170,14 @@ impl Output {
 }
 
 /// Used by inner functions like `Connection::output`.
-enum SendOption {
+enum SendOption<'a> {
     /// Yes, please send this datagram.
-    Yes(Datagram),
+    Yes(Datagram<&'a [u8]>),
     /// Don't send.  If this was blocked on the pacer (the arg is true).
     No(bool),
 }
 
-impl Default for SendOption {
+impl<'a> Default for SendOption<'a> {
     fn default() -> Self {
         Self::No(false)
     }
@@ -221,8 +241,8 @@ impl AddressValidationInfo {
 /// 1. Perform operations using the `stream_*()` methods.
 /// 1. Call `process_input()` when a datagram is received or the timer expires. Obtain information
 ///    on connection state changes by checking `events()`.
-/// 1. Having completed handling current activity, repeatedly call `process_output()` for packets to
-///    send, until it returns `Output::Callback` or `Output::None`.
+/// 1. Having completed handling current activity, repeatedly call `process()` for packets to send,
+///    until it returns `Output::Callback` or `Output::None`.
 ///
 /// After the connection is closed (either by calling `close()` or by the
 /// remote) continue processing until `state()` returns `Closed`.
@@ -798,7 +818,8 @@ impl Connection {
 
         let tps = &self.tps;
         if let Agent::Server(ref mut s) = self.crypto.tls {
-            let mut enc = Encoder::default();
+            let mut out = vec![];
+            let mut enc = Encoder::new(&mut out);
             enc.encode_vvec_with(|enc_inner| {
                 tps.borrow().local.encode(enc_inner);
             });
@@ -1018,23 +1039,8 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: &Datagram, now: Instant) {
-        self.process_multiple_input(iter::once(d), now);
-    }
-
-    /// Process new input datagrams on the connection.
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
-        let mut dgrams = dgrams.into_iter().peekable();
-        if dgrams.peek().is_none() {
-            return;
-        }
-
-        for d in dgrams {
-            self.input(d, now, now);
-        }
+    pub fn process_input<'a>(&mut self, d: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+        self.input(d.into(), now, now);
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
     }
@@ -1102,12 +1108,22 @@ impl Connection {
         delay
     }
 
+    /// Shorthand for [`Connection::process`] with no input `dgram`.
+    #[must_use = "Output of the process function must be handled"]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
     /// Get output packets, as a result of receiving packets, or actions taken
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     #[must_use = "Output of the process_output function must be handled"]
-    pub fn process_output(&mut self, now: Instant) -> Output {
+    fn process_output_into_buffer<'a>(
+        &mut self,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
         match (&self.state, self.role) {
@@ -1123,7 +1139,7 @@ impl Connection {
             }
         }
 
-        match self.output(now) {
+        match self.output(now, out) {
             SendOption::Yes(dgram) => Output::Datagram(dgram),
             SendOption::No(paced) => match self.state {
                 State::Init | State::Closed(_) => Output::None,
@@ -1135,18 +1151,37 @@ impl Connection {
         }
     }
 
-    /// Process input and generate output.
+    /// Same as [`Connection::process_into_buffer`] but allocating output into
+    /// new [`Vec`].
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        if let Some(d) = dgram {
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
+            .map_datagram(Into::into)
+    }
+
+    /// Process input and generate output.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `out` is not empty.
+    #[must_use = "Output of the process function must be handled"]
+    pub fn process_into_buffer<'a>(
+        &mut self,
+        input: Option<Datagram<&[u8]>>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(out.is_empty());
+        if let Some(d) = input {
             self.input(d, now, now);
             self.process_saved(now);
         }
         #[allow(clippy::let_and_return)]
-        let output = self.process_output(now);
+        let output = self.process_output_into_buffer(now, out);
         #[cfg(all(feature = "build-fuzzing-corpus", test))]
         if self.test_frame_writer.is_none() {
-            if let Some(d) = output.clone().dgram() {
+            if let Some(d) = output.clone().map_datagram(Into::into).dgram() {
                 neqo_common::write_item_to_fuzzing_corpus("packet", &d);
             }
         }
@@ -1217,7 +1252,7 @@ impl Connection {
         }
     }
 
-    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram) -> bool {
+    fn is_stateless_reset(&self, path: &PathRef, d: Datagram<&[u8]>) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
@@ -1230,7 +1265,7 @@ impl Connection {
     fn check_stateless_reset(
         &mut self,
         path: &PathRef,
-        d: &Datagram,
+        d: Datagram<&[u8]>,
         first: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1256,24 +1291,27 @@ impl Connection {
             debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(&saved.d, saved.t, now);
+                self.input((&saved.d).into(), saved.t, now);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    fn save_datagram(&mut self, cspace: CryptoSpace, d: &Datagram, remaining: usize, now: Instant) {
-        let d = if remaining < d.len() {
-            Datagram::new(
-                d.source(),
-                d.destination(),
-                d.tos(),
-                &d[d.len() - remaining..],
-            )
-        } else {
-            d.clone()
-        };
+    fn save_datagram(
+        &mut self,
+        cspace: CryptoSpace,
+        d: Datagram<&[u8]>,
+        remaining: usize,
+        now: Instant,
+    ) {
+        let d = Datagram::new(
+            d.source(),
+            d.destination(),
+            d.tos(),
+            d[d.len() - remaining..].to_vec(),
+            None,
+        );
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
     }
@@ -1474,7 +1512,7 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        d: &Datagram,
+        d: Datagram<&[u8]>,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
@@ -1506,7 +1544,7 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: &Datagram, received: Instant, now: Instant) {
+    fn input(&mut self, d: Datagram<&[u8]>, received: Instant, now: Instant) {
         // First determine the path.
         let path = self.paths.find_path_with_rebinding(
             d.destination(),
@@ -1520,119 +1558,121 @@ impl Connection {
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
-    fn input_path(&mut self, path: &PathRef, d: &Datagram, now: Instant) -> Res<()> {
-        let mut slc = &d[..];
-        let mut dcid = None;
+    fn input_path(&mut self, path: &PathRef, d: Datagram<&[u8]>, now: Instant) -> Res<()> {
+        for mut slc in d.iter_segments() {
+            let mut dcid = None;
 
-        qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
-        let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
+            qtrace!([self], "{} input {}", path.borrow(), hex(&*d));
+            let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
 
-        // Handle each packet in the datagram.
-        while !slc.is_empty() {
-            self.stats.borrow_mut().packets_rx += 1;
-            let (packet, remainder) =
-                match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
-                    Ok((packet, remainder)) => (packet, remainder),
-                    Err(e) => {
-                        qinfo!([self], "Garbage packet: {}", e);
-                        qtrace!([self], "Garbage packet contents: {}", hex(slc));
-                        self.stats.borrow_mut().pkt_dropped("Garbage packet");
-                        break;
-                    }
-                };
-            match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
-                PreprocessResult::Continue => (),
-                PreprocessResult::Next => break,
-                PreprocessResult::End => return Ok(()),
-            }
+            // Handle each packet in the datagram.
+            while !slc.is_empty() {
+                self.stats.borrow_mut().packets_rx += 1;
+                let (packet, remainder) =
+                    match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
+                        Ok((packet, remainder)) => (packet, remainder),
+                        Err(e) => {
+                            qinfo!([self], "Garbage packet: {}", e);
+                            qtrace!([self], "Garbage packet contents: {}", hex(slc));
+                            self.stats.borrow_mut().pkt_dropped("Garbage packet");
+                            break;
+                        }
+                    };
+                match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
+                    PreprocessResult::Continue => (),
+                    PreprocessResult::Next => break,
+                    PreprocessResult::End => return Ok(()),
+                }
 
-            qtrace!([self], "Received unverified packet {:?}", packet);
+                qtrace!([self], "Received unverified packet {:?}", packet);
 
-            match packet.decrypt(&mut self.crypto.states, now + pto) {
-                Ok(payload) => {
-                    // OK, we have a valid packet.
-                    self.idle_timeout.on_packet_received(now);
-                    dump_packet(
-                        self,
-                        path,
-                        "-> RX",
-                        payload.packet_type(),
-                        payload.pn(),
-                        &payload[..],
-                        d.tos(),
-                        d.len(),
-                    );
+                match packet.decrypt(&mut self.crypto.states, now + pto) {
+                    Ok(payload) => {
+                        // OK, we have a valid packet.
+                        self.idle_timeout.on_packet_received(now);
+                        dump_packet(
+                            self,
+                            path,
+                            "-> RX",
+                            payload.packet_type(),
+                            payload.pn(),
+                            &payload[..],
+                            d.tos(),
+                            d.len(),
+                        );
 
-                    #[cfg(feature = "build-fuzzing-corpus")]
-                    if packet.packet_type() == PacketType::Initial {
-                        let target = if self.role == Role::Client {
-                            "server_initial"
-                        } else {
-                            "client_initial"
-                        };
-                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
-                    }
+                        #[cfg(feature = "build-fuzzing-corpus")]
+                        if packet.packet_type() == PacketType::Initial {
+                            let target = if self.role == Role::Client {
+                                "server_initial"
+                            } else {
+                                "client_initial"
+                            };
+                            neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
+                        }
 
-                    qlog::packet_received(&self.qlog, &packet, &payload);
-                    let space = PacketNumberSpace::from(payload.packet_type());
-                    if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(payload.pn()) {
-                            qdebug!("Duplicate packet {}-{}", space, payload.pn());
-                            self.stats.borrow_mut().dups_rx += 1;
-                        } else {
-                            match self.process_packet(path, &payload, now) {
-                                Ok(migrate) => {
-                                    self.postprocess_packet(path, d, &packet, migrate, now);
-                                }
-                                Err(e) => {
-                                    self.ensure_error_path(path, &packet, now);
-                                    return Err(e);
+                        qlog::packet_received(&self.qlog, &packet, &payload);
+                        let space = PacketNumberSpace::from(payload.packet_type());
+                        if let Some(space) = self.acks.get_mut(space) {
+                            if space.is_duplicate(payload.pn()) {
+                                qdebug!("Duplicate packet {}-{}", space, payload.pn());
+                                self.stats.borrow_mut().dups_rx += 1;
+                            } else {
+                                match self.process_packet(path, &payload, now) {
+                                    Ok(migrate) => {
+                                        self.postprocess_packet(path, d, &packet, migrate, now);
+                                    }
+                                    Err(e) => {
+                                        self.ensure_error_path(path, &packet, now);
+                                        return Err(e);
+                                    }
                                 }
                             }
+                        } else {
+                            qdebug!(
+                                [self],
+                                "Received packet {} for untracked space {}",
+                                space,
+                                payload.pn()
+                            );
+                            return Err(Error::ProtocolViolation);
                         }
-                    } else {
-                        qdebug!(
-                            [self],
-                            "Received packet {} for untracked space {}",
-                            space,
-                            payload.pn()
-                        );
-                        return Err(Error::ProtocolViolation);
+                    }
+                    Err(e) => {
+                        match e {
+                            Error::KeysPending(cspace) => {
+                                // This packet can't be decrypted because we don't have the keys
+                                // yet. Don't check this packet for
+                                // a stateless reset, just return.
+                                let remaining = slc.len();
+                                self.save_datagram(cspace, d, remaining, now);
+                                return Ok(());
+                            }
+                            Error::KeysExhausted => {
+                                // Exhausting read keys is fatal.
+                                return Err(e);
+                            }
+                            Error::KeysDiscarded(cspace) => {
+                                // This was a valid-appearing Initial packet: maybe probe with
+                                // a Handshake packet to keep the handshake moving.
+                                self.received_untracked |=
+                                    self.role == Role::Client && cspace == CryptoSpace::Initial;
+                            }
+                            _ => (),
+                        }
+                        // Decryption failure, or not having keys is not fatal.
+                        // If the state isn't available, or we can't decrypt the packet, drop
+                        // the rest of the datagram on the floor, but don't generate an error.
+                        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
+                        self.stats.borrow_mut().pkt_dropped("Decryption failure");
+                        qlog::packet_dropped(&self.qlog, &packet);
                     }
                 }
-                Err(e) => {
-                    match e {
-                        Error::KeysPending(cspace) => {
-                            // This packet can't be decrypted because we don't have the keys yet.
-                            // Don't check this packet for a stateless reset, just return.
-                            let remaining = slc.len();
-                            self.save_datagram(cspace, d, remaining, now);
-                            return Ok(());
-                        }
-                        Error::KeysExhausted => {
-                            // Exhausting read keys is fatal.
-                            return Err(e);
-                        }
-                        Error::KeysDiscarded(cspace) => {
-                            // This was a valid-appearing Initial packet: maybe probe with
-                            // a Handshake packet to keep the handshake moving.
-                            self.received_untracked |=
-                                self.role == Role::Client && cspace == CryptoSpace::Initial;
-                        }
-                        _ => (),
-                    }
-                    // Decryption failure, or not having keys is not fatal.
-                    // If the state isn't available, or we can't decrypt the packet, drop
-                    // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(path, d, dcid.is_none(), now)?;
-                    self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&self.qlog, &packet);
-                }
+                slc = remainder;
+                dcid = Some(ConnectionId::from(packet.dcid()));
             }
-            slc = remainder;
-            dcid = Some(ConnectionId::from(packet.dcid()));
+            self.check_stateless_reset(path, d, dcid.is_none(), now)?;
         }
-        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
         Ok(())
     }
 
@@ -1916,7 +1956,13 @@ impl Connection {
         Ok(())
     }
 
-    fn handle_migration(&mut self, path: &PathRef, d: &Datagram, migrate: bool, now: Instant) {
+    fn handle_migration(
+        &mut self,
+        path: &PathRef,
+        d: Datagram<&[u8]>,
+        migrate: bool,
+        now: Instant,
+    ) {
         if !migrate {
             return;
         }
@@ -1936,7 +1982,7 @@ impl Connection {
         }
     }
 
-    fn output(&mut self, now: Instant) -> SendOption {
+    fn output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> SendOption<'a> {
         qtrace!([self], "output {:?}", now);
         let res = match &self.state {
             State::Init
@@ -1947,7 +1993,7 @@ impl Connection {
             | State::Confirmed => self.paths.select_path().map_or_else(
                 || Ok(SendOption::default()),
                 |path| {
-                    let res = self.output_path(&path, now, &None);
+                    let res = self.output_path(&path, now, &None, out);
                     self.capture_error(Some(path), now, 0, res)
                 },
             ),
@@ -1964,7 +2010,7 @@ impl Connection {
                             qerror!([self], "Attempting to close with a temporary path");
                             Err(Error::InternalError)
                         } else {
-                            self.output_path(&path, now, &Some(details))
+                            self.output_path(&path, now, &Some(details), out)
                         };
                         self.capture_error(Some(path), now, 0, res)
                     },
@@ -1974,19 +2020,21 @@ impl Connection {
         res.unwrap_or_default()
     }
 
-    fn build_packet_header(
+    #[allow(clippy::too_many_arguments)]
+    fn build_packet_header<'a>(
         path: &Path,
         cspace: CryptoSpace,
-        encoder: Encoder,
+        encoder: Encoder<'a>,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
         version: Version,
         grease_quic_bit: bool,
-    ) -> (PacketType, PacketBuilder) {
+        limit: usize,
+    ) -> (PacketType, PacketBuilder<'a>) {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
-            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
+            PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid(), Some(limit))
         } else {
             qdebug!(
                 "Building {:?} dcid {:?} scid {:?}",
@@ -1994,7 +2042,14 @@ impl Connection {
                 path.remote_cid(),
                 path.local_cid(),
             );
-            PacketBuilder::long(encoder, pt, version, path.remote_cid(), path.local_cid())
+            PacketBuilder::long(
+                encoder,
+                pt,
+                version,
+                path.remote_cid(),
+                path.local_cid(),
+                Some(limit),
+            )
         };
         if builder.remaining() > 0 {
             builder.scramble(grease_quic_bit);
@@ -2288,27 +2343,105 @@ impl Connection {
         self.stats.borrow_mut().frame_tx.connection_close += 1;
     }
 
-    /// Build a datagram, possibly from multiple packets (for different PN
-    /// spaces) and each containing 1+ frames.
-    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
-    fn output_path(
+    // TODO: There is a limit to the number of segments supported. E.g. you
+    // can't pass 200 segments to the Linux Kernel.
+    fn output_path<'a>(
         &mut self,
         path: &PathRef,
         now: Instant,
         closing_frame: &Option<ClosingFrame>,
-    ) -> Res<SendOption> {
+        out: &'a mut Vec<u8>,
+    ) -> Res<SendOption<'a>> {
+        assert_eq!(out.len(), 0);
+
+        qinfo!("\n===== output_path");
+        let mut initial_capacity = out.capacity();
+        // TODO
+        if initial_capacity == 0 {
+            initial_capacity = usize::MAX;
+        }
+        qinfo!("initial_capacity: {initial_capacity}");
+        let mut segment_size = None;
+
+        loop {
+            let limit = segment_size.map(|s| min(s, initial_capacity - out.len()));
+            if limit < segment_size {
+                qinfo!("no more space for another segment");
+                break;
+            }
+            qinfo!("limit: {limit:?}, out len: {}", out.len());
+            // Determine how we are sending packets (PTO, etc..).
+            let profile = self
+                .loss_recovery
+                .send_profile_2(limit, &path.borrow(), now);
+            qinfo!("output_path send_profile {:?}", profile);
+            qdebug!([self], "output_path send_profile {:?}", profile);
+
+            let start = out.len();
+            if let Some(pace) = self.output_path_segment(profile, path, now, closing_frame, out)? {
+                qinfo!("SendOption::No");
+                if segment_size.is_none() {
+                    return Ok(SendOption::No(pace));
+                }
+                break;
+            }
+            qinfo!("SendOption::Yes");
+
+            if segment_size.is_none() {
+                segment_size = Some(out.len());
+                if out.len() < path.borrow().plpmtu() / 2 {
+                    qinfo!("Segment is smaller than half of the mtu: {}", out.len());
+                    break;
+                }
+            }
+
+            if out.len() % segment_size.expect("TODO") != 0 {
+                qinfo!("Segment is smaller than previous");
+                break;
+            }
+
+            if path.borrow().pmtud().needs_probe() {
+                qinfo!("about to probe, thus larger than previous segment");
+                break;
+            }
+
+            assert!(out.len() - start <= segment_size.unwrap());
+        }
+
+        let mut dgram = path
+            .borrow_mut()
+            .datagram(out, &mut self.stats.borrow_mut());
+        dgram.set_segment_size(segment_size.expect("TODO"));
+
+        qinfo!(
+            "Sending datagram: {} size {} segments",
+            dgram.len(),
+            dgram.num_segments()
+        );
+
+        return Ok(SendOption::Yes(dgram));
+    }
+
+    /// Build a datagram, possibly from multiple packets (for different PN
+    /// spaces) and each containing 1+ frames.
+    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
+    fn output_path_segment<'a>(
+        &mut self,
+        profile: SendProfile,
+        path: &PathRef,
+        now: Instant,
+        closing_frame: &Option<ClosingFrame>,
+        out: &'a mut Vec<u8>,
+        // TODO: Option is misleading here.
+    ) -> Res<Option<bool>> {
         let mut initial_sent = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
-        // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
-        qdebug!([self], "output_path send_profile {:?}", profile);
-
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        let mut encoder = Encoder::with_capacity(profile.limit());
+        let mut encoder = Encoder::new(out);
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((cspace, tx)) = self.crypto.states.select_tx_mut(self.version, *space) else {
@@ -2324,6 +2457,7 @@ impl Connection {
                 &self.address_validation,
                 version,
                 grease_quic_bit,
+                profile.limit(),
             );
             let pn = Self::add_packet_number(
                 &mut builder,
@@ -2434,30 +2568,26 @@ impl Connection {
 
         if encoder.is_empty() {
             qdebug!("TX blocked, profile={:?}", profile);
-            Ok(SendOption::No(profile.paced()))
+            Ok(Some(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
-            let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
                     qdebug!(
                         [self],
                         "pad Initial from {} to PLPMTU {}",
-                        packets.len(),
+                        encoder.len(),
                         profile.limit()
                     );
-                    initial.track_padding(profile.limit() - packets.len());
+                    initial.track_padding(profile.limit() - encoder.len());
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
-                    packets.resize(profile.limit(), 0);
+                    encoder.pad_to(profile.limit(), 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
             }
-            path.borrow_mut().add_sent(packets.len());
-            Ok(SendOption::Yes(
-                path.borrow_mut()
-                    .datagram(packets, &mut self.stats.borrow_mut()),
-            ))
+            path.borrow_mut().add_sent(encoder.len());
+            Ok(None)
         }
     }
 
@@ -3428,7 +3558,9 @@ impl Connection {
         };
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
-        let encoder = Encoder::default();
+
+        let mut out = vec![];
+        let encoder = Encoder::new(&mut out);
 
         let (_, mut builder) = Self::build_packet_header(
             &path.borrow(),
@@ -3438,6 +3570,7 @@ impl Connection {
             &self.address_validation,
             version,
             false,
+            mtu,
         );
         _ = Self::add_packet_number(
             &mut builder,

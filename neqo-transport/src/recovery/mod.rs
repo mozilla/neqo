@@ -885,13 +885,30 @@ impl LossRecovery {
         lost_packets
     }
 
+    #[cfg(test)]
+    pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
+        self.send_profile_2(None, path, now)
+    }
+
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
     #[allow(clippy::option_if_let_else)]
-    pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
+    pub fn send_profile_2(
+        &mut self,
+        // TODO: Maybe `segment_limit` is better? Because it might be the last
+        // in the vector, smaller than the overall segment size.
+        segment_size: Option<usize>,
+        path: &Path,
+        now: Instant,
+    ) -> SendProfile {
         qtrace!([self], "get send profile {:?}", now);
         let sender = path.sender();
-        let mtu = path.plpmtu();
+        let mut mtu = path.plpmtu();
+        // TODO: Cleanup?
+        if let Some(segment_size) = segment_size {
+            mtu = min(mtu, segment_size);
+        }
+
         if let Some(profile) = self
             .pto_state
             .as_mut()

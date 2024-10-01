@@ -17,7 +17,8 @@ use crate::frames::{
 
 pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {
     // For data, headers and push_promise we do not read all bytes from the buffer
-    let d2 = Encoder::from_hex(st);
+    let mut out = vec![];
+    let d2 = Encoder::new(&mut out).from_hex(st);
     assert_eq!(d.as_ref(), &d2.as_ref()[..d.as_ref().len()]);
 
     let mut conn_c = default_client();
@@ -36,7 +37,8 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     let mut fr: FrameReader = FrameReader::new();
 
     // conver string into u8 vector
-    let buf = Encoder::from_hex(st);
+    let mut out = vec![];
+    let buf = Encoder::new(&mut out).from_hex(st);
     conn_s.stream_send(stream_id, buf.as_ref()).unwrap();
     let out = conn_s.process(None, now());
     mem::drop(conn_c.process(out.as_dgram_ref(), now()));
@@ -59,7 +61,8 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
 }
 
 pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
-    let mut d = Encoder::default();
+    let mut out = vec![];
+    let mut d = Encoder::new(&mut out);
 
     f.encode(&mut d);
 
@@ -69,7 +72,8 @@ pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
 }
 
 pub fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
-    let mut d = Encoder::default();
+    let mut out = vec![];
+    let mut d = Encoder::new(&mut out);
 
     f.encode(&mut d);
 

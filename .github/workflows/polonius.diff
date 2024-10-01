@@ -1,0 +1,50 @@
+diff --git a/neqo-http3/src/server.rs b/neqo-http3/src/server.rs
+index 9b73f2c7..d6cd39a2 100644
+--- a/neqo-http3/src/server.rs
++++ b/neqo-http3/src/server.rs
+@@ -120,12 +120,7 @@ impl Http3Server {
+         out: &'a mut Vec<u8>,
+     ) -> Output<&'a [u8]> {
+         qtrace!([self], "Process.");
+-        let mut output = self.server.process_into_buffer(
+-            dgram,
+-            now,
+-            // See .github/workflows/polonius.yml.
+-            unsafe { &mut *std::ptr::from_mut(out) },
+-        );
++        let mut output = self.server.process_into_buffer(dgram, now, out);
+ 
+         self.process_http3(now);
+ 
+diff --git a/neqo-transport/src/server.rs b/neqo-transport/src/server.rs
+index 2446f8d3..25ceb2b0 100644
+--- a/neqo-transport/src/server.rs
++++ b/neqo-transport/src/server.rs
+@@ -445,12 +445,7 @@ impl Server {
+         let mut callback = None;
+ 
+         for connection in &mut self.connections {
+-            match connection.borrow_mut().process_into_buffer(
+-                None,
+-                now,
+-                // See .github/workflows/polonius.yml.
+-                unsafe { &mut *std::ptr::from_mut(out) },
+-            ) {
++            match connection.borrow_mut().process_into_buffer(None, now, out) {
+                 Output::None => {}
+                 d @ Output::Datagram(_) => return d,
+                 Output::Callback(next) => match callback {
+@@ -491,12 +486,7 @@ impl Server {
+ 
+         #[allow(clippy::option_if_let_else)]
+         let output = if let Some(dgram) = dgram {
+-            self.process_input(
+-                dgram,
+-                now,
+-                // See .github/workflows/polonius.yml.
+-                unsafe { &mut *std::ptr::from_mut(out) },
+-            )
++            self.process_input(dgram, now, out)
+         } else {
+             Output::None
+         };

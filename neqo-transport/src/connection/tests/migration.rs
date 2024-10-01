@@ -54,7 +54,7 @@ fn loopback() -> SocketAddr {
 }
 
 fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
-    Datagram::new(a, a, d.tos(), &d[..])
+    Datagram::new(a, a, d.tos(), d.to_vec(), None)
 }
 
 const fn new_port(a: SocketAddr) -> SocketAddr {
@@ -63,7 +63,13 @@ const fn new_port(a: SocketAddr) -> SocketAddr {
 }
 
 fn change_source_port(d: &Datagram) -> Datagram {
-    Datagram::new(new_port(d.source()), d.destination(), d.tos(), &d[..])
+    Datagram::new(
+        new_port(d.source()),
+        d.destination(),
+        d.tos(),
+        d.to_vec(),
+        None,
+    )
 }
 
 #[test]
@@ -968,7 +974,7 @@ fn error_on_new_path_with_no_connection_id() {
     client.process_input(&dgram, now());
 
     // See issue #1697. We had a crash when the client had a temporary path and
-    // process_output is called.
+    // process (previously process_output) is called.
     let closing_frames = client.stats().frame_tx.connection_close;
     mem::drop(client.process_output(now()));
     assert!(matches!(

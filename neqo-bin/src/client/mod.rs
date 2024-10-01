@@ -372,10 +372,12 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process_output(&mut self, now: Instant) -> Output;
-    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>;
+    fn process_into_buffer<'a>(
+        &mut self,
+        input: Option<Datagram<&[u8]>>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]>;
     fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
@@ -391,13 +393,35 @@ struct Runner<'a, H: Handler> {
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
+    recv_buf: Vec<u8>,
+    send_buf: Vec<u8>,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
+    fn new(
+        local_addr: SocketAddr,
+        socket: &'a mut crate::udp::Socket,
+        client: H::Client,
+        handler: H,
+        args: &'a Args,
+    ) -> Self {
+        Self {
+            local_addr,
+            socket,
+            client,
+            handler,
+            args,
+            timeout: None,
+            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
+            // TODO
+            send_buf: Vec::with_capacity(neqo_udp::RECV_BUF_SIZE),
+        }
+    }
+
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
-            self.process_output().await?;
+            self.process(false).await?;
             if self.client.has_events() {
                 continue;
             }
@@ -418,7 +442,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
 
             match ready(self.socket, self.timeout.as_mut()).await? {
-                Ready::Socket => self.process_multiple_input().await?,
+                Ready::Socket => self.process(true).await?,
                 Ready::Timeout => {
                     self.timeout = None;
                 }
@@ -432,37 +456,36 @@ impl<'a, H: Handler> Runner<'a, H> {
         Ok(self.handler.take_token())
     }
 
-    async fn process_output(&mut self) -> Result<(), io::Error> {
+    async fn process(&mut self, mut should_read: bool) -> Result<(), io::Error> {
         loop {
-            match self.client.process_output(Instant::now()) {
+            let dgram = should_read
+                .then(|| self.socket.recv(&self.local_addr, &mut self.recv_buf))
+                .transpose()?
+                .flatten();
+            should_read = dgram.is_some();
+
+            match self
+                .client
+                .process_into_buffer(dgram, Instant::now(), &mut self.send_buf)
+            {
                 Output::Datagram(dgram) => {
                     self.socket.writable().await?;
-                    self.socket.send(&dgram)?;
+                    self.socket.send(dgram)?;
+                    self.send_buf.clear();
+                    continue;
                 }
                 Output::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {:?}", new_timeout);
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                    break;
                 }
                 Output::None => {
                     qdebug!("Output::None");
-                    break;
                 }
             }
-        }
 
-        Ok(())
-    }
-
-    async fn process_multiple_input(&mut self) -> Res<()> {
-        loop {
-            let dgrams = self.socket.recv(&self.local_addr)?;
-            if dgrams.is_empty() {
+            if !should_read {
                 break;
             }
-            self.client
-                .process_multiple_input(dgrams.iter(), Instant::now());
-            self.process_output().await?;
         }
 
         Ok(())
@@ -572,32 +595,18 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http09::Handler::new(to_request, &args);
 
-                Runner {
-                    args: &args,
-                    client,
-                    handler,
-                    local_addr: real_local,
-                    socket: &mut socket,
-                    timeout: None,
-                }
-                .run()
-                .await?
+                Runner::new(real_local, &mut socket, client, handler, &args)
+                    .run()
+                    .await?
             } else {
                 let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
                     .expect("failed to create client");
 
                 let handler = http3::Handler::new(to_request, &args);
 
-                Runner {
-                    args: &args,
-                    client,
-                    handler,
-                    local_addr: real_local,
-                    socket: &mut socket,
-                    timeout: None,
-                }
-                .run()
-                .await?
+                Runner::new(real_local, &mut socket, client, handler, &args)
+                    .run()
+                    .await?
             };
         }
     }

@@ -113,18 +113,46 @@ impl Http3Server {
         self.server.ech_config()
     }
 
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process_into_buffer<'a>(
+        &mut self,
+        dgram: Option<Datagram<&[u8]>>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qtrace!([self], "Process.");
-        let out = self.server.process(dgram, now);
+        let mut output = self.server.process_into_buffer(
+            dgram,
+            now,
+            // See .github/workflows/polonius.yml.
+            unsafe { &mut *std::ptr::from_mut(out) },
+        );
+
         self.process_http3(now);
-        // If we do not that a dgram already try again after process_http3.
-        match out {
-            Output::Datagram(d) => {
-                qtrace!([self], "Send packet: {:?}", d);
-                Output::Datagram(d)
-            }
-            _ => self.server.process(Option::<&Datagram>::None, now),
+
+        // If we do not have a dgram already try again after process_http3.
+        if !matches!(output, Output::Datagram(_)) {
+            output = self.server.process_into_buffer(None, now, out);
         }
+
+        if let Output::Datagram(d) = output {
+            qtrace!([self], "Send packet: {:?}", d);
+        }
+
+        output
+    }
+
+    /// Same as [`Http3Server::process_into_buffer`] but allocating output into
+    /// new [`Vec`].
+    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
+            .map_datagram(Into::into)
+    }
+
+    /// Shorthand for [`Http3Server::process`] with no input `dgram`.
+    #[must_use = "Output of the process function must be handled"]
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
     }
 
     /// Process HTTP3 layer.
@@ -623,7 +651,8 @@ mod tests {
             element_id: stream_id.as_u64(),
             priority: Priority::default(),
         };
-        let mut e = Encoder::default();
+        let mut out = vec![];
+        let mut e = Encoder::new(&mut out);
         frame.encode(&mut e);
         peer_conn.control_send(e.as_ref());
         let out = peer_conn.process(None, now());

@@ -81,7 +81,7 @@ impl ConnectionNode {
 
     pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
         Self::new_client(
-            ConnectionParameters::default().pmtud(true),
+            ConnectionParameters::default(),
             boxed![ReachState::new(State::Confirmed)],
             goals,
         )
@@ -89,7 +89,7 @@ impl ConnectionNode {
 
     pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
         Self::new_server(
-            ConnectionParameters::default().pmtud(true),
+            ConnectionParameters::default(),
             boxed![ReachState::new(State::Confirmed)],
             goals,
         )
