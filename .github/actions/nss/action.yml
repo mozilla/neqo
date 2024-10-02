@@ -86,7 +86,7 @@ runs:
         fi
 
     - name: Checkout NSS
-      if: env.USE_SYSTEM == '0'
+      if: env.USE_SYSTEM_NSS == '0'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nss
