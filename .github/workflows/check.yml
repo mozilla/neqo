@@ -45,7 +45,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview,' || '' }} ${{ matrix.rust-toolchain == 'nightly' && 'rust-src,' || '' }}
           tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -96,6 +96,24 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+
+      - name: Run tests with sanitizers
+        if: (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest') && matrix.rust-toolchain == 'nightly'
+        env:
+          RUST_LOG: trace
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            TARGET="x86_64-unknown-linux-gnu"
+            SANITIZERS="address thread leak"
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            TARGET="aarch64-apple-darwin"
+            # no leak sanitizer support yet
+            SANITIZERS="address thread"
+          fi
+          for sanitizer in $SANITIZERS; do
+            echo "Running tests with $sanitizer sanitizer..."
+            RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
+          done
 
   bench:
     needs: [check]
