@@ -99,4 +99,5 @@ jobs:
 
   bench:
     needs: [check]
+    if: ${{ github.event.pull_request.draft == false }}
     uses: ./.github/workflows/bench.yml
