@@ -96,7 +96,7 @@ impl IdleTimeout {
         self.start(now) + max(self.timeout / 2, pto)
     }
 
-    pub fn maybe_keep_alive_timeout(&self, now: Instant, pto: Duration) -> Option<Instant> {
+    pub fn next_keep_alive(&self, now: Instant, pto: Duration) -> Option<Instant> {
         if self.keep_alive_outstanding {
             return None;
         }

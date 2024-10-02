@@ -1053,7 +1053,7 @@ impl Connection {
             return timeout.duration_since(now);
         }
 
-        let mut delays = SmallVec::<[_; 6]>::new();
+        let mut delays = SmallVec::<[_; 7]>::new();
         if let Some(ack_time) = self.acks.ack_time(now) {
             qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
@@ -1069,8 +1069,7 @@ impl Connection {
             delays.push(idle_time);
 
             if self.streams.need_keep_alive() {
-                if let Some(keep_alive_time) = self.idle_timeout.maybe_keep_alive_timeout(now, pto)
-                {
+                if let Some(keep_alive_time) = self.idle_timeout.next_keep_alive(now, pto) {
                     qtrace!([self], "Keep alive timer {:?}", keep_alive_time);
                     delays.push(keep_alive_time);
                 }
