@@ -231,14 +231,14 @@ impl ServerRunner {
         }
     }
 
-    async fn process(&mut self, mut socket_inx: Option<usize>) -> Result<(), io::Error> {
+    async fn process(&mut self, mut socket_index: Option<usize>) -> Result<(), io::Error> {
         loop {
-            let mut dgram = if let Some(inx) = socket_inx {
-                let (host, socket) = self.sockets.get_mut(inx).unwrap();
+            let mut dgram = if let Some(index) = socket_index {
+                let (host, socket) = self.sockets.get_mut(index).unwrap();
                 let dgram = socket.recv(host, &mut self.recv_buf)?;
                 if dgram.is_none() {
                     // Done reading.
-                    socket_inx.take();
+                    socket_index.take();
                 }
                 dgram
             } else {
@@ -276,7 +276,7 @@ impl ServerRunner {
                 Output::None => {}
             }
 
-            if socket_inx.is_none() {
+            if socket_index.is_none() {
                 // No socket to read and nothing to write.
                 break;
             }
@@ -315,8 +315,8 @@ impl ServerRunner {
             }
 
             match self.ready().await? {
-                Ready::Socket(socket) => {
-                    self.process(Some(socket)).await?;
+                Ready::Socket(socket_index) => {
+                    self.process(Some(socket_index)).await?;
                 }
                 Ready::Timeout => {
                     self.timeout = None;
