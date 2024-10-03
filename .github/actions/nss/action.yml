@@ -33,18 +33,18 @@ runs:
       run: |
         if ! command -v pkg-config &> /dev/null; then
           echo "pkg-config: not found"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         if ! pkg-config --exists nss; then
           echo "pkg-config: NSS not found"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_VERSION="$(pkg-config --modversion nss)"
         if [ "$?" -ne 0 ]; then
           echo "pkg-config: failed to determine NSS version"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
@@ -53,11 +53,11 @@ runs:
         REQ_NSS_MINOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f2)
         if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
           echo "System NSS is too old: $NSS_VERSION"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
-        echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        echo "USE_SYSTEM_NSS=1" >> "$GITHUB_ENV"
 
     - name: Use sccache
       # Apparently the action can't be installed twice in the same workflow, so check if
@@ -66,11 +66,11 @@ runs:
       #
       # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
       # is too small for this to be effective there.
-      if: env.SCCACHE_ENABLED != '1' && env.BUILD_NSS == '1' && runner.environment != 'github-hosted'
+      if: env.SCCACHE_ENABLED != '1' && env.USE_SYSTEM_NSS == '0' && runner.environment != 'github-hosted'
       uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
     - name: Enable sscache
-      if: env.BUILD_NSS == '1' && runner.environment != 'github-hosted'
+      if: env.USE_SYSTEM_NSS == '0' && runner.environment != 'github-hosted'
       shell: bash
       run: |
         echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
@@ -86,21 +86,21 @@ runs:
         fi
 
     - name: Checkout NSS
-      if: env.BUILD_NSS == '1'
+      if: env.USE_SYSTEM_NSS == '0'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nss
         path: nss
 
     - name: Checkout NSPR
-      if: env.BUILD_NSS == '1'
+      if: env.USE_SYSTEM_NSS == '0'
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         repository: nss-dev/nspr
         path: nspr
 
     - name: Get head revisions
-      if: env.BUILD_NSS == '1'
+      if: env.USE_SYSTEM_NSS == '0'
       shell: bash
       run: |
         NSS_HEAD=$(git -C nss rev-parse HEAD)
@@ -110,21 +110,22 @@ runs:
 
     - name: Cache NSS
       id: cache
-      if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      if: env.USE_SYSTEM_NSS == '0' && runner.environment == 'github-hosted'
       uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
         path: dist
         key: nss-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
 
     - name: Check if build is needed
-      if: env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      if: env.USE_SYSTEM_NSS == '0'
       shell: bash
       run: |
-        if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
+        if [ "${{ runner.environment }}" != "github-hosted" ] || [ "${{ steps.cache.outputs.cache-hit }}" == "false" ]; then
+          echo "Building NSS from source"
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+        else
           echo "Using cached prebuilt NSS"
           echo "BUILD_NSS=0" >> "$GITHUB_ENV"
-        else
-          echo "Building NSS from source"
         fi
 
     - name: Install build dependencies (Linux)
@@ -176,6 +177,7 @@ runs:
 
     - name: Set up environment
       shell: bash
+      if: env.USE_SYSTEM_NSS == '0'
       run: |
         NSS_TARGET="${{ inputs.type }}"
         echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
@@ -187,7 +189,6 @@ runs:
         echo "NSS_PREBUILT=1" >> "$GITHUB_ENV"
       env:
         NSS_DIR: ${{ github.workspace }}/nss
-        NSPR_DIR: ${{ github.workspace }}/nspr
 
     - name: Build
       shell: bash
