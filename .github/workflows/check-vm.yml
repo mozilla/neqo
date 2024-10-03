@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [freebsd, openbsd, netbsd, solaris]
+        os: [freebsd, openbsd, netbsd] # solaris has a super-old rust package
     runs-on: ubuntu-latest
 
     steps:
