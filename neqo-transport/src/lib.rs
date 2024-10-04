@@ -127,6 +127,7 @@ pub enum Error {
     KeyUpdateBlocked,
     NoAvailablePath,
     NoMoreData,
+    NonEmptySendBuf,
     NotConnected,
     PacketNumberOverlap,
     PeerApplicationError(AppError),

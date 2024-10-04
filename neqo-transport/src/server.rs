@@ -199,7 +199,7 @@ impl Server {
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(out.is_empty());
+        debug_assert!(out.is_empty());
 
         qdebug!([self], "Handle initial");
         let res = self
@@ -351,7 +351,7 @@ impl Server {
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(out.is_empty());
+        debug_assert!(out.is_empty());
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -441,7 +441,7 @@ impl Server {
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
     fn process_next_output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> Output<&'a [u8]> {
-        assert!(out.is_empty());
+        debug_assert!(out.is_empty());
         let mut callback = None;
 
         for connection in &mut self.connections {
@@ -487,7 +487,7 @@ impl Server {
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(out.is_empty());
+        debug_assert!(out.is_empty());
 
         #[allow(clippy::option_if_let_else)]
         let output = if let Some(dgram) = dgram {

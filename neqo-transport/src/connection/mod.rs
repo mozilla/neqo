@@ -1183,7 +1183,6 @@ impl Connection {
         now: Instant,
         out: &'a mut Vec<u8>,
     ) -> Output<&'a [u8]> {
-        assert!(out.is_empty());
         if let Some(d) = input {
             self.input(d, now, now);
             self.process_saved(now);
@@ -2369,13 +2368,17 @@ impl Connection {
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
+        if !out.is_empty() {
+            debug_assert!(false);
+            return Err(Error::NonEmptySendBuf);
+        }
+
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        assert_eq!(out.len(), 0);
         let mut encoder = Encoder::new(out);
         for space in PacketNumberSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
