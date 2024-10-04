@@ -55,7 +55,8 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     let dst_cid = dec.decode_vec(1).expect("client DCID");
     let src_cid = dec.decode_vec(1).expect("client SCID");
 
-    let mut encoder = Encoder::default();
+    let mut out = vec![];
+    let mut encoder = Encoder::new(&mut out);
     encoder.encode_byte(PACKET_BIT_LONG);
     encoder.encode(&[0; 4]); // Zero version == VN.
     encoder.encode_vec(1, src_cid);
@@ -64,7 +65,7 @@ fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     for v in versions {
         encoder.encode_uint(4, *v);
     }
-    encoder.into()
+    out
 }
 
 #[test]

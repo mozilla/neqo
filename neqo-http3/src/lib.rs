@@ -45,16 +45,10 @@ instead informs the application when processing needs to be triggered.
 
 
 The core functions for driving HTTP/3 sessions are:
- - __On the client-side__ :
-   - [`process_output`](struct.Http3Client.html#method.process_output) used for producing UDP
-     payload. If a payload is not produced this function returns a callback time, e.g. the time when
-     [`process_output`](struct.Http3Client.html#method.process_output) should be called again.
-   - [`process_input`](struct.Http3Client.html#method.process_input)  used consuming UDP payload.
-   - [`process`](struct.Http3Client.html#method.process) combines the 2 functions into one, i.e. it
-     consumes UDP payload if available and produces some UDP payload to be sent or returns a
-     callback time.
-- __On the server-side__ only [`process`](struct.Http3Server.html#method.process) is
-  available.
+- On the client-side [`Http3Client::process`] consume UDP payload if available
+  and produces some UDP payload to be sent or returns a callback time.
+- The same functionality is available on the server-side via
+  [`Http3Server::process`].
 
 An example interaction with a socket:
 
@@ -69,9 +63,9 @@ let mut client = Http3Client::new(...);
 
 ...
 
-// process_output can return 3 values, data to be sent, time duration when process_output should
+// process can return 3 values, data to be sent, time duration when process should
 // be called, and None when Http3Client is done.
-match client.process_output(Instant::now()) {
+match client.process(Instant::now(), None, now) {
     Output::Datagram(dgram) => {
         // Send dgram on a socket.
         socket.send_to(&dgram[..], dgram.destination())
@@ -92,8 +86,9 @@ match client.process_output(Instant::now()) {
 // Reading new data coming for the network.
 match socket.recv_from(&mut buf[..]) {
      Ok((sz, remote)) => {
-        let d = Datagram::new(remote, *local_addr, &buf[..sz]);
-        client.process_input(d, Instant::now());
+        let d = Datagram::new(remote, *local_addr, &buf[..sz], None);
+        let output = client.process(Some(d), Instant::now());
+        // Handle output.
     }
     Err(err) => {
          eprintln!("UDP error: {}", err);

@@ -7,7 +7,6 @@
 #![allow(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
 
 use std::{
-    cell::RefCell,
     io::{self, IoSliceMut},
     net::SocketAddr,
     slice,
@@ -21,21 +20,17 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 /// Allows reading multiple datagrams in a single [`Socket::recv`] call.
 //
 // TODO: Experiment with different values across platforms.
-const RECV_BUF_SIZE: usize = u16::MAX as usize;
-
-std::thread_local! {
-    static RECV_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0; RECV_BUF_SIZE]);
-}
+pub const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &Datagram,
+    d: Datagram<&[u8]>,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
         ecn: EcnCodepoint::from_bits(Into::<u8>::into(d.tos())),
-        contents: d,
+        contents: d.as_ref(),
         segment_size: None,
         src_ip: None,
     };
@@ -57,63 +52,54 @@ use std::os::fd::AsFd as SocketRef;
 #[cfg(windows)]
 use std::os::windows::io::AsSocket as SocketRef;
 
-pub fn recv_inner(
+pub fn recv_inner<'a>(
     local_address: &SocketAddr,
     state: &UdpSocketState,
     socket: impl SocketRef,
-) -> Result<Vec<Datagram>, io::Error> {
-    let dgrams = RECV_BUF.with_borrow_mut(|recv_buf| -> Result<Vec<Datagram>, io::Error> {
-        let mut meta;
+    recv_buf: &'a mut Vec<u8>,
+) -> Result<Datagram<&'a [u8]>, io::Error> {
+    let mut meta;
 
-        loop {
-            meta = RecvMeta::default();
+    let data = loop {
+        meta = RecvMeta::default();
 
-            state.recv(
-                (&socket).into(),
-                &mut [IoSliceMut::new(recv_buf)],
-                slice::from_mut(&mut meta),
-            )?;
+        state.recv(
+            (&socket).into(),
+            &mut [IoSliceMut::new(recv_buf.as_mut())],
+            slice::from_mut(&mut meta),
+        )?;
 
-            if meta.len == 0 || meta.stride == 0 {
-                qdebug!(
-                    "ignoring datagram from {} to {} len {} stride {}",
-                    meta.addr,
-                    local_address,
-                    meta.len,
-                    meta.stride
-                );
-                continue;
-            }
-
-            break;
+        if meta.len == 0 || meta.stride == 0 {
+            qdebug!(
+                "ignoring datagram from {} to {} len {} stride {}",
+                meta.addr,
+                local_address,
+                meta.len,
+                meta.stride
+            );
+            continue;
         }
 
-        Ok(recv_buf[0..meta.len]
-            .chunks(meta.stride)
-            .map(|d| {
-                qtrace!(
-                    "received {} bytes from {} to {}",
-                    d.len(),
-                    meta.addr,
-                    local_address,
-                );
-                Datagram::new(
-                    meta.addr,
-                    *local_address,
-                    meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
-                    d,
-                )
-            })
-            .collect())
-    })?;
+        break &recv_buf[..meta.len];
+    };
 
-    qtrace!(
-        "received {} datagrams ({:?})",
-        dgrams.len(),
-        dgrams.iter().map(|d| d.len()).collect::<Vec<_>>(),
+    let datagram = Datagram::new(
+        meta.addr,
+        *local_address,
+        meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
+        data,
+        Some(meta.stride),
     );
 
-    Ok(dgrams)
+    qtrace!(
+        "received {} bytes from {} to {} with {} segments",
+        datagram.len(),
+        datagram.source(),
+        datagram.destination(),
+        datagram.num_segments(),
+    );
+
+    Ok(datagram)
 }
 
 /// A wrapper around a UDP socket, sending and receiving [`Datagram`]s.
@@ -132,14 +118,18 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &Datagram) -> io::Result<()> {
+    pub fn send(&self, d: Datagram<&[u8]>) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
     /// set with the provided local address.
-    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
-        recv_inner(local_address, &self.state, &self.inner)
+    pub fn recv<'a>(
+        &self,
+        local_address: &SocketAddr,
+        recv_buf: &'a mut Vec<u8>,
+    ) -> Result<Datagram<&'a [u8]>, io::Error> {
+        recv_inner(local_address, &self.state, &self.inner, recv_buf)
     }
 }
 
@@ -162,15 +152,18 @@ mod tests {
         let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
+        let payload = vec![];
         let datagram = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::default(),
-            vec![],
+            payload.as_slice(),
+            None,
         );
 
-        sender.send(&datagram)?;
-        let res = receiver.recv(&receiver_addr);
+        sender.send(datagram)?;
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
+        let res = receiver.recv(&receiver_addr, &mut recv_buf);
         assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
 
         Ok(())
@@ -182,21 +175,21 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
+        let payload = b"Hello, world!".to_vec();
         let datagram = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
-            b"Hello, world!".to_vec(),
+            payload.as_slice(),
+            None,
         );
 
-        sender.send(&datagram)?;
+        sender.send(datagram)?;
 
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
         let received_datagram = receiver
-            .recv(&receiver_addr)
-            .expect("receive to succeed")
-            .into_iter()
-            .next()
-            .expect("receive to yield datagram");
+            .recv(&receiver_addr, &mut recv_buf)
+            .expect("receive to succeed");
 
         // Assert that the ECN is correct.
         assert_eq!(
@@ -236,19 +229,17 @@ mod tests {
 
         // Allow for one GSO sendmmsg to result in multiple GRO recvmmsg.
         let mut num_received = 0;
+        let mut recv_buf = vec![0; RECV_BUF_SIZE];
         while num_received < max_gso_segments {
-            receiver
-                .recv(&receiver_addr)
-                .expect("receive to succeed")
-                .into_iter()
-                .for_each(|d| {
-                    assert_eq!(
-                        SEGMENT_SIZE,
-                        d.len(),
-                        "Expect received datagrams to have same length as sent datagrams."
-                    );
-                    num_received += 1;
-                });
+            let dgram = receiver
+                .recv(&receiver_addr, &mut recv_buf)
+                .expect("receive to succeed");
+            assert_eq!(
+                SEGMENT_SIZE,
+                dgram.segment_size(),
+                "Expect received datagrams to have same length as sent datagrams."
+            );
+            num_received += dgram.num_segments();
         }
 
         Ok(())

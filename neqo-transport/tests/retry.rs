@@ -156,7 +156,13 @@ fn retry_different_ip() {
     let dgram = dgram.unwrap();
     let other_v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
     let other_addr = SocketAddr::new(other_v4, 443);
-    let from_other = Datagram::new(other_addr, dgram.destination(), dgram.tos(), &dgram[..]);
+    let from_other = Datagram::new(
+        other_addr,
+        dgram.destination(),
+        dgram.tos(),
+        dgram[..].to_vec(),
+        None,
+    );
     let dgram = server.process(Some(&from_other), now()).dgram();
     assert!(dgram.is_none());
 }
@@ -177,7 +183,13 @@ fn new_token_different_ip() {
     // Now rewrite the source address.
     let d = dgram.unwrap();
     let src = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), d.source().port());
-    let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
+    let dgram = Some(Datagram::new(
+        src,
+        d.destination(),
+        d.tos(),
+        d[..].to_vec(),
+        None,
+    ));
     let dgram = server.process(dgram.as_ref(), now()).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_retry(dgram.as_ref().unwrap());
@@ -202,7 +214,13 @@ fn new_token_expired() {
     let the_future = now() + Duration::from_secs(60 * 60 * 24 * 30);
     let d = dgram.unwrap();
     let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
-    let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
+    let dgram = Some(Datagram::new(
+        src,
+        d.destination(),
+        d.tos(),
+        d[..].to_vec(),
+        None,
+    ));
     let dgram = server.process(dgram.as_ref(), the_future).dgram(); // Retry
     assert!(dgram.is_some());
     assertions::assert_retry(dgram.as_ref().unwrap());
@@ -263,7 +281,13 @@ fn retry_bad_integrity() {
 
     let mut tweaked = retry.to_vec();
     tweaked[retry.len() - 1] ^= 0x45; // damage the auth tag
-    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), retry.tos(), tweaked);
+    let tweaked_packet = Datagram::new(
+        retry.source(),
+        retry.destination(),
+        retry.tos(),
+        tweaked,
+        None,
+    );
 
     // The client should ignore this packet.
     let dgram = client.process(Some(&tweaked_packet), now()).dgram();
@@ -336,13 +360,14 @@ fn vn_after_retry() {
     let dgram = client.process(dgram.as_ref(), now()).dgram(); // Initial w/token
     assert!(dgram.is_some());
 
-    let mut encoder = Encoder::default();
+    let mut out = vec![];
+    let mut encoder = Encoder::new(&mut out);
     encoder.encode_byte(0x80);
     encoder.encode(&[0; 4]); // Zero version == VN.
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
-    let vn = datagram(encoder.into());
+    let vn = datagram(out);
 
     assert_ne!(
         client.process(Some(&vn), now()).callback(),
@@ -395,8 +420,9 @@ fn mitm_retry() {
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)
         .unwrap();
 
+    let mut out = Vec::with_capacity(header.len());
     // Now re-encode without the token.
-    let mut enc = Encoder::with_capacity(header.len());
+    let mut enc = Encoder::new(&mut out);
     enc.encode(&header[..5])
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
@@ -406,8 +432,9 @@ fn mitm_retry() {
     let notoken_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
     qtrace!("notoken_header={}", hex_with_len(&notoken_header));
 
+    let mut out = Vec::with_capacity(MIN_INITIAL_PACKET_SIZE);
     // Encrypt.
-    let mut notoken_packet = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE)
+    let mut notoken_packet = Encoder::new(&mut out)
         .encode(&notoken_header)
         .as_ref()
         .to_vec();
@@ -430,6 +457,7 @@ fn mitm_retry() {
         client_initial2.destination(),
         client_initial2.tos(),
         notoken_packet,
+        None,
     );
     qdebug!("passing modified Initial to the main server");
     let dgram = server.process(Some(&new_datagram), now()).dgram();

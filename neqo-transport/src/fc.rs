@@ -809,8 +809,9 @@ mod test {
 
         fc[StreamType::BiDi].add_retired(1);
         fc[StreamType::BiDi].send_flowc_update();
+        let mut buf = vec![];
         // consume the frame
-        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut builder = PacketBuilder::short(Encoder::new(&mut buf), false, None::<&[u8]>, None);
         let mut tokens = Vec::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);

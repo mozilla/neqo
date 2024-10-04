@@ -192,12 +192,15 @@ impl Server {
         self.ech_config.as_ref().map_or(&[], |cfg| &cfg.encoded)
     }
 
-    fn handle_initial(
+    fn handle_initial<'a>(
         &mut self,
         initial: InitialDetails,
-        dgram: &Datagram,
+        dgram: Datagram<&[u8]>,
         now: Instant,
-    ) -> Output {
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(out.is_empty());
+
         qdebug!([self], "Handle initial");
         let res = self
             .address_validation
@@ -205,9 +208,9 @@ impl Server {
             .validate(&initial.token, dgram.source(), now);
         match res {
             AddressValidationResult::Invalid => Output::None,
-            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
+            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now, out),
             AddressValidationResult::ValidRetry(orig_dcid) => {
-                self.accept_connection(initial, dgram, Some(orig_dcid), now)
+                self.accept_connection(initial, dgram, Some(orig_dcid), now, out)
             }
             AddressValidationResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", initial.dst_cid);
@@ -228,6 +231,7 @@ impl Server {
                         &new_dcid,
                         &token,
                         &initial.dst_cid,
+                        out,
                     );
                     packet.map_or_else(
                         |_| {
@@ -240,6 +244,7 @@ impl Server {
                                 dgram.source(),
                                 dgram.tos(),
                                 p,
+                                None,
                             ))
                         },
                     )
@@ -294,13 +299,14 @@ impl Server {
         }
     }
 
-    fn accept_connection(
+    fn accept_connection<'a>(
         &mut self,
         initial: InitialDetails,
-        dgram: &Datagram,
+        dgram: Datagram<&[u8]>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) -> Output {
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
         qinfo!(
             [self],
             "Accept connection {:?}",
@@ -321,7 +327,7 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid);
-                let out = c.process(Some(dgram), now);
+                let out = c.process_into_buffer(Some(dgram), now, out);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
             }
@@ -339,7 +345,13 @@ impl Server {
         }
     }
 
-    fn process_input(&mut self, dgram: &Datagram, now: Instant) -> Output {
+    fn process_input<'a>(
+        &mut self,
+        dgram: Datagram<&[u8]>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(out.is_empty());
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
@@ -356,7 +368,7 @@ impl Server {
             .iter_mut()
             .find(|c| c.borrow().is_valid_local_cid(packet.dcid()))
         {
-            return c.borrow_mut().process(Some(dgram), now);
+            return c.borrow_mut().process_into_buffer(Some(dgram), now, out);
         }
 
         if packet.packet_type() == PacketType::Short {
@@ -384,6 +396,7 @@ impl Server {
                 &packet.dcid()[..],
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
+                out,
             );
 
             crate::qlog::server_version_information_failed(
@@ -397,6 +410,7 @@ impl Server {
                 dgram.source(),
                 dgram.tos(),
                 vn,
+                None,
             ));
         }
 
@@ -409,7 +423,7 @@ impl Server {
                 // Copy values from `packet` because they are currently still borrowing from
                 // `dgram`.
                 let initial = InitialDetails::new(&packet);
-                self.handle_initial(initial, dgram, now)
+                self.handle_initial(initial, dgram, now, out)
             }
             PacketType::ZeroRtt => {
                 let dcid = ConnectionId::from(packet.dcid());
@@ -426,11 +440,17 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant) -> Output {
+    fn process_next_output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> Output<&'a [u8]> {
+        assert!(out.is_empty());
         let mut callback = None;
 
         for connection in &mut self.connections {
-            match connection.borrow_mut().process(None, now) {
+            match connection.borrow_mut().process_into_buffer(
+                None,
+                now,
+                // See .github/workflows/polonius.yml.
+                unsafe { &mut *std::ptr::from_mut(out) },
+            ) {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
                 Output::Callback(next) => match callback {
@@ -443,17 +463,55 @@ impl Server {
         callback.map_or(Output::None, Output::Callback)
     }
 
+    /// Same as [`Server::process_into_buffer`] but allocating output into new
+    /// [`Vec`].
     #[must_use]
     pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
-        let out = dgram
-            .map_or(Output::None, |d| self.process_input(d, now))
-            .or_else(|| self.process_next_output(now));
+        let mut out = vec![];
+        self.process_into_buffer(dgram.map(Into::into), now, &mut out)
+            .map_datagram(Into::into)
+    }
+
+    /// Shorthand for [`Server::process`] with no input `dgram`.
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        self.process(None, now)
+    }
+
+    /// # Panics
+    ///
+    /// Panics when `out` is not empty.
+    #[must_use]
+    pub fn process_into_buffer<'a>(
+        &mut self,
+        dgram: Option<Datagram<&[u8]>>,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<&'a [u8]> {
+        assert!(out.is_empty());
+
+        #[allow(clippy::option_if_let_else)]
+        let output = if let Some(dgram) = dgram {
+            self.process_input(
+                dgram,
+                now,
+                // See .github/workflows/polonius.yml.
+                unsafe { &mut *std::ptr::from_mut(out) },
+            )
+        } else {
+            Output::None
+        };
+
+        let output = if output == Output::None {
+            self.process_next_output(now, out)
+        } else {
+            output
+        };
 
         // Clean-up closed connections.
         self.connections
             .retain(|c| !matches!(c.borrow().state(), State::Closed(_)));
 
-        out
+        output
     }
 
     /// This lists the connections that have received new events

@@ -298,10 +298,10 @@ fn wt_unknown_session_frame_client() {
     let wt_session = wt.create_wt_session();
 
     // Send an unknown frame.
-    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    let mut buf = Vec::with_capacity(UNKNOWN_FRAME_LEN + 4);
+    let mut enc = Encoder::new(&mut buf);
     enc.encode_varint(1028_u64); // Arbitrary type.
     enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
-    let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     wt.client.send_data(wt_session.stream_id(), &buf).unwrap();
     wt.exchange_packets();
@@ -344,13 +344,13 @@ fn wt_close_session_frame_broken_client() {
     let wt_session = wt.create_wt_session();
 
     // Send a incorrect CloseSession frame.
-    let mut enc = Encoder::default();
+    let mut buf = vec![];
+    let mut enc = Encoder::new(&mut buf);
     WebTransportFrame::CloseSession {
         error: 5,
         message: "Hello".to_string(),
     }
     .encode(&mut enc);
-    let mut buf: Vec<_> = enc.into();
     // Corrupt the string.
     buf[9] = 0xff;
     wt.client.send_data(wt_session.stream_id(), &buf).unwrap();

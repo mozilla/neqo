@@ -139,6 +139,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
         server_initial.destination(),
         server_initial.tos(),
         packet,
+        None,
     );
 
     // Now a connection can be made successfully.

@@ -134,7 +134,8 @@ impl WebTransportSendStream {
         Self {
             stream_id,
             state: if local {
-                let mut d = Encoder::default();
+                let mut out = vec![];
+                let mut d = Encoder::new(&mut out);
                 if stream_id.is_uni() {
                     d.encode_varint(WEBTRANSPORT_UNI_STREAM);
                 } else {
@@ -142,7 +143,7 @@ impl WebTransportSendStream {
                 }
                 d.encode_varint(session_id.as_u64());
                 WebTransportSenderStreamState::SendingInit {
-                    buf: d.into(),
+                    buf: out,
                     fin: false,
                 }
             } else {

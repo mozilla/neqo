@@ -254,7 +254,8 @@ fn wrong_setting_value() {
     let control = server.stream_create(StreamType::UniDi).unwrap();
     server.stream_send(control, CONTROL_STREAM_TYPE).unwrap();
     // Encode a settings frame and send it.
-    let mut enc = Encoder::default();
+    let mut out = vec![];
+    let mut enc = Encoder::new(&mut out);
     let settings = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::EnableWebTransport, 2)]),
     };
