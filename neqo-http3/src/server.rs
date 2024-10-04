@@ -134,7 +134,7 @@ impl Http3Server {
             output = self.server.process_into_buffer(None, now, out);
         }
 
-        if let Output::Datagram(d) = output {
+        if let Output::Datagram(d) = &output {
             qtrace!([self], "Send packet: {:?}", d);
         }
 

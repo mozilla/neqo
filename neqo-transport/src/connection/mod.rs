@@ -1262,7 +1262,8 @@ impl Connection {
         }
     }
 
-    fn is_stateless_reset(&self, path: &PathRef, d: Datagram<&[u8]>) -> bool {
+    // TODO: & and &[u8]
+    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram<&[u8]>) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
@@ -1275,11 +1276,11 @@ impl Connection {
     fn check_stateless_reset(
         &mut self,
         path: &PathRef,
-        d: Datagram<&[u8]>,
+        d: &Datagram<&[u8]>,
         first: bool,
         now: Instant,
     ) -> Res<()> {
-        if first && self.is_stateless_reset(path, d) {
+        if first && self.is_stateless_reset(path, &d) {
             // Failing to process a packet in a datagram might
             // indicate that there is a stateless reset present.
             qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
@@ -1311,7 +1312,7 @@ impl Connection {
     fn save_datagram(
         &mut self,
         cspace: CryptoSpace,
-        d: Datagram<&[u8]>,
+        d: &Datagram<&[u8]>,
         remaining: usize,
         now: Instant,
     ) {
@@ -1522,7 +1523,7 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        d: Datagram<&[u8]>,
+        d: &Datagram<&[u8]>,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
@@ -1572,7 +1573,8 @@ impl Connection {
         for mut slc in d.iter_segments() {
             let mut dcid = None;
 
-            qtrace!([self], "{} input {}", path.borrow(), hex(&*d));
+            // TODO
+            // qtrace!([self], "{} input {}", path.borrow(), hex(&*d));
             let pto = path.borrow().rtt().pto(self.confirmed());
 
             // Handle each packet in the datagram.
@@ -1630,7 +1632,7 @@ impl Connection {
                             } else {
                                 match self.process_packet(path, &payload, now) {
                                     Ok(migrate) => {
-                                        self.postprocess_packet(path, d, &packet, migrate, now);
+                                        self.postprocess_packet(path, &d, &packet, migrate, now);
                                     }
                                     Err(e) => {
                                         self.ensure_error_path(path, &packet, now);
@@ -1655,7 +1657,7 @@ impl Connection {
                                 // don't have the keys yet. Don't check this
                                 // packet for a stateless reset, just return.
                                 let remaining = slc.len();
-                                self.save_datagram(cspace, d, remaining, now);
+                                self.save_datagram(cspace, &d, remaining, now);
                                 return Ok(());
                             }
                             Error::KeysExhausted => {
@@ -1673,7 +1675,7 @@ impl Connection {
                         // Decryption failure, or not having keys is not fatal.
                         // If the state isn't available, or we can't decrypt the packet, drop
                         // the rest of the datagram on the floor, but don't generate an error.
-                        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
+                        self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
                         self.stats.borrow_mut().pkt_dropped("Decryption failure");
                         qlog::packet_dropped(&self.qlog, &packet);
                     }
@@ -1681,7 +1683,7 @@ impl Connection {
                 slc = remainder;
                 dcid = Some(ConnectionId::from(packet.dcid()));
             }
-            self.check_stateless_reset(path, d, dcid.is_none(), now)?;
+            self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
         }
         Ok(())
     }
@@ -1969,7 +1971,7 @@ impl Connection {
     fn handle_migration(
         &mut self,
         path: &PathRef,
-        d: Datagram<&[u8]>,
+        d: &Datagram<&[u8]>,
         migrate: bool,
         now: Instant,
     ) {

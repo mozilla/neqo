@@ -20,8 +20,6 @@ pub struct Datagram<D = Vec<u8>> {
     d: D,
 }
 
-impl Copy for Datagram<&[u8]> {}
-
 impl<D> Datagram<D> {
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
