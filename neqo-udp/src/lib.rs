@@ -92,7 +92,7 @@ pub fn recv_inner<'a>(
     );
 
     qtrace!(
-        "received {} bytes from {} to {} with {} segments",
+        "received {} bytes from {} to {} in {} segments",
         datagram.len(),
         datagram.source(),
         datagram.destination(),
