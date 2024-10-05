@@ -6,7 +6,7 @@
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
 
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, BorrowedDatagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
@@ -187,10 +187,10 @@ impl HttpServer {
 impl super::HttpServer for HttpServer {
     fn process_into_buffer<'a>(
         &mut self,
-        dgram: Option<Datagram<&[u8]>>,
+        dgram: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         self.server.process_into_buffer(dgram, now, out)
     }
 

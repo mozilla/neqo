@@ -17,7 +17,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Role,
+    event::Provider, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, BorrowedDatagram,
+    Datagram, Role,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -195,10 +196,10 @@ impl Server {
     fn handle_initial<'a>(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram<&[u8]>,
+        dgram: BorrowedDatagram,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         debug_assert!(out.is_empty());
 
         qdebug!([self], "Handle initial");
@@ -239,7 +240,7 @@ impl Server {
                             Output::None
                         },
                         |p| {
-                            Output::Datagram(Datagram::new(
+                            Output::Datagram(BorrowedDatagram::new(
                                 dgram.destination(),
                                 dgram.source(),
                                 dgram.tos(),
@@ -302,11 +303,11 @@ impl Server {
     fn accept_connection<'a>(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram<&[u8]>,
+        dgram: BorrowedDatagram,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         qinfo!(
             [self],
             "Accept connection {:?}",
@@ -347,10 +348,10 @@ impl Server {
 
     fn process_input<'a>(
         &mut self,
-        dgram: Datagram<&[u8]>,
+        dgram: BorrowedDatagram,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         debug_assert!(out.is_empty());
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
@@ -405,7 +406,7 @@ impl Server {
                 packet.wire_version(),
             );
 
-            return Output::Datagram(Datagram::new(
+            return Output::Datagram(BorrowedDatagram::new(
                 dgram.destination(),
                 dgram.source(),
                 dgram.tos(),
@@ -440,7 +441,11 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output<'a>(&mut self, now: Instant, out: &'a mut Vec<u8>) -> Output<&'a [u8]> {
+    fn process_next_output<'a>(
+        &mut self,
+        now: Instant,
+        out: &'a mut Vec<u8>,
+    ) -> Output<BorrowedDatagram<'a>> {
         debug_assert!(out.is_empty());
         let mut callback = None;
 
@@ -483,10 +488,10 @@ impl Server {
     #[must_use]
     pub fn process_into_buffer<'a>(
         &mut self,
-        dgram: Option<Datagram<&[u8]>>,
+        dgram: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         debug_assert!(out.is_empty());
 
         #[allow(clippy::option_if_let_else)]

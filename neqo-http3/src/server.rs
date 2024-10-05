@@ -14,7 +14,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{qtrace, BorrowedDatagram, Datagram};
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -115,10 +115,10 @@ impl Http3Server {
 
     pub fn process_into_buffer<'a>(
         &mut self,
-        dgram: Option<Datagram<&[u8]>>,
+        dgram: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         qtrace!([self], "Process.");
         let mut output = self.server.process_into_buffer(
             dgram,

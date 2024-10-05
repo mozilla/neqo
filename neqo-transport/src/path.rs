@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos, IpTosEcn};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, BorrowedDatagram, Encoder, IpTos, IpTosEcn,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -712,13 +714,13 @@ impl Path {
     }
 
     /// Make a datagram.
-    pub fn datagram<'a>(&mut self, payload: &'a [u8], stats: &mut Stats) -> Datagram<&'a [u8]> {
+    pub fn datagram<'a>(&mut self, payload: &'a [u8], stats: &mut Stats) -> BorrowedDatagram<'a> {
         // Make sure to use the TOS value from before calling EcnInfo::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
         let tos = self.tos();
         self.ecn_info.on_packet_sent(stats);
-        Datagram::new(self.local, self.remote, tos, payload, None)
+        BorrowedDatagram::new(self.local, self.remote, tos, payload, None)
     }
 
     /// Get local address as `SocketAddr`

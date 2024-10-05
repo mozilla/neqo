@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{hex, qdebug, qerror, qinfo, Datagram, Header};
+use neqo_common::{hex, qdebug, qerror, qinfo, BorrowedDatagram, Header};
 use neqo_crypto::{generate_ech_keys, random, AntiReplay};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
@@ -81,10 +81,10 @@ impl Display for HttpServer {
 impl super::HttpServer for HttpServer {
     fn process_into_buffer<'a>(
         &mut self,
-        dgram: Option<Datagram<&[u8]>>,
+        dgram: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> neqo_http3::Output<&'a [u8]> {
+    ) -> neqo_http3::Output<BorrowedDatagram<'a>> {
         self.server.process_into_buffer(dgram, now, out)
     }
 

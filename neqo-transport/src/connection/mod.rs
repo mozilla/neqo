@@ -20,7 +20,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
-    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+    qlog::NeqoQlog, qtrace, qwarn, BorrowedDatagram, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group,
@@ -98,18 +98,21 @@ pub enum ZeroRttState {
 
 /// Type returned from [`Connection::process()`]. Users are required to call
 /// these repeatedly until [`Output::Callback`] or [`Output::None`] is returned.
+//
+// TODO: Default `Datagram` best here? Maybe `BorrowedDatagram`? Or even introduce BorrowedOutput? Or OwnedOutput?
 #[derive(Clone, PartialEq, Eq)]
-pub enum Output<D = Vec<u8>> {
+pub enum Output<D = Datagram> {
     /// Connection requires no action.
     None,
     /// Connection requires the datagram be sent.
-    Datagram(Datagram<D>),
+    Datagram(D),
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
 }
 
-impl<D: AsRef<[u8]>> Debug for Output<D> {
+// TODO: Needed?
+impl<D: Debug> Debug for Output<D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "None"),
@@ -149,7 +152,7 @@ impl Output {
 }
 
 impl<D> Output<D> {
-    pub fn map_datagram<U>(self, f: impl FnOnce(Datagram<D>) -> Datagram<U>) -> Output<U> {
+    pub fn map_datagram<U>(self, f: impl FnOnce(D) -> U) -> Output<U> {
         match self {
             Self::None => Output::None,
             Self::Datagram(d) => Output::Datagram(f(d)),
@@ -172,7 +175,7 @@ impl<D> Output<D> {
 /// Used by inner functions like `Connection::output`.
 enum SendOption<'a> {
     /// Yes, please send this datagram.
-    Yes(Datagram<&'a [u8]>),
+    Yes(BorrowedDatagram<'a>),
     /// Don't send.  If this was blocked on the pacer (the arg is true).
     No(bool),
 }
@@ -1043,7 +1046,7 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input<'a>(&mut self, d: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+    pub fn process_input<'a>(&mut self, d: impl Into<BorrowedDatagram<'a>>, now: Instant) {
         self.input(d.into(), now, now);
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
@@ -1134,7 +1137,7 @@ impl Connection {
         &mut self,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
         match (&self.state, self.role) {
@@ -1179,10 +1182,10 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         if let Some(d) = input {
             self.input(d, now, now);
             self.process_saved(now);
@@ -1263,7 +1266,7 @@ impl Connection {
     }
 
     // TODO: & and &[u8]
-    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram<&[u8]>) -> bool {
+    fn is_stateless_reset(&self, path: &PathRef, d: &BorrowedDatagram) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
@@ -1276,7 +1279,7 @@ impl Connection {
     fn check_stateless_reset(
         &mut self,
         path: &PathRef,
-        d: &Datagram<&[u8]>,
+        d: &BorrowedDatagram,
         first: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1312,7 +1315,7 @@ impl Connection {
     fn save_datagram(
         &mut self,
         cspace: CryptoSpace,
-        d: &Datagram<&[u8]>,
+        d: &BorrowedDatagram,
         remaining: usize,
         now: Instant,
     ) {
@@ -1523,7 +1526,7 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        d: &Datagram<&[u8]>,
+        d: &BorrowedDatagram,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
@@ -1555,7 +1558,7 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: Datagram<&[u8]>, received: Instant, now: Instant) {
+    fn input(&mut self, d: BorrowedDatagram, received: Instant, now: Instant) {
         // First determine the path.
         let path = self.paths.find_path_with_rebinding(
             d.destination(),
@@ -1569,7 +1572,7 @@ impl Connection {
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
-    fn input_path(&mut self, path: &PathRef, d: Datagram<&[u8]>, now: Instant) -> Res<()> {
+    fn input_path(&mut self, path: &PathRef, d: BorrowedDatagram, now: Instant) -> Res<()> {
         for mut slc in d.iter_segments() {
             let mut dcid = None;
 
@@ -1971,7 +1974,7 @@ impl Connection {
     fn handle_migration(
         &mut self,
         path: &PathRef,
-        d: &Datagram<&[u8]>,
+        d: &BorrowedDatagram,
         migrate: bool,
         now: Instant,
     ) {

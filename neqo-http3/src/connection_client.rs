@@ -15,7 +15,7 @@ use std::{
 
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
-    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    BorrowedDatagram, Datagram, Decoder, Encoder, Header, MessageType, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::Stats as QpackStats;
@@ -855,10 +855,10 @@ impl Http3Client {
 
     pub fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         qtrace!([self], "Process.");
         if let Some(d) = input {
             self.conn.process_input(d, now);
@@ -883,7 +883,7 @@ impl Http3Client {
     }
 
     #[cfg(test)]
-    fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+    fn process_input<'a>(&mut self, dgram: impl Into<BorrowedDatagram<'a>>, now: Instant) {
         qtrace!([self], "Process input");
         self.conn.process_input(dgram, now);
         self.process_http3(now);

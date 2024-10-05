@@ -18,7 +18,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
+use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, BorrowedDatagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -130,10 +130,10 @@ impl super::Client for Http3Client {
 
     fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         self.process_into_buffer(input, now, out)
     }
 

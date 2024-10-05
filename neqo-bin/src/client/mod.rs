@@ -23,7 +23,7 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
+use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, BorrowedDatagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -374,10 +374,10 @@ enum CloseState {
 trait Client {
     fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]>;
+    ) -> Output<BorrowedDatagram<'a>>;
     fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where

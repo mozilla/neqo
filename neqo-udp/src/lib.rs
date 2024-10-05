@@ -12,7 +12,7 @@ use std::{
     slice,
 };
 
-use neqo_common::{qdebug, qtrace, Datagram, IpTos};
+use neqo_common::{qdebug, qtrace, BorrowedDatagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Socket receive buffer size.
@@ -25,7 +25,7 @@ pub const RECV_BUF_SIZE: usize = u16::MAX as usize;
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: Datagram<&[u8]>,
+    d: BorrowedDatagram,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
@@ -57,7 +57,7 @@ pub fn recv_inner<'a>(
     state: &UdpSocketState,
     socket: impl SocketRef,
     recv_buf: &'a mut Vec<u8>,
-) -> Result<Datagram<&'a [u8]>, io::Error> {
+) -> Result<BorrowedDatagram<'a>, io::Error> {
     let mut meta;
 
     let data = loop {
@@ -83,7 +83,7 @@ pub fn recv_inner<'a>(
         break &recv_buf[..meta.len];
     };
 
-    let datagram = Datagram::new(
+    let datagram = BorrowedDatagram::new(
         meta.addr,
         *local_address,
         meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
@@ -118,7 +118,7 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: Datagram<&[u8]>) -> io::Result<()> {
+    pub fn send(&self, d: BorrowedDatagram) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
@@ -128,7 +128,7 @@ impl<S: SocketRef> Socket<S> {
         &self,
         local_address: &SocketAddr,
         recv_buf: &'a mut Vec<u8>,
-    ) -> Result<Datagram<&'a [u8]>, io::Error> {
+    ) -> Result<BorrowedDatagram<'a>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner, recv_buf)
     }
 }
@@ -153,7 +153,7 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let payload = vec![];
-        let datagram = Datagram::new(
+        let datagram = BorrowedDatagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::default(),
@@ -176,7 +176,7 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let payload = b"Hello, world!".to_vec();
-        let datagram = Datagram::new(
+        let datagram = BorrowedDatagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             IpTos::from((IpTosDscp::Le, IpTosEcn::Ect1)),
@@ -184,7 +184,7 @@ mod tests {
             None,
         );
 
-        sender.send(datagram)?;
+        sender.send(datagram.clone())?;
 
         let mut recv_buf = vec![0; RECV_BUF_SIZE];
         let received_datagram = receiver

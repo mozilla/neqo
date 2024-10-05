@@ -17,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
+use neqo_common::{event::Provider, qdebug, qinfo, qwarn, BorrowedDatagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
@@ -179,10 +179,10 @@ impl TryFrom<&State> for CloseState {
 impl super::Client for Connection {
     fn process_into_buffer<'a>(
         &mut self,
-        input: Option<Datagram<&[u8]>>,
+        input: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]> {
+    ) -> Output<BorrowedDatagram<'a>> {
         self.process_into_buffer(input, now, out)
     }
 

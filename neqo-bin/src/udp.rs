@@ -6,7 +6,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::Datagram;
+use neqo_common::BorrowedDatagram;
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
 ///
@@ -47,7 +47,7 @@ impl Socket {
     }
 
     /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: Datagram<&[u8]>) -> io::Result<()> {
+    pub fn send(&self, d: BorrowedDatagram) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             neqo_udp::send_inner(&self.state, (&self.inner).into(), d)
         })
@@ -59,7 +59,7 @@ impl Socket {
         &self,
         local_address: &SocketAddr,
         recv_buf: &'a mut Vec<u8>,
-    ) -> Result<Option<Datagram<&'a [u8]>>, io::Error> {
+    ) -> Result<Option<BorrowedDatagram<'a>>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
                 neqo_udp::recv_inner(local_address, &self.state, &self.inner, recv_buf)

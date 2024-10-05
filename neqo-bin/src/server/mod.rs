@@ -25,7 +25,7 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{qdebug, qerror, qinfo, qwarn, BorrowedDatagram};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
@@ -196,10 +196,10 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 pub trait HttpServer: Display {
     fn process_into_buffer<'a>(
         &mut self,
-        dgram: Option<Datagram<&[u8]>>,
+        dgram: Option<BorrowedDatagram>,
         now: Instant,
         out: &'a mut Vec<u8>,
-    ) -> Output<&'a [u8]>;
+    ) -> Output<BorrowedDatagram<'a>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }

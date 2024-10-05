@@ -9,7 +9,7 @@ use std::{net::SocketAddr, ops::Deref};
 use crate::{hex_with_len, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Datagram<D = Vec<u8>> {
+pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
     /// The size of each segment within the [`Datagram`]. All segments, but the
@@ -17,10 +17,28 @@ pub struct Datagram<D = Vec<u8>> {
     /// [`Datagram::segment_size`].
     segment_size: usize,
     tos: IpTos,
-    d: D,
+    // TODO: Rename to `data`?
+    d: Vec<u8>,
 }
 
-impl<D> Datagram<D> {
+impl Datagram {
+    #[must_use]
+    pub fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        d: Vec<u8>,
+        segment_size: Option<usize>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size: segment_size.unwrap_or_else(|| d.len()),
+            d,
+        }
+    }
+
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
         self.src
@@ -44,80 +62,50 @@ impl<D> Datagram<D> {
     pub const fn segment_size(&self) -> usize {
         self.segment_size
     }
-}
 
-impl<D: AsRef<[u8]>> Datagram<D> {
-    pub fn new(
-        src: SocketAddr,
-        dst: SocketAddr,
-        tos: IpTos,
-        d: D,
-        segment_size: Option<usize>,
-    ) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            segment_size: segment_size.unwrap_or_else(|| d.as_ref().len()),
-            d,
-        }
-    }
+    // TODO: Needed?
     pub fn iter_segments(&self) -> impl Iterator<Item = &[u8]> {
-        self.d.as_ref().chunks(self.segment_size)
+        self.d.chunks(self.segment_size)
     }
 
+    // TODO: Needed?
     pub fn num_segments(&self) -> usize {
-        self.d.as_ref().len().div_ceil(self.segment_size)
+        self.d.len().div_ceil(self.segment_size)
     }
-}
 
-impl<D: Deref<Target = [u8]>> Deref for Datagram<D> {
-    type Target = [u8];
+    pub fn borrow<'a>(&'a self) -> BorrowedDatagram<'a> {
+        BorrowedDatagram {
+            src: self.src,
+            dst: self.dst,
+            segment_size: self.segment_size,
+            tos: self.tos,
+            d: self.d.as_ref(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.d.len()
+    }
+
     #[must_use]
-    fn deref(&self) -> &Self::Target {
-        &self.d
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
-impl<'a> From<&'a Datagram> for Datagram<&'a [u8]> {
-    fn from(value: &'a Datagram) -> Self {
-        let Datagram {
-            src,
-            dst,
-            tos,
-            segment_size,
-            d,
-        } = value;
-        Datagram {
-            src: *src,
-            dst: *dst,
-            tos: *tos,
-            segment_size: *segment_size,
-            d,
-        }
+impl From<Datagram> for Vec<u8> {
+    fn from(d: Datagram) -> Self {
+        d.d
     }
 }
 
-impl From<Datagram<&[u8]>> for Datagram {
-    fn from(value: Datagram<&[u8]>) -> Self {
-        let Datagram {
-            src,
-            dst,
-            tos,
-            segment_size,
-            d,
-        } = value;
-        Self {
-            src,
-            dst,
-            tos,
-            segment_size,
-            d: d.to_owned(),
-        }
+impl<'a> From<BorrowedDatagram<'a>> for Datagram {
+    fn from(value: BorrowedDatagram) -> Self {
+        value.to_owned()
     }
 }
 
-impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
+impl std::fmt::Debug for Datagram {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -130,9 +118,139 @@ impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
     }
 }
 
-impl From<Datagram> for Vec<u8> {
-    fn from(value: Datagram) -> Self {
-        value.d
+impl AsRef<[u8]> for Datagram {
+    fn as_ref(&self) -> &[u8] {
+        self.d.as_ref()
+    }
+}
+
+// TODO: Really needed? Not idiomatic.
+impl Deref for Datagram {
+    type Target = [u8];
+    #[must_use]
+    fn deref(&self) -> &Self::Target {
+        &self.d
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct BorrowedDatagram<'a> {
+    src: SocketAddr,
+    dst: SocketAddr,
+    /// The size of each segment within the [`BorrowedDatagram`]. All segments, but the
+    /// last, have the same size. The last segment can be shorter than
+    /// [`BorrowedDatagram::segment_size`].
+    segment_size: usize,
+    tos: IpTos,
+    d: &'a [u8],
+}
+
+impl<'a> BorrowedDatagram<'a> {
+    pub fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: IpTos,
+        d: &'a [u8],
+        segment_size: Option<usize>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            segment_size: segment_size.unwrap_or_else(|| d.as_ref().len()),
+            d,
+        }
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> SocketAddr {
+        self.src
+    }
+
+    #[must_use]
+    pub const fn destination(&self) -> SocketAddr {
+        self.dst
+    }
+
+    #[must_use]
+    pub const fn tos(&self) -> IpTos {
+        self.tos
+    }
+
+    pub fn set_tos(&mut self, tos: IpTos) {
+        self.tos = tos;
+    }
+
+    #[must_use]
+    pub const fn segment_size(&self) -> usize {
+        self.segment_size
+    }
+
+    pub fn iter_segments(&self) -> impl Iterator<Item = &[u8]> {
+        self.d.as_ref().chunks(self.segment_size)
+    }
+
+    pub fn num_segments(&self) -> usize {
+        self.d.as_ref().len().div_ceil(self.segment_size)
+    }
+
+    pub fn to_owned(&self) -> Datagram {
+        Datagram {
+            src: self.src,
+            dst: self.dst,
+            segment_size: self.segment_size,
+            tos: self.tos,
+            d: self.d.to_vec(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.d.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<'a> std::fmt::Debug for BorrowedDatagram<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "BorrowedDatagram {:?} {:?}->{:?}: {}",
+            self.tos,
+            self.src,
+            self.dst,
+            hex_with_len(&self.d)
+        )
+    }
+}
+
+impl<'a> From<&'a Datagram> for BorrowedDatagram<'a> {
+    fn from(value: &'a Datagram) -> Self {
+        BorrowedDatagram {
+            src: value.src,
+            dst: value.dst,
+            segment_size: value.segment_size,
+            tos: value.tos,
+            d: value.d.as_ref(),
+        }
+    }
+}
+
+impl<'a> AsRef<[u8]> for BorrowedDatagram<'a> {
+    fn as_ref(&self) -> &[u8] {
+        self.d.as_ref()
+    }
+}
+
+// TODO: Really needed? Not idiomatic.
+impl<'a> Deref for BorrowedDatagram<'a> {
+    type Target = [u8];
+    #[must_use]
+    fn deref(&self) -> &Self::Target {
+        &self.d
     }
 }
 
