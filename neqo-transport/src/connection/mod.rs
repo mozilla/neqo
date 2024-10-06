@@ -2514,22 +2514,22 @@ impl Connection {
             Ok(SendOption::No(profile.paced()))
         } else {
             // Perform additional padding for Initial packets as necessary.
-            let packets: &mut Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
                     qdebug!(
                         [self],
                         "pad Initial from {} to PLPMTU {}",
-                        packets.len(),
+                        encoder.len(),
                         profile.limit()
                     );
-                    initial.track_padding(profile.limit() - packets.len());
+                    initial.track_padding(profile.limit() - encoder.len());
                     // These zeros aren't padding frames, they are an invalid all-zero coalesced
                     // packet, which is why we don't increase `frame_tx.padding` count here.
-                    packets.resize(profile.limit(), 0);
+                    encoder.pad_to(profile.limit(), 0);
                 }
                 self.loss_recovery.on_packet_sent(path, initial);
             }
+            let packets: &mut [u8] = encoder.into();
             path.borrow_mut().add_sent(packets.len());
             Ok(SendOption::Yes(
                 path.borrow_mut()

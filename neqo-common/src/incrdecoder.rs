@@ -145,6 +145,11 @@ mod tests {
     };
     use crate::codec::Encoder;
 
+    // TODO: Deduplicate with codec.rs.
+    fn send_buffer() -> Vec<u8> {
+        vec![0; u16::MAX as usize]
+    }
+
     #[test]
     fn buffer_incremental() {
         let b = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -180,7 +185,7 @@ mod tests {
             );
 
             let decoder = IncrementalDecoderUint::default();
-            let mut out = vec![];
+            let mut out = send_buffer();
             let mut db = Encoder::new(&mut out).from_hex(&self.b);
             // Add padding so that we can verify that the reader doesn't over-consume.
             db.encode_byte(0xff);
@@ -238,7 +243,7 @@ mod tests {
 
     #[test]
     fn zero_len() {
-        let mut out = vec![];
+        let mut out = send_buffer();
         let enc = Encoder::new(&mut out).from_hex("ff");
         let mut dec = Decoder::new(enc.as_ref());
         let mut incr = IncrementalDecoderBuffer::new(0);
@@ -248,7 +253,7 @@ mod tests {
 
     #[test]
     fn ignore() {
-        let mut out = vec![];
+        let mut out = send_buffer();
         let db = Encoder::new(&mut out).from_hex("12345678ff");
 
         let decoder = IncrementalDecoderIgnore::new(4);

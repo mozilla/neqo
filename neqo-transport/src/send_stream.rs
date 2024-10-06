@@ -3085,9 +3085,9 @@ mod tests {
             );
             assert_eq!(stats.stream, 1);
             assert_eq!(builder.is_full(), expect_full);
+            // TODO: Why not builder.build?
             let encoder = Encoder::from(builder);
-            let buf: &mut Vec<u8> = encoder.into();
-            buf.clone().split_off(header_len)
+            encoder.to_vec().split_off(header_len)
         }
 
         let mut len_buf = vec![];
