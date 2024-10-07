@@ -149,7 +149,7 @@ fn ack_for_unsent() {
     let client_dcid = client_dcid.to_owned();
 
     let server_packet = server.process(client_initial.as_dgram_ref(), now()).dgram();
-    let (server_initial, server_hs) = split_datagram(server_packet.as_ref().unwrap());
+    let (server_initial, _) = split_datagram(server_packet.as_ref().unwrap());
     let (protected_header, _, _, payload) =
         decode_initial_header(&server_initial, Role::Server).unwrap();
 
