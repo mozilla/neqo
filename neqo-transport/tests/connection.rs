@@ -172,6 +172,7 @@ fn ack_for_unsent() {
     dec.skip_vvec(); // Skip over the payload.
 
     // Overwrite largest_acked in the ACK frame with 3 (a packet that was never sent).
+    assert_eq!(plaintext[1], 0x0);
     plaintext[1] = 0x3;
 
     // And rebuild the packet.
