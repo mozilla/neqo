@@ -189,7 +189,6 @@ fn ack_for_unsent() {
 
     // Now deliver the packet with the spoofed ACK frame
     client.process_input(&spoofed, now());
-    client.process_input(&server_hs.unwrap(), now());
     assert_eq!(
         client.state(),
         &State::Closed(CloseReason::Transport(Error::AckedUnsentPacket))
