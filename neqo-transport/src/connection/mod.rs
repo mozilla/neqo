@@ -2862,7 +2862,7 @@ impl Connection {
                     ecn_count,
                     ack_delay,
                     now,
-                );
+                )?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3055,15 +3055,29 @@ impl Connection {
         ack_ecn: Option<EcnCount>,
         ack_delay: u64,
         now: Instant,
-    ) where
+    ) -> Res<()>
+    where
         R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
-
         let Some(path) = self.paths.primary() else {
-            return;
+            return Ok(());
         };
+
+        // Ensure that the largest acknowledged packet number was actually sent.
+        // (If we ever start using non-contigous packet numbers, we need to check all the packet
+        // numbers in the ACKed ranges.)
+        let next_pn = self
+            .crypto
+            .states
+            .select_tx(self.version, space)
+            .map_or_else(|| Err(Error::InternalError), |(_, tx)| Ok(tx.next_pn()))?;
+        if largest_acknowledged >= next_pn {
+            qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
+            return Err(Error::AckedUnsentPacket);
+        }
+
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
@@ -3097,6 +3111,7 @@ impl Connection {
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
         stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
+        Ok(())
     }
 
     /// Tell 0-RTT packets that they were "lost".
