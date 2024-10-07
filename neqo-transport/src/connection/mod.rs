@@ -3083,7 +3083,6 @@ impl Connection {
         let Some(path) = self.paths.primary() else {
             return;
         };
-
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
@@ -3116,8 +3115,8 @@ impl Connection {
         qlog::packets_lost(&self.qlog, &lost_packets);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
-        if let Some(la) = largest_acknowledged {
-            stats.largest_acknowledged = max(stats.largest_acknowledged, la);
+        if let Some(largest_acknowledged) = largest_acknowledged {
+            stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
         }
     }
 
