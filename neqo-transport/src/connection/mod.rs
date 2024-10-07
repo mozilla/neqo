@@ -1663,6 +1663,17 @@ impl Connection {
         // on the assert for doesn't exist.
         // OK, we have a valid packet.
 
+        // Get the next packet number we'll send, for ACK verification.
+        // TODO: Once PR #2118 lands, this can move to handle_ack. For now, it needs to be here,
+        // because we can drop packet number spaces as we parse throught the packet, and if an ACK
+        // frame follows a CRYPTO frame that makes us drop a space, we need to know this
+        // packet number to verify the ACK against.
+        let next_pn = self
+            .crypto
+            .states
+            .select_tx(self.version, PacketNumberSpace::from(packet.packet_type()))
+            .map_or(0, |(_, tx)| tx.next_pn());
+
         let mut ack_eliciting = false;
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
@@ -1675,7 +1686,14 @@ impl Connection {
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
-            if let Err(e) = self.input_frame(path, packet.version(), packet.packet_type(), f, now) {
+            if let Err(e) = self.input_frame(
+                path,
+                packet.version(),
+                packet.packet_type(),
+                f,
+                next_pn,
+                now,
+            ) {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
             }
         }
@@ -2822,6 +2840,7 @@ impl Connection {
         packet_version: Version,
         packet_type: PacketType,
         frame: Frame,
+        next_pn: PacketNumber,
         now: Instant,
     ) -> Res<()> {
         if !frame.is_allowed(packet_type) {
@@ -2857,6 +2876,7 @@ impl Connection {
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
                 self.handle_ack(
                     space,
+                    next_pn,
                     largest_acknowledged,
                     ranges,
                     ecn_count,
@@ -3047,9 +3067,11 @@ impl Connection {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn handle_ack<R>(
         &mut self,
         space: PacketNumberSpace,
+        next_pn: PacketNumber,
         largest_acknowledged: PacketNumber,
         ack_ranges: R,
         ack_ecn: Option<EcnCount>,
@@ -3068,11 +3090,6 @@ impl Connection {
         // Ensure that the largest acknowledged packet number was actually sent.
         // (If we ever start using non-contigous packet numbers, we need to check all the packet
         // numbers in the ACKed ranges.)
-        let next_pn = self
-            .crypto
-            .states
-            .select_tx(self.version, space)
-            .map_or_else(|| Err(Error::InternalError), |(_, tx)| Ok(tx.next_pn()))?;
         if largest_acknowledged >= next_pn {
             qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
             return Err(Error::AckedUnsentPacket);
