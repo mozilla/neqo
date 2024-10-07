@@ -70,7 +70,7 @@ jobs:
 
       - name: Download cached main-branch results
         id: criterion-cache
-        uses: actions/cache/restore@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache/restore@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2 # v4.1.0
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
@@ -231,7 +231,7 @@ jobs:
 
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache/save@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2 # v4.1.0
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
