@@ -2876,7 +2876,7 @@ impl Connection {
                 // (If we ever start using non-contiguous packet numbers, we need to check all the
                 // packet numbers in the ACKed ranges.)
                 if largest_acknowledged >= next_pn {
-                    qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
+                    qwarn!("Largest ACKed {} was never sent", largest_acknowledged);
                     return Err(Error::AckedUnsentPacket);
                 }
 
