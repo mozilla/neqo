@@ -2873,7 +2873,7 @@ impl Connection {
                 ecn_count,
             } => {
                 // Ensure that the largest acknowledged packet number was actually sent.
-                // (If we ever start using non-contigous packet numbers, we need to check all the
+                // (If we ever start using non-contiguous packet numbers, we need to check all the
                 // packet numbers in the ACKed ranges.)
                 if largest_acknowledged >= next_pn {
                     qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
