@@ -132,7 +132,7 @@ fn reorder_server_initial() {
     assert_eq!(*client.state(), State::Confirmed);
 }
 
-/// Ignore ACK for unsent package.
+///
 #[test]
 fn ack_for_unsent() {
     // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
@@ -190,7 +190,10 @@ fn ack_for_unsent() {
     // Now deliver the packet with the spoofed ACK frame
     client.process_input(&spoofed, now());
     client.process_input(&server_hs.unwrap(), now());
-    assert_eq!(client.state(), &State::Handshaking);
+    assert_eq!(
+        client.state(),
+        &State::Closed(CloseReason::Transport(Error::AckedUnsentPacket))
+    );
 }
 
 fn set_payload(server_packet: &Option<Datagram>, client_dcid: &[u8], payload: &[u8]) -> Datagram {
