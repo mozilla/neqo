@@ -132,7 +132,7 @@ fn reorder_server_initial() {
     assert_eq!(*client.state(), State::Confirmed);
 }
 
-///
+/// Receiving an ACK frame for a packet number that was never sent is an error.
 #[test]
 fn ack_for_unsent() {
     // A simple ACK_ECN frame for a single packet with packet number 0 with a single ECT(0) mark.
@@ -171,10 +171,10 @@ fn ack_for_unsent() {
     assert_eq!(dec.decode_varint(), Some(0x00)); // offset
     dec.skip_vvec(); // Skip over the payload.
 
-    // Overwrite larget_acked in the ACK frame with 3 (a packet that was never sent).
+    // Overwrite largest_acked in the ACK frame with 3 (a packet that was never sent).
     plaintext[1] = 0x3;
 
-    // And rebuild a packet.
+    // And rebuild the packet.
     let mut packet = header.clone();
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
     aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
