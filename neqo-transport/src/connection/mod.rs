@@ -2872,17 +2872,17 @@ impl Connection {
                 ack_ranges,
                 ecn_count,
             } => {
+                // Ensure that the largest acknowledged packet number was actually sent.
+                // (If we ever start using non-contigous packet numbers, we need to check all the packet
+                // numbers in the ACKed ranges.)
+                if largest_acknowledged >= next_pn {
+                    qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
+                    return Err(Error::AckedUnsentPacket);
+                }
+
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(
-                    space,
-                    next_pn,
-                    largest_acknowledged,
-                    ranges,
-                    ecn_count,
-                    ack_delay,
-                    now,
-                )?;
+                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3071,8 +3071,6 @@ impl Connection {
     fn handle_ack<R>(
         &mut self,
         space: PacketNumberSpace,
-        next_pn: PacketNumber,
-        largest_acknowledged: PacketNumber,
         ack_ranges: R,
         ack_ecn: Option<EcnCount>,
         ack_delay: u64,
@@ -3087,23 +3085,15 @@ impl Connection {
             return Ok(());
         };
 
-        // Ensure that the largest acknowledged packet number was actually sent.
-        // (If we ever start using non-contigous packet numbers, we need to check all the packet
-        // numbers in the ACKed ranges.)
-        if largest_acknowledged >= next_pn {
-            qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
-            return Err(Error::AckedUnsentPacket);
-        }
-
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
-            largest_acknowledged,
             ack_ranges,
             ack_ecn,
             self.decode_ack_delay(ack_delay),
             now,
         );
+        let largest_acknowledged = acked_packets.first().map(SentPacket::pn);
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
@@ -3127,7 +3117,9 @@ impl Connection {
         qlog::packets_lost(&self.qlog, &lost_packets);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
-        stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
+        if let Some(la) = largest_acknowledged {
+            stats.largest_acknowledged = max(stats.largest_acknowledged, la);
+        }
         Ok(())
     }
 
