@@ -587,8 +587,6 @@ impl LossRecovery {
         R: IntoIterator<Item = RangeInclusive<PacketNumber>>,
         R::IntoIter: ExactSizeIterator,
     {
-        qdebug!([self], "ACK for {}.", pn_space,);
-
         let Some(space) = self.spaces.get_mut(pn_space) else {
             qinfo!("ACK on discarded space");
             return (Vec::new(), Vec::new());
@@ -621,7 +619,7 @@ impl LossRecovery {
 
         qdebug!(
             [self],
-            "ACK pn_space={} largest_acked={}.",
+            "ACK for {} - largest_acked={}",
             pn_space,
             largest_acked_pkt.pn()
         );

@@ -1664,7 +1664,7 @@ impl Connection {
         // OK, we have a valid packet.
 
         // Get the next packet number we'll send, for ACK verification.
-        // TODO: Once PR #2118 lands, this can move to handle_ack. For now, it needs to be here,
+        // TODO: Once PR #2118 lands, this can move to `input_frame`. For now, it needs to be here,
         // because we can drop packet number spaces as we parse throught the packet, and if an ACK
         // frame follows a CRYPTO frame that makes us drop a space, we need to know this
         // packet number to verify the ACK against.
@@ -2873,8 +2873,8 @@ impl Connection {
                 ecn_count,
             } => {
                 // Ensure that the largest acknowledged packet number was actually sent.
-                // (If we ever start using non-contigous packet numbers, we need to check all the packet
-                // numbers in the ACKed ranges.)
+                // (If we ever start using non-contigous packet numbers, we need to check all the
+                // packet numbers in the ACKed ranges.)
                 if largest_acknowledged >= next_pn {
                     qwarn!("Largest ACKed {} was never sent", largest_acknowledged,);
                     return Err(Error::AckedUnsentPacket);
@@ -2882,7 +2882,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
+                self.handle_ack(space, ranges, ecn_count, ack_delay, now);
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3067,7 +3067,6 @@ impl Connection {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn handle_ack<R>(
         &mut self,
         space: PacketNumberSpace,
@@ -3075,14 +3074,14 @@ impl Connection {
         ack_ecn: Option<EcnCount>,
         ack_delay: u64,
         now: Instant,
-    ) -> Res<()>
-    where
+    ) where
         R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
+
         let Some(path) = self.paths.primary() else {
-            return Ok(());
+            return;
         };
 
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
@@ -3120,7 +3119,6 @@ impl Connection {
         if let Some(la) = largest_acknowledged {
             stats.largest_acknowledged = max(stats.largest_acknowledged, la);
         }
-        Ok(())
     }
 
     /// Tell 0-RTT packets that they were "lost".
