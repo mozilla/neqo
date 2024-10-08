@@ -835,9 +835,10 @@ fn ack_for_unsent() {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    server.test_frame_writer = Some(Box::new(AckforUnsentWriter {}));
-    let spoofed = server.process_output(now()).dgram().unwrap();
-    server.test_frame_writer = None;
+    let spoofed = server
+        .test_write_frames(AckforUnsentWriter {}, now())
+        .dgram()
+        .unwrap();
 
     // Now deliver the packet with the spoofed ACK frame
     client.process_input(&spoofed, now());
