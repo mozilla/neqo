@@ -103,8 +103,6 @@ jobs:
             echo "version = \"$MTU_VERSION\""
           } >> supply-chain/audits.toml
           {
-            echo '[policy.qlog]'
-            echo 'audit-as-crates-io = true'
             echo '[policy.mtu]'
             echo 'audit-as-crates-io = true'
           } >> supply-chain/config.toml
