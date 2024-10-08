@@ -344,8 +344,8 @@ mod tests {
         Pmtud, Stats,
     };
 
-    const V4: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-    const V6: IpAddr = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0));
+    const V4: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+    const V6: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
     fn make_sentpacket(pn: u64, now: Instant, len: usize) -> SentPacket {
         SentPacket::new(

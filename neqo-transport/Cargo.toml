@@ -18,11 +18,11 @@ workspace = true
 [dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = { version = "2.7", default-features = false }
-indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
+indexmap = { version = "2.2", default-features = false }                                    # See https://github.com/mozilla/neqo/issues/1858
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
-mtu = { path = "../../mtu", default-features = false }
+mtu = { git = "https://github.com/mozilla/mtu.git", branch = "feat-from-routing", default-features = false } # TODO: Point to the crate on crates.io
 qlog = { workspace = true }
 smallvec = { version = "1.11", default-features = false }
 static_assertions = { version = "1.1", default-features = false }

@@ -6,14 +6,12 @@
 
 // Congestion control
 
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    time::Duration,
-};
+use std::time::Duration;
 
 use neqo_common::IpTosEcn;
 use test_fixture::now;
 
+use super::{IP_ADDR, MTU, RTT};
 use crate::{
     cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl},
     packet::PacketType,
@@ -22,10 +20,7 @@ use crate::{
     rtt::RttEstimate,
 };
 
-const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-const MTU: usize = 1_500;
-const PTO: Duration = Duration::from_millis(100);
-const RTT: Duration = Duration::from_millis(98);
+const PTO: Duration = RTT;
 const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
 
 fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {

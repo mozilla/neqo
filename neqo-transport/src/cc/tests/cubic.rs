@@ -8,7 +8,6 @@
 #![allow(clippy::cast_sign_loss)]
 
 use std::{
-    net::{IpAddr, Ipv4Addr},
     ops::Sub,
     time::{Duration, Instant},
 };
@@ -16,6 +15,7 @@ use std::{
 use neqo_common::IpTosEcn;
 use test_fixture::now;
 
+use super::{IP_ADDR, MTU, RTT};
 use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
@@ -30,10 +30,6 @@ use crate::{
     recovery::SentPacket,
     rtt::RttEstimate,
 };
-
-const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-const MTU: usize = 1_500;
-const RTT: Duration = Duration::from_millis(100);
 
 const fn cwnd_after_loss(cwnd: usize) -> usize {
     cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
