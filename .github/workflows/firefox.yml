@@ -102,6 +102,12 @@ jobs:
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$MTU_VERSION\""
           } >> supply-chain/audits.toml
+          {
+            echo '[policy.qlog]'
+            echo 'audit-as-crates-io = true'
+            echo '[policy.mtu]'
+            echo 'audit-as-crates-io = true'
+          } >> supply-chain/config.toml
           sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
           {
             echo '[patch."https://github.com/mozilla/neqo"]'
