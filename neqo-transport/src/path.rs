@@ -570,9 +570,6 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        // We're passing `None` into `mtu::interface_and_mtu` here, which force the lookup to only
-        // take the local address into account. Taking the remote address into account would require
-        // a call to `connect`, which Firefox blocklists for Rust dependencies.
         let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
             Ok((name, mtu)) => {
                 qdebug!("Outbound interface {name} has MTU {mtu}");
