@@ -101,6 +101,10 @@ jobs:
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$MTU_VERSION\""
+            echo '[[audits.mtu]]'
+            echo 'who = "CI"'
+            echo 'criteria = "safe-to-deploy"'
+            echo "version = \"0.2.0@git:9a8b72d3eebf04cc5accbddbbef3e3603dcf943f\""
           } >> supply-chain/audits.toml
           {
             echo '[policy.mtu]'
