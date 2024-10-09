@@ -75,6 +75,12 @@ jobs:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Cache toolchain
+        uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2 # v4.1.0
+        with:
+          path: mozbuild
+          key: mozbuild-${{ runner.os }}
+
       - name: Bootstrap Firefox
         run: |
           cd mozilla-unified
