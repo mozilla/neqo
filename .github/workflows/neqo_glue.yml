@@ -1,0 +1,72 @@
+name: neqo_glue
+on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  pull_request:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clippy:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+        with:
+          repository: mozilla/gecko-dev
+          path: gecko-dev
+          sparse-checkout: |
+            netwerk/socket/neqo_glue
+            toolkit/components/glean/api
+            xpcom/rust/nserror
+            xpcom/rust/nsstring
+            xpcom/rust/xpcom
+            modules/libpref/init/static_prefs
+
+      - uses: ./.github/actions/rust
+        with:
+          # components: clippy
+          # tools: cargo-hack
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # - id: nss-version
+      #   run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      # - uses: ./.github/actions/nss
+      #   with:
+      #     minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - run: |
+          {
+            echo '[patch."https://github.com/mozilla/neqo"]'
+            echo 'neqo-http3 = { path = "../../../neqo-http3" }'
+            echo 'neqo-transport = { path = "../../../neqo-transport" }'
+            echo 'neqo-common = { path = "../../../neqo-common" }'
+            echo 'neqo-qpack = { path = "../../../neqo-qpack" }'
+            echo 'neqo-crypto = { path = "../../../neqo-crypto" }'
+          } >> gecko-dev/netwerk/socket/neqo_glue/Cargo.toml
+      - run: cargo hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings
+      - run: cargo doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
