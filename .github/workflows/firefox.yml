@@ -61,7 +61,7 @@ jobs:
 
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
-        run: choco install -y mozillabuild
+        run: choco install -y mozillabuild --version 4.0.2
 
       - name: Install Rust
         uses: ./.github/actions/rust
