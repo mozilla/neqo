@@ -43,6 +43,7 @@ jobs:
             xpcom/rust/nsstring
             xpcom/rust/xpcom
             modules/libpref/init/static_prefs
+            browser/app/nmhproxy
 
       - uses: ./.github/actions/rust
         with:
@@ -67,6 +68,7 @@ jobs:
             echo 'neqo-qpack = { path = "../../../neqo-qpack" }'
             echo 'neqo-crypto = { path = "../../../neqo-crypto" }'
           } >> Cargo.toml
+          cargo check -v
           cargo hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings
           cargo doc --workspace --no-deps --document-private-items
         env:
