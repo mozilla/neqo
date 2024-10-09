@@ -1,5 +1,8 @@
 name: QNS
 on:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review]
