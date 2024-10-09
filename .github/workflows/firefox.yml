@@ -72,7 +72,7 @@ jobs:
 
       - name: Install deps (Windows)
         if: runner.os == 'Windows' && (matrix.flavor != 'browser' || github.event.pull_request.draft == true)
-        run: choco install -y mozillabuild
+        run: choco install -y mozillabuild --version 4.0.2
 
       - name: Install Rust
         if: matrix.flavor != 'browser' || github.event.pull_request.draft == true
