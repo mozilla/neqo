@@ -44,6 +44,7 @@ jobs:
 
     steps:
       - name: Check out Neqo
+        if: matrix.flavor != 'browser' || github.event.pull_request.draft == true
         uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
 
       - name: Maximize build space
@@ -63,22 +64,25 @@ jobs:
           df -h
 
       - name: Check out Firefox
+        if: matrix.flavor != 'browser' || github.event.pull_request.draft == true
         uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           repository: mozilla/gecko-dev
           path: mozilla-unified
 
       - name: Install deps (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (matrix.flavor != 'browser' || github.event.pull_request.draft == true)
         run: choco install -y mozillabuild
 
       - name: Install Rust
+        if: matrix.flavor != 'browser' || github.event.pull_request.draft == true
         uses: ./.github/actions/rust
         with:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Bootstrap Firefox
+        if: matrix.flavor != 'browser' || github.event.pull_request.draft == true
         run: |
           cd mozilla-unified
           {
@@ -94,6 +98,7 @@ jobs:
           ./mach bootstrap --application-choice browser
 
       - name: Plumb in Neqo
+        if: matrix.flavor != 'browser' || github.event.pull_request.draft == true
         run: |
           # Get qlog version used by neqo
           cargo generate-lockfile
