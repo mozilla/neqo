@@ -23,11 +23,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         type: [debug]
-        flavor: [browser, glue]
+        flavor: [glue]
         include:
-          - type: ${{ github.event.pull_request.draft == false && 'release' || '' }}
-        exclude:
-          - flavor: ${{github.event.pull_request.draft == true && 'browser' || ''}}
+          - type: ${{ github.event.pull_request.draft == false && 'release' || 'debug' }}
+          - flavor: ${{github.event.pull_request.draft == false && 'browser' || 'glue'}}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
