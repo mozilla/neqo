@@ -58,6 +58,7 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - run: |
+          cd gecko-dev/netwerk/socket/neqo_glue
           {
             echo '[patch."https://github.com/mozilla/neqo"]'
             echo 'neqo-http3 = { path = "../../../neqo-http3" }'
@@ -65,8 +66,8 @@ jobs:
             echo 'neqo-common = { path = "../../../neqo-common" }'
             echo 'neqo-qpack = { path = "../../../neqo-qpack" }'
             echo 'neqo-crypto = { path = "../../../neqo-crypto" }'
-          } >> gecko-dev/netwerk/socket/neqo_glue/Cargo.toml
-      - run: cargo hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings
-      - run: cargo doc --workspace --no-deps --document-private-items
+          } >> Cargo.toml
+          cargo hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings
+          cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
