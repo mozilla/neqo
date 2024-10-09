@@ -36,14 +36,14 @@ jobs:
         with:
           repository: mozilla/gecko-dev
           path: gecko-dev
-          sparse-checkout: |
-            netwerk/socket/neqo_glue
-            toolkit/components/glean/api
-            xpcom/rust/nserror
-            xpcom/rust/nsstring
-            xpcom/rust/xpcom
-            modules/libpref/init/static_prefs
-            browser/app/nmhproxy
+          # sparse-checkout: |
+          #   netwerk/socket/neqo_glue
+          #   toolkit/components/glean/api
+          #   xpcom/rust/nserror
+          #   xpcom/rust/nsstring
+          #   xpcom/rust/xpcom
+          #   modules/libpref/init/static_prefs
+          #   browser/app/nmhproxy
 
       - uses: ./.github/actions/rust
         with:
