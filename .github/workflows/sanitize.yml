@@ -62,14 +62,16 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            sudo apt-get update
             sudo apt-get install -y --no-install-recommends llvm
             TARGET="x86_64-unknown-linux-gnu"
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             # llvm-symbolizer (as part of llvm) is installed by default on macOS runners
             TARGET="aarch64-apple-darwin"
-            # Suppress leaks from dyld4::RuntimeState on macOS
-            echo "leak:dyld4::RuntimeState" > suppressions.txt
+            # Suppress leaks on macOS. TODO: Check occasionally if these are still needed.
+            {
+              echo "leak:dyld4::RuntimeState"
+              echo "leak:fetchInitializingClassList"
+            } > suppressions.txt
             export LSAN_OPTIONS="suppressions=suppressions.txt"
           fi
           cargo nextest run -Z build-std --features ci --target "$TARGET"
