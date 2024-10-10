@@ -51,6 +51,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
+        sanitizer: []
         include:
           - os: ubuntu-latest
             toolchain: stable
