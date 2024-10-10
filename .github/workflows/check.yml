@@ -53,10 +53,11 @@ jobs:
         type: [debug]
         sanitizer: [null]
         include:
+          # Do one release build on stable, just to check that it works.
           - os: ubuntu-latest
             toolchain: stable
             type: release
-
+          # Add sanitizer builds.
           - os: ubuntu-latest
             toolchain: nightly
             type: debug
@@ -77,6 +78,7 @@ jobs:
             toolchain: nightly
             type: debug
             sanitizer: thread
+          # macOS doesn't support the leak checker yet.
           # - os: macos-latest
           #   toolchain: nightly
           #   type: debug
@@ -145,7 +147,7 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.sanitizer == null && matrix.type == 'debug' && matrix.toolchain == 'stable'
+        if: matrix.type == 'debug' && matrix.toolchain == 'stable'
 
       - name: Run tests with sanitizers
         if: matrix.sanitizer != null
