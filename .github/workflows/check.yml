@@ -111,9 +111,6 @@ jobs:
         env:
           RUST_LOG: trace
         run: |
-          if [ "${{ env.DUMP_SIMULATION_SEEDS }}" ]; then
-            export DUMP_SIMULATION_SEEDS=${{ env.DUMP_SIMULATION_SEEDS }}/sanitizer
-          fi
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             TARGET="x86_64-unknown-linux-gnu"
             SANITIZERS="address thread leak"
@@ -124,6 +121,10 @@ jobs:
           fi
           for sanitizer in $SANITIZERS; do
             echo "Running tests with $sanitizer sanitizer..."
+            # shellcheck disable=SC2078
+            if [ "${{ env.DUMP_SIMULATION_SEEDS }}" ]; then
+              export DUMP_SIMULATION_SEEDS="${{ env.DUMP_SIMULATION_SEEDS }}/sanitizer/$sanitizer"
+            fi
             RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
           done
 
