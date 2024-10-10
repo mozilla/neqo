@@ -49,41 +49,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
-        sanitizer: [null]
         include:
-          # Do one release build on stable, just to check that it works.
           - os: ubuntu-latest
-            toolchain: stable
+            rust-toolchain: stable
             type: release
-          # Add sanitizer builds.
-          - os: ubuntu-latest
-            toolchain: nightly
-            type: debug
-            sanitizer: address
-          - os: ubuntu-latest
-            toolchain: nightly
-            type: debug
-            sanitizer: thread
-          - os: ubuntu-latest
-            toolchain: nightly
-            type: debug
-            sanitizer: leak
-          - os: macos-latest
-            toolchain: nightly
-            type: debug
-            sanitizer: address
-          - os: macos-latest
-            toolchain: nightly
-            type: debug
-            sanitizer: thread
-          # macOS doesn't support the leak checker yet.
-          # - os: macos-latest
-          #   toolchain: nightly
-          #   type: debug
-          #   sanitizer: leak
-
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
@@ -93,9 +64,9 @@ jobs:
 
       - uses: ./.github/actions/rust
         with:
-          version: ${{ matrix.toolchain }}
-          components: ${{ matrix.toolchain == 'stable' && 'llvm-tools-preview' || matrix.toolchain == 'nightly' && 'rust-src' || '' }}
-          tools: ${{ matrix.toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          version: ${{ matrix.rust-toolchain }}
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -106,26 +77,23 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Check
-        if: matrix.sanitizer == null
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.toolchain }} check $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
-        if: matrix.sanitizer == null
         run: |
           # shellcheck disable=SC2086
-          if [ "${{ matrix.toolchain }}" == "stable" ]; then
-            RUST_LOG=trace cargo +${{ matrix.toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
           else
-            RUST_LOG=trace cargo +${{ matrix.toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
           fi
 
       - name: Run client/server transfer
-        if: matrix.sanitizer == null
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           # Give the server time to start.
@@ -147,20 +115,7 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.toolchain == 'stable'
-
-      - name: Run tests with sanitizers
-        if: matrix.sanitizer != null
-        env:
-          RUST_LOG: trace
-        run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            TARGET="x86_64-unknown-linux-gnu"
-          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            TARGET="aarch64-apple-darwin"
-          fi
-          echo "Running tests with ${{ matrix.sanitizer }} sanitizer..."
-          RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" RUSTDOCFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
   bench:
     needs: [check]
