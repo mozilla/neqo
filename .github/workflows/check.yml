@@ -17,6 +17,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -68,12 +69,14 @@ jobs:
           cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
+        env:
+          RUST_LOG: trace
         run: |
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
-            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
           else
-            RUST_LOG=trace cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
           fi
 
       - name: Run client/server transfer
@@ -120,6 +123,17 @@ jobs:
             echo "Running tests with $sanitizer sanitizer..."
             RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
           done
+
+      - name: Print simulation seeds
+        if: env.DUMP_SIMULATION_SEEDS
+        run: ls -1 ${{ env.DUMP_SIMULATION_SEEDS }}
+
+      - name: Save simulation seeds artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: simulation-seeds
+          path: /tmp/simulation-seeds
+          compression-level: 9
 
   bench:
     needs: [check]
