@@ -26,7 +26,6 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-# Keep in sync with .github/workflows/check.yml
 rust-version = "1.76.0"
 
 [workspace.dependencies]
