@@ -61,6 +61,26 @@ jobs:
             toolchain: nightly
             type: debug
             sanitizer: address
+          - os: ubuntu-latest
+            toolchain: nightly
+            type: debug
+            sanitizer: thread
+          - os: ubuntu-latest
+            toolchain: nightly
+            type: debug
+            sanitizer: leak
+          - os: macos-latest
+            toolchain: nightly
+            type: debug
+            sanitizer: address
+          - os: macos-latest
+            toolchain: nightly
+            type: debug
+            sanitizer: thread
+          # - os: macos-latest
+          #   toolchain: nightly
+          #   type: debug
+          #   sanitizer: leak
 
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
@@ -137,8 +157,8 @@ jobs:
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             TARGET="aarch64-apple-darwin"
           fi
-          echo "Running tests with $sanitizer sanitizer..."
-          RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
+          echo "Running tests with ${{ matrix.sanitizer }} sanitizer..."
+          RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" RUSTDOCFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
 
   bench:
     needs: [check]
