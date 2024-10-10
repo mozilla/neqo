@@ -43,7 +43,6 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: nightly
-          # components: llvm-tools-preview
           components: rust-src
           tools: cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
