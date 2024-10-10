@@ -71,6 +71,6 @@ jobs:
             TARGET="aarch64-apple-darwin"
             # Suppress leaks from dyld4::RuntimeState on macOS
             echo "leak:dyld4::RuntimeState" > suppressions.txt
-            export ASAN_OPTIONS="$ASAN_OPTIONS:suppressions=suppressions.txt"
+            export LSAN_OPTIONS="suppressions=suppressions.txt"
           fi
           cargo nextest run -Z build-std --features ci --target "$TARGET"
