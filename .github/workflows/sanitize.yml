@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest] # No Windows support for sanitizers.
         sanitizer: [address, thread, leak]
         exclude:
           # Leak sanitizer is not supported on macOS.
@@ -42,6 +42,7 @@ jobs:
         with:
           version: nightly
           # components: llvm-tools-preview
+          tools: cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
