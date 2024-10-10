@@ -129,6 +129,7 @@ jobs:
         run: ls -1 ${{ env.DUMP_SIMULATION_SEEDS }}
 
       - name: Save simulation seeds artifact
+        if: env.DUMP_SIMULATION_SEEDS
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
