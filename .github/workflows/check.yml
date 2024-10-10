@@ -94,7 +94,7 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.toolchain }}
-          components: ${{ matrix.toolchain == 'stable' && 'llvm-tools-preview' || matrix.toolchain == 'nightly' && 'rust-src' || '' }}
+          components: ${{ matrix.toolchain == 'stable' && 'llvm-tools-preview' || matrix.sanitizer != null && 'rust-src' || '' }}
           tools: ${{ matrix.toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
           token: ${{ secrets.GITHUB_TOKEN }}
 
