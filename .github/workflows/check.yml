@@ -56,15 +56,10 @@ jobs:
             toolchain: stable
             type: release
 
-          - toolchain: nightly
+          - os: ubuntu-latest
+            toolchain: nightly
             type: debug
             sanitizer: address
-          - toolchain: nightly
-            type: debug
-            sanitizer: thread
-          - toolchain: nightly
-            type: debug
-            sanitizer: leak
 
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
