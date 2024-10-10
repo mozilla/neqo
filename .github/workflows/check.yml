@@ -38,6 +38,11 @@ jobs:
           - os: ubuntu-latest
             rust-toolchain: stable
             type: release
+          - os: [ubuntu-latest, macos-latest]
+            rust-toolchain: nightly
+            type: debug
+            sanitizer: [address thread leak]
+
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
@@ -63,11 +68,13 @@ jobs:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
       - name: Check
+        if: matrix.sanitizer == null
         run: |
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
+        if: matrix.sanitizer == null
         run: |
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
@@ -77,6 +84,7 @@ jobs:
           fi
 
       - name: Run client/server transfer
+        if: matrix.sanitizer == null
         run: |
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
@@ -101,25 +109,20 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: matrix.sanitizer == null && matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
       - name: Run tests with sanitizers
-        if: (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest') && matrix.rust-toolchain == 'nightly'
+        if: matrix.sanitizer != null
         env:
           RUST_LOG: trace
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             TARGET="x86_64-unknown-linux-gnu"
-            SANITIZERS="address thread leak"
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             TARGET="aarch64-apple-darwin"
-            # no leak sanitizer support yet
-            SANITIZERS="address thread"
           fi
-          for sanitizer in $SANITIZERS; do
-            echo "Running tests with $sanitizer sanitizer..."
-            RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
-          done
+          echo "Running tests with $sanitizer sanitizer..."
+          RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
 
   bench:
     needs: [check]
