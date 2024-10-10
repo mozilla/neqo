@@ -71,7 +71,7 @@ impl Random {
     pub fn seed_str(&self) -> String {
         // Make sure to print leading zeros.
         format!(
-            "{:08x}{:08x}{:08x}{:08x}",
+            "{:016x}{:016x}{:016x}{:016x}",
             self.state[0], self.state[1], self.state[2], self.state[3],
         )
     }
