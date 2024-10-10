@@ -34,8 +34,8 @@ jobs:
           # Memory and leak sanitizers are not supported on macOS.
           - os: macos-latest
             sanitizer: leak
-          - os: macos-latest
-            sanitizer: memory
+          # - os: macos-latest
+          #   sanitizer: memory
     runs-on: ${{ matrix.os }}
 
     steps:
