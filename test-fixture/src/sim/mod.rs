@@ -15,7 +15,7 @@ use std::{
     cell::RefCell,
     cmp::min,
     fmt::Debug,
-    fs::write,
+    fs::{create_dir_all, write},
     ops::{Deref, DerefMut},
     rc::Rc,
     time::{Duration, Instant},
@@ -160,10 +160,14 @@ impl Simulator {
         // Dump the seed to a file to the directory in the `DUMP_SIMULATION_SEEDS` environment
         // variable, if set.
         if let Ok(dir) = std::env::var("DUMP_SIMULATION_SEEDS") {
-            let seed_str = sim.rng.borrow().seed_str();
-            let path = format!("{dir}/{seed_str}");
-            if write(&path, sim.rng.borrow().seed_str()).is_err() {
-                qerror!("Failed to write seed to {path}");
+            if create_dir_all(&dir).is_err() {
+                qerror!("Failed to create directory {dir}");
+            } else {
+                let seed_str = sim.rng.borrow().seed_str();
+                let path = format!("{dir}/{seed_str}");
+                if write(&path, seed_str).is_err() {
+                    qerror!("Failed to write seed to {path}");
+                }
             }
         }
         sim
