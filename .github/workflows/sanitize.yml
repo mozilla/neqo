@@ -67,11 +67,12 @@ jobs:
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             # llvm-symbolizer (as part of llvm) is installed by default on macOS runners
             TARGET="aarch64-apple-darwin"
-            # Suppress leaks on macOS. TODO: Check occasionally if these are still needed.
+            # Suppress non-neqo leaks on macOS. TODO: Check occasionally if these are still needed.
             {
               echo "leak:dyld4::RuntimeState"
               echo "leak:fetchInitializingClassList"
             } > suppressions.txt
-            export LSAN_OPTIONS="suppressions=suppressions.txt"
+            PWD=$(pwd)
+            export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
           cargo nextest run -Z build-std --features ci --target "$TARGET"
