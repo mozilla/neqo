@@ -231,8 +231,11 @@ impl Args {
 
         // Only use v1 for most QNS tests.
         self.shared.quic_parameters.quic_version = vec![Version::Version1];
+        // This is the default for all tests except http3.
+        self.shared.use_old_http = true;
         match testcase.as_str() {
             "http3" => {
+                self.shared.use_old_http = false;
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
                         qerror!("Unsupported test case: {testcase}");
@@ -242,15 +245,18 @@ impl Args {
                     self.method = String::from("POST");
                 }
             }
-            "handshake" | "transfer" | "retry" | "ecn" => {
-                self.shared.use_old_http = true;
-            }
+            "handshake"
+            | "transfer"
+            | "retry"
+            | "ecn"
+            | "rebind-port"
+            | "rebind-addr"
+            | "connectionmigration" => {}
             "resumption" => {
                 if self.urls.len() < 2 {
                     qerror!("Warning: resumption test won't work without >1 URL");
                     exit(127);
                 }
-                self.shared.use_old_http = true;
                 self.resume = true;
             }
             "zerortt" => {
@@ -258,7 +264,6 @@ impl Args {
                     qerror!("Warning: zerortt test won't work without >1 URL");
                     exit(127);
                 }
-                self.shared.use_old_http = true;
                 self.resume = true;
                 // PMTUD probes inflate what we sent in 1-RTT, causing QNS to fail the test.
                 self.shared.quic_parameters.no_pmtud = true;
@@ -267,22 +272,18 @@ impl Args {
                 self.shared.quic_parameters.no_pacing = true;
             }
             "multiconnect" => {
-                self.shared.use_old_http = true;
                 self.download_in_series = true;
             }
             "chacha20" => {
-                self.shared.use_old_http = true;
                 self.shared.ciphers.clear();
                 self.shared
                     .ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             "keyupdate" => {
-                self.shared.use_old_http = true;
                 self.key_update = true;
             }
             "v2" => {
-                self.shared.use_old_http = true;
                 // Use default version set for this test (which allows compatible vneg.)
                 self.shared.quic_parameters.quic_version.clear();
             }
