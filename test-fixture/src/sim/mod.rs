@@ -165,7 +165,7 @@ impl Simulator {
             } else {
                 let seed_str = sim.rng.borrow().seed_str();
                 let path = format!("{dir}/{seed_str}");
-                if write(&path, seed_str).is_err() {
+                if File::create(&path).is_err() {
                     qerror!("Failed to write seed to {path}");
                 }
             }
