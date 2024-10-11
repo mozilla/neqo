@@ -69,7 +69,6 @@ impl Random {
     /// Get the seed necessary to continue from the current state of the RNG.
     #[must_use]
     pub fn seed_str(&self) -> String {
-        // Make sure to print leading zeros.
         format!(
             "{:016x}{:016x}{:016x}{:016x}",
             self.state[0], self.state[1], self.state[2], self.state[3],
