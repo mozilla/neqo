@@ -128,10 +128,6 @@ jobs:
             RUSTFLAGS="-Z sanitizer=$sanitizer" RUSTDOCFLAGS="-Z sanitizer=$sanitizer" cargo +nightly nextest run -Z build-std --features ci --target "$TARGET"
           done
 
-      - name: Print simulation seeds
-        if: env.DUMP_SIMULATION_SEEDS
-        run: find ${{ env.DUMP_SIMULATION_SEEDS }}
-
       - name: Save simulation seeds artifact
         if: env.DUMP_SIMULATION_SEEDS
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
