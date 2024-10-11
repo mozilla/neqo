@@ -15,8 +15,9 @@ use std::{
     cell::RefCell,
     cmp::min,
     fmt::Debug,
-    fs::{create_dir_all, write},
+    fs::{create_dir_all, File},
     ops::{Deref, DerefMut},
+    path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -164,9 +165,9 @@ impl Simulator {
                 qerror!("Failed to create directory {dir}");
             } else {
                 let seed_str = sim.rng.borrow().seed_str();
-                let path = format!("{dir}/{seed_str}");
+                let path = PathBuf::from(format!("{dir}/{}-{seed_str}", sim.name));
                 if File::create(&path).is_err() {
-                    qerror!("Failed to write seed to {path}");
+                    qerror!("Failed to write seed to {}", path.to_string_lossy());
                 }
             }
         }
