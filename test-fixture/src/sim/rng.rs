@@ -70,7 +70,7 @@ impl Random {
     #[must_use]
     pub fn seed_str(&self) -> String {
         format!(
-            "{:8x}{:8x}{:8x}{:8x}",
+            "{:016x}{:016x}{:016x}{:016x}",
             self.state[0], self.state[1], self.state[2], self.state[3],
         )
     }

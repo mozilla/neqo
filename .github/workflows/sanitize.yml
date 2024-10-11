@@ -11,6 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -76,3 +77,11 @@ jobs:
             export LSAN_OPTIONS="suppressions=$PWD/suppressions.txt"
           fi
           cargo nextest run -Z build-std --features ci --target "$TARGET"
+
+      - name: Save simulation seeds artifact
+        if: env.DUMP_SIMULATION_SEEDS
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: simulation-seeds-${{ matrix.os }}-sanitizer-${{ matrix.sanitizer }}
+          path: ${{ env.DUMP_SIMULATION_SEEDS }}
+          compression-level: 9
