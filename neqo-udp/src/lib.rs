@@ -58,7 +58,7 @@ use std::os::fd::AsFd as SocketRef;
 use std::os::windows::io::AsSocket as SocketRef;
 
 pub fn recv_inner(
-    local_address: &SocketAddr,
+    local_address: SocketAddr,
     state: &UdpSocketState,
     socket: impl SocketRef,
 ) -> Result<Vec<Datagram>, io::Error> {
@@ -99,7 +99,7 @@ pub fn recv_inner(
                 );
                 Datagram::new(
                     meta.addr,
-                    *local_address,
+                    local_address,
                     meta.ecn.map(|n| IpTos::from(n as u8)).unwrap_or_default(),
                     d,
                 )
@@ -138,7 +138,7 @@ impl<S: SocketRef> Socket<S> {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each
     /// set with the provided local address.
-    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    pub fn recv(&self, local_address: SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         recv_inner(local_address, &self.state, &self.inner)
     }
 }
@@ -170,7 +170,7 @@ mod tests {
         );
 
         sender.send(&datagram)?;
-        let res = receiver.recv(&receiver_addr);
+        let res = receiver.recv(receiver_addr);
         assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
 
         Ok(())
@@ -192,7 +192,7 @@ mod tests {
         sender.send(&datagram)?;
 
         let received_datagram = receiver
-            .recv(&receiver_addr)
+            .recv(receiver_addr)
             .expect("receive to succeed")
             .into_iter()
             .next()
@@ -238,7 +238,7 @@ mod tests {
         let mut num_received = 0;
         while num_received < max_gso_segments {
             receiver
-                .recv(&receiver_addr)
+                .recv(receiver_addr)
                 .expect("receive to succeed")
                 .into_iter()
                 .for_each(|d| {
