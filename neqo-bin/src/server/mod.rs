@@ -336,20 +336,27 @@ pub async fn server(mut args: Args) -> Res<()> {
             qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
         }
 
+        // This is the default for all tests except http3.
+        args.shared.use_old_http = true;
         // TODO: More options to deduplicate with client?
         match testcase.as_str() {
-            "http3" => (),
+            "http3" => args.shared.use_old_http = false,
             "zerortt" => {
-                args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
                 args.shared.quic_parameters.max_streams_bidi = 100;
             }
-            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {
-                args.shared.use_old_http = true;
+            "handshake"
+            | "transfer"
+            | "resumption"
+            | "multiconnect"
+            | "v2"
+            | "ecn"
+            | "rebind-port"
+            | "rebind-addr"
+            | "connectionmigration" => {
                 args.shared.alpn = String::from(HQ_INTEROP);
             }
             "chacha20" => {
-                args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
                 args.shared.ciphers.clear();
                 args.shared
@@ -357,7 +364,6 @@ pub async fn server(mut args: Args) -> Res<()> {
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             "retry" => {
-                args.shared.use_old_http = true;
                 args.shared.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
             }
