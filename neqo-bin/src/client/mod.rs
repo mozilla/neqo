@@ -169,6 +169,11 @@ pub struct Args {
     /// Print connection stats after close.
     #[arg(name = "stats", long)]
     stats: bool,
+
+    /// The length of the local connection ID.
+    #[arg(name = "cid-length", short = 'l', long, default_value = "0",
+          value_parser = clap::value_parser!(u8).range(..=20))]
+    cid_len: u8,
 }
 
 impl Args {
@@ -198,6 +203,7 @@ impl Args {
             test: None,
             upload_size: 100,
             stats: false,
+            cid_len: 0,
         }
     }
 
@@ -245,13 +251,13 @@ impl Args {
                     self.method = String::from("POST");
                 }
             }
-            "handshake"
-            | "transfer"
-            | "retry"
-            | "ecn"
-            | "rebind-port"
-            | "rebind-addr"
-            | "connectionmigration" => {}
+            "handshake" | "transfer" | "retry" | "ecn" => {}
+            "rebind-port" | "rebind-addr" | "connectionmigration" => {
+                if self.cid_len == 0 {
+                    qinfo!("Resumption test won't work with a zero-length CID; overwriting to 8");
+                    self.cid_len = 8;
+                }
+            }
             "resumption" => {
                 if self.urls.len() < 2 {
                     qerror!("Warning: resumption test won't work without >1 URL");
