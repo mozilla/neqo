@@ -87,14 +87,14 @@ runs:
 
     - name: Checkout NSS
       if: env.USE_SYSTEM_NSS == '0'
-      uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       with:
         repository: nss-dev/nss
         path: nss
 
     - name: Checkout NSPR
       if: env.USE_SYSTEM_NSS == '0'
-      uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       with:
         repository: nss-dev/nspr
         path: nspr
@@ -111,7 +111,7 @@ runs:
     - name: Cache NSS
       id: cache
       if: env.USE_SYSTEM_NSS == '0' && runner.environment == 'github-hosted'
-      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2 # v4.1.0
+      uses: actions/cache@3624ceb22c1c5a301c8db4169662070a689d9ea8 # v4.1.1
       with:
         path: dist
         key: nss-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
