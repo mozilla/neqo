@@ -22,8 +22,8 @@ use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
-    AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output,
-    StreamId,
+    AppError, CloseReason, Connection, Error as TransportError, Output,
+    RandomConnectionIdGenerator, StreamId,
 };
 use url::Url;
 
@@ -72,7 +72,7 @@ pub fn create_client(
     let mut transport = Connection::new_client(
         hostname,
         &[&args.shared.alpn],
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10))),
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(args.shared.alpn.as_str()),

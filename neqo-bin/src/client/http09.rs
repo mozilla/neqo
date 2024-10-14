@@ -20,7 +20,7 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    CloseReason, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
+    CloseReason, Connection, ConnectionEvent, Error, Output, RandomConnectionIdGenerator, State,
     StreamId, StreamType,
 };
 use url::Url;
@@ -137,7 +137,7 @@ pub fn create_client(
     let mut client = Connection::new_client(
         hostname,
         &[alpn],
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10))),
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(alpn),
