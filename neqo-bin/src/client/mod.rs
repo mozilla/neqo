@@ -254,7 +254,7 @@ impl Args {
             "handshake" | "transfer" | "retry" | "ecn" => {}
             "rebind-port" | "rebind-addr" | "connectionmigration" => {
                 if self.cid_len == 0 {
-                    qinfo!("Resumption test won't work with a zero-length CID; overwriting to 8");
+                    qinfo!("Rebind/migration test won't work with len-0 CID; overwriting to 8");
                     self.cid_len = 8;
                 }
             }
