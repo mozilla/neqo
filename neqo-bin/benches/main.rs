@@ -20,22 +20,18 @@ fn transfer(c: &mut Criterion) {
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
     let done_sender = spawn_server();
-    let mtu = if let Ok(mtu) = env::var("MTU") {
-        format!("/mtu-{}", mtu)
-    } else {
-        "".to_string()
-    };
+    let mtu = env::var("MTU").map_or_else(|_| String::new(), |mtu| format!("/mtu-{mtu}"));
     for Benchmark { name, requests } in [
         Benchmark {
-            name: format!("1-conn/1-100mb-resp{} (aka. Download)", mtu),
+            name: format!("1-conn/1-100mb-resp{mtu} (aka. Download)"),
             requests: vec![100 * 1024 * 1024],
         },
         Benchmark {
-            name: format!("1-conn/10_000-parallel-1b-resp{} (aka. RPS)", mtu),
+            name: format!("1-conn/10_000-parallel-1b-resp{mtu} (aka. RPS)"),
             requests: vec![1; 10_000],
         },
         Benchmark {
-            name: format!("1-conn/1-1b-resp{} (aka. HPS)", mtu),
+            name: format!("1-conn/1-1b-resp{mtu} (aka. HPS)"),
             requests: vec![1; 1],
         },
     ] {
@@ -61,6 +57,7 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
+#[allow(clippy::redundant_pub_crate)] // Bug in clippy nursery? Not sure how this lint could fire here.
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
