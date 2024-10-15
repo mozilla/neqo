@@ -152,13 +152,13 @@ impl Paths {
     }
 
     fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
-        let seqno = retired
-            .borrow()
-            .remote_cid
-            .as_ref()
-            .unwrap()
-            .sequence_number();
-        to_retire.push(seqno);
+        if let Some(cid) = &retired.borrow().remote_cid {
+            if cid.connection_id().len() == 0 {
+                qinfo!("Not retiring zero-len connection ID");
+            } else {
+                to_retire.push(cid.sequence_number());
+            }
+        }
     }
 
     /// Adopt a temporary path as permanent.
