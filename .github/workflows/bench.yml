@@ -89,7 +89,7 @@ jobs:
           taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
           for MTU in 1500 65536; do
             sudo ip link set dev lo mtu "$MTU"
-            nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+            MTU=$MTU nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
           done
 
       # Compare various configurations of neqo against msquic, and gather perf data
