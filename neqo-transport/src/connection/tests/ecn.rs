@@ -143,12 +143,12 @@ fn stats() {
 
     for _ in 0..ECN_TEST_COUNT {
         let ack = send_and_receive(&mut client, &mut server, now);
-        client.process_input(&ack.unwrap(), now);
+        client.process_input(ack.unwrap(), now);
     }
 
     for _ in 0..ECN_TEST_COUNT {
         let ack = send_and_receive(&mut server, &mut client, now);
-        server.process_input(&ack.unwrap(), now);
+        server.process_input(ack.unwrap(), now);
     }
 
     for stats in [client.stats(), server.stats()] {
@@ -194,7 +194,7 @@ fn disables_on_remark() {
 
     for _ in 0..ECN_TEST_COUNT {
         if let Some(ack) = send_with_modifier_and_receive(&mut client, &mut server, now, remark()) {
-            client.process_input(&ack, now);
+            client.process_input(ack, now);
         }
     }
 
@@ -223,21 +223,21 @@ pub fn migration_with_modifiers(
     // Right after the handshake, the ECN validation should still be in progress.
     let client_pkt = send_something(&mut client, now);
     assert_ecn_enabled(client_pkt.tos());
-    server.process_input(&orig_path_modifier(client_pkt).unwrap(), now);
+    server.process_input(orig_path_modifier(client_pkt).unwrap(), now);
 
     // Send some data on the current path.
     for _ in 0..burst {
         let client_pkt = send_something_with_modifier(&mut client, now, orig_path_modifier);
-        server.process_input(&client_pkt, now);
+        server.process_input(client_pkt, now);
     }
 
     if let Some(ack) = server.process_output(now).dgram() {
-        client.process_input(&ack, now);
+        client.process_input(ack, now);
     }
 
     let client_pkt = send_something(&mut client, now);
     let tos_before_migration = client_pkt.tos();
-    server.process_input(&orig_path_modifier(client_pkt).unwrap(), now);
+    server.process_input(orig_path_modifier(client_pkt).unwrap(), now);
 
     client
         .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
@@ -250,7 +250,7 @@ pub fn migration_with_modifiers(
         assert_eq!(client.stats().frame_tx.path_challenge, 1);
         let probe_cid = ConnectionId::from(get_cid(&probe));
 
-        let resp = new_path_modifier(server.process(Some(&probe), now).dgram().unwrap()).unwrap();
+        let resp = new_path_modifier(server.process(Some(probe), now).dgram().unwrap()).unwrap();
         assert_v4_path(&resp, true);
         assert_eq!(server.stats().frame_tx.path_response, 1);
         assert_eq!(server.stats().frame_tx.path_challenge, 1);
@@ -259,13 +259,13 @@ pub fn migration_with_modifiers(
         let client_data = send_something_with_modifier(&mut client, now, orig_path_modifier);
         assert_ne!(get_cid(&client_data), probe_cid);
         assert_v6_path(&client_data, false);
-        server.process_input(&client_data, now);
+        server.process_input(client_data, now);
         let server_data = send_something_with_modifier(&mut server, now, orig_path_modifier);
         assert_v6_path(&server_data, false);
-        client.process_input(&server_data, now);
+        client.process_input(server_data, now);
 
         // Once the client receives the probe response, it migrates to the new path.
-        client.process_input(&resp, now);
+        client.process_input(resp, now);
         assert_eq!(client.stats().frame_rx.path_challenge, 1);
         migrated = true;
 
@@ -276,7 +276,7 @@ pub fn migration_with_modifiers(
         // However, it will probe the old path again, even though it has just
         // received a response to its last probe, because it needs to verify
         // that the migration is genuine.
-        server.process_input(&migrate_client, now);
+        server.process_input(migrate_client, now);
     }
 
     let stream_before = server.stats().frame_tx.stream;
@@ -301,8 +301,8 @@ pub fn migration_with_modifiers(
         assert_eq!(server.stats().frame_tx.stream, stream_before + 1);
 
         // The client receives these checks and responds to the probe, but uses the new path.
-        client.process_input(&migrate_server, now);
-        client.process_input(&probe_old_server, now);
+        client.process_input(migrate_server, now);
+        client.process_input(probe_old_server, now);
         let old_probe_resp = send_something_with_modifier(&mut client, now, new_path_modifier);
         assert_v6_path(&old_probe_resp, true);
         let client_confirmation = client.process_output(now).dgram().unwrap();
@@ -315,17 +315,17 @@ pub fn migration_with_modifiers(
         let server_confirmation =
             send_something_with_modifier(&mut server, now + server_pacing, new_path_modifier);
         assert_v4_path(&server_confirmation, false);
-        client.process_input(&server_confirmation, now);
+        client.process_input(server_confirmation, now);
 
         // Send some data on the new path.
         for _ in 0..burst {
             now += client.process_output(now).callback();
             let client_pkt = send_something_with_modifier(&mut client, now, new_path_modifier);
-            server.process_input(&client_pkt, now);
+            server.process_input(client_pkt, now);
         }
 
         if let Some(ack) = server.process_output(now).dgram() {
-            client.process_input(&ack, now);
+            client.process_input(ack, now);
         }
     }
 
