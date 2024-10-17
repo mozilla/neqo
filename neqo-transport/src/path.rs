@@ -98,48 +98,6 @@ impl Paths {
             })
     }
 
-    /// Find the path, but allow for rebinding.  That matches the pair of addresses
-    /// to paths that match the remote address only based on IP addres, not port.
-    /// We use this when the other side migrates to skip address validation and
-    /// creating a new path.
-    pub fn find_path_with_rebinding(
-        &self,
-        local: SocketAddr,
-        remote: SocketAddr,
-        cc: CongestionControlAlgorithm,
-        pacing: bool,
-        now: Instant,
-    ) -> PathRef {
-        self.paths
-            .iter()
-            .find_map(|p| {
-                if p.borrow().received_on(local, remote, false) {
-                    Some(Rc::clone(p))
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                self.paths.iter().find_map(|p| {
-                    if p.borrow().received_on(local, remote, true) {
-                        Some(Rc::clone(p))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .unwrap_or_else(|| {
-                Rc::new(RefCell::new(Path::temporary(
-                    local,
-                    remote,
-                    cc,
-                    pacing,
-                    self.qlog.clone(),
-                    now,
-                )))
-            })
-    }
-
     /// Get a reference to the primary path, if one exists.
     pub fn primary(&self) -> Option<PathRef> {
         self.primary.clone()
