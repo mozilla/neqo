@@ -457,7 +457,7 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn process_multiple_input(&mut self) -> Res<()> {
         loop {
-            let dgrams = self.socket.recv(&self.local_addr)?;
+            let dgrams = self.socket.recv(self.local_addr)?;
             if dgrams.is_empty() {
                 break;
             }

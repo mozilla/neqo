@@ -55,7 +55,7 @@ impl Socket {
 
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
-    pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+    pub fn recv(&self, local_address: SocketAddr) -> Result<Vec<Datagram>, io::Error> {
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
                 neqo_udp::recv_inner(local_address, &self.state, &self.inner)
