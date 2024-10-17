@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     mem,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
     time::Duration,
 };
@@ -30,9 +30,10 @@ use crate::{
     packet::PacketBuilder,
     path::MAX_PATH_PROBES,
     pmtud::Pmtud,
+    stats::FrameStats,
     tparams::{self, PreferredAddress, TransportParameter},
     CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
-    ConnectionParameters, EmptyConnectionIdGenerator, Error,
+    ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -62,27 +63,179 @@ const fn new_port(a: SocketAddr) -> SocketAddr {
     SocketAddr::new(a.ip(), port)
 }
 
+fn new_address_and_port(a: SocketAddr) -> SocketAddr {
+    let ip = match a.ip() {
+        IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from(ip.octets().map(|b| b.overflowing_add(11).0))),
+        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from(ip.octets().map(|b| b.overflowing_add(11).0))),
+    };
+    SocketAddr::new(ip, new_port(a).port())
+}
+
 fn change_source_port(d: &Datagram) -> Datagram {
     Datagram::new(new_port(d.source()), d.destination(), d.tos(), &d[..])
 }
 
-#[test]
-fn rebinding_port() {
+fn change_source_ip_and_port(d: &Datagram) -> Datagram {
+    Datagram::new(
+        new_address_and_port(d.source()),
+        d.destination(),
+        d.tos(),
+        &d[..],
+    )
+}
+
+fn assert_path_challenge(
+    c: &Connection,
+    d: &Datagram,
+    before: &FrameStats,
+    mod_saddr: fn(SocketAddr) -> SocketAddr,
+    padded: bool,
+) {
+    let after = c.stats().frame_tx;
+    assert_eq!(after.path_challenge, before.path_challenge + 1);
+    assert_eq!(d.source(), DEFAULT_ADDR);
+    assert_eq!(d.destination(), mod_saddr(DEFAULT_ADDR));
+    if padded {
+        assert!(d.len() >= MIN_INITIAL_PACKET_SIZE);
+    } else {
+        assert!(d.len() < MIN_INITIAL_PACKET_SIZE);
+    }
+}
+
+const fn id(a: SocketAddr) -> SocketAddr {
+    a
+}
+
+fn assert_path_response(c: &Connection, d: &Datagram, before: &FrameStats) {
+    let after = c.stats().frame_tx;
+    assert_eq!(after.path_response, before.path_response + 1);
+    assert_eq!(d.source(), DEFAULT_ADDR);
+    assert_eq!(d.destination(), DEFAULT_ADDR);
+}
+
+fn rebind(to_new_path: fn(&Datagram) -> Datagram, to_new_saddr: fn(SocketAddr) -> SocketAddr) {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
     let dgram = send_something(&mut client, now());
-    let dgram = change_source_port(&dgram);
+    let orig_saddr = dgram.source();
+    let dgram = to_new_path(&dgram);
 
-    server.process_input(&dgram, now());
-    // Have the server send something so that it generates a packet.
-    let stream_id = server.stream_create(StreamType::UniDi).unwrap();
-    server.stream_close_send(stream_id).unwrap();
+    // Server will reply to modified datagram with a PATH_CHALLENGE.
+    // Due to the amplification limit, this will not be padded to MIN_INITIAL_PACKET_SIZE.
+    let before = server.stats().frame_tx;
+    let dgram = server.process(Some(&dgram), now()).dgram().unwrap();
+    assert_path_challenge(&server, &dgram, &before, to_new_saddr, false);
+
+    // Restore the original source address, so to the client it looks like the path has not changed.
+    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
+
+    // The client should respond to the PATH_CHALLENGE, without changing paths.
+    let before = client.stats().frame_tx;
+    let dgram = client.process(Some(&dgram), now()).dgram().unwrap();
+    assert_path_response(&client, &dgram, &before);
+
+    // The server should now see the response on the new path.
+    // It will send another PATH_CHALLENGE padded to MIN_INITIAL_PACKET_SIZE.
+    let dgram = to_new_path(&dgram);
+    let before = server.stats().frame_tx;
+    let dgram = server.process(Some(&dgram), now()).dgram().unwrap();
+    assert_path_challenge(&server, &dgram, &before, to_new_saddr, true);
+
+    // Restore the original source address, so to the client it looks like the path has not changed.
+    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
+
+    // The client should respond to the PATH_CHALLENGE, without changing paths.
+    let before = client.stats().frame_tx;
+    let dgram = client.process(Some(&dgram), now()).dgram().unwrap();
+    assert_path_response(&client, &dgram, &before);
+
+    // The server should now see the second response on the new path.
+    // It will then try to probe the old path.
+    let dgram = to_new_path(&dgram);
+    let before = server.stats().frame_tx;
+    let dgram = server.process(Some(&dgram), now()).dgram().unwrap();
+    assert_path_challenge(&server, &dgram, &before, id, true);
+
+    // Do not deliver this probe to the client.
+
+    // Server will now ACK on the new path.
+    let before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let dgram = dgram.unwrap();
+    let after = server.stats().frame_tx;
+    assert_eq!(after.ack, before.ack + 1);
     assert_eq!(dgram.source(), DEFAULT_ADDR);
-    assert_eq!(dgram.destination(), new_port(DEFAULT_ADDR));
+    assert_eq!(dgram.destination(), to_new_saddr(DEFAULT_ADDR));
+
+    // Restore the original source address, so to the client it looks like the path has not changed.
+    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
+
+    // The client should process the ACK and go idle.
+    let delay = client.process(Some(&dgram), now()).callback();
+    assert_eq!(delay, ConnectionParameters::default().get_idle_timeout());
+
+    // The server will probe the old path.
+    let mut now = now();
+    let dgram = loop {
+        let before = server.stats().frame_tx;
+        match server.process_output(now) {
+            Output::Callback(t) => {
+                now += t;
+            }
+            Output::Datagram(d) => match d.destination() {
+                a if a == DEFAULT_ADDR => {
+                    // Old path gets probes.
+                    assert_path_challenge(&server, &d, &before, id, true);
+                }
+                a if a == to_new_saddr(DEFAULT_ADDR) => {
+                    // Quit loop when path old path retired.
+                    let after = server.stats().frame_tx;
+                    if after.retire_connection_id == before.retire_connection_id + 1 {
+                        break d;
+                    }
+                    // Otherwise confirm this is a PING on the new path.
+                    assert_eq!(after.ping, before.ping + 1);
+                }
+                _ => panic!(),
+            },
+            Output::None => panic!(),
+        }
+    };
+
+    // Restore the original source address, so to the client it looks like the path has not changed.
+    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
+
+    // The client should now act on the RETIRE_CONNECTION_ID and respond with a NEW_CONNECTION_ID.
+    let before = client.stats().frame_tx;
+    let dgram = client.process(Some(&dgram), now).dgram().unwrap();
+    let after = client.stats().frame_tx;
+    assert_eq!(after.new_connection_id, before.new_connection_id + 1);
+
+    // Server ACKs.
+    let dgram = to_new_path(&dgram);
+    let before = server.stats().frame_tx;
+    let dgram = server.process(Some(&dgram), now).dgram().unwrap();
+    let after = server.stats().frame_tx;
+    assert_eq!(after.ack, before.ack + 1);
+
+    // Restore the original source address, so to the client it looks like the path has not changed.
+    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
+
+    // The client should process the ACK and go idle.
+    let delay = client.process(Some(&dgram), now).callback();
+    assert_eq!(delay, ConnectionParameters::default().get_idle_timeout());
+}
+
+#[test]
+fn rebinding_port() {
+    rebind(change_source_port, new_port);
+}
+
+#[test]
+fn rebinding_address_and_port() {
+    rebind(change_source_ip_and_port, new_address_and_port);
 }
 
 /// This simulates an attack where a valid packet is forwarded on
