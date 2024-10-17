@@ -7,6 +7,7 @@
 use std::{io, net::SocketAddr};
 
 use neqo_common::Datagram;
+use neqo_transport::RECV_BUFFER_SIZE;
 
 /// Ideally this would live in [`neqo-udp`]. [`neqo-udp`] is used in Firefox.
 ///
@@ -56,10 +57,12 @@ impl Socket {
     /// Receive a batch of [`Datagram`]s on the given [`Socket`], each set with
     /// the provided local address.
     pub fn recv(&self, local_address: &SocketAddr) -> Result<Vec<Datagram>, io::Error> {
+        let mut recv_buf = vec![0; RECV_BUFFER_SIZE];
         self.inner
             .try_io(tokio::io::Interest::READABLE, || {
-                neqo_udp::recv_inner(local_address, &self.state, &self.inner)
+                neqo_udp::recv_inner(local_address, &self.state, &self.inner, &mut recv_buf)
             })
+            .map(|dgrams| dgrams.map(|d| d.to_owned()).collect())
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::WouldBlock {
                     Ok(vec![])
