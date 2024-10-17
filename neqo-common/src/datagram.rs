@@ -9,23 +9,14 @@ use std::{net::SocketAddr, ops::Deref};
 use crate::{hex_with_len, IpTos};
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Datagram {
+pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
     tos: IpTos,
-    d: Vec<u8>,
+    d: D,
 }
 
-impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
-        Self {
-            src,
-            dst,
-            tos,
-            d: d.into(),
-        }
-    }
-
+impl<D> Datagram<D> {
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
         self.src
@@ -46,6 +37,27 @@ impl Datagram {
     }
 }
 
+impl Datagram<Vec<u8>> {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: V) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            d: d.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn borrow(&self) -> Datagram<&[u8]> {
+        Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d: self.d.as_ref(),
+        }
+    }
+}
+
 impl Deref for Datagram {
     type Target = Vec<u8>;
     #[must_use]
@@ -54,7 +66,7 @@ impl Deref for Datagram {
     }
 }
 
-impl std::fmt::Debug for Datagram {
+impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -64,6 +76,43 @@ impl std::fmt::Debug for Datagram {
             self.dst,
             hex_with_len(&self.d)
         )
+    }
+}
+
+impl Deref for Datagram<&[u8]> {
+    type Target = [u8];
+    #[must_use]
+    fn deref(&self) -> &Self::Target {
+        self.d
+    }
+}
+
+impl<'a> Datagram<&'a [u8]> {
+    #[must_use]
+    pub const fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a [u8]) -> Self {
+        Self { src, dst, tos, d }
+    }
+
+    #[must_use]
+    pub fn to_owned(&self) -> Datagram {
+        Datagram {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            d: self.d.to_vec(),
+        }
+    }
+}
+
+impl<'a> From<&'a Datagram> for Datagram<&'a [u8]> {
+    fn from(value: &'a Datagram) -> Self {
+        value.borrow()
+    }
+}
+
+impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
+    fn as_ref(&self) -> &[u8] {
+        self.d.as_ref()
     }
 }
 
