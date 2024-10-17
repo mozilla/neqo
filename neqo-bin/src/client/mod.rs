@@ -493,6 +493,14 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     .map_err(Error::QlogError)
 }
 
+const fn unspecified_addr(addr: &SocketAddr) -> SocketAddr {
+    match addr {
+        SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+        SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 pub async fn client(mut args: Args) -> Res<()> {
     neqo_common::log::init(
         args.shared
@@ -529,23 +537,18 @@ pub async fn client(mut args: Args) -> Res<()> {
             exit(127);
         }
 
-        let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
+        let mut remote_addrs = format!("{host}:{port}").to_socket_addrs()?.filter(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
                 (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
             )
         });
+        let remote_addr = remote_addrs.next();
         let Some(remote_addr) = remote_addr else {
             qerror!("No compatible address found for: {host}");
             exit(1);
         };
-
-        let local_addr = match remote_addr {
-            SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
-            SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
-        };
-
-        let mut socket = crate::udp::Socket::bind(local_addr)?;
+        let mut socket = crate::udp::Socket::bind(unspecified_addr(&remote_addr))?;
         let real_local = socket.local_addr().unwrap();
         qinfo!(
             "{} Client connecting: {:?} -> {:?}",
@@ -553,6 +556,18 @@ pub async fn client(mut args: Args) -> Res<()> {
             real_local,
             remote_addr,
         );
+
+        let migration = if args.shared.qns_test == Some("connectionmigration".to_owned()) {
+            remote_addrs.next().map_or_else(
+                || {
+                    qerror!("No migration address found for {host}");
+                    exit(127);
+                },
+                |migration_addr| Some((real_local.port(), migration_addr)),
+            )
+        } else {
+            None
+        };
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
@@ -571,7 +586,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     http09::create_client(&args, real_local, remote_addr, &hostname, token)
                         .expect("failed to create client");
 
-                let handler = http09::Handler::new(to_request, &args);
+                let handler = http09::Handler::new(to_request, &args, migration.as_ref());
 
                 Runner {
                     args: &args,

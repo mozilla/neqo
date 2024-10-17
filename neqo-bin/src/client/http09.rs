@@ -26,7 +26,7 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::STREAM_IO_BUFFER_SIZE;
+use crate::{client::unspecified_addr, STREAM_IO_BUFFER_SIZE};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -37,6 +37,7 @@ pub struct Handler<'a> {
     token: Option<ResumptionToken>,
     needs_key_update: bool,
     read_buffer: Vec<u8>,
+    migration: Option<&'a (u16, SocketAddr)>,
 }
 
 impl Handler<'_> {
@@ -86,10 +87,33 @@ impl super::Handler for Handler<'_> {
                     }
                 }
                 ConnectionEvent::StateChange(
-                    State::WaitInitial | State::Handshaking | State::Connected,
+                    State::WaitInitial | State::Handshaking | State::Connected | State::Confirmed,
                 ) => {
                     qdebug!("{event:?}");
                     self.download_urls(client);
+                    if event == ConnectionEvent::StateChange(State::Confirmed) {
+                        if let Some((local_port, migration_addr)) = &self.migration {
+                            let mut local_addr = unspecified_addr(migration_addr);
+                            local_addr.set_port(*local_port);
+                            qdebug!("Migrating path to {:?} -> {:?}", local_addr, migration_addr);
+                            client
+                                .migrate(
+                                    Some(local_addr),
+                                    Some(*migration_addr),
+                                    false,
+                                    Instant::now(),
+                                )
+                                .map(|()| {
+                                    qinfo!(
+                                        "Connection migrated to {:?} -> {:?}",
+                                        local_addr,
+                                        migration_addr
+                                    );
+                                    // Don't do another migration.
+                                    self.migration = None;
+                                })?;
+                        }
+                    }
                 }
                 ConnectionEvent::ZeroRttRejected => {
                     qdebug!("{event:?}");
@@ -211,7 +235,11 @@ impl super::Client for Connection {
 }
 
 impl<'b> Handler<'b> {
-    pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
+    pub fn new(
+        url_queue: VecDeque<Url>,
+        args: &'b Args,
+        migration: Option<&'b (u16, SocketAddr)>,
+    ) -> Self {
         Self {
             streams: HashMap::new(),
             url_queue,
@@ -221,6 +249,7 @@ impl<'b> Handler<'b> {
             token: None,
             needs_key_update: args.key_update,
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
+            migration,
         }
     }
 
