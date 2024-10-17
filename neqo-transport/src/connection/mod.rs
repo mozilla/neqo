@@ -1022,14 +1022,14 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: &Datagram, now: Instant) {
-        self.process_multiple_input(iter::once(d), now);
+    pub fn process_input<'a>(&mut self, d: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+        self.process_multiple_input(iter::once(d.into()), now);
     }
 
     /// Process new input datagrams on the connection.
     pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
-        I: IntoIterator<Item = &'a Datagram>,
+        I: IntoIterator<Item = Datagram<&'a [u8]>>,
     {
         let mut dgrams = dgrams.into_iter().peekable();
         if dgrams.peek().is_none() {
@@ -1241,7 +1241,7 @@ impl Connection {
         }
     }
 
-    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram) -> bool {
+    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram<&[u8]>) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
@@ -1254,7 +1254,7 @@ impl Connection {
     fn check_stateless_reset(
         &mut self,
         path: &PathRef,
-        d: &Datagram,
+        d: &Datagram<&[u8]>,
         first: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1280,23 +1280,29 @@ impl Connection {
             debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(&saved.d, saved.t, now);
+                self.input(saved.d.borrow(), saved.t, now);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    fn save_datagram(&mut self, cspace: CryptoSpace, d: &Datagram, remaining: usize, now: Instant) {
+    fn save_datagram(
+        &mut self,
+        cspace: CryptoSpace,
+        d: &Datagram<&[u8]>,
+        remaining: usize,
+        now: Instant,
+    ) {
         let d = if remaining < d.len() {
             Datagram::new(
                 d.source(),
                 d.destination(),
                 d.tos(),
-                &d[d.len() - remaining..],
+                d[d.len() - remaining..].to_vec(),
             )
         } else {
-            d.clone()
+            d.to_owned()
         };
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
@@ -1498,7 +1504,7 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        d: &Datagram,
+        d: &Datagram<&[u8]>,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
@@ -1530,7 +1536,9 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: &Datagram, received: Instant, now: Instant) {
+    fn input<'a>(&mut self, d: impl Into<Datagram<&'a [u8]>>, received: Instant, now: Instant) {
+        let d = d.into();
+
         // First determine the path.
         let path = self.paths.find_path_with_rebinding(
             d.destination(),
@@ -1540,15 +1548,15 @@ impl Connection {
             now,
         );
         path.borrow_mut().add_received(d.len());
-        let res = self.input_path(&path, d, received);
+        let res = self.input_path(&path, &d, received);
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
-    fn input_path(&mut self, path: &PathRef, d: &Datagram, now: Instant) -> Res<()> {
+    fn input_path(&mut self, path: &PathRef, d: &Datagram<&[u8]>, now: Instant) -> Res<()> {
         let mut slc = &d[..];
         let mut dcid = None;
 
-        qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
+        qtrace!([self], "{} input {}", path.borrow(), hex(d));
         let pto = path.borrow().rtt().pto(self.confirmed());
 
         // Handle each packet in the datagram.
@@ -1958,7 +1966,13 @@ impl Connection {
         Ok(())
     }
 
-    fn handle_migration(&mut self, path: &PathRef, d: &Datagram, migrate: bool, now: Instant) {
+    fn handle_migration(
+        &mut self,
+        path: &PathRef,
+        d: &Datagram<&[u8]>,
+        migrate: bool,
+        now: Instant,
+    ) {
         if !migrate {
             return;
         }

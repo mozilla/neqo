@@ -873,13 +873,13 @@ impl Http3Client {
     /// packets need to be sent or if a timer needs to be updated.
     ///
     /// [1]: ../neqo_transport/enum.ConnectionEvent.html
-    pub fn process_input(&mut self, dgram: &Datagram, now: Instant) {
-        self.process_multiple_input(iter::once(dgram), now);
+    pub fn process_input<'a>(&mut self, dgram: impl Into<Datagram<&'a [u8]>>, now: Instant) {
+        self.process_multiple_input(iter::once(dgram.into()), now);
     }
 
     pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
-        I: IntoIterator<Item = &'a Datagram>,
+        I: IntoIterator<Item = Datagram<&'a [u8]>>,
     {
         let mut dgrams = dgrams.into_iter().peekable();
         qtrace!([self], "Process multiple datagrams");
