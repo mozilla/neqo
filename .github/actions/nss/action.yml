@@ -120,7 +120,7 @@ runs:
       if: env.USE_SYSTEM_NSS == '0'
       shell: bash
       run: |
-        if [ "${{ runner.environment }}" != "github-hosted" ] || [ "${{ steps.cache.outputs.cache-hit }}" == "false" ]; then
+        if [ "${{ runner.environment }}" != "github-hosted" ] || [ "${{ steps.cache.outputs.cache-hit }}" == "" ]; then
           echo "Building NSS from source"
           echo "BUILD_NSS=1" >> "$GITHUB_ENV"
         else
