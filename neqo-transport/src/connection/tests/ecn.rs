@@ -14,9 +14,10 @@ use test_fixture::{
 
 use crate::{
     connection::tests::{
-        connect_force_idle, connect_force_idle_with_modifier, default_client, default_server,
-        handshake_with_modifier, migration::get_cid, new_client, new_server, send_and_receive,
-        send_something, send_something_with_modifier, send_with_modifier_and_receive, DEFAULT_RTT,
+        assert_path_challenge_min_len, connect_force_idle, connect_force_idle_with_modifier,
+        default_client, default_server, handshake_with_modifier, migration::get_cid, new_client,
+        new_server, send_and_receive, send_something, send_something_with_modifier,
+        send_with_modifier_and_receive, DEFAULT_RTT,
     },
     ecn::ECN_TEST_COUNT,
     path::MAX_PATH_PROBES,
@@ -120,6 +121,7 @@ fn migration_delay_to_ecn_blackhole() {
                     // This should be a PATH_CHALLENGE.
                     probes += 1;
                     assert_eq!(client.stats().frame_tx.path_challenge, probes);
+                    assert_path_challenge_min_len(&client, &d, now);
                     if probes <= MAX_PATH_PROBES {
                         // The first probes should be sent with ECN.
                         assert_ecn_enabled(d.tos());
@@ -247,6 +249,7 @@ pub fn migration_with_modifiers(
     let probe = new_path_modifier(client.process_output(now).dgram().unwrap());
     if let Some(probe) = probe {
         assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
+        assert_path_challenge_min_len(&client, &probe, now);
         assert_eq!(client.stats().frame_tx.path_challenge, 1);
         let probe_cid = ConnectionId::from(get_cid(&probe));
 
@@ -254,6 +257,7 @@ pub fn migration_with_modifiers(
         assert_v4_path(&resp, true);
         assert_eq!(server.stats().frame_tx.path_response, 1);
         assert_eq!(server.stats().frame_tx.path_challenge, 1);
+        assert_path_challenge_min_len(&server, &resp, now);
 
         // Data continues to be exchanged on the old path.
         let client_data = send_something_with_modifier(&mut client, now, orig_path_modifier);
@@ -287,6 +291,10 @@ pub fn migration_with_modifiers(
         server.stats().frame_tx.path_challenge,
         if migrated { 2 } else { 0 }
     );
+    if migrated {
+        assert_path_challenge_min_len(&server, &probe_old_server, now);
+    }
+
     assert_eq!(
         server.stats().frame_tx.stream,
         if migrated { stream_before } else { 1 }
