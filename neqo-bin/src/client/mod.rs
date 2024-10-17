@@ -376,7 +376,7 @@ trait Client {
     fn process_output(&mut self, now: Instant) -> Output;
     fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
-        I: IntoIterator<Item = &'a Datagram>;
+        I: IntoIterator<Item = Datagram<&'a [u8]>>;
     fn has_events(&self) -> bool;
     fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
@@ -462,7 +462,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 break;
             }
             self.client
-                .process_multiple_input(dgrams.iter(), Instant::now());
+                .process_multiple_input(dgrams.iter().map(Datagram::borrow), Instant::now());
             self.process_output().await?;
         }
 

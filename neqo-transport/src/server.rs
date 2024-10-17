@@ -430,7 +430,7 @@ impl Server {
         let mut callback = None;
 
         for connection in &mut self.connections {
-            match connection.borrow_mut().process(None, now) {
+            match connection.borrow_mut().process(None::<&Datagram>, now) {
                 Output::None => {}
                 d @ Output::Datagram(_) => return d,
                 Output::Callback(next) => match callback {
