@@ -134,7 +134,7 @@ impl super::Client for Http3Client {
 
     fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
     where
-        I: IntoIterator<Item = &'a Datagram>,
+        I: IntoIterator<Item = Datagram<&'a [u8]>>,
     {
         self.process_multiple_input(dgrams, now);
     }
