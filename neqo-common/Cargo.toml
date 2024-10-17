@@ -18,7 +18,7 @@ workspace = true
 [dependencies]
 # Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
 enum-map = { version = "2.7", default-features = false }
-env_logger = { version = "0.10", default-features = false }
+env_logger = { version = "0.11", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
