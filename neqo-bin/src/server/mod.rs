@@ -289,7 +289,7 @@ impl ServerRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgrams = socket.recv(host)?;
+                    let dgrams = socket.recv(*host)?;
                     if dgrams.is_empty() {
                         break;
                     }
