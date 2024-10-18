@@ -152,13 +152,14 @@ impl Paths {
     }
 
     fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
-        let seqno = retired
-            .borrow()
-            .remote_cid
-            .as_ref()
-            .unwrap()
-            .sequence_number();
-        to_retire.push(seqno);
+        if let Some(cid) = &retired.borrow().remote_cid {
+            let seqno = cid.sequence_number();
+            if cid.connection_id().len() == 0 {
+                qdebug!("Connection ID {seqno} is zero-length, not retiring");
+            } else {
+                to_retire.push(seqno);
+            }
+        }
     }
 
     /// Adopt a temporary path as permanent.
@@ -389,7 +390,15 @@ impl Paths {
 
         self.paths.retain(|p| {
             let current = p.borrow().remote_cid.as_ref().unwrap().sequence_number();
-            if current < retire_prior {
+            if current < retire_prior
+                && p.borrow()
+                    .remote_cid
+                    .as_ref()
+                    .unwrap()
+                    .connection_id()
+                    .len()
+                    != 0
+            {
                 to_retire.push(current);
                 let new_cid = store.next();
                 let has_replacement = new_cid.is_some();

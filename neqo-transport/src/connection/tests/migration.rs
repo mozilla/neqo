@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{Datagram, Decoder};
+use neqo_common::{qdebug, Datagram, Decoder};
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
@@ -21,7 +21,8 @@ use test_fixture::{
 use super::{
     super::{Connection, Output, State, StreamType},
     connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something, CountingConnectionIdGenerator,
+    maybe_authenticate, new_client, new_server, send_something, zero_len_cid_client,
+    CountingConnectionIdGenerator,
 };
 use crate::{
     cid::LOCAL_ACTIVE_CID_LIMIT,
@@ -113,12 +114,15 @@ fn assert_path_response(c: &Connection, d: &Datagram, before: &FrameStats) {
     assert_eq!(d.destination(), DEFAULT_ADDR);
 }
 
-fn rebind(to_new_path: fn(&Datagram) -> Datagram, to_new_saddr: fn(SocketAddr) -> SocketAddr) {
-    let mut client = default_client();
+fn rebind(
+    client: &mut Connection,
+    to_new_path: fn(&Datagram) -> Datagram,
+    to_new_saddr: fn(SocketAddr) -> SocketAddr,
+) {
     let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
+    connect_force_idle(client, &mut server);
 
-    let dgram = send_something(&mut client, now());
+    let dgram = send_something(client, now());
     let orig_saddr = dgram.source();
     let dgram = to_new_path(&dgram);
 
@@ -134,7 +138,7 @@ fn rebind(to_new_path: fn(&Datagram) -> Datagram, to_new_saddr: fn(SocketAddr) -
     // The client should respond to the PATH_CHALLENGE, without changing paths.
     let before = client.stats().frame_tx;
     let dgram = client.process(Some(&dgram), now()).dgram().unwrap();
-    assert_path_response(&client, &dgram, &before);
+    assert_path_response(client, &dgram, &before);
 
     // The server should now see the response on the new path.
     // It will send another PATH_CHALLENGE padded to MIN_INITIAL_PACKET_SIZE.
@@ -149,7 +153,7 @@ fn rebind(to_new_path: fn(&Datagram) -> Datagram, to_new_saddr: fn(SocketAddr) -
     // The client should respond to the PATH_CHALLENGE, without changing paths.
     let before = client.stats().frame_tx;
     let dgram = client.process(Some(&dgram), now()).dgram().unwrap();
-    assert_path_response(&client, &dgram, &before);
+    assert_path_response(client, &dgram, &before);
 
     // The server should now see the second response on the new path.
     // It will then try to probe the old path.
@@ -176,66 +180,107 @@ fn rebind(to_new_path: fn(&Datagram) -> Datagram, to_new_saddr: fn(SocketAddr) -
     let delay = client.process(Some(&dgram), now()).callback();
     assert_eq!(delay, ConnectionParameters::default().get_idle_timeout());
 
-    // The server will probe the old path.
+    let client_uses_zero_len_cid = client
+        .paths
+        .primary()
+        .unwrap()
+        .borrow()
+        .local_cid()
+        .unwrap()
+        .len()
+        == 0;
     let mut now = now();
-    let dgram = loop {
+    let mut total_delay = Duration::new(0, 0);
+    qdebug!("XXXXXXXXX");
+    loop {
         let before = server.stats().frame_tx;
         match server.process_output(now) {
             Output::Callback(t) => {
                 now += t;
+                total_delay += t;
+                if total_delay == ConnectionParameters::default().get_idle_timeout() {
+                    // Server should only hit the idle timeout here when the client uses a zero-len
+                    // CID.
+                    assert!(client_uses_zero_len_cid);
+                    break;
+                }
             }
-            Output::Datagram(d) => match d.destination() {
-                a if a == DEFAULT_ADDR => {
-                    // Old path gets probes.
-                    assert_path_challenge(&server, &d, &before, id, true);
-                }
-                a if a == to_new_saddr(DEFAULT_ADDR) => {
-                    // Quit loop when path old path retired.
-                    let after = server.stats().frame_tx;
-                    if after.retire_connection_id == before.retire_connection_id + 1 {
-                        break d;
+            Output::Datagram(d) => {
+                total_delay = Duration::new(0, 0);
+                match d.destination() {
+                    a if a == DEFAULT_ADDR => {
+                        // Old path gets path challenges.
+                        assert_path_challenge(&server, &d, &before, id, true);
+                        // Don't deliver them.
                     }
-                    // Otherwise confirm this is a PING on the new path.
-                    assert_eq!(after.ping, before.ping + 1);
+                    a if a == to_new_saddr(DEFAULT_ADDR) => {
+                        let after = server.stats().frame_tx;
+                        // If the client uses a zero-len CID, the server will only PING.
+                        // Otherwise, it will PING or send a RETIRE_CONNECTION_ID.
+                        if client_uses_zero_len_cid {
+                            assert_eq!(after.ping, before.ping + 1);
+                        } else {
+                            assert!(
+                                after.retire_connection_id == before.retire_connection_id + 1
+                                    || after.ping == before.ping + 1
+                            );
+                        }
+                        let d = Datagram::new(d.source(), orig_saddr, d.tos(), &d[..]);
+                        // Restore the original source address, so to the client it looks like the
+                        // path has not changed.
+                        let d = Datagram::new(d.source(), orig_saddr, d.tos(), &d[..]);
+                        let before = client.stats().frame_tx;
+                        let ack = client.process(Some(&d), now).dgram().unwrap();
+                        let after = client.stats().frame_tx;
+                        assert_eq!(after.ack, before.ack + 1);
+                        // Also deliver the ACK.
+                        let ack = to_new_path(&ack);
+                        server.process_input(&ack, now);
+                        if !client_uses_zero_len_cid
+                            && after.new_connection_id == before.new_connection_id + 1
+                        {
+                            // Declare victory once the client has sent a new connection ID.
+                            break;
+                        }
+                    }
+                    _ => panic!(),
                 }
-                _ => panic!(),
-            },
+            }
             Output::None => panic!(),
         }
-    };
-
-    // Restore the original source address, so to the client it looks like the path has not changed.
-    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
-
-    // The client should now act on the RETIRE_CONNECTION_ID and respond with a NEW_CONNECTION_ID.
-    let before = client.stats().frame_tx;
-    let dgram = client.process(Some(&dgram), now).dgram().unwrap();
-    let after = client.stats().frame_tx;
-    assert_eq!(after.new_connection_id, before.new_connection_id + 1);
-
-    // Server ACKs.
-    let dgram = to_new_path(&dgram);
-    let before = server.stats().frame_tx;
-    let dgram = server.process(Some(&dgram), now).dgram().unwrap();
-    let after = server.stats().frame_tx;
-    assert_eq!(after.ack, before.ack + 1);
-
-    // Restore the original source address, so to the client it looks like the path has not changed.
-    let dgram = Datagram::new(dgram.source(), orig_saddr, dgram.tos(), &dgram[..]);
-
-    // The client should process the ACK and go idle.
-    let delay = client.process(Some(&dgram), now).callback();
-    assert_eq!(delay, ConnectionParameters::default().get_idle_timeout());
+    }
 }
 
 #[test]
 fn rebinding_port() {
-    rebind(change_source_port, new_port);
+    rebind(&mut default_client(), change_source_port, new_port);
+}
+
+#[test]
+fn rebinding_port_zero_len_cid() {
+    rebind(
+        &mut zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR),
+        change_source_port,
+        new_port,
+    );
 }
 
 #[test]
 fn rebinding_address_and_port() {
-    rebind(change_source_ip_and_port, new_address_and_port);
+    rebind(
+        &mut default_client(),
+        change_source_ip_and_port,
+        new_address_and_port,
+    );
+}
+
+#[test]
+fn rebinding_address_and_port_zero_len_cid() {
+    rebind(
+        &mut zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR),
+        change_source_ip_and_port,
+        new_address_and_port,
+    );
 }
 
 /// This simulates an attack where a valid packet is forwarded on
@@ -601,16 +646,7 @@ fn migration_graceful() {
 #[test]
 fn migration_client_empty_cid() {
     fixture_init();
-    let client = Connection::new_client(
-        test_fixture::DEFAULT_SERVER_NAME,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
-        ConnectionParameters::default(),
-        now(),
-    )
-    .unwrap();
+    let client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
     migration(client);
 }
 
@@ -659,16 +695,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
 
     fixture_init();
     let (log, _contents) = new_neqo_qlog();
-    let mut client = Connection::new_client(
-        test_fixture::DEFAULT_SERVER_NAME,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        hs_client,
-        hs_server,
-        ConnectionParameters::default(),
-        now(),
-    )
-    .unwrap();
+    let mut client = zero_len_cid_client(hs_client, hs_server);
     client.set_qlog(log);
     let spa = match preferred {
         SocketAddr::V6(v6) => PreferredAddress::new(None, Some(v6)),
