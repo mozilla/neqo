@@ -83,7 +83,7 @@ impl Paths {
         self.paths
             .iter()
             .find_map(|p| {
-                if p.borrow().received_on(local, remote, false) {
+                if p.borrow().received_on(local, remote) {
                     Some(Rc::clone(p))
                 } else {
                     None
@@ -580,12 +580,8 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    /// This uses the full local socket address, but ignores the port number on the peer
-    /// if `flexible` is true, allowing for NAT rebinding that retains the same IP.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr, flexible: bool) -> bool {
-        self.local == local
-            && self.remote.ip() == remote.ip()
-            && (flexible || self.remote.port() == remote.port())
+    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+        self.local == local && self.remote == remote
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
