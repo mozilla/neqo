@@ -14,7 +14,7 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qinfo, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
@@ -405,7 +405,7 @@ impl ConnectionIdStore<[u8; 16]> {
     pub fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
         let mut retired = Vec::new();
         self.cids.retain(|e| {
-            if e.seqno < retire_prior {
+            if e.seqno != CONNECTION_ID_SEQNO_EMPTY && e.seqno < retire_prior {
                 retired.push(e.seqno);
                 false
             } else {
@@ -510,8 +510,18 @@ impl ConnectionIdManager {
     pub fn retire(&mut self, seqno: u64) {
         // TODO(mt) - consider keeping connection IDs around for a short while.
 
-        self.connection_ids.retire(seqno);
-        self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+        let zero_len_cid = seqno == CONNECTION_ID_SEQNO_EMPTY
+            || self
+                .connection_ids
+                .cids
+                .iter()
+                .any(|c| c.seqno == seqno && c.cid.len() == 0);
+        if zero_len_cid {
+            qdebug!("Connection ID {seqno} is zero-length, not retiring");
+        } else {
+            self.connection_ids.retire(seqno);
+            self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+        }
     }
 
     /// During the handshake, a server needs to regard the client's choice of destination
