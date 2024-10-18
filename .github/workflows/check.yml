@@ -82,13 +82,11 @@ jobs:
           cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
-        id: tests
         env:
           RUST_LOG: trace
         run: |
-          DUMP_SIMULATION_SEEDS="$(mktemp -d)"
+          DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
-          echo "seeds=$DUMP_SIMULATION_SEEDS" >> "$GITHUB_OUTPUT"
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
             cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --profile ci --lcov --output-path lcov.info
@@ -128,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
-          path: ${{ steps.tests.outputs.seeds }}
+          path: simulation-seeds
           compression-level: 9
 
   bench:
