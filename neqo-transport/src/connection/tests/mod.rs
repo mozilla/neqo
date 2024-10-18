@@ -30,7 +30,7 @@ use crate::{
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
     tparams::{DISABLE_MIGRATION, GREASE_QUIC_BIT},
     ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
-    Version,
+    Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 // All the tests.
@@ -667,6 +667,27 @@ fn assert_default_stats(stats: &Stats) {
     let dflt_frames = FrameStats::default();
     assert_eq!(stats.frame_rx, dflt_frames);
     assert_eq!(stats.frame_tx, dflt_frames);
+}
+
+fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
+    let path = c.paths.find_path(
+        d.source(),
+        d.destination(),
+        c.conn_params.get_cc_algorithm(),
+        c.conn_params.pacing_enabled(),
+        now,
+    );
+    if path.borrow().amplification_limit() < path.borrow().plpmtu() {
+        // If the amplification limit is less than the PLPMTU, then the path
+        // challenge will not have been padded.
+        return;
+    }
+    assert!(
+        d.len() >= MIN_INITIAL_PACKET_SIZE,
+        "{} < {}",
+        d.len(),
+        MIN_INITIAL_PACKET_SIZE
+    );
 }
 
 #[test]
