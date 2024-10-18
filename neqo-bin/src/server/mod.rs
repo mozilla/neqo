@@ -205,6 +205,7 @@ pub struct ServerRunner {
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
+    recv_buf: Vec<u8>,
 }
 
 impl ServerRunner {
@@ -219,6 +220,7 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
+            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
         }
     }
 
@@ -289,10 +291,13 @@ impl ServerRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgrams = socket.recv(host)?;
-                    if dgrams.is_empty() {
+                    let Some(dgrams) = socket.recv(host, &mut self.recv_buf)? else {
+                        break;
+                    };
+                    if dgrams.len() == 0 {
                         break;
                     }
+                    let dgrams: Vec<Datagram> = dgrams.map(|d| d.to_owned()).collect();
                     for dgram in dgrams {
                         self.process(Some(&dgram)).await?;
                     }
