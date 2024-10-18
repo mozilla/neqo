@@ -88,9 +88,9 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
-            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --profile ci --lcov --output-path lcov.info
           else
-            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
           fi
 
       - name: Run client/server transfer
