@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     cid::LOCAL_ACTIVE_CID_LIMIT,
-    connection::tests::{send_something_paced, send_with_extra},
+    connection::tests::{assert_path_challenge_min_len, send_something_paced, send_with_extra},
     frame::FRAME_TYPE_NEW_CONNECTION_ID,
     packet::PacketBuilder,
     path::MAX_PATH_PROBES,
@@ -255,10 +255,12 @@ fn path_forwarding_attack() {
     // The server now probes the new (primary) path.
     let new_probe = server.process_output(now).dgram().unwrap();
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&server, &new_probe, now);
     assert_v4_path(&new_probe, false); // Can't be padded.
 
     // The server also probes the old path.
     let old_probe = server.process_output(now).dgram().unwrap();
+    assert_path_challenge_min_len(&server, &old_probe, now);
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
     assert_v6_path(&old_probe, true);
 
@@ -293,6 +295,7 @@ fn path_forwarding_attack() {
     let server_data1 = server.process(Some(&new_resp), now).dgram().unwrap();
     assert_v4_path(&server_data1, true);
     assert_eq!(server.stats().frame_tx.path_challenge, 3);
+    assert_path_challenge_min_len(&server, &server_data1, now);
 
     // The client responds to this probe on the new path.
     client.process_input(&server_data1, now);
@@ -332,6 +335,8 @@ fn migrate_immediate() {
 
     let client1 = send_something(&mut client, now);
     assert_v4_path(&client1, true); // Contains PATH_CHALLENGE.
+    assert_path_challenge_min_len(&client, &client1, now);
+
     let client2 = send_something(&mut client, now);
     assert_v4_path(&client2, false); // Doesn't.
 
@@ -389,6 +394,7 @@ fn migrate_immediate_fail() {
 
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
+    assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
     for _ in 0..MAX_PATH_PROBES * 2 - 1 {
@@ -399,6 +405,7 @@ fn migrate_immediate_fail() {
         let before = client.stats().frame_tx;
         let probe = client.process_output(now).dgram().unwrap();
         assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
+        assert_path_challenge_min_len(&client, &probe, now);
         let after = client.stats().frame_tx;
         assert_eq!(after.path_challenge, before.path_challenge + 1);
         assert_eq!(after.padding, before.padding + 1);
@@ -406,8 +413,9 @@ fn migrate_immediate_fail() {
 
         // This might be a PTO, which will result in sending a probe.
         if let Some(probe) = client.process_output(now).dgram() {
-            assert_v4_path(&probe, false); // Contains PATH_CHALLENGE.
+            assert_v4_path(&probe, false); // Contains PING.
             let after = client.stats().frame_tx;
+            assert_eq!(after.path_challenge, before.path_challenge + 1);
             assert_eq!(after.ping, before.ping + 1);
             assert_eq!(after.all(), before.all() + 3);
         }
@@ -439,6 +447,7 @@ fn migrate_same() {
     let probe = client.process_output(now).dgram().unwrap();
     assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&client, &probe, now);
 
     let resp = server.process(Some(&probe), now).dgram().unwrap();
     assert_v6_path(&resp, true);
@@ -465,6 +474,7 @@ fn migrate_same_fail() {
 
     let probe = client.process_output(now).dgram().unwrap();
     assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
+    assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
     for _ in 0..MAX_PATH_PROBES * 2 - 1 {
@@ -475,6 +485,7 @@ fn migrate_same_fail() {
         let before = client.stats().frame_tx;
         let probe = client.process_output(now).dgram().unwrap();
         assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
+        assert_path_challenge_min_len(&client, &probe, now);
         let after = client.stats().frame_tx;
         assert_eq!(after.path_challenge, before.path_challenge + 1);
         assert_eq!(after.padding, before.padding + 1);
@@ -482,8 +493,9 @@ fn migrate_same_fail() {
 
         // This might be a PTO, which will result in sending a probe.
         if let Some(probe) = client.process_output(now).dgram() {
-            assert_v6_path(&probe, false); // Contains PATH_CHALLENGE.
+            assert_v6_path(&probe, false); // Contains PING.
             let after = client.stats().frame_tx;
+            assert_eq!(after.path_challenge, before.path_challenge + 1);
             assert_eq!(after.ping, before.ping + 1);
             assert_eq!(after.all(), before.all() + 3);
         }
@@ -521,11 +533,13 @@ fn migration(mut client: Connection) {
 
     let probe = client.process_output(now).dgram().unwrap();
     assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
+    assert_path_challenge_min_len(&client, &probe, now);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
     let probe_cid = ConnectionId::from(get_cid(&probe));
 
     let resp = server.process(Some(&probe), now).dgram().unwrap();
     assert_v4_path(&resp, true);
+    assert_path_challenge_min_len(&server, &resp, now);
     assert_eq!(server.stats().frame_tx.path_response, 1);
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
 
@@ -552,6 +566,7 @@ fn migration(mut client: Connection) {
     let probe_old_server = send_something(&mut server, now);
     // This is just the double-check probe; no STREAM frames.
     assert_v6_path(&probe_old_server, true);
+    assert_path_challenge_min_len(&server, &probe_old_server, now);
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
     assert_eq!(server.stats().frame_tx.stream, stream_before);
 
@@ -668,6 +683,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     let probe = client.process(dgram.as_ref(), now()).dgram().unwrap();
     assert_toward_spa(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&client, &probe, now());
     assert_ne!(client.process_output(now()).callback(), Duration::new(0, 0));
 
     // Data continues on the main path for the client.
@@ -678,6 +694,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     let resp = server.process(Some(&probe), now()).dgram().unwrap();
     assert_from_spa(&resp, true);
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&server, &resp, now());
     assert_eq!(server.stats().frame_tx.path_response, 1);
 
     // Data continues on the main path for the server.
@@ -697,6 +714,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
     let probe = server.process(Some(&data), now()).dgram().unwrap();
     assert_orig_path(&probe, true);
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
+    assert_path_challenge_min_len(&server, &probe, now());
 
     // But data now goes on the new path.
     let data = send_something(&mut server, now());
@@ -1007,6 +1025,7 @@ fn retire_prior_to_migration_failure() {
     let probe = client.process_output(now()).dgram().unwrap();
     assert_v4_path(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&client, &probe, now());
     let probe_cid = ConnectionId::from(get_cid(&probe));
     assert_ne!(original_cid, probe_cid);
 
@@ -1018,6 +1037,7 @@ fn retire_prior_to_migration_failure() {
     assert_v4_path(&resp, true);
     assert_eq!(server.stats().frame_tx.path_response, 1);
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&server, &resp, now());
 
     // Have the client receive the NEW_CONNECTION_ID with Retire Prior To.
     client.process_input(&retire_all, now());
@@ -1060,6 +1080,7 @@ fn retire_prior_to_migration_success() {
     let probe = client.process_output(now()).dgram().unwrap();
     assert_v4_path(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&client, &probe, now());
     let probe_cid = ConnectionId::from(get_cid(&probe));
     assert_ne!(original_cid, probe_cid);
 
@@ -1071,6 +1092,7 @@ fn retire_prior_to_migration_success() {
     assert_v4_path(&resp, true);
     assert_eq!(server.stats().frame_tx.path_response, 1);
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
+    assert_path_challenge_min_len(&server, &resp, now());
 
     // Have the client receive the NEW_CONNECTION_ID with Retire Prior To second.
     // As this occurs in a very specific order, migration succeeds.
