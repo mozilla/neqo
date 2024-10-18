@@ -358,8 +358,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
-        Datagram::new(d.source(), d.destination(), d.tos(), a),
-        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b)),
+        Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
+        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
 }
 
