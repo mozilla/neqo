@@ -181,10 +181,11 @@ impl super::Client for Connection {
         self.process_output(now)
     }
 
-    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = Datagram<&'a [u8]>>,
-    {
+    fn process_multiple_input<'a>(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        now: Instant,
+    ) {
         self.process_multiple_input(dgrams, now);
     }
 

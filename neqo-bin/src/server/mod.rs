@@ -194,7 +194,7 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
 
 #[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output;
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
@@ -205,6 +205,7 @@ pub struct ServerRunner {
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
+    recv_buf: Vec<u8>,
 }
 
 impl ServerRunner {
@@ -219,6 +220,7 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
+            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
         }
     }
 
@@ -236,7 +238,7 @@ impl ServerRunner {
             .unwrap_or(first_socket)
     }
 
-    async fn process(&mut self, mut dgram: Option<&Datagram>) -> Result<(), io::Error> {
+    async fn process(&mut self, mut dgram: Option<Datagram>) -> Result<(), io::Error> {
         loop {
             match self.server.process(dgram.take(), (self.now)()) {
                 Output::Datagram(dgram) => {
@@ -289,12 +291,15 @@ impl ServerRunner {
             match self.ready().await? {
                 Ready::Socket(inx) => loop {
                     let (host, socket) = self.sockets.get_mut(inx).unwrap();
-                    let dgrams = socket.recv(host)?;
-                    if dgrams.is_empty() {
+                    let Some(dgrams) = socket.recv(host, &mut self.recv_buf)? else {
+                        break;
+                    };
+                    if dgrams.len() == 0 {
                         break;
                     }
+                    let dgrams: Vec<Datagram> = dgrams.map(|d| d.to_owned()).collect();
                     for dgram in dgrams {
-                        self.process(Some(&dgram)).await?;
+                        self.process(Some(dgram)).await?;
                     }
                 },
                 Ready::Timeout => {
