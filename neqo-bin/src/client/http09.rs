@@ -26,7 +26,7 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::{client::unspecified_addr, STREAM_IO_BUFFER_SIZE};
+use crate::{client::local_addr_for, STREAM_IO_BUFFER_SIZE};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -86,34 +86,33 @@ impl super::Handler for Handler<'_> {
                         self.download_urls(client);
                     }
                 }
+                ConnectionEvent::StateChange(State::Confirmed) => {
+                    if let Some((local_port, migration_addr)) = &self.migration {
+                        let local_addr = local_addr_for(migration_addr, *local_port);
+                        qdebug!("Migrating path to {:?} -> {:?}", local_addr, migration_addr);
+                        client
+                            .migrate(
+                                Some(local_addr),
+                                Some(*migration_addr),
+                                false,
+                                Instant::now(),
+                            )
+                            .map(|()| {
+                                qinfo!(
+                                    "Connection migrated to {:?} -> {:?}",
+                                    local_addr,
+                                    migration_addr
+                                );
+                                // Don't do another migration.
+                                self.migration = None;
+                            })?;
+                    }
+                }
                 ConnectionEvent::StateChange(
-                    State::WaitInitial | State::Handshaking | State::Connected | State::Confirmed,
+                    State::WaitInitial | State::Handshaking | State::Connected,
                 ) => {
                     qdebug!("{event:?}");
                     self.download_urls(client);
-                    if event == ConnectionEvent::StateChange(State::Confirmed) {
-                        if let Some((local_port, migration_addr)) = &self.migration {
-                            let mut local_addr = unspecified_addr(migration_addr);
-                            local_addr.set_port(*local_port);
-                            qdebug!("Migrating path to {:?} -> {:?}", local_addr, migration_addr);
-                            client
-                                .migrate(
-                                    Some(local_addr),
-                                    Some(*migration_addr),
-                                    false,
-                                    Instant::now(),
-                                )
-                                .map(|()| {
-                                    qinfo!(
-                                        "Connection migrated to {:?} -> {:?}",
-                                        local_addr,
-                                        migration_addr
-                                    );
-                                    // Don't do another migration.
-                                    self.migration = None;
-                                })?;
-                        }
-                    }
                 }
                 ConnectionEvent::ZeroRttRejected => {
                     qdebug!("{event:?}");

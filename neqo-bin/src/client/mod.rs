@@ -31,7 +31,7 @@ use neqo_crypto::{
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use tokio::time::Sleep;
-use url::{Origin, Url};
+use url::{Host, Origin, Url};
 
 use crate::SharedArgs;
 
@@ -493,14 +493,29 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     .map_err(Error::QlogError)
 }
 
-const fn unspecified_addr(addr: &SocketAddr) -> SocketAddr {
-    match addr {
-        SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-        SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+const fn local_addr_for(remote_addr: &SocketAddr, local_port: u16) -> SocketAddr {
+    match remote_addr {
+        SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), local_port),
+        SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), local_port),
     }
 }
 
-#[allow(clippy::too_many_lines)]
+fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((Host, u16), VecDeque<Url>)> {
+    urls.iter()
+        .fold(HashMap::<Origin, VecDeque<Url>>::new(), |mut urls, url| {
+            urls.entry(url.origin()).or_default().push_back(url.clone());
+            urls
+        })
+        .into_iter()
+        .filter_map(|(origin, urls)| match origin {
+            Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
+            Origin::Opaque(x) => {
+                qwarn!("Opaque origin {x:?}");
+                None
+            }
+        })
+}
+
 pub async fn client(mut args: Args) -> Res<()> {
     neqo_common::log::init(
         args.shared
@@ -514,24 +529,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     init()?;
 
-    let urls_by_origin = args
-        .urls
-        .clone()
-        .into_iter()
-        .fold(HashMap::<Origin, VecDeque<Url>>::new(), |mut urls, url| {
-            urls.entry(url.origin()).or_default().push_back(url);
-            urls
-        })
-        .into_iter()
-        .filter_map(|(origin, urls)| match origin {
-            Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
-            Origin::Opaque(x) => {
-                qwarn!("Opaque origin {x:?}");
-                None
-            }
-        });
-
-    for ((host, port), mut urls) in urls_by_origin {
+    for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
             qerror!("Resumption to {host} cannot work without at least 2 URLs.");
             exit(127);
@@ -548,7 +546,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             qerror!("No compatible address found for: {host}");
             exit(1);
         };
-        let mut socket = crate::udp::Socket::bind(unspecified_addr(&remote_addr))?;
+        let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
         let real_local = socket.local_addr().unwrap();
         qinfo!(
             "{} Client connecting: {:?} -> {:?}",
@@ -557,14 +555,14 @@ pub async fn client(mut args: Args) -> Res<()> {
             remote_addr,
         );
 
-        let migration = if args.shared.qns_test == Some("connectionmigration".to_owned()) {
-            remote_addrs.next().map_or_else(
-                || {
-                    qerror!("No migration address found for {host}");
-                    exit(127);
-                },
-                |migration_addr| Some((real_local.port(), migration_addr)),
-            )
+        let migration = if args.shared.qns_test.as_deref() == Some("connectionmigration") {
+            #[allow(clippy::option_if_let_else)]
+            if let Some(addr) = remote_addrs.next() {
+                Some((real_local.port(), addr))
+            } else {
+                qerror!("Cannot migrate from {host} when there is no address that follows");
+                exit(127);
+            }
         } else {
             None
         };
