@@ -88,7 +88,7 @@ jobs:
         run: |
           DUMP_SIMULATION_SEEDS="$(mktemp -d)"
           export DUMP_SIMULATION_SEEDS
-          echo "seeds=\"$DUMP_SIMULATION_SEEDS\"" >> "$GITHUB_OUTPUT"
+          echo "seeds=$DUMP_SIMULATION_SEEDS" >> "$GITHUB_OUTPUT"
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
             cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --profile ci --lcov --output-path lcov.info
