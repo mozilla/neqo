@@ -134,7 +134,8 @@ jobs:
             fi
           }
 
-          for mtu in 1488 1504 65536; do
+          # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
+          for mtu in 1504 65536; do
             sudo ip link set dev lo mtu "$mtu"
             for server in msquic neqo; do
               for client in msquic neqo; do
