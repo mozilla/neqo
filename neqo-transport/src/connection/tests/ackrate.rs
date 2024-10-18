@@ -13,7 +13,7 @@ use super::{
     ack_bytes, connect_rtt_idle, default_client, default_server, fill_cwnd, increase_cwnd,
     induce_persistent_congestion, new_client, new_server, send_something, DEFAULT_RTT,
 };
-use crate::stream_id::StreamType;
+use crate::{connection::tests::assert_path_challenge_min_len, stream_id::StreamType};
 
 /// With the default RTT here (100ms) and default ratio (4), endpoints won't send
 /// `ACK_FREQUENCY` as the ACK delay isn't different enough from the default.
@@ -169,6 +169,7 @@ fn migrate_ack_delay() {
 
     let client1 = send_something(&mut client, now);
     assertions::assert_v4_path(&client1, true); // Contains PATH_CHALLENGE.
+    assert_path_challenge_min_len(&client, &client1, now);
     let client2 = send_something(&mut client, now);
     assertions::assert_v4_path(&client2, false); // Doesn't.  Is dropped.
     now += DEFAULT_RTT / 2;
