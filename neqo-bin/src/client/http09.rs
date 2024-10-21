@@ -93,7 +93,7 @@ impl super::Handler for Handler<'_> {
                         client
                             .migrate(
                                 Some(local_addr),
-                                Some(*migration_addr),
+                                Some(migration_addr),
                                 false,
                                 Instant::now(),
                             )
