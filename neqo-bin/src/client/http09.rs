@@ -88,12 +88,12 @@ impl super::Handler for Handler<'_> {
                 }
                 ConnectionEvent::StateChange(State::Confirmed) => {
                     if let Some((local_port, migration_addr)) = self.migration.take() {
-                        let local_addr = local_addr_for(migration_addr, local_port);
+                        let local_addr = local_addr_for(migration_addr, *local_port);
                         qdebug!("Migrating path to {:?} -> {:?}", local_addr, migration_addr);
                         client
                             .migrate(
                                 Some(local_addr),
-                                Some(migration_addr),
+                                Some(*migration_addr),
                                 false,
                                 Instant::now(),
                             )
