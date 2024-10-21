@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    convert::identity,
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
@@ -103,10 +104,6 @@ fn assert_path_challenge(
     }
 }
 
-const fn id(a: SocketAddr) -> SocketAddr {
-    a
-}
-
 fn assert_path_response(c: &Connection, d: &Datagram, before: &FrameStats) {
     let after = c.stats().frame_tx;
     assert_eq!(after.path_response, before.path_response + 1);
@@ -160,7 +157,7 @@ fn rebind(
     let dgram = to_new_path(&dgram);
     let before = server.stats().frame_tx;
     let dgram = server.process(Some(&dgram), now()).dgram().unwrap();
-    assert_path_challenge(&server, &dgram, &before, id, true);
+    assert_path_challenge(&server, &dgram, &before, identity, true);
 
     // Do not deliver this probe to the client.
 
@@ -191,7 +188,6 @@ fn rebind(
         == 0;
     let mut now = now();
     let mut total_delay = Duration::new(0, 0);
-    qdebug!("XXXXXXXXX");
     loop {
         let before = server.stats().frame_tx;
         match server.process_output(now) {
@@ -210,7 +206,7 @@ fn rebind(
                 match d.destination() {
                     a if a == DEFAULT_ADDR => {
                         // Old path gets path challenges.
-                        assert_path_challenge(&server, &d, &before, id, true);
+                        assert_path_challenge(&server, &d, &before, identity, true);
                         // Don't deliver them.
                     }
                     a if a == to_new_saddr(DEFAULT_ADDR) => {
