@@ -103,8 +103,6 @@ impl super::Handler for Handler<'_> {
                                     local_addr,
                                     migration_addr
                                 );
-                                // Don't do another migration.
-                                self.migration = None;
                             })?;
                     }
                 }
