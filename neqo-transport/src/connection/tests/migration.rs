@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{qdebug, Datagram, Decoder};
+use neqo_common::{Datagram, Decoder};
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
