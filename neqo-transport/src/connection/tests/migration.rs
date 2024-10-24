@@ -108,7 +108,7 @@ fn rebind(
     // Server will reply to modified datagram with a PATH_CHALLENGE.
     // Due to the amplification limit, this will not be padded to MIN_INITIAL_PACKET_SIZE.
     let before = server.stats().frame_tx;
-    let s1 = server.process(Some(&c1_new), now).dgram().unwrap();
+    let s1 = server.process(Some(c1_new.clone()), now).dgram().unwrap();
     assert_path_challenge(server, &s1, &before, c1_new.source(), false);
 
     // Restore the original source address, so to the client it looks like the path has not changed.
@@ -116,14 +116,14 @@ fn rebind(
 
     // The client should respond to the PATH_CHALLENGE, without changing paths.
     let before = client.stats().frame_tx;
-    let c2 = client.process(Some(&s1_reb), now).dgram().unwrap();
+    let c2 = client.process(Some(s1_reb), now).dgram().unwrap();
     assert_path_response(client, &c2, &before);
 
     // The server should now see the response on the new path.
     // It will send another PATH_CHALLENGE padded to MIN_INITIAL_PACKET_SIZE.
     let c2_new = new_path(&c2);
     let before = server.stats().frame_tx;
-    let s2 = server.process(Some(&c2_new), now).dgram().unwrap();
+    let s2 = server.process(Some(c2_new.clone()), now).dgram().unwrap();
     assert_path_challenge(server, &s2, &before, c2_new.source(), true);
 
     // Restore the original source address, so to the client it looks like the path has not changed.
@@ -131,7 +131,7 @@ fn rebind(
 
     // The client should respond to the PATH_CHALLENGE, without changing paths.
     let before = client.stats().frame_tx;
-    let c3 = client.process(Some(&s2_reb), now).dgram().unwrap();
+    let c3 = client.process(Some(s2_reb.clone()), now).dgram().unwrap();
     assert_path_response(client, &s2_reb, &before);
 
     // The server should now see the second response on the new path.
@@ -139,7 +139,7 @@ fn rebind(
     let c3_new = new_path(&c3);
     let c3_cur = cur_path(&c3);
     let before = server.stats().frame_tx;
-    let s3 = server.process(Some(&c3_new), now).dgram().unwrap();
+    let s3 = server.process(Some(c3_new.clone()), now).dgram().unwrap();
     assert_path_challenge(server, &s3, &before, c3_cur.source(), true);
 
     // Do not deliver this probe to the client.
@@ -156,7 +156,7 @@ fn rebind(
     let s4_reb = Datagram::new(s4.source(), local_address(client), s4.tos(), &s4[..]);
 
     // The client should process the ACK and go idle.
-    let delay = client.process(Some(&s4_reb), now).callback();
+    let delay = client.process(Some(s4_reb), now).callback();
     assert_eq!(delay, ConnectionParameters::default().get_idle_timeout());
 
     let client_uses_zero_len_cid = client
@@ -204,12 +204,12 @@ fn rebind(
                     // the path has not changed.
                     let sx_r = Datagram::new(sx.source(), local_address(client), sx.tos(), &sx[..]);
                     let before = client.stats().frame_tx;
-                    let cx = client.process(Some(&sx_r), now).dgram().unwrap();
+                    let cx = client.process(Some(sx_r), now).dgram().unwrap();
                     let after = client.stats().frame_tx;
                     assert_eq!(after.ack, before.ack + 1);
                     // Also deliver the ACK.
                     let cx_n = new_path(&cx);
-                    server.process_input(&cx_n, now);
+                    server.process_input(cx_n, now);
                     if !client_uses_zero_len_cid
                         && after.new_connection_id == before.new_connection_id + 1
                     {
