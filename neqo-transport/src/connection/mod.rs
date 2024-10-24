@@ -1536,7 +1536,7 @@ impl Connection {
     /// This takes two times: when the datagram was received, and the current time.
     fn input(&mut self, d: Datagram<impl AsRef<[u8]>>, received: Instant, now: Instant) {
         // First determine the path.
-        let path = self.paths.find_path_with_rebinding(
+        let path = self.paths.find_path(
             d.destination(),
             d.source(),
             self.conn_params.get_cc_algorithm(),

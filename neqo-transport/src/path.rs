@@ -83,7 +83,7 @@ impl Paths {
         self.paths
             .iter()
             .find_map(|p| {
-                if p.borrow().received_on(local, remote, false) {
+                if p.borrow().received_on(local, remote) {
                     Some(Rc::clone(p))
                 } else {
                     None
@@ -95,48 +95,6 @@ impl Paths {
                     p.prime_rtt(primary.borrow().rtt());
                 }
                 Rc::new(RefCell::new(p))
-            })
-    }
-
-    /// Find the path, but allow for rebinding.  That matches the pair of addresses
-    /// to paths that match the remote address only based on IP addres, not port.
-    /// We use this when the other side migrates to skip address validation and
-    /// creating a new path.
-    pub fn find_path_with_rebinding(
-        &self,
-        local: SocketAddr,
-        remote: SocketAddr,
-        cc: CongestionControlAlgorithm,
-        pacing: bool,
-        now: Instant,
-    ) -> PathRef {
-        self.paths
-            .iter()
-            .find_map(|p| {
-                if p.borrow().received_on(local, remote, false) {
-                    Some(Rc::clone(p))
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                self.paths.iter().find_map(|p| {
-                    if p.borrow().received_on(local, remote, true) {
-                        Some(Rc::clone(p))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .unwrap_or_else(|| {
-                Rc::new(RefCell::new(Path::temporary(
-                    local,
-                    remote,
-                    cc,
-                    pacing,
-                    self.qlog.clone(),
-                    now,
-                )))
             })
     }
 
@@ -152,13 +110,14 @@ impl Paths {
     }
 
     fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
-        let seqno = retired
-            .borrow()
-            .remote_cid
-            .as_ref()
-            .unwrap()
-            .sequence_number();
-        to_retire.push(seqno);
+        if let Some(cid) = &retired.borrow().remote_cid {
+            let seqno = cid.sequence_number();
+            if cid.connection_id().len() == 0 {
+                qdebug!("Connection ID {seqno} is zero-length, not retiring");
+            } else {
+                to_retire.push(seqno);
+            }
+        }
     }
 
     /// Adopt a temporary path as permanent.
@@ -389,7 +348,15 @@ impl Paths {
 
         self.paths.retain(|p| {
             let current = p.borrow().remote_cid.as_ref().unwrap().sequence_number();
-            if current < retire_prior {
+            if current < retire_prior
+                && p.borrow()
+                    .remote_cid
+                    .as_ref()
+                    .unwrap()
+                    .connection_id()
+                    .len()
+                    != 0
+            {
                 to_retire.push(current);
                 let new_cid = store.next();
                 let has_replacement = new_cid.is_some();
@@ -622,12 +589,8 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    /// This uses the full local socket address, but ignores the port number on the peer
-    /// if `flexible` is true, allowing for NAT rebinding that retains the same IP.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr, flexible: bool) -> bool {
-        self.local == local
-            && self.remote.ip() == remote.ip()
-            && (flexible || self.remote.port() == remote.port())
+    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+        self.local == local && self.remote == remote
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
