@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos, IpTosEcn};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos, IpTosEcn,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -568,7 +570,17 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
+        let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
+            Ok((name, mtu)) => {
+                qdebug!("Outbound interface {name} has MTU {mtu}");
+                mtu
+            }
+            Err(e) => {
+                qwarn!("Failed to determine outbound interface: {e}");
+                usize::MAX
+            }
+        };
+        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
