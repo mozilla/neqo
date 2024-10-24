@@ -17,7 +17,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -86,11 +85,13 @@ jobs:
         env:
           RUST_LOG: trace
         run: |
+          DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
+          export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
-            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --profile ci --lcov --output-path lcov.info
           else
-            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --no-fail-fast
+            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
           fi
 
       - name: Run client/server transfer
@@ -121,11 +122,11 @@ jobs:
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
       - name: Save simulation seeds artifact
-        if: env.DUMP_SIMULATION_SEEDS
+        if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
-          path: ${{ env.DUMP_SIMULATION_SEEDS }}
+          path: simulation-seeds
           compression-level: 9
 
   bench:
