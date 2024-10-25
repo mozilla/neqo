@@ -405,8 +405,8 @@ impl UrlHandler<'_> {
             Ok(client_stream_id) => {
                 qdebug!("Successfully created stream id {client_stream_id} for {url}");
 
-                let handler: Box<dyn StreamHandler> = match self.args.test {
-                    None => {
+                let handler: Box<dyn StreamHandler> = match self.args.method.as_str() {
+                    "GET" => {
                         let out_file = get_output_file(
                             &url,
                             self.args.output_dir.as_ref(),
@@ -415,12 +415,13 @@ impl UrlHandler<'_> {
                         client.stream_close_send(client_stream_id).unwrap();
                         Box::new(DownloadStreamHandler { out_file })
                     }
-                    Some(_) => Box::new(UploadStreamHandler {
+                    "POST" => Box::new(UploadStreamHandler {
                         data: vec![42; self.args.upload_size],
                         offset: 0,
                         chunk_size: STREAM_IO_BUFFER_SIZE,
                         start: Instant::now(),
                     }),
+                    _ => unimplemented!(),
                 };
 
                 self.stream_handlers.insert(client_stream_id, handler);
