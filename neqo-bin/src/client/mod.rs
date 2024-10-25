@@ -175,7 +175,7 @@ impl Args {
     #[must_use]
     #[cfg(any(test, feature = "bench"))]
     #[allow(clippy::missing_panics_doc)]
-    pub fn new(requests: &[u64]) -> Self {
+    pub fn new(requests: &[usize], upload: bool) -> Self {
         use std::str::FromStr;
         Self {
             shared: crate::SharedArgs::default(),
@@ -183,7 +183,7 @@ impl Args {
                 .iter()
                 .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())
                 .collect(),
-            method: "GET".into(),
+            method: if upload { "POST".into() } else { "GET".into() },
             header: vec![],
             max_concurrent_push_streams: 10,
             download_in_series: false,
@@ -196,7 +196,7 @@ impl Args {
             ipv4_only: false,
             ipv6_only: false,
             test: None,
-            upload_size: 100,
+            upload_size: if upload { requests[0] } else { 100 },
             stats: false,
         }
     }
