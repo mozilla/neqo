@@ -112,7 +112,7 @@ impl Paths {
     fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
         if let Some(cid) = &retired.borrow().remote_cid {
             let seqno = cid.sequence_number();
-            if cid.connection_id().len() == 0 {
+            if cid.connection_id().is_empty() {
                 qdebug!("Connection ID {seqno} is zero-length, not retiring");
             } else {
                 to_retire.push(seqno);
@@ -347,30 +347,23 @@ impl Paths {
         to_retire.append(&mut retired);
 
         self.paths.retain(|p| {
-            let current = p.borrow().remote_cid.as_ref().unwrap().sequence_number();
-            if current < retire_prior
-                && p.borrow()
-                    .remote_cid
-                    .as_ref()
-                    .unwrap()
-                    .connection_id()
-                    .len()
-                    != 0
-            {
-                to_retire.push(current);
+            let mut path = p.borrow_mut();
+            let current = path.remote_cid.as_ref().unwrap();
+            if current.sequence_number() < retire_prior && !current.connection_id().is_empty() {
+                to_retire.push(current.sequence_number());
                 let new_cid = store.next();
                 let has_replacement = new_cid.is_some();
                 // There must be a connection ID available for the primary path as we
                 // keep that path at the first index.
-                debug_assert!(!p.borrow().is_primary() || has_replacement);
-                p.borrow_mut().remote_cid = new_cid;
+                debug_assert!(!path.is_primary() || has_replacement);
+                path.remote_cid = new_cid;
                 if !has_replacement
                     && migration_target
                         .as_ref()
                         .map_or(false, |target| Rc::ptr_eq(target, p))
                 {
                     qinfo!(
-                        [p.borrow()],
+                        [path],
                         "NEW_CONNECTION_ID with Retire Prior To forced migration to fail"
                     );
                     *migration_target = None;
