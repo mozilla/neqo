@@ -98,11 +98,13 @@ was checked out to `/home/alice/git/neqo`, add the following lines to the root
 
 ```toml
 [patch."https://github.com/mozilla/neqo"]
-neqo-http3 = { path = "/home/alice/git/neqo/neqo-http3" }
-neqo-transport = { path = "/home/alice/git/neqo/neqo-transport" }
+neqo-bin = { path = "/home/alice/git/neqo/neqo-bin" }
 neqo-common = { path = "/home/alice/git/neqo/neqo-common" }
-neqo-qpack = { path = "/home/alice/git/neqo/neqo-qpack" }
 neqo-crypto = { path = "/home/alice/git/neqo/neqo-crypto" }
+neqo-http3 = { path = "/home/alice/git/neqo/neqo-http3" }
+neqo-qpack = { path = "/home/alice/git/neqo/neqo-qpack" }
+neqo-transport = { path = "/home/alice/git/neqo/neqo-transport" }
+neqo-udp = { path = "/home/alice/git/neqo/neqo-udp" }
 ```
 
 Then run the following:
