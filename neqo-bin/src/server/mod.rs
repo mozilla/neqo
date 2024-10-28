@@ -238,15 +238,12 @@ impl ServerRunner {
                     input_dgrams = socket.recv(*host, &mut self.recv_buf)?;
                 }
                 // Then take the first datagram, if any.
-                input_dgrams.iter_mut().flatten().next().map_or_else(
-                    || {
-                        // Reading from the socket returned no datagrams. Don't try again.
-                        ready_socket_index = None;
-                        input_dgrams = None;
-                        None
-                    },
-                    Some,
-                )
+                input_dgrams.iter_mut().flatten().next().or_else(|| {
+                    // Reading from the socket returned no datagrams. Don't try again.
+                    ready_socket_index = None;
+                    input_dgrams = None;
+                    None
+                })
             };
 
             // Have server process in- and output datagrams.
