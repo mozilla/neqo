@@ -249,17 +249,7 @@ impl ServerRunner {
             // Have server process in- and output datagrams.
             match self.server.process(input_dgram, (self.now)()) {
                 Output::Datagram(dgram) => {
-                    let ((_host, first_socket), rest) = self.sockets.split_first_mut().unwrap();
-                    let socket = rest
-                        .iter_mut()
-                        .map(|(_host, socket)| socket)
-                        .find(|socket| {
-                            socket
-                                .local_addr()
-                                .ok()
-                                .map_or(false, |socket_addr| socket_addr == dgram.source())
-                        })
-                        .unwrap_or(first_socket);
+                    let socket = find_socket(&mut self.sockets, dgram.source());
                     socket.writable().await?;
                     socket.send(&dgram)?;
                     continue;
@@ -321,6 +311,23 @@ impl ServerRunner {
 enum Ready {
     Socket(usize),
     Timeout,
+}
+
+/// Tries to find a socket, but then just falls back to sending from the first.
+fn find_socket(
+    sockets: &mut [(SocketAddr, crate::udp::Socket)],
+    addr: SocketAddr,
+) -> &mut crate::udp::Socket {
+    let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
+    rest.iter_mut()
+        .map(|(_host, socket)| socket)
+        .find(|socket| {
+            socket
+                .local_addr()
+                .ok()
+                .map_or(false, |socket_addr| socket_addr == addr)
+        })
+        .unwrap_or(first_socket)
 }
 
 pub async fn server(mut args: Args) -> Res<()> {
