@@ -129,6 +129,13 @@ jobs:
           path: simulation-seeds
           compression-level: 9
 
+  check-cargo-lock:
+    name: Ensure `Cargo.lock` contains all required dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: cargo update -w --locked
+
   bench:
     needs: [check]
     if: >
