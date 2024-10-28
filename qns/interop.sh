@@ -12,9 +12,12 @@ export PATH="${PATH}:/neqo/bin"
 case "$ROLE" in
 client)
   /wait-for-it.sh sim:57832 -s -t 30
-  # shellcheck disable=SC2086
-  RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --cc cubic --qns-test "$TESTCASE" \
-    --qlog-dir "$QLOGDIR" --output-dir /downloads $REQUESTS 2> >(tee -i -a "/logs/$ROLE.log" >&2)
+  OPTIONS=(--cc cubic --qns-test "$TESTCASE" --qlog-dir "$QLOGDIR" --output-dir /downloads)
+  if [ "$REQUESTS" ]; then
+    mapfile -t URLS <<<"$REQUESTS"
+    OPTIONS+=("${URLS[@]}")
+  fi
+  RUST_LOG=debug RUST_BACKTRACE=1 neqo-client "${OPTIONS[@]}" 2> >(tee -i -a "/logs/$ROLE.log" >&2)
   ;;
 
 server)
@@ -27,8 +30,10 @@ server)
     -name "$CERT" -passout pass: -out "$P12CERT"
   pk12util -d "sql:$DB" -i "$P12CERT" -W ''
   certutil -L -d "sql:$DB" -n "$CERT"
-  RUST_LOG=debug RUST_BACKTRACE=1 neqo-server --cc cubic --qns-test "$TESTCASE" \
-    --qlog-dir "$QLOGDIR" -d "$DB" -k "$CERT" '[::]:443' 2> >(tee -i -a "/logs/$ROLE.log" >&2)
+  OPTIONS=(--cc cubic --qns-test "$TESTCASE" --qlog-dir "$QLOGDIR" -d "$DB" -k "$CERT")
+  [ "$TESTCASE" = "connectionmigration" ] &&
+    OPTIONS+=(--preferred-address-v4 server4:4443 --preferred-address-v6 server6:4443)
+  RUST_LOG=debug RUST_BACKTRACE=1 neqo-server "${OPTIONS[@]}" '[::]:443' 2> >(tee -i -a "/logs/$ROLE.log" >&2)
   ;;
 
 *)
