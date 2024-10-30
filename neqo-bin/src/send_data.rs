@@ -8,7 +8,6 @@ use std::{borrow::Cow, cmp::min};
 
 use crate::STREAM_IO_BUFFER_SIZE;
 
-// TODO: Rename
 #[derive(Debug)]
 pub struct SendData {
     data: Cow<'static, [u8]>,
@@ -70,10 +69,6 @@ impl SendData {
             }
         }
 
-        self.done()
-    }
-
-    const fn done(&self) -> bool {
         self.remaining == 0
     }
 
