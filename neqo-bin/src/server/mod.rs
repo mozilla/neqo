@@ -224,6 +224,84 @@ impl ServerRunner {
         }
     }
 
+    /// Tries to find a socket, but then just falls back to sending from the first.
+    fn find_socket(
+        sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        addr: SocketAddr,
+    ) -> &mut crate::udp::Socket {
+        let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
+        rest.iter_mut()
+            .map(|(_host, socket)| socket)
+            .find(|socket| {
+                socket
+                    .local_addr()
+                    .ok()
+                    .map_or(false, |socket_addr| socket_addr == addr)
+            })
+            .unwrap_or(first_socket)
+    }
+
+    async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
+        loop {
+            let (host, socket) = self.sockets.get_mut(sockets_index).unwrap();
+            let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
+                break;
+            };
+
+            for input_dgram in input_dgrams {
+                Self::process_inner(
+                    &mut self.server,
+                    &mut self.timeout,
+                    &mut self.sockets,
+                    &self.now,
+                    Some(input_dgram),
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn process(&mut self) -> Result<(), io::Error> {
+        Self::process_inner(
+            &mut self.server,
+            &mut self.timeout,
+            &mut self.sockets,
+            &self.now,
+            None,
+        )
+        .await
+    }
+
+    // Free function (i.e. not taking `&mut self: ServerRunner`) to be callable by
+    // `ServerRunner::read_and_process` while holding a reference to
+    // `ServerRunner::recv_buf`.
+    async fn process_inner(
+        server: &mut Box<dyn HttpServer>,
+        timeout: &mut Option<Pin<Box<Sleep>>>,
+        sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        now: &dyn Fn() -> Instant,
+        mut input_dgram: Option<Datagram<&[u8]>>,
+    ) -> Result<(), io::Error> {
+        loop {
+            match server.process(input_dgram.take(), now()) {
+                Output::Datagram(dgram) => {
+                    let socket = Self::find_socket(sockets, dgram.source());
+                    socket.writable().await?;
+                    socket.send(&dgram)?;
+                }
+                Output::Callback(new_timeout) => {
+                    qdebug!("Setting timeout of {:?}", new_timeout);
+                    *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    break;
+                }
+                Output::None => break,
+            }
+        }
+        Ok(())
+    }
+
     // Wait for any of the sockets to be readable or the timeout to fire.
     async fn ready(&mut self) -> Result<Ready, io::Error> {
         let sockets_ready = select_all(
@@ -263,88 +341,11 @@ impl ServerRunner {
             }
         }
     }
-
-    async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
-        loop {
-            let (host, socket) = self.sockets.get_mut(sockets_index).unwrap();
-            let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
-                break;
-            };
-
-            for input_dgram in input_dgrams {
-                process(
-                    &mut self.server,
-                    &mut self.timeout,
-                    &mut self.sockets,
-                    &self.now,
-                    Some(input_dgram),
-                )
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn process(&mut self) -> Result<(), io::Error> {
-        process(
-            &mut self.server,
-            &mut self.timeout,
-            &mut self.sockets,
-            &self.now,
-            None,
-        )
-        .await
-    }
 }
 
 enum Ready {
     Socket(usize),
     Timeout,
-}
-
-// Free function (i.e. not taking `&mut self: ServerRunner`) to be callable by
-// `ServerRunner::read_and_process` while holding a reference to
-// `ServerRunner::recv_buf`.
-async fn process(
-    server: &mut Box<dyn HttpServer>,
-    timeout: &mut Option<Pin<Box<Sleep>>>,
-    sockets: &mut [(SocketAddr, crate::udp::Socket)],
-    now: &dyn Fn() -> Instant,
-    mut input_dgram: Option<Datagram<&[u8]>>,
-) -> Result<(), io::Error> {
-    loop {
-        match server.process(input_dgram.take(), now()) {
-            Output::Datagram(dgram) => {
-                let socket = find_socket(sockets, dgram.source());
-                socket.writable().await?;
-                socket.send(&dgram)?;
-            }
-            Output::Callback(new_timeout) => {
-                qdebug!("Setting timeout of {:?}", new_timeout);
-                *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
-                return Ok(());
-            }
-            Output::None => return Ok(()),
-        }
-    }
-}
-
-/// Tries to find a socket, but then just falls back to sending from the first.
-fn find_socket(
-    sockets: &mut [(SocketAddr, crate::udp::Socket)],
-    addr: SocketAddr,
-) -> &mut crate::udp::Socket {
-    let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
-    rest.iter_mut()
-        .map(|(_host, socket)| socket)
-        .find(|socket| {
-            socket
-                .local_addr()
-                .ok()
-                .map_or(false, |socket_addr| socket_addr == addr)
-        })
-        .unwrap_or(first_socket)
 }
 
 pub async fn server(mut args: Args) -> Res<()> {
