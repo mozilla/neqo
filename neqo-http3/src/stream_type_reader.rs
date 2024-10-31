@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Instant;
+
 use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{Connection, StreamId, StreamType};
@@ -226,7 +228,7 @@ impl RecvStream for NewStreamHeadReader {
         Ok(())
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, conn: &mut Connection, _now: Instant) -> Res<(ReceiveOutput, bool)> {
         let t = self.get_type(conn)?;
         Ok((
             t.map_or(ReceiveOutput::NoOutput, ReceiveOutput::NewStream),

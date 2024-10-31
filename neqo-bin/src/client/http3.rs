@@ -164,7 +164,7 @@ impl Handler<'_> {
 impl super::Handler for Handler<'_> {
     type Client = Http3Client;
 
-    fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
+    fn handle(&mut self, client: &mut Http3Client, now: Instant) -> Res<bool> {
         while let Some(event) = client.next_event() {
             match event {
                 Http3ClientEvent::AuthenticationNeeded => {
@@ -182,7 +182,7 @@ impl super::Handler for Handler<'_> {
                         qwarn!("Data on unexpected stream: {stream_id}");
                     }
                     if fin {
-                        self.url_handler.on_stream_fin(client, stream_id);
+                        self.url_handler.on_stream_fin(client, stream_id, now);
                     }
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
@@ -215,7 +215,7 @@ impl super::Handler for Handler<'_> {
                     }
 
                     if stream_done {
-                        self.url_handler.on_stream_fin(client, stream_id);
+                        self.url_handler.on_stream_fin(client, stream_id, now);
                     }
                 }
                 Http3ClientEvent::DataWritable { stream_id } => {
@@ -224,20 +224,20 @@ impl super::Handler for Handler<'_> {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => {
-                            handler.process_data_writable(client, stream_id);
+                            handler.process_data_writable(client, stream_id, now);
                         }
                     }
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
                     qinfo!("{event:?}");
-                    self.url_handler.process_urls(client);
+                    self.url_handler.process_urls(client, now);
                 }
                 Http3ClientEvent::ZeroRttRejected => {
                     qinfo!("{event:?}");
                     // All 0-RTT data was rejected. We need to retransmit it.
                     self.reinit();
-                    self.url_handler.process_urls(client);
+                    self.url_handler.process_urls(client, now);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
                 _ => {
@@ -263,7 +263,12 @@ trait StreamHandler {
         data: &[u8],
         output_read_data: bool,
     ) -> Res<bool>;
-    fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId);
+    fn process_data_writable(
+        &mut self,
+        client: &mut Http3Client,
+        stream_id: StreamId,
+        now: Instant,
+    );
 }
 
 struct DownloadStreamHandler {
@@ -308,7 +313,13 @@ impl StreamHandler for DownloadStreamHandler {
         Ok(true)
     }
 
-    fn process_data_writable(&mut self, _client: &mut Http3Client, _stream_id: StreamId) {}
+    fn process_data_writable(
+        &mut self,
+        _client: &mut Http3Client,
+        _stream_id: StreamId,
+        _now: Instant,
+    ) {
+    }
 }
 
 struct UploadStreamHandler {
@@ -341,12 +352,17 @@ impl StreamHandler for UploadStreamHandler {
         Ok(true)
     }
 
-    fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
+    fn process_data_writable(
+        &mut self,
+        client: &mut Http3Client,
+        stream_id: StreamId,
+        now: Instant,
+    ) {
         let done = self
             .data
-            .send(|chunk| client.send_data(stream_id, chunk).unwrap());
+            .send(|chunk| client.send_data(stream_id, chunk, now).unwrap());
         if done {
-            client.stream_close_send(stream_id).unwrap();
+            client.stream_close_send(stream_id, now).unwrap();
         }
     }
 }
@@ -364,7 +380,7 @@ impl UrlHandler<'_> {
         self.stream_handlers.get_mut(&stream_id)
     }
 
-    fn process_urls(&mut self, client: &mut Http3Client) {
+    fn process_urls(&mut self, client: &mut Http3Client, now: Instant) {
         loop {
             if self.url_queue.is_empty() {
                 break;
@@ -372,13 +388,13 @@ impl UrlHandler<'_> {
             if self.stream_handlers.len() >= self.args.concurrency {
                 break;
             }
-            if !self.next_url(client) {
+            if !self.next_url(client, now) {
                 break;
             }
         }
     }
 
-    fn next_url(&mut self, client: &mut Http3Client) -> bool {
+    fn next_url(&mut self, client: &mut Http3Client, now: Instant) -> bool {
         let url = self
             .url_queue
             .pop_front()
@@ -400,7 +416,7 @@ impl UrlHandler<'_> {
                             self.args.output_dir.as_ref(),
                             &mut self.all_paths,
                         );
-                        client.stream_close_send(client_stream_id).unwrap();
+                        client.stream_close_send(client_stream_id, now).unwrap();
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {
@@ -432,9 +448,9 @@ impl UrlHandler<'_> {
         self.stream_handlers.is_empty() && self.url_queue.is_empty()
     }
 
-    fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId) {
+    fn on_stream_fin(&mut self, client: &mut Http3Client, stream_id: StreamId, now: Instant) {
         self.stream_handlers.remove(&stream_id);
-        self.process_urls(client);
+        self.process_urls(client, now);
     }
 }
 

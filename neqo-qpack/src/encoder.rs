@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    time::Instant,
+};
 
 use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
@@ -123,17 +126,22 @@ impl QPackEncoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
-        self.read_instructions(conn, stream_id)
+    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId, now: Instant) -> Res<()> {
+        self.read_instructions(conn, stream_id, now)
             .map_err(|e| map_error(&e))
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    fn read_instructions(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
         qdebug!([self], "read a new instruction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut(), now)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -202,7 +210,12 @@ impl QPackEncoder {
         }
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
+    fn call_instruction(
+        &mut self,
+        instruction: DecoderInstruction,
+        qlog: &NeqoQlog,
+        now: Instant,
+    ) -> Res<()> {
         qdebug!([self], "call intruction {:?}", instruction);
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -210,6 +223,7 @@ impl QPackEncoder {
                     qlog,
                     increment,
                     &increment.to_be_bytes(),
+                    now,
                 );
 
                 self.insert_count_instruction(increment)

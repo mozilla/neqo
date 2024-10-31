@@ -361,7 +361,7 @@ async fn ready(
 trait Handler {
     type Client: Client;
 
-    fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
+    fn handle(&mut self, client: &mut Self::Client, now: Instant) -> Res<bool>;
     fn take_token(&mut self) -> Option<ResumptionToken>;
 }
 
@@ -418,7 +418,7 @@ impl<'a, H: Handler> Runner<'a, H> {
 
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
         loop {
-            let handler_done = self.handler.handle(&mut self.client)?;
+            let handler_done = self.handler.handle(&mut self.client, Instant::now())?;
             self.process_output().await?;
             if self.client.has_events() {
                 continue;

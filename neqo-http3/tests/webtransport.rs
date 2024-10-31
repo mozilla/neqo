@@ -82,7 +82,11 @@ fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     }
 }
 
-fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
+fn create_wt_session(
+    client: &mut Http3Client,
+    server: &mut Http3Server,
+    now: Instant,
+) -> WebTransportRequest {
     let wt_session_id = client
         .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
@@ -104,7 +108,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                             .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
                 );
                 session
-                    .response(&WebTransportSessionAcceptAction::Accept)
+                    .response(&WebTransportSessionAcceptAction::Accept, now)
                     .unwrap();
                 wt_server_session = Some(session);
             }
@@ -143,8 +147,12 @@ fn send_data_client(
     server: &mut Http3Server,
     wt_stream_id: StreamId,
     data: &[u8],
+    now: Instant,
 ) {
-    assert_eq!(client.send_data(wt_stream_id, data).unwrap(), data.len());
+    assert_eq!(
+        client.send_data(wt_stream_id, data, now).unwrap(),
+        data.len()
+    );
     exchange_packets(client, server);
 }
 

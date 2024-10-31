@@ -527,11 +527,11 @@ impl LossRecovery {
         dropped
     }
 
-    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
+    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket, now: Instant) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
         qtrace!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
-            path.borrow_mut().packet_sent(&mut sent_packet);
+            path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
             qwarn!(
@@ -690,7 +690,7 @@ impl LossRecovery {
         if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
             if pto < now {
                 let probes = PacketNumberSpaceSet::from(&[PacketNumberSpace::ApplicationData]);
-                self.fire_pto(PacketNumberSpace::ApplicationData, probes);
+                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
             }
         }
     }
@@ -804,7 +804,12 @@ impl LossRecovery {
         }
     }
 
-    fn fire_pto(&mut self, pn_space: PacketNumberSpace, allow_probes: PacketNumberSpaceSet) {
+    fn fire_pto(
+        &mut self,
+        pn_space: PacketNumberSpace,
+        allow_probes: PacketNumberSpaceSet,
+        now: Instant,
+    ) {
         if let Some(st) = &mut self.pto_state {
             st.pto(pn_space, allow_probes);
         } else {
@@ -821,6 +826,7 @@ impl LossRecovery {
             &[QlogMetric::PtoCount(
                 self.pto_state.as_ref().unwrap().count(),
             )],
+            now,
         );
     }
 
@@ -853,7 +859,7 @@ impl LossRecovery {
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
             qtrace!([self], "PTO {}, probing {:?}", pn_space, allow_probes);
-            self.fire_pto(pn_space, allow_probes);
+            self.fire_pto(pn_space, allow_probes, now);
         }
     }
 
@@ -986,8 +992,8 @@ mod tests {
                 .on_ack_received(&self.path, pn_space, acked_ranges, ack_ecn, ack_delay, now)
         }
 
-        pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
-            self.lr.on_packet_sent(&self.path, sent_packet);
+        pub fn on_packet_sent(&mut self, sent_packet: SentPacket, now: Instant) {
+            self.lr.on_packet_sent(&self.path, sent_packet, now);
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<SentPacket> {
@@ -1026,7 +1032,7 @@ mod tests {
                 None,
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
             );
-            path.set_primary(true);
+            path.set_primary(true, todo!());
             path.rtt_mut().set_initial(TEST_RTT);
             Self {
                 lr: LossRecovery::new(StatsCell::default(), FAST_PTO_SCALE),

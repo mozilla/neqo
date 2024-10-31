@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Instant,
+};
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};
@@ -51,15 +54,17 @@ impl ControlStreamLocal {
         &mut self,
         conn: &mut Connection,
         recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
+        now: Instant,
     ) -> Res<()> {
-        self.stream.send_buffer(conn)?;
-        self.send_priority_update(conn, recv_conn)
+        self.stream.send_buffer(conn, now)?;
+        self.send_priority_update(conn, recv_conn, now)
     }
 
     fn send_priority_update(
         &mut self,
         conn: &mut Connection,
         recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
+        now: Instant,
     ) -> Res<()> {
         // send all necessary priority updates
         while let Some(update_id) = self.outstanding_priority_update.pop_front() {
@@ -79,7 +84,7 @@ impl ControlStreamLocal {
             if let Some(hframe) = stream.priority_update_frame() {
                 let mut enc = Encoder::new();
                 hframe.encode(&mut enc);
-                if self.stream.send_atomic(conn, enc.as_ref())? {
+                if self.stream.send_atomic(conn, enc.as_ref(), now)? {
                     stream.priority_update_sent();
                 } else {
                     self.outstanding_priority_update.push_front(update_id);

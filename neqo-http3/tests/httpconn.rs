@@ -45,20 +45,20 @@ fn receive_request(server: &Http3Server) -> Option<Http3OrWebTransportStream> {
     None
 }
 
-fn set_response(request: &Http3OrWebTransportStream) {
+fn set_response(request: &Http3OrWebTransportStream, now: Instant) {
     request
         .send_headers(&[
             Header::new(":status", "200"),
             Header::new("content-length", "3"),
         ])
         .unwrap();
-    request.send_data(RESPONSE_DATA).unwrap();
-    request.stream_close_send().unwrap();
+    request.send_data(RESPONSE_DATA, now).unwrap();
+    request.stream_close_send(now).unwrap();
 }
 
-fn process_server_events(server: &Http3Server) {
+fn process_server_events(server: &Http3Server, now: Instant) {
     let request = receive_request(server).unwrap();
-    set_response(&request);
+    set_response(&request, now);
 }
 
 fn process_client_events(conn: &mut Http3Client) {

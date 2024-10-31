@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc, time::Instant};
 
 use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
@@ -145,24 +145,28 @@ impl WebTransportSession {
             .send_headers(headers, conn)
     }
 
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
         qtrace!([self], "receive control data");
-        let (out, _) = self.control_stream_recv.receive(conn)?;
+        let (out, _) = self.control_stream_recv.receive(conn, now)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers();
-        self.read_control_stream(conn)?;
+        self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == SessionState::Done))
     }
 
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
+    fn header_unblocked(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<(ReceiveOutput, bool)> {
         let (out, _) = self
             .control_stream_recv
             .http_stream()
             .unwrap()
-            .header_unblocked(conn)?;
+            .header_unblocked(conn, now)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers();
-        self.read_control_stream(conn)?;
+        self.read_control_stream(conn, now)?;
         Ok((ReceiveOutput::NoOutput, self.state == SessionState::Done))
     }
 
@@ -187,8 +191,8 @@ impl WebTransportSession {
             .priority_update_sent();
     }
 
-    fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.control_stream_send.send(conn)?;
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.control_stream_send.send(conn, now)?;
         if self.control_stream_send.done() {
             self.state = SessionState::Done;
         }
@@ -338,13 +342,13 @@ impl WebTransportSession {
     /// # Errors
     ///
     /// It may return an error if the frame is not correctly decoded.
-    pub fn read_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
+    pub fn read_control_stream(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
         let (f, fin) = self
             .frame_reader
-            .receive::<WebTransportFrame>(&mut StreamReaderRecvStreamWrapper::new(
-                conn,
-                &mut self.control_stream_recv,
-            ))
+            .receive::<WebTransportFrame>(
+                &mut StreamReaderRecvStreamWrapper::new(conn, &mut self.control_stream_recv),
+                now,
+            )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
         qtrace!([self], "Received frame: {:?} fin={}", f, fin);
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
@@ -378,7 +382,13 @@ impl WebTransportSession {
     ///
     /// Return an error if the stream was closed on the transport layer, but that information is not
     /// yet consumed on the http/3 layer.
-    pub fn close_session(&mut self, conn: &mut Connection, error: u32, message: &str) -> Res<()> {
+    pub fn close_session(
+        &mut self,
+        conn: &mut Connection,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
         self.state = SessionState::Done;
         let close_frame = WebTransportFrame::CloseSession {
             error,
@@ -387,8 +397,8 @@ impl WebTransportSession {
         let mut encoder = Encoder::default();
         close_frame.encode(&mut encoder);
         self.control_stream_send
-            .send_data_atomic(conn, encoder.as_ref())?;
-        self.control_stream_send.close(conn)?;
+            .send_data_atomic(conn, encoder.as_ref(), now)?;
+        self.control_stream_send.close(conn, now)?;
         self.state = if self.control_stream_send.done() {
             SessionState::Done
         } else {
@@ -397,8 +407,8 @@ impl WebTransportSession {
         Ok(())
     }
 
-    fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        self.control_stream_send.send_data(conn, buf)
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.control_stream_send.send_data(conn, buf, now)
     }
 
     /// # Errors
@@ -437,8 +447,8 @@ impl Stream for Rc<RefCell<WebTransportSession>> {
 }
 
 impl RecvStream for Rc<RefCell<WebTransportSession>> {
-    fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.borrow_mut().receive(conn)
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
+        self.borrow_mut().receive(conn, now)
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
@@ -456,8 +466,12 @@ impl RecvStream for Rc<RefCell<WebTransportSession>> {
 }
 
 impl HttpRecvStream for Rc<RefCell<WebTransportSession>> {
-    fn header_unblocked(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        self.borrow_mut().header_unblocked(conn)
+    fn header_unblocked(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<(ReceiveOutput, bool)> {
+        self.borrow_mut().header_unblocked(conn, now)
     }
 
     fn maybe_update_priority(&mut self, priority: Priority) -> bool {
@@ -474,12 +488,12 @@ impl HttpRecvStream for Rc<RefCell<WebTransportSession>> {
 }
 
 impl SendStream for Rc<RefCell<WebTransportSession>> {
-    fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.borrow_mut().send(conn)
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.borrow_mut().send(conn, now)
     }
 
-    fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        self.borrow_mut().send_data(conn, buf)
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        self.borrow_mut().send_data(conn, buf, now)
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -492,12 +506,18 @@ impl SendStream for Rc<RefCell<WebTransportSession>> {
         self.borrow_mut().done()
     }
 
-    fn close(&mut self, conn: &mut Connection) -> Res<()> {
-        self.borrow_mut().close_session(conn, 0, "")
+    fn close(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.borrow_mut().close_session(conn, 0, "", now)
     }
 
-    fn close_with_message(&mut self, conn: &mut Connection, error: u32, message: &str) -> Res<()> {
-        self.borrow_mut().close_session(conn, error, message)
+    fn close_with_message(
+        &mut self,
+        conn: &mut Connection,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
+        self.borrow_mut().close_session(conn, error, message, now)
     }
 
     fn handle_stop_sending(&mut self, close_type: CloseType) {

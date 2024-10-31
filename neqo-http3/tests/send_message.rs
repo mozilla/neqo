@@ -135,7 +135,9 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
     assert!(fin_received);
 }
 
-fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
+fn connect_send_and_receive_request(
+    now: Instant,
+) -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
 
@@ -155,7 +157,7 @@ fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTr
         )
         .unwrap();
     assert_eq!(req, 0);
-    hconn_c.stream_close_send(req).unwrap();
+    hconn_c.stream_close_send(req, now).unwrap();
     exchange_packets(&mut hconn_c, &mut hconn_s);
 
     let request = receive_request(&hconn_s).unwrap();

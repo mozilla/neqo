@@ -11,7 +11,7 @@ use std::{
     io::BufWriter,
     path::PathBuf,
     rc::Rc,
-    time::SystemTime,
+    time::{Instant, SystemTime},
 };
 
 use qlog::{
@@ -95,26 +95,26 @@ impl NeqoQlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event<F>(&self, f: F)
+    pub fn add_event<F>(&self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::Event>,
     {
         self.add_event_with_stream(|s| {
             if let Some(evt) = f() {
-                s.add_event(evt)?;
+                s.add_event_with_instant(evt, now)?;
             }
             Ok(())
         });
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_data<F>(&self, f: F)
+    pub fn add_event_data<F>(&self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
         self.add_event_with_stream(|s| {
             if let Some(ev_data) = f() {
-                s.add_event_data_now(ev_data)?;
+                s.add_event_data_with_instant(ev_data, now)?;
             }
             Ok(())
         });
@@ -122,6 +122,8 @@ impl NeqoQlog {
 
     /// If logging enabled, closure is given the Qlog stream to write events and
     /// frames to.
+    //
+    // TODO: What about this one?
     pub fn add_event_with_stream<F>(&self, f: F)
     where
         F: FnOnce(&mut QlogStreamer) -> Result<(), qlog::Error>,

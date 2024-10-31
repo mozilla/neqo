@@ -168,6 +168,7 @@ impl Paths {
         path: &PathRef,
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
+        now: Instant,
     ) {
         debug_assert!(self.is_temporary(path));
 
@@ -195,7 +196,7 @@ impl Paths {
         path.borrow_mut().make_permanent(local_cid, remote_cid);
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
-            assert!(self.select_primary(path).is_none());
+            assert!(self.select_primary(path, now).is_none());
         }
     }
 
@@ -203,10 +204,10 @@ impl Paths {
     /// Using the old path is only necessary if this change in path is a reaction
     /// to a migration from a peer, in which case the old path needs to be probed.
     #[must_use]
-    fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
+    fn select_primary(&mut self, path: &PathRef, now: Instant) -> Option<PathRef> {
         qdebug!([path.borrow()], "set as primary path");
         let old_path = self.primary.replace(Rc::clone(path)).inspect(|old| {
-            old.borrow_mut().set_primary(false);
+            old.borrow_mut().set_primary(false, now);
         });
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
@@ -218,7 +219,7 @@ impl Paths {
             .expect("migration target should be permanent");
         self.paths.swap(0, idx);
 
-        path.borrow_mut().set_primary(true);
+        path.borrow_mut().set_primary(true, now);
         old_path
     }
 
@@ -242,7 +243,7 @@ impl Paths {
         path.borrow_mut().set_ecn_baseline(baseline);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
-            mem::drop(self.select_primary(path));
+            mem::drop(self.select_primary(path, now));
             self.migration_target = None;
         } else {
             self.migration_target = Some(Rc::clone(path));
@@ -285,7 +286,7 @@ impl Paths {
                 // Need a clone as `fallback` is borrowed from `self`.
                 let path = Rc::clone(fallback);
                 qinfo!([path.borrow()], "Failing over after primary path failed");
-                mem::drop(self.select_primary(&path));
+                mem::drop(self.select_primary(&path, now));
                 true
             } else {
                 false
@@ -328,7 +329,7 @@ impl Paths {
             return;
         }
 
-        if let Some(old_path) = self.select_primary(path) {
+        if let Some(old_path) = self.select_primary(path, now) {
             // Need to probe the old path if the peer migrates.
             old_path.borrow_mut().probe(stats);
             // TODO(mt) - suppress probing if the path was valid within 3PTO.
@@ -366,7 +367,7 @@ impl Paths {
                     .map_or(false, |target| Rc::ptr_eq(target, p))
                 {
                     let primary = self.migration_target.take();
-                    mem::drop(self.select_primary(&primary.unwrap()));
+                    mem::drop(self.select_primary(&primary.unwrap(), now));
                     return true;
                 }
                 break;
@@ -637,12 +638,12 @@ impl Path {
     }
 
     /// Set whether this path is primary.
-    pub(crate) fn set_primary(&mut self, primary: bool) {
+    pub(crate) fn set_primary(&mut self, primary: bool, now: Instant) {
         qtrace!([self], "Make primary {}", primary);
         debug_assert!(self.remote_cid.is_some());
         self.primary = primary;
         if !primary {
-            self.sender.discard_in_flight();
+            self.sender.discard_in_flight(now);
         }
     }
 
@@ -958,11 +959,11 @@ impl Path {
     }
 
     /// Record a packet as having been sent on this path.
-    pub fn packet_sent(&mut self, sent: &mut SentPacket) {
+    pub fn packet_sent(&mut self, sent: &mut SentPacket, now: Instant) {
         if !self.is_primary() {
             sent.clear_primary_path();
         }
-        self.sender.on_packet_sent(sent, self.rtt.estimate());
+        self.sender.on_packet_sent(sent, self.rtt.estimate(), now);
     }
 
     /// Discard a packet that previously might have been in-flight.
@@ -988,7 +989,7 @@ impl Path {
             );
         }
 
-        self.sender.discard(sent);
+        self.sender.discard(sent, now);
     }
 
     /// Record packets as acknowledged with the sender.
@@ -1005,7 +1006,7 @@ impl Path {
         if ecn_ce_received {
             let cwnd_reduced = self
                 .sender
-                .on_ecn_ce_received(acked_pkts.first().expect("must be there"));
+                .on_ecn_ce_received(acked_pkts.first().expect("must be there"), now);
             if cwnd_reduced {
                 self.rtt.update_ack_delay(self.sender.cwnd(), self.plpmtu());
             }

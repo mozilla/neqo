@@ -551,6 +551,7 @@ impl Http3Client {
                 headers,
                 priority,
             },
+            now,
         );
         if let Err(e) = &output {
             if e.connection_error() {
@@ -589,10 +590,10 @@ impl Http3Client {
     /// # Errors
     ///
     /// An error will be return if stream does not exist.
-    pub fn stream_close_send(&mut self, stream_id: StreamId) -> Res<()> {
+    pub fn stream_close_send(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
         qdebug!([self], "Close sending side stream={}.", stream_id);
         self.base_handler
-            .stream_close_send(&mut self.conn, stream_id)
+            .stream_close_send(&mut self.conn, stream_id, now)
     }
 
     /// # Errors
@@ -625,7 +626,7 @@ impl Http3Client {
     /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
-    pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8]) -> Res<usize> {
+    pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8], now: Instant) -> Res<usize> {
         qinfo!(
             [self],
             "send_data from stream {} sending {} bytes.",
@@ -636,7 +637,7 @@ impl Http3Client {
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send_data(&mut self.conn, buf)
+            .send_data(&mut self.conn, buf, now)
     }
 
     /// Response data are read directly into a buffer supplied as a parameter of this function to
@@ -653,7 +654,9 @@ impl Http3Client {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qdebug!([self], "read_data from stream {}.", stream_id);
-        let res = self.base_handler.read_data(&mut self.conn, stream_id, buf);
+        let res = self
+            .base_handler
+            .read_data(&mut self.conn, stream_id, buf, now);
         if let Err(e) = &res {
             if e.connection_error() {
                 self.close(now, e.code(), "");
@@ -741,9 +744,15 @@ impl Http3Client {
         session_id: StreamId,
         error: u32,
         message: &str,
+        now: Instant,
     ) -> Res<()> {
-        self.base_handler
-            .webtransport_close_session(&mut self.conn, session_id, error, message)
+        self.base_handler.webtransport_close_session(
+            &mut self.conn,
+            session_id,
+            error,
+            message,
+            now,
+        )
     }
 
     /// # Errors
@@ -900,19 +909,19 @@ impl Http3Client {
         qtrace!([self], "Process http3 internal.");
         match self.base_handler.state() {
             Http3State::ZeroRtt | Http3State::Connected | Http3State::GoingAway(..) => {
-                let res = self.check_connection_events();
+                let res = self.check_connection_events(now);
                 if self.check_result(now, &res) {
                     return;
                 }
                 self.push_handler
                     .borrow_mut()
                     .maybe_send_max_push_id_frame(&mut self.base_handler);
-                let res = self.base_handler.process_sending(&mut self.conn);
+                let res = self.base_handler.process_sending(&mut self.conn, now);
                 self.check_result(now, &res);
             }
             Http3State::Closed { .. } => {}
             _ => {
-                let res = self.check_connection_events();
+                let res = self.check_connection_events(now);
                 _ = self.check_result(now, &res);
             }
         }
@@ -995,7 +1004,7 @@ impl Http3Client {
     /// [1]: https://github.com/mozilla/neqo/blob/main/neqo-http3/src/connection.rs
     /// [2]: ../neqo_transport/enum.ConnectionEvent.html
     /// [3]: ../neqo_transport/enum.ConnectionEvent.html#variant.RecvStreamReadable
-    fn check_connection_events(&mut self) -> Res<()> {
+    fn check_connection_events(&mut self, now: Instant) -> Res<()> {
         qtrace!([self], "Check connection events.");
         while let Some(e) = self.conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
@@ -1014,7 +1023,7 @@ impl Http3Client {
                     }
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    self.handle_stream_readable(stream_id)?;
+                    self.handle_stream_readable(stream_id, now)?;
                 }
                 ConnectionEvent::RecvStreamReset {
                     stream_id,
@@ -1087,13 +1096,13 @@ impl Http3Client {
     ///       specification.
     ///
     /// [1]: https://github.com/mozilla/neqo/blob/main/neqo-http3/src/connection.rs
-    fn handle_stream_readable(&mut self, stream_id: StreamId) -> Res<()> {
+    fn handle_stream_readable(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
         match self
             .base_handler
-            .handle_stream_readable(&mut self.conn, stream_id)?
+            .handle_stream_readable(&mut self.conn, stream_id, now)?
         {
             ReceiveOutput::NewStream(NewStreamType::Push(push_id)) => {
-                self.handle_new_push_stream(stream_id, push_id)
+                self.handle_new_push_stream(stream_id, push_id, now)
             }
             ReceiveOutput::NewStream(NewStreamType::Http(_)) => Err(Error::HttpStreamCreation),
             ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
@@ -1103,9 +1112,9 @@ impl Http3Client {
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
                 )?;
-                let res = self
-                    .base_handler
-                    .handle_stream_readable(&mut self.conn, stream_id)?;
+                let res =
+                    self.base_handler
+                        .handle_stream_readable(&mut self.conn, stream_id, now)?;
                 debug_assert!(matches!(res, ReceiveOutput::NoOutput));
                 Ok(())
             }
@@ -1133,7 +1142,12 @@ impl Http3Client {
         }
     }
 
-    fn handle_new_push_stream(&mut self, stream_id: StreamId, push_id: u64) -> Res<()> {
+    fn handle_new_push_stream(
+        &mut self,
+        stream_id: StreamId,
+        push_id: u64,
+        now: Instant,
+    ) -> Res<()> {
         if !self.push_handler.borrow().can_receive_push() {
             return Err(Error::HttpId);
         }
@@ -1174,7 +1188,7 @@ impl Http3Client {
         );
         let res = self
             .base_handler
-            .handle_stream_readable(&mut self.conn, stream_id)?;
+            .handle_stream_readable(&mut self.conn, stream_id, now)?;
         debug_assert!(matches!(res, ReceiveOutput::NoOutput));
         Ok(())
     }

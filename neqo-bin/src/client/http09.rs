@@ -53,7 +53,7 @@ impl Handler<'_> {
 impl super::Handler for Handler<'_> {
     type Client = Connection;
 
-    fn handle(&mut self, client: &mut Self::Client) -> Res<bool> {
+    fn handle(&mut self, client: &mut Self::Client, now: Instant) -> Res<bool> {
         while let Some(event) = client.next_event() {
             if self.needs_key_update {
                 match client.initiate_key_update() {
@@ -69,7 +69,7 @@ impl super::Handler for Handler<'_> {
 
             match event {
                 ConnectionEvent::AuthenticationNeeded => {
-                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    client.authenticated(AuthenticationStatus::Ok, now);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.read(client, stream_id)?;
