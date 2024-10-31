@@ -13,7 +13,7 @@ use qlog::events::{
 };
 
 pub fn qpack_read_insert_count_increment_instruction(qlog: &NeqoQlog, increment: u64, data: &[u8]) {
-    qlog.add_event_data(|| {
+    qlog.add_event_data_now(|| {
         let raw = RawInfo {
             length: Some(8),
             payload_length: None,

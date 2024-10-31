@@ -527,11 +527,11 @@ impl LossRecovery {
         dropped
     }
 
-    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
+    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket, now: Instant) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
         qtrace!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
-            path.borrow_mut().packet_sent(&mut sent_packet);
+            path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
             qwarn!(
@@ -690,7 +690,7 @@ impl LossRecovery {
         if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
             if pto < now {
                 let probes = PacketNumberSpaceSet::from(&[PacketNumberSpace::ApplicationData]);
-                self.fire_pto(PacketNumberSpace::ApplicationData, probes);
+                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
             }
         }
     }
@@ -804,7 +804,12 @@ impl LossRecovery {
         }
     }
 
-    fn fire_pto(&mut self, pn_space: PacketNumberSpace, allow_probes: PacketNumberSpaceSet) {
+    fn fire_pto(
+        &mut self,
+        pn_space: PacketNumberSpace,
+        allow_probes: PacketNumberSpaceSet,
+        now: Instant,
+    ) {
         if let Some(st) = &mut self.pto_state {
             st.pto(pn_space, allow_probes);
         } else {
@@ -821,6 +826,7 @@ impl LossRecovery {
             &[QlogMetric::PtoCount(
                 self.pto_state.as_ref().unwrap().count(),
             )],
+            now,
         );
     }
 
@@ -853,7 +859,7 @@ impl LossRecovery {
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
             qtrace!([self], "PTO {}, probing {:?}", pn_space, allow_probes);
-            self.fire_pto(pn_space, allow_probes);
+            self.fire_pto(pn_space, allow_probes, now);
         }
     }
 
@@ -986,8 +992,8 @@ mod tests {
                 .on_ack_received(&self.path, pn_space, acked_ranges, ack_ecn, ack_delay, now)
         }
 
-        pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
-            self.lr.on_packet_sent(&self.path, sent_packet);
+        pub fn on_packet_sent(&mut self, sent_packet: SentPacket, now: Instant) {
+            self.lr.on_packet_sent(&self.path, sent_packet, now);
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<SentPacket> {
@@ -1026,7 +1032,7 @@ mod tests {
                 None,
                 ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
             );
-            path.set_primary(true);
+            path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);
             Self {
                 lr: LossRecovery::new(StatsCell::default(), FAST_PTO_SCALE),
@@ -1119,15 +1125,18 @@ mod tests {
 
     fn pace(lr: &mut Fixture, count: u64) {
         for pn in 0..count {
-            lr.on_packet_sent(SentPacket::new(
-                PacketType::Short,
-                pn,
-                IpTosEcn::default(),
-                pn_time(pn),
-                true,
-                Vec::new(),
-                ON_SENT_SIZE,
-            ));
+            lr.on_packet_sent(
+                SentPacket::new(
+                    PacketType::Short,
+                    pn,
+                    IpTosEcn::default(),
+                    pn_time(pn),
+                    true,
+                    Vec::new(),
+                    ON_SENT_SIZE,
+                ),
+                Instant::now(),
+            );
         }
     }
 
@@ -1269,24 +1278,30 @@ mod tests {
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
         // pn 0 should then be marked lost because it is then outstanding for 5RTT/4
         // the loss time for packets is 9RTT/8.
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Short,
-            0,
-            IpTosEcn::default(),
-            pn_time(0),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Short,
-            1,
-            IpTosEcn::default(),
-            pn_time(0) + TEST_RTT / 4,
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Short,
+                0,
+                IpTosEcn::default(),
+                pn_time(0),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Short,
+                1,
+                IpTosEcn::default(),
+                pn_time(0) + TEST_RTT / 4,
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
         let (_, lost) = lr.on_ack_received(
             PacketNumberSpace::ApplicationData,
             vec![1..=1],
@@ -1374,33 +1389,42 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut lr = Fixture::default();
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Initial,
-            0,
-            IpTosEcn::default(),
-            pn_time(0),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Handshake,
-            0,
-            IpTosEcn::default(),
-            pn_time(1),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Short,
-            0,
-            IpTosEcn::default(),
-            pn_time(2),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Initial,
+                0,
+                IpTosEcn::default(),
+                pn_time(0),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Handshake,
+                0,
+                IpTosEcn::default(),
+                pn_time(1),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Short,
+                0,
+                IpTosEcn::default(),
+                pn_time(2),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
 
         // Now put all spaces on the LR timer so we can see them.
         for sp in &[
@@ -1418,7 +1442,7 @@ mod tests {
                 ON_SENT_SIZE,
             );
             let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
-            lr.on_packet_sent(sent_pkt);
+            lr.on_packet_sent(sent_pkt, Instant::now());
             lr.on_ack_received(
                 pn_space,
                 vec![1..=1],
@@ -1444,30 +1468,36 @@ mod tests {
 
         // There are cases where we send a packet that is not subsequently tracked.
         // So check that this works.
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Initial,
-            0,
-            IpTosEcn::default(),
-            pn_time(3),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Initial,
+                0,
+                IpTosEcn::default(),
+                pn_time(3),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
     }
 
     #[test]
     fn rearm_pto_after_confirmed() {
         let mut lr = Fixture::default();
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Initial,
-            0,
-            IpTosEcn::default(),
-            now(),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Initial,
+                0,
+                IpTosEcn::default(),
+                now(),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
         // Set the RTT to the initial value so that discarding doesn't
         // alter the estimate.
         let rtt = lr.path.borrow().rtt().estimate();
@@ -1479,24 +1509,30 @@ mod tests {
             now() + rtt,
         );
 
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Handshake,
-            0,
-            IpTosEcn::default(),
-            now(),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Short,
-            0,
-            IpTosEcn::default(),
-            now(),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Handshake,
+                0,
+                IpTosEcn::default(),
+                now(),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Short,
+                0,
+                IpTosEcn::default(),
+                now(),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
 
         assert!(lr.pto_time(PacketNumberSpace::ApplicationData).is_some());
         lr.discard(PacketNumberSpace::Initial, pn_time(1));
@@ -1526,15 +1562,18 @@ mod tests {
             assert_eq!(path.amplification_limit(), SPARE);
         }
 
-        lr.on_packet_sent(SentPacket::new(
-            PacketType::Initial,
-            0,
-            IpTosEcn::default(),
-            now(),
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-        ));
+        lr.on_packet_sent(
+            SentPacket::new(
+                PacketType::Initial,
+                0,
+                IpTosEcn::default(),
+                now(),
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+            ),
+            Instant::now(),
+        );
 
         let handshake_pto = lr.path.borrow().rtt().pto(false);
         let expected_pto = now() + handshake_pto;
