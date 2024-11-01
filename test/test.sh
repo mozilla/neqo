@@ -10,7 +10,6 @@
 
 set -e
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
 
 cargo build --bin neqo-client --bin neqo-server
 
@@ -24,17 +23,24 @@ else
         iface=lo
 fi
 
+if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
+        export LD_LIBRARY_PATH="$NSS_DIR/../dist/$NSS_TARGET/lib"
+        export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
+fi
+
 client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
 server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
 tcpdump_pid=$!
+trap 'kill $tcpdump_pid; rm -rf "$tmp"' EXIT
 
 tmux -CC \
         set-option -g default-shell "$(which bash)" \; \
-        new-session "$client && kill -USR2 $tcpdump_pid && touch $tmp/done" \; \
+        new-session "$client; kill -USR2 $tcpdump_pid; touch $tmp/done" \; \
         split-window -h "$server" \; \
         split-window -v -f "\
-                until [ -e $tmp/done ]; do sleep 1; done && \
+                until [ -e $tmp/done ]; do sleep 1; done; \
+                echo $tmp; ls -l $tmp; echo; \
                 tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
         set remain-on-exit on

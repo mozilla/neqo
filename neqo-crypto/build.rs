@@ -66,7 +66,7 @@ fn is_debug() -> bool {
 // Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
 fn setup_clang() {
     // If this isn't Windows, or we're in CI, then we don't need to do anything.
-    if env::consts::OS != "windows" || env::var("GITHUB_WORKFLOW").unwrap() == "CI" {
+    if env::consts::OS != "windows" || env::var("GITHUB_WORKFLOW").unwrap_or_default() == "CI" {
         return;
     }
     println!("rerun-if-env-changed=LIBCLANG_PATH");
@@ -103,20 +103,20 @@ fn get_bash() -> PathBuf {
 
     // When running under MOZILLABUILD, we need to make sure not to invoke
     // another instance of bash that might be sitting around (like WSL).
-    match env::var("MOZILLABUILD") {
-        Ok(d) => PathBuf::from(d).join("msys").join("bin").join("bash.exe"),
-        Err(_) => PathBuf::from("bash"),
-    }
+    env::var("MOZILLABUILD").map_or_else(
+        |_| PathBuf::from("bash"),
+        |d| PathBuf::from(d).join("msys").join("bin").join("bash.exe"),
+    )
 }
 
-fn build_nss(dir: PathBuf) {
+fn build_nss(dir: PathBuf, nsstarget: &str) {
     let mut build_nss = vec![
         String::from("./build.sh"),
         String::from("-Ddisable_tests=1"),
         // Generate static libraries in addition to shared libraries.
         String::from("--static"),
     ];
-    if !is_debug() {
+    if nsstarget == "Release" {
         build_nss.push(String::from("-o"));
     }
     if let Ok(d) = env::var("NSS_JOBS") {
@@ -317,15 +317,18 @@ fn setup_standalone(nss: &str) -> Vec<String> {
         "The NSS_DIR environment variable is expected to be an absolute path."
     );
 
-    build_nss(nss.clone());
-
     // $NSS_DIR/../dist/
     let nssdist = nss.parent().unwrap().join("dist");
     println!("cargo:rerun-if-env-changed=NSS_TARGET");
     let nsstarget = env::var("NSS_TARGET")
         .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
-    let nsstarget = nssdist.join(nsstarget.trim());
 
+    // If NSS_PREBUILT is set, we assume that the NSS libraries are already built.
+    if env::var("NSS_PREBUILT").is_err() {
+        build_nss(nss, &nsstarget);
+    }
+
+    let nsstarget = nssdist.join(nsstarget.trim());
     let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");

@@ -24,7 +24,7 @@ runs:
   using: "composite"
   steps:
     - name: Checkout quic-interop/quic-interop-runner repository
-      uses: actions/checkout@44c2b7a8a4ea60a981eaca3cf939b5f4305c123b # v4.1.5
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         repository: 'quic-interop/quic-interop-runner'
         path: 'quic-interop-runner'
@@ -42,7 +42,7 @@ runs:
 
     - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
       with:
-        python-version: 3.8
+        python-version: 3.12
         cache: 'pip'
         cache-dependency-path: 'quic-interop-runner/requirements.txt'
 
@@ -71,10 +71,31 @@ runs:
         fi
         # Don't fail CI if the interop test fails
         set -o pipefail
-        python run.py $ARGS 2>&1 | tee ../summary.txt || true
+        python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
+        # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
+        # (that we assume happened in neqo.)
+        for log in ../logs/*/*/output.txt; do
+          if grep -q 'RUST_BACKTRACE=full' "$log"; then
+            echo "Panic detected in $log"
+            tail -n 50 "$log"
+            FAILED=1
+          fi
+        done
+        # Remove all log files > $MAX_SIZE for succeeded tests to make the artifacts smaller.
+        MAX_SIZE=2M
+        echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
+        echo "Removing these log files > $MAX_SIZE:"
+        SUCCEEDED=$(jq < ../result.json '. | .results[][] | select(.result == "succeeded").name' | tr -d '"')
+        for run in ../logs/*; do
+          for test in $SUCCEEDED; do
+            find "$run/$test" -type f -size +$MAX_SIZE -ls -exec cp note.txt {} \;
+          done
+        done
+        exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      if: always()
       id: upload-logs
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
@@ -82,16 +103,18 @@ runs:
         compression-level: 9
 
     - name: Store log URL
+      if: always()
       run: |
         jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
           < result.json  > result.json.tmp && \
           mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      if: always()
       with:
         name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
         path: |
           result.json
           summary.txt
-          retention-days: 1
+        retention-days: 1

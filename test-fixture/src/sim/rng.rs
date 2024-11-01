@@ -70,7 +70,7 @@ impl Random {
     #[must_use]
     pub fn seed_str(&self) -> String {
         format!(
-            "{:8x}{:8x}{:8x}{:8x}",
+            "{:016x}{:016x}{:016x}{:016x}",
             self.state[0], self.state[1], self.state[2], self.state[3],
         )
     }
@@ -79,12 +79,12 @@ impl Random {
 impl Default for Random {
     #[cfg(not(feature = "disable-random"))]
     fn default() -> Self {
-        Random::new(&neqo_crypto::random::<32>())
+        Self::new(&neqo_crypto::random::<32>())
     }
 
     #[cfg(feature = "disable-random")]
     // Use a fixed seed for a deterministic sequence of numbers.
     fn default() -> Self {
-        Random::new(&[1; 32])
+        Self::new(&[1; 32])
     }
 }

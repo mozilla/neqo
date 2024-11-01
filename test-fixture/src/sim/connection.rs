@@ -80,25 +80,25 @@ impl ConnectionNode {
     }
 
     pub fn default_client(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
-        // TODO
-        let params = ConnectionParameters::default(); // .cc_algorithm(neqo_transport::CongestionControlAlgorithm::Cubic);
-        Self::new_client(params, boxed![ReachState::new(State::Confirmed)], goals)
-    }
-
-    pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
-        Self::new_server(
-            ConnectionParameters::default(),
+        Self::new_client(
+            ConnectionParameters::default().pmtud(true),
             boxed![ReachState::new(State::Confirmed)],
             goals,
         )
     }
 
-    #[allow(dead_code)]
+    pub fn default_server(goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>) -> Self {
+        Self::new_server(
+            ConnectionParameters::default().pmtud(true),
+            boxed![ReachState::new(State::Confirmed)],
+            goals,
+        )
+    }
+
     pub fn clear_goals(&mut self) {
         self.goals.clear();
     }
 
-    #[allow(dead_code)]
     pub fn add_goal(&mut self, goal: Box<dyn ConnectionGoal>) {
         self.goals.push(goal);
     }
@@ -141,7 +141,7 @@ impl Node for ConnectionNode {
     fn process(&mut self, mut dgram: Option<Datagram>, now: Instant) -> Output {
         _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
-            let res = self.c.process(dgram.take().as_ref(), now);
+            let res = self.c.process(dgram.take(), now);
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
@@ -194,7 +194,7 @@ pub struct ReachState {
 impl ReachState {
     /// Create a new instance that intends to reach the indicated state.
     #[must_use]
-    pub fn new(target: State) -> Self {
+    pub const fn new(target: State) -> Self {
         Self { target }
     }
 }
@@ -223,7 +223,7 @@ pub struct SendData {
 
 impl SendData {
     #[must_use]
-    pub fn new(amount: usize) -> Self {
+    pub const fn new(amount: usize) -> Self {
         Self {
             remaining: amount,
             stream_id: None,
@@ -305,7 +305,7 @@ pub struct ReceiveData {
 
 impl ReceiveData {
     #[must_use]
-    pub fn new(amount: usize) -> Self {
+    pub const fn new(amount: usize) -> Self {
         Self { remaining: amount }
     }
 

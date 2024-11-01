@@ -15,3 +15,7 @@ updates:
     directory: "/qns"
     schedule:
       interval: "weekly"
+  - package-ecosystem: docker
+    directory: /taskcluster/docker/linux
+    schedule:
+      interval: "weekly"

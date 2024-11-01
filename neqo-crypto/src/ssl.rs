@@ -8,11 +8,8 @@
     dead_code,
     non_upper_case_globals,
     non_snake_case,
-    clippy::cognitive_complexity,
     clippy::too_many_lines,
-    clippy::upper_case_acronyms,
-    unknown_lints,
-    clippy::borrow_as_ptr
+    clippy::cognitive_complexity
 )]
 
 use std::os::raw::{c_uint, c_void};
@@ -28,9 +25,7 @@ mod SSLOption {
 }
 
 // I clearly don't understand how bindgen operates.
-#[allow(clippy::empty_enum)]
 pub enum PLArenaPool {}
-#[allow(clippy::empty_enum)]
 pub enum PRFileDesc {}
 
 // Remap some constants.
@@ -56,7 +51,8 @@ pub enum Opt {
 impl Opt {
     // Cast is safe here because SSLOptions are within the i32 range
     #[allow(clippy::cast_possible_wrap)]
-    pub(crate) fn as_int(self) -> PRInt32 {
+    #[must_use]
+    pub const fn as_int(self) -> PRInt32 {
         let i = match self {
             Self::Locking => SSLOption::SSL_NO_LOCKS,
             Self::Tickets => SSLOption::SSL_ENABLE_SESSION_TICKETS,

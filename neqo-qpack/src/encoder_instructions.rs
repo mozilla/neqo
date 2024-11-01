@@ -32,7 +32,7 @@ pub enum EncoderInstruction<'a> {
     NoInstruction,
 }
 
-impl<'a> EncoderInstruction<'a> {
+impl EncoderInstruction<'_> {
     pub(crate) fn marshal(&self, enc: &mut QpackData, use_huffman: bool) {
         match self {
             Self::Capacity { value } => {
@@ -122,7 +122,7 @@ impl ::std::fmt::Display for EncoderInstructionReader {
 }
 
 impl EncoderInstructionReader {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             state: EncoderInstructionReaderState::ReadInstruction,
             instruction: DecodedEncoderInstruction::NoInstruction,
@@ -285,7 +285,7 @@ mod test {
     }
 
     #[test]
-    fn test_encoding_decoding_instructions() {
+    fn encoding_decoding_instructions() {
         test_encoding_decoding(&EncoderInstruction::Capacity { value: 1 }, false);
         test_encoding_decoding(&EncoderInstruction::Capacity { value: 10_000 }, false);
 
@@ -386,7 +386,7 @@ mod test {
     }
 
     #[test]
-    fn test_encoding_decoding_instructions_slow_reader() {
+    fn encoding_decoding_instructions_slow_reader() {
         test_encoding_decoding_slow_reader(&EncoderInstruction::Capacity { value: 1 }, false);
         test_encoding_decoding_slow_reader(&EncoderInstruction::Capacity { value: 10_000 }, false);
 
@@ -468,7 +468,7 @@ mod test {
     }
 
     #[test]
-    fn test_decoding_error() {
+    fn decoding_error() {
         let mut test_receiver: TestReceiver = TestReceiver::default();
         // EncoderInstruction::Capacity with overflow
         test_receiver.write(&[

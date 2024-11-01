@@ -41,19 +41,19 @@ fn connect() -> (Http3Client, Http3Server) {
     )
     .expect("create a server");
     assert_eq!(client.state(), Http3State::Initializing);
-    let out = client.process(None, now());
+    let out = client.process_output(now());
     assert_eq!(client.state(), Http3State::Initializing);
 
-    let out = server.process(out.as_dgram_ref(), now());
-    let out = client.process(out.as_dgram_ref(), now());
-    let out = server.process(out.as_dgram_ref(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
 
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
     client.authenticated(AuthenticationStatus::Ok, now());
 
-    let mut out = client.process(out.as_dgram_ref(), now()).dgram();
+    let mut out = client.process(out.dgram(), now()).dgram();
     let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
     assert!(client.events().any(connected));
 
@@ -61,9 +61,9 @@ fn connect() -> (Http3Client, Http3Server) {
 
     // Exchange H3 setttings
     loop {
-        out = server.process(out.as_ref(), now()).dgram();
+        out = server.process(out, now()).dgram();
         let dgram_present = out.is_some();
-        out = client.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
         if out.is_none() && !dgram_present {
             break;
         }
@@ -74,8 +74,8 @@ fn connect() -> (Http3Client, Http3Server) {
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
     loop {
-        out = client.process(out.as_ref(), now()).dgram();
-        out = server.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
         if out.is_none() {
             break;
         }
@@ -92,7 +92,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
     while let Some(event) = server.next_event() {
         match event {
             Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                mut session,
+                session,
                 headers,
             }) => {
                 assert!(
@@ -151,7 +151,7 @@ fn send_data_client(
 fn send_data_server(
     client: &mut Http3Client,
     server: &mut Http3Server,
-    wt_stream: &mut Http3OrWebTransportStream,
+    wt_stream: &Http3OrWebTransportStream,
     data: &[u8],
 ) {
     assert_eq!(wt_stream.send_data(data).unwrap(), data.len());
@@ -254,7 +254,7 @@ fn wt_client_stream_bidi() {
         .webtransport_create_stream(wt_session.stream_id(), StreamType::BiDi)
         .unwrap();
     send_data_client(&mut client, &mut server, wt_client_stream, BUF_CLIENT);
-    let mut wt_server_stream = receive_data_server(
+    let wt_server_stream = receive_data_server(
         &mut client,
         &mut server,
         wt_client_stream,
@@ -262,7 +262,7 @@ fn wt_client_stream_bidi() {
         BUF_CLIENT,
         false,
     );
-    send_data_server(&mut client, &mut server, &mut wt_server_stream, BUF_SERVER);
+    send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(&mut client, wt_client_stream, false, BUF_SERVER, false);
 }
 
@@ -271,9 +271,9 @@ fn wt_server_stream_uni() {
     const BUF_SERVER: &[u8] = &[2; 30];
 
     let (mut client, mut server) = connect();
-    let mut wt_session = create_wt_session(&mut client, &mut server);
-    let mut wt_server_stream = wt_session.create_stream(StreamType::UniDi).unwrap();
-    send_data_server(&mut client, &mut server, &mut wt_server_stream, BUF_SERVER);
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let wt_server_stream = wt_session.create_stream(StreamType::UniDi).unwrap();
+    send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(
         &mut client,
         wt_server_stream.stream_id(),
@@ -289,9 +289,9 @@ fn wt_server_stream_bidi() {
     const BUF_SERVER: &[u8] = &[1; 20];
 
     let (mut client, mut server) = connect();
-    let mut wt_session = create_wt_session(&mut client, &mut server);
-    let mut wt_server_stream = wt_session.create_stream(StreamType::BiDi).unwrap();
-    send_data_server(&mut client, &mut server, &mut wt_server_stream, BUF_SERVER);
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let wt_server_stream = wt_session.create_stream(StreamType::BiDi).unwrap();
+    send_data_server(&mut client, &mut server, &wt_server_stream, BUF_SERVER);
     receive_data_client(
         &mut client,
         wt_server_stream.stream_id(),

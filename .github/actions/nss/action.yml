@@ -1,79 +1,194 @@
-name: Fetch and build NSS
-description: Fetch and build NSS
+name: Install NSS
+description: Install NSS
 
 inputs:
   type:
-    description: "Whether to do a debug or release build of NSS"
+    description: "When building, whether to do a debug or release build of NSS"
     default: "Release"
-
-# This step might be removed if the distro included a recent enough
-# version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
-# (neqo-crypto/build.rs would also need to query pkg-config to get the
-# right build flags rather than building NSS.)
-#
-# Also see https://github.com/mozilla/neqo/issues/1711
+  minimum-version:
+    description: "Minimum required version of NSS"
+    required: true
 
 runs:
   using: composite
   steps:
+    - name: Install system NSS (Linux)
+      shell: bash
+      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libnss3-dev pkg-config
+
+    - name: Install system NSS (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
+      run: |
+        brew update
+        brew install nss
+
     - name: Check system NSS version
       shell: bash
       run: |
         if ! command -v pkg-config &> /dev/null; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "pkg-config: not found"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         if ! pkg-config --exists nss; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "pkg-config: NSS not found"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_VERSION="$(pkg-config --modversion nss)"
         if [ "$?" -ne 0 ]; then
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "pkg-config: failed to determine NSS version"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         NSS_MAJOR=$(echo "$NSS_VERSION" | cut -d. -f1)
         NSS_MINOR=$(echo "$NSS_VERSION" | cut -d. -f2)
-        REQ_NSS_MAJOR=$(cut -d. -f1 < neqo-crypto/min_version.txt)
-        REQ_NSS_MINOR=$(cut -d. -f2 < neqo-crypto/min_version.txt)
+        REQ_NSS_MAJOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f1)
+        REQ_NSS_MINOR=$(echo "${{ inputs.minimum-version}}" | cut -d. -f2)
         if [[ "$NSS_MAJOR" -lt "$REQ_NSS_MAJOR" || "$NSS_MAJOR" -eq "$REQ_NSS_MAJOR" && "$NSS_MINOR" -lt "$REQ_NSS_MINOR" ]]; then
           echo "System NSS is too old: $NSS_VERSION"
-          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+          echo "USE_SYSTEM_NSS=0" >> "$GITHUB_ENV"
           exit 0
         fi
         echo "System NSS is suitable: $NSS_VERSION"
-        echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        echo "USE_SYSTEM_NSS=1" >> "$GITHUB_ENV"
 
-    # Ideally, we'd use this. But things are sufficiently flaky that we're better off
-    # trying both hg and git. Leaving this here in case we want to re-try in the future.
-    #
-    # - name: Checkout NSPR
-    #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@44c2b7a8a4ea60a981eaca3cf939b5f4305c123b # v4.1.5
-    #   with:
-    #     repository: "nss-dev/nspr"
-    #     path: ${{ github.workspace }}/nspr
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: env.SCCACHE_ENABLED != '1' && env.USE_SYSTEM_NSS == '0' && runner.environment != 'github-hosted'
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-    # - name: Checkout NSS
-    #   if: env.BUILD_NSS == '1'
-    #   uses: actions/checkout@44c2b7a8a4ea60a981eaca3cf939b5f4305c123b # v4.1.5
-    #   with:
-    #     repository: "nss-dev/nss"
-    #     path: ${{ github.workspace }}/nss
-
-    - name: Checkout NSPR
+    - name: Enable sscache
+      if: env.USE_SYSTEM_NSS == '0' && runner.environment != 'github-hosted'
       shell: bash
-      if: env.BUILD_NSS == '1'
       run: |
-        hg clone https://hg.mozilla.org/projects/nspr "${{ github.workspace }}/nspr" || \
-          git clone --depth=1 https://github.com/nss-dev/nspr "${{ github.workspace }}/nspr"
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
+        if [ "${{ runner.os }}" != "Windows" ]; then
+          # TODO: Figure out how to make this work on Windows
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
 
     - name: Checkout NSS
+      if: env.USE_SYSTEM_NSS == '0'
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        repository: nss-dev/nss
+        path: nss
+
+    - name: Checkout NSPR
+      if: env.USE_SYSTEM_NSS == '0'
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        repository: nss-dev/nspr
+        path: nspr
+
+    - name: Get head revisions
+      if: env.USE_SYSTEM_NSS == '0'
       shell: bash
-      if: env.BUILD_NSS == '1'
       run: |
-        hg clone https://hg.mozilla.org/projects/nss "${{ github.workspace }}/nss" || \
-          git clone --depth=1 https://github.com/nss-dev/nss "${{ github.workspace }}/nss"
+        NSS_HEAD=$(git -C nss rev-parse HEAD)
+        NSPR_HEAD=$(git -C nspr rev-parse HEAD)
+        echo "NSS_HEAD=$NSS_HEAD" >> "$GITHUB_ENV"
+        echo "NSPR_HEAD=$NSPR_HEAD" >> "$GITHUB_ENV"
+
+    - name: Cache NSS
+      id: cache
+      if: env.USE_SYSTEM_NSS == '0' && runner.environment == 'github-hosted'
+      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+      with:
+        path: dist
+        key: nss-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
+
+    - name: Check if build is needed
+      if: env.USE_SYSTEM_NSS == '0'
+      shell: bash
+      run: |
+        if [ "${{ runner.environment }}" != "github-hosted" ] || [ "${{ steps.cache.outputs.cache-hit }}" == "" ]; then
+          echo "Building NSS from source"
+          echo "BUILD_NSS=1" >> "$GITHUB_ENV"
+        else
+          echo "Using cached prebuilt NSS"
+          echo "BUILD_NSS=0" >> "$GITHUB_ENV"
+        fi
+
+    - name: Install build dependencies (Linux)
+      shell: bash
+      if: runner.os == 'Linux' && env.BUILD_NSS == '1' && runner.environment == 'github-hosted'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: sudo apt-get install -y --no-install-recommends gyp ninja-build
+
+    - name: Install build dependencies (MacOS)
+      shell: bash
+      if: runner.os == 'MacOS' && env.BUILD_NSS == '1'
+      run: |
+        brew install ninja
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install --user --break-system-packages -r req.txt
+        echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+
+    - name: Install build dependencies (Windows)
+      shell: bash
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      run: |
+        # shellcheck disable=SC2028
+        {
+          echo C:/msys64/usr/bin
+          echo C:/msys64/mingw64/bin
+        } >> "$GITHUB_PATH"
+        /c/msys64/usr/bin/pacman -S --noconfirm python3-pip nsinstall
+        echo "gyp-next>=0.18.1" > req.txt
+        python3 -m pip install -r req.txt
+
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      uses: ilammy/msvc-dev-cmd@v1
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: runner.os == 'Windows' && env.BUILD_NSS == '1'
+      run: |
+        {
+          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+          echo "GYP_MSVS_VERSION=2022"
+          echo "BASH=$SHELL"
+        } >> "$GITHUB_ENV"
+        # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+        rm /usr/bin/link.exe || true
+
+    - name: Set up environment
+      shell: bash
+      if: env.USE_SYSTEM_NSS == '0'
+      run: |
+        NSS_TARGET="${{ inputs.type }}"
+        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
+        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
+        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
+        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
+        echo "NSS_PREBUILT=1" >> "$GITHUB_ENV"
+      env:
+        NSS_DIR: ${{ github.workspace }}/nss
 
     - name: Build
       shell: bash
@@ -84,18 +199,7 @@ runs:
           # we also want debug symbols and frame pointers for that, which the normal optimized NSS
           # build process doesn't provide.
           OPT="-o"
-          NSS_TARGET=Release
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
-        else
-          NSS_TARGET=Debug
         fi
+        [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
-        echo "NSS_TARGET=$NSS_TARGET" >> "$GITHUB_ENV"
-        NSS_OUT="$NSS_DIR/../dist/$NSS_TARGET"
-        echo "LD_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
-        echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib" >> "$GITHUB_ENV"
-        echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
-        echo "NSS_DIR=$NSS_DIR" >> "$GITHUB_ENV"
-      env:
-        NSS_DIR: ${{ github.workspace }}/nss
-        NSPR_DIR: ${{ github.workspace }}/nspr

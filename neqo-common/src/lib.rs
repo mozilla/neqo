@@ -16,7 +16,6 @@ pub mod hrtime;
 mod incrdecoder;
 pub mod log;
 pub mod qlog;
-pub mod timer;
 pub mod tos;
 
 use std::fmt::Write;
@@ -91,7 +90,7 @@ pub enum Role {
 
 impl Role {
     #[must_use]
-    pub fn remote(self) -> Self {
+    pub const fn remote(self) -> Self {
         match self {
             Self::Client => Self::Server,
             Self::Server => Self::Client,

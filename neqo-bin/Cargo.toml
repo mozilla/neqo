@@ -8,6 +8,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [[bin]]
 name = "neqo-client"
@@ -32,20 +35,20 @@ log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-crypto = { path = "./../neqo-crypto" }
 neqo-http3 = { path = "./../neqo-http3" }
-neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
+neqo-udp = { path = "./../neqo-udp" }
 qlog = { workspace = true }
-quinn-udp = { version = "0.5.0", default-features = false }
+quinn-udp = { workspace = true }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { version = "2.5", default-features = false }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["html_reports", "async_tokio"] }
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-bench = []
+bench = ["neqo-transport/bench"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

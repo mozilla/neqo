@@ -76,7 +76,7 @@ impl ::std::fmt::Display for DecoderInstructionReader {
 }
 
 impl DecoderInstructionReader {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             state: DecoderInstructionReaderState::ReadInstruction,
             instruction: DecoderInstruction::NoInstruction,
@@ -89,7 +89,7 @@ impl DecoderInstructionReader {
     /// 2) `ClosedCriticalStream`
     /// 3) other errors will be translated to `DecoderStream` by the caller of this function.
     pub fn read_instructions<R: ReadByte>(&mut self, recv: &mut R) -> Res<DecoderInstruction> {
-        qdebug!([self], "read a new instraction");
+        qdebug!([self], "read a new instruction");
         loop {
             match &mut self.state {
                 DecoderInstructionReaderState::ReadInstruction => {
@@ -158,7 +158,7 @@ mod test {
     }
 
     #[test]
-    fn test_encoding_decoding_instructions() {
+    fn encoding_decoding_instructions() {
         test_encoding_decoding(DecoderInstruction::InsertCountIncrement { increment: 1 });
         test_encoding_decoding(DecoderInstruction::InsertCountIncrement { increment: 10_000 });
 
@@ -197,7 +197,7 @@ mod test {
     }
 
     #[test]
-    fn test_encoding_decoding_instructions_slow_reader() {
+    fn encoding_decoding_instructions_slow_reader() {
         test_encoding_decoding_slow_reader(DecoderInstruction::InsertCountIncrement {
             increment: 10_000,
         });
@@ -210,7 +210,7 @@ mod test {
     }
 
     #[test]
-    fn test_decoding_error() {
+    fn decoding_error() {
         let mut test_receiver: TestReceiver = TestReceiver::default();
         // InsertCountIncrement with overflow
         test_receiver.write(&[

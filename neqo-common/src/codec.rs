@@ -17,19 +17,19 @@ pub struct Decoder<'a> {
 impl<'a> Decoder<'a> {
     /// Make a new view of the provided slice.
     #[must_use]
-    pub fn new(buf: &[u8]) -> Decoder {
+    pub const fn new(buf: &[u8]) -> Decoder {
         Decoder { buf, offset: 0 }
     }
 
     /// Get the number of bytes remaining until the end.
     #[must_use]
-    pub fn remaining(&self) -> usize {
+    pub const fn remaining(&self) -> usize {
         self.buf.len() - self.offset
     }
 
     /// The number of bytes from the underlying slice that have been decoded.
     #[must_use]
-    pub fn offset(&self) -> usize {
+    pub const fn offset(&self) -> usize {
         self.offset
     }
 
@@ -73,7 +73,8 @@ impl<'a> Decoder<'a> {
     }
 
     /// Provides the next byte without moving the read position.
-    pub fn peek_byte(&mut self) -> Option<u8> {
+    #[must_use]
+    pub const fn peek_byte(&self) -> Option<u8> {
         if self.remaining() < 1 {
             None
         } else {
@@ -162,7 +163,7 @@ impl<'a> AsRef<[u8]> for Decoder<'a> {
     }
 }
 
-impl<'a> Debug for Decoder<'a> {
+impl Debug for Decoder<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str(&hex_with_len(self.as_ref()))
     }
@@ -170,7 +171,7 @@ impl<'a> Debug for Decoder<'a> {
 
 impl<'a> From<&'a [u8]> for Decoder<'a> {
     #[must_use]
-    fn from(buf: &'a [u8]) -> Decoder<'a> {
+    fn from(buf: &'a [u8]) -> Self {
         Decoder::new(buf)
     }
 }
@@ -180,12 +181,12 @@ where
     T: AsRef<[u8]>,
 {
     #[must_use]
-    fn from(buf: &'a T) -> Decoder<'a> {
+    fn from(buf: &'a T) -> Self {
         Decoder::new(buf.as_ref())
     }
 }
 
-impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
+impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
     #[must_use]
     fn eq(&self, other: &Decoder<'b>) -> bool {
         self.buf == other.buf
@@ -303,7 +304,6 @@ impl Encoder {
     /// # Panics
     ///
     /// When `n` is outside the range `1..=8`.
-    #[allow(clippy::cast_possible_truncation)]
     pub fn encode_uint<T: Into<u64>>(&mut self, n: usize, v: T) -> &mut Self {
         let v = v.into();
         assert!(n > 0 && n <= 8);
@@ -373,7 +373,6 @@ impl Encoder {
     /// # Panics
     ///
     /// When `f()` writes more than 2^62 bytes.
-    #[allow(clippy::cast_possible_truncation)]
     pub fn encode_vvec_with<F: FnOnce(&mut Self)>(&mut self, f: F) -> &mut Self {
         let start = self.buf.len();
         // Optimize for short buffers, reserve a single byte for the length.
@@ -632,7 +631,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Varint value too large")]
-    fn encoded_length_oob() {
+    const fn encoded_length_oob() {
         _ = Encoder::varint_len(1 << 62);
     }
 

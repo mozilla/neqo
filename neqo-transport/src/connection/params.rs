@@ -44,6 +44,7 @@ pub enum PreferredAddressConfig {
 /// `ConnectionParameters` use for setting intitial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
+#[allow(clippy::struct_excessive_bools)] // We need that many, sorry.
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     versions: VersionConfig,
@@ -78,7 +79,10 @@ pub struct ConnectionParameters {
     incoming_datagram_queue: usize,
     fast_pto: u8,
     grease: bool,
+    disable_migration: bool,
     pacing: bool,
+    /// Whether the connection performs PLPMTUD.
+    pmtud: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -102,14 +106,16 @@ impl Default for ConnectionParameters {
             incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             fast_pto: FAST_PTO_SCALE,
             grease: true,
+            disable_migration: false,
             pacing: true,
+            pmtud: false,
         }
     }
 }
 
 impl ConnectionParameters {
     #[must_use]
-    pub fn get_versions(&self) -> &VersionConfig {
+    pub const fn get_versions(&self) -> &VersionConfig {
         &self.versions
     }
 
@@ -128,29 +134,29 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
+    pub const fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
         self.cc_algorithm
     }
 
     #[must_use]
-    pub fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
+    pub const fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
         self.cc_algorithm = v;
         self
     }
 
     #[must_use]
-    pub fn get_max_data(&self) -> u64 {
+    pub const fn get_max_data(&self) -> u64 {
         self.max_data
     }
 
     #[must_use]
-    pub fn max_data(mut self, v: u64) -> Self {
+    pub const fn max_data(mut self, v: u64) -> Self {
         self.max_data = v;
         self
     }
 
     #[must_use]
-    pub fn get_max_streams(&self, stream_type: StreamType) -> u64 {
+    pub const fn get_max_streams(&self, stream_type: StreamType) -> u64 {
         match stream_type {
             StreamType::BiDi => self.max_streams_bidi,
             StreamType::UniDi => self.max_streams_uni,
@@ -219,31 +225,31 @@ impl ConnectionParameters {
 
     /// Set a preferred address (which only has an effect for a server).
     #[must_use]
-    pub fn preferred_address(mut self, preferred: PreferredAddress) -> Self {
+    pub const fn preferred_address(mut self, preferred: PreferredAddress) -> Self {
         self.preferred_address = PreferredAddressConfig::Address(preferred);
         self
     }
 
     /// Disable the use of preferred addresses.
     #[must_use]
-    pub fn disable_preferred_address(mut self) -> Self {
+    pub const fn disable_preferred_address(mut self) -> Self {
         self.preferred_address = PreferredAddressConfig::Disabled;
         self
     }
 
     #[must_use]
-    pub fn get_preferred_address(&self) -> &PreferredAddressConfig {
+    pub const fn get_preferred_address(&self) -> &PreferredAddressConfig {
         &self.preferred_address
     }
 
     #[must_use]
-    pub fn ack_ratio(mut self, ack_ratio: u8) -> Self {
+    pub const fn ack_ratio(mut self, ack_ratio: u8) -> Self {
         self.ack_ratio = ack_ratio;
         self
     }
 
     #[must_use]
-    pub fn get_ack_ratio(&self) -> u8 {
+    pub const fn get_ack_ratio(&self) -> u8 {
         self.ack_ratio
     }
 
@@ -258,23 +264,23 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub fn get_idle_timeout(&self) -> Duration {
+    pub const fn get_idle_timeout(&self) -> Duration {
         self.idle_timeout
     }
 
     #[must_use]
-    pub fn get_datagram_size(&self) -> u64 {
+    pub const fn get_datagram_size(&self) -> u64 {
         self.datagram_size
     }
 
     #[must_use]
-    pub fn datagram_size(mut self, v: u64) -> Self {
+    pub const fn datagram_size(mut self, v: u64) -> Self {
         self.datagram_size = v;
         self
     }
 
     #[must_use]
-    pub fn get_outgoing_datagram_queue(&self) -> usize {
+    pub const fn get_outgoing_datagram_queue(&self) -> usize {
         self.outgoing_datagram_queue
     }
 
@@ -286,7 +292,7 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub fn get_incoming_datagram_queue(&self) -> usize {
+    pub const fn get_incoming_datagram_queue(&self) -> usize {
         self.incoming_datagram_queue
     }
 
@@ -298,7 +304,7 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub fn get_fast_pto(&self) -> u8 {
+    pub const fn get_fast_pto(&self) -> u8 {
         self.fast_pto
     }
 
@@ -325,24 +331,41 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub fn is_greasing(&self) -> bool {
+    pub const fn is_greasing(&self) -> bool {
         self.grease
     }
 
     #[must_use]
-    pub fn grease(mut self, grease: bool) -> Self {
+    pub const fn grease(mut self, grease: bool) -> Self {
         self.grease = grease;
         self
     }
 
     #[must_use]
-    pub fn pacing_enabled(&self) -> bool {
+    pub const fn disable_migration(mut self, disable_migration: bool) -> Self {
+        self.disable_migration = disable_migration;
+        self
+    }
+
+    #[must_use]
+    pub const fn pacing_enabled(&self) -> bool {
         self.pacing
     }
 
     #[must_use]
-    pub fn pacing(mut self, pacing: bool) -> Self {
+    pub const fn pacing(mut self, pacing: bool) -> Self {
         self.pacing = pacing;
+        self
+    }
+
+    #[must_use]
+    pub const fn pmtud_enabled(&self) -> bool {
+        self.pmtud
+    }
+
+    #[must_use]
+    pub const fn pmtud(mut self, pmtud: bool) -> Self {
+        self.pmtud = pmtud;
         self
     }
 
@@ -359,17 +382,21 @@ impl ConnectionParameters {
         // default parameters
         tps.local.set_integer(
             tparams::ACTIVE_CONNECTION_ID_LIMIT,
-            u64::try_from(LOCAL_ACTIVE_CID_LIMIT).unwrap(),
+            u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
         );
-        tps.local.set_empty(tparams::DISABLE_MIGRATION);
-        tps.local.set_empty(tparams::GREASE_QUIC_BIT);
+        if self.disable_migration {
+            tps.local.set_empty(tparams::DISABLE_MIGRATION);
+        }
+        if self.grease {
+            tps.local.set_empty(tparams::GREASE_QUIC_BIT);
+        }
         tps.local.set_integer(
             tparams::MAX_ACK_DELAY,
-            u64::try_from(DEFAULT_ACK_DELAY.as_millis()).unwrap(),
+            u64::try_from(DEFAULT_ACK_DELAY.as_millis())?,
         );
         tps.local.set_integer(
             tparams::MIN_ACK_DELAY,
-            u64::try_from(GRANULARITY.as_micros()).unwrap(),
+            u64::try_from(GRANULARITY.as_micros())?,
         );
 
         // set configurable parameters

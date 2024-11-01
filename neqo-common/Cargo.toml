@@ -7,6 +7,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [lints]
 workspace = true
@@ -18,24 +22,18 @@ env_logger = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
-time = { version = "0.3", default-features = false, features = ["formatting"] }
+
+[target."cfg(windows)".dependencies]
+# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+windows = { version = "0.58", default-features = false, features = ["Win32_Media"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
 ci = []
 build-fuzzing-corpus = ["hex"]
 
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3"
-features = ["timeapi"]
-
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
-
-[[bench]]
-name = "timer"
-harness = false

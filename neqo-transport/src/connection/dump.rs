@@ -18,7 +18,7 @@ use crate::{
     path::PathRef,
 };
 
-#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::too_many_arguments)]
 pub fn dump_packet(
     conn: &Connection,
     path: &PathRef,
@@ -27,6 +27,7 @@ pub fn dump_packet(
     pn: PacketNumber,
     payload: &[u8],
     tos: IpTos,
+    len: usize,
 ) {
     if log::STATIC_MAX_LEVEL == log::LevelFilter::Off || !log::log_enabled!(log::Level::Debug) {
         return;
@@ -41,16 +42,17 @@ pub fn dump_packet(
         };
         let x = f.dump();
         if !x.is_empty() {
-            write!(&mut s, "\n  {} {}", dir, &x).unwrap();
+            _ = write!(&mut s, "\n  {} {}", dir, &x);
         }
     }
     qdebug!(
         [conn],
-        "pn={} type={:?} {} {:?}{}",
+        "pn={} type={:?} {} {:?} len {}{}",
         pn,
         pt,
         path.borrow(),
         tos,
+        len,
         s
     );
 }

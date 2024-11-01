@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
@@ -30,12 +28,12 @@ pub enum SessionCloseReason {
 }
 
 impl From<CloseType> for SessionCloseReason {
-    fn from(close_type: CloseType) -> SessionCloseReason {
+    fn from(close_type: CloseType) -> Self {
         match close_type {
             CloseType::ResetApp(e) | CloseType::ResetRemote(e) | CloseType::LocalError(e) => {
-                SessionCloseReason::Error(e)
+                Self::Error(e)
             }
-            CloseType::Done => SessionCloseReason::Clean {
+            CloseType::Done => Self::Clean {
                 error: 0,
                 message: String::new(),
             },
@@ -70,13 +68,13 @@ pub(crate) enum ExtendedConnectType {
 impl ExtendedConnectType {
     #[must_use]
     #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
-    pub fn string(&self) -> &str {
+    pub const fn string(self) -> &'static str {
         "webtransport"
     }
 
     #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     #[must_use]
-    pub fn get_stream_type(self, session_id: StreamId) -> Http3StreamType {
+    pub const fn get_stream_type(self, session_id: StreamId) -> Http3StreamType {
         Http3StreamType::WebTransport(session_id)
     }
 }
@@ -84,7 +82,7 @@ impl ExtendedConnectType {
 impl From<ExtendedConnectType> for HSettingType {
     fn from(_type: ExtendedConnectType) -> Self {
         // This will change when we have more features using ExtendedConnectType.
-        HSettingType::EnableWebTransport
+        Self::EnableWebTransport
     }
 }
 
@@ -110,7 +108,7 @@ impl ExtendedConnectFeature {
     }
 
     #[must_use]
-    pub fn enabled(&self) -> bool {
+    pub const fn enabled(&self) -> bool {
         self.feature_negotiation.enabled()
     }
 }

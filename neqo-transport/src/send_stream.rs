@@ -139,7 +139,7 @@ enum RangeState {
 
 /// Track ranges in the stream as sent or acked. Acked implies sent. Not in a
 /// range implies needing-to-be-sent, either initially or as a retransmission.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct RangeTracker {
     /// The number of bytes that have been acknowledged starting from offset 0.
     acked: u64,
@@ -158,7 +158,7 @@ impl RangeTracker {
             .map_or(self.acked, |(&k, &(v, _))| k + v)
     }
 
-    fn acked_from_zero(&self) -> u64 {
+    const fn acked_from_zero(&self) -> u64 {
         self.acked
     }
 
@@ -481,7 +481,7 @@ impl RangeTracker {
 }
 
 /// Buffer to contain queued bytes and track their state.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct TxBuffer {
     // TODO: Consider shrinking from time to time?
     send_buf: VecDeque<u8>, // buffer of not-acked bytes
@@ -521,12 +521,9 @@ impl TxBuffer {
             &self.send_buf.as_slices().1[buff_off - self.send_buf.as_slices().0.len()..]
         };
 
-        let len = if let Some(range_len) = maybe_len {
-            // Truncate if range crosses deque slices
+        let len = maybe_len.map_or(slc.len(), |range_len| {
             min(usize::try_from(range_len).unwrap(), slc.len())
-        } else {
-            slc.len()
-        };
+        });
 
         debug_assert!(len > 0);
         debug_assert!(len <= slc.len());
@@ -563,7 +560,7 @@ impl TxBuffer {
     }
 
     #[must_use]
-    pub fn retired(&self) -> u64 {
+    pub const fn retired(&self) -> u64 {
         self.ranges.acked_from_zero()
     }
 
@@ -578,7 +575,7 @@ impl TxBuffer {
 
 /// QUIC sending stream states, based on -transport 3.1.
 #[derive(Debug)]
-pub(crate) enum SendStreamState {
+pub enum SendStreamState {
     Ready {
         fc: SenderFlowControl<StreamId>,
         conn_fc: Rc<RefCell<SenderFlowControl<()>>>,
@@ -623,7 +620,7 @@ impl SendStreamState {
         }
     }
 
-    fn name(&self) -> &str {
+    const fn name(&self) -> &str {
         match self {
             Self::Ready { .. } => "Ready",
             Self::Send { .. } => "Send",
@@ -661,7 +658,7 @@ pub struct SendStreamStats {
 
 impl SendStreamStats {
     #[must_use]
-    pub fn new(bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
+    pub const fn new(bytes_written: u64, bytes_sent: u64, bytes_acked: u64) -> Self {
         Self {
             bytes_written,
             bytes_sent,
@@ -670,17 +667,17 @@ impl SendStreamStats {
     }
 
     #[must_use]
-    pub fn bytes_written(&self) -> u64 {
+    pub const fn bytes_written(&self) -> u64 {
         self.bytes_written
     }
 
     #[must_use]
-    pub fn bytes_sent(&self) -> u64 {
+    pub const fn bytes_sent(&self) -> u64 {
         self.bytes_sent
     }
 
     #[must_use]
-    pub fn bytes_acked(&self) -> u64 {
+    pub const fn bytes_acked(&self) -> u64 {
         self.bytes_acked
     }
 }
@@ -782,7 +779,7 @@ impl SendStream {
     }
 
     #[must_use]
-    pub fn is_fair(&self) -> bool {
+    pub const fn is_fair(&self) -> bool {
         self.fair
     }
 
@@ -796,7 +793,7 @@ impl SendStream {
     }
 
     #[must_use]
-    pub fn sendorder(&self) -> Option<SendOrder> {
+    pub const fn sendorder(&self) -> Option<SendOrder> {
         self.sendorder
     }
 
@@ -844,7 +841,7 @@ impl SendStream {
     }
 
     #[must_use]
-    pub fn bytes_acked(&self) -> u64 {
+    pub const fn bytes_acked(&self) -> u64 {
         match &self.state {
             SendStreamState::Send { send_buf, .. } | SendStreamState::DataSent { send_buf, .. } => {
                 send_buf.retired()
@@ -1210,7 +1207,7 @@ impl SendStream {
     }
 
     #[must_use]
-    pub fn is_terminal(&self) -> bool {
+    pub const fn is_terminal(&self) -> bool {
         matches!(
             self.state,
             SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd { .. }
@@ -1364,11 +1361,7 @@ impl SendStream {
         &mut self.state
     }
 
-    pub(crate) fn maybe_emit_writable_event(
-        &mut self,
-        previous_limit: usize,
-        current_limit: usize,
-    ) {
+    pub(crate) fn maybe_emit_writable_event(&self, previous_limit: usize, current_limit: usize) {
         let low_watermark = self.writable_event_low_watermark.get();
 
         // Skip if:
@@ -1433,7 +1426,7 @@ impl OrderGroup {
     }
 
     #[must_use]
-    pub fn stream_ids(&self) -> &Vec<StreamId> {
+    pub const fn stream_ids(&self) -> &Vec<StreamId> {
         &self.vec
     }
 
@@ -1477,7 +1470,7 @@ impl OrderGroup {
     }
 }
 
-impl<'a> Iterator for OrderGroupIter<'a> {
+impl Iterator for OrderGroupIter<'_> {
     type Item = StreamId;
     fn next(&mut self) -> Option<Self::Item> {
         // Stop when we would return the started_at element on the next
@@ -1492,7 +1485,7 @@ impl<'a> Iterator for OrderGroupIter<'a> {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SendStreams {
+pub struct SendStreams {
     map: IndexMap<StreamId, SendStream>,
 
     // What we really want is a Priority Queue that we can do arbitrary
@@ -1528,14 +1521,17 @@ pub(crate) struct SendStreams {
 }
 
 impl SendStreams {
+    #[allow(clippy::missing_errors_doc)]
     pub fn get(&self, id: StreamId) -> Res<&SendStream> {
         self.map.get(&id).ok_or(Error::InvalidStreamId)
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
         self.map.get_mut(&id).ok_or(Error::InvalidStreamId)
     }
 
+    #[must_use]
     pub fn exists(&self, id: StreamId) -> bool {
         self.map.contains_key(&id)
     }
@@ -1552,6 +1548,8 @@ impl SendStreams {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.set_fairness(stream_id, true)?;
         if let Some(stream) = self.map.get_mut(&stream_id) {
@@ -1576,6 +1574,8 @@ impl SendStreams {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
         let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
         let was_fair = stream.fair;
@@ -1648,6 +1648,7 @@ impl SendStreams {
         self.regular.clear();
     }
 
+    #[allow(clippy::missing_panics_doc)]
     pub fn remove_terminal(&mut self) {
         self.map.retain(|stream_id, stream| {
             if stream.is_terminal() {
@@ -1739,6 +1740,7 @@ impl SendStreams {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
     pub fn update_initial_limit(&mut self, remote: &TransportParameters) {
         for (id, ss) in &mut self.map {
             let limit = if id.is_bidi() {
@@ -1752,6 +1754,7 @@ impl SendStreams {
     }
 }
 
+#[allow(clippy::into_iter_without_iter)]
 impl<'a> IntoIterator for &'a mut SendStreams {
     type Item = (&'a StreamId, &'a mut SendStream);
     type IntoIter = indexmap::map::IterMut<'a, StreamId, SendStream>;
@@ -2250,7 +2253,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
     fn tx_buffer_next_bytes_1() {
         let mut txb = TxBuffer::new();
 
@@ -2415,7 +2417,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tx_buffer_acks() {
+    fn tx_buffer_acks() {
         let mut tx = TxBuffer::new();
         assert_eq!(tx.send(&[4; 100]), 100);
         let res = tx.next_bytes().unwrap();
@@ -2542,7 +2544,7 @@ mod tests {
         ));
     }
 
-    fn as_stream_token(t: &RecoveryToken) -> &SendStreamRecoveryToken {
+    const fn as_stream_token(t: &RecoveryToken) -> &SendStreamRecoveryToken {
         if let RecoveryToken::Stream(StreamRecoveryToken::Stream(rt)) = &t {
             rt
         } else {
@@ -2564,7 +2566,7 @@ mod tests {
         ss.insert(StreamId::from(0), s);
 
         let mut tokens = Vec::new();
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
 
         // Write a small frame: no fin.
         let written = builder.len();
@@ -2640,7 +2642,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
     // Verify lost frames handle fin properly with zero length fin
     fn send_stream_get_frame_zerolength_fin() {
         let conn_fc = connection_fc(100);
@@ -2653,7 +2654,7 @@ mod tests {
         ss.insert(StreamId::from(0), s);
 
         let mut tokens = Vec::new();
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         ss.write_frames(
             TransmissionPriority::default(),
             &mut builder,
@@ -2731,7 +2732,7 @@ mod tests {
         assert_eq!(s.next_bytes(false), Some((0, &b"ab"[..])));
 
         // This doesn't report blocking yet.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2784,7 +2785,7 @@ mod tests {
         assert_eq!(s.send_atomic(b"abc").unwrap(), 0);
 
         // Assert that STREAM_DATA_BLOCKED is sent.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_blocked_frame(
@@ -2871,7 +2872,7 @@ mod tests {
         s.mark_as_lost(len_u64, 0, true);
 
         // No frame should be sent here.
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut tokens = Vec::new();
         let mut stats = FrameStats::default();
         s.write_stream_frame(
@@ -2931,7 +2932,7 @@ mod tests {
             s.close();
         }
 
-        let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
 
@@ -3032,7 +3033,7 @@ mod tests {
             s.send(data).unwrap();
             s.close();
 
-            let mut builder = PacketBuilder::short(Encoder::new(), false, []);
+            let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
             let header_len = builder.len();
             // Add 2 for the frame type and stream ID, then add the extra.
             builder.set_limit(header_len + data.len() + 2 + extra);

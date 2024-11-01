@@ -6,7 +6,7 @@ use libfuzzer_sys::fuzz_target;
 #[cfg(all(fuzzing, not(windows)))]
 fuzz_target!(|data: &[u8]| {
     use neqo_common::{Datagram, Encoder, Role};
-    use neqo_transport::Version;
+    use neqo_transport::{packet::MIN_INITIAL_PACKET_SIZE, Version};
     use test_fixture::{
         default_client, default_server,
         header_protection::{
@@ -17,12 +17,9 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let mut client = default_client();
-    let ci = client.process(None, now()).dgram().expect("a datagram");
+    let ci = client.process_output(now()).dgram().expect("a datagram");
     let mut server = default_server();
-    let si = server
-        .process(Some(&ci), now())
-        .dgram()
-        .expect("a datagram");
+    let si = server.process(Some(ci), now()).dgram().expect("a datagram");
 
     let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&si, Role::Server) else {
         return;
@@ -63,14 +60,8 @@ fuzz_target!(|data: &[u8]| {
         &mut ciphertext,
         (header_enc.len() - 1)..header_enc.len(),
     );
-    let fuzzed_si = Datagram::new(
-        si.source(),
-        si.destination(),
-        si.tos(),
-        si.ttl(),
-        ciphertext,
-    );
-    let _response = client.process(Some(&fuzzed_si), now());
+    let fuzzed_si = Datagram::new(si.source(), si.destination(), si.tos(), ciphertext);
+    let _response = client.process(Some(fuzzed_si), now());
 });
 
 #[cfg(any(not(fuzzing), windows))]

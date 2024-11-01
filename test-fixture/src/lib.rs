@@ -13,6 +13,7 @@ use std::{
     io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -52,7 +53,8 @@ pub fn fixture_init() {
 
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+// But make it a second, so that tests with reasonable RTTs don't fail.
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
@@ -96,13 +98,7 @@ pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
-        IpTosEcn::Ect0.into(),
-        Some(128),
-        data,
-    )
+    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, IpTosEcn::Ect0.into(), data)
 }
 
 /// Create a default socket address.
@@ -239,7 +235,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     };
     while !is_done(a) {
         _ = maybe_authenticate(a);
-        let d = a.process(datagram.as_ref(), now());
+        let d = a.process(datagram, now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);
     }
@@ -362,8 +358,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
-        Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), a),
-        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), b)),
+        Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
+        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
 }
 
@@ -416,7 +412,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         EventImportance::Base,
         Box::new(buf),
     );
-    let log = NeqoQlog::enabled(streamer, "");
+    let log = NeqoQlog::enabled(streamer, PathBuf::from(""));
     (log.expect("to be able to write to new log"), contents)
 }
 
