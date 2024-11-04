@@ -83,7 +83,7 @@ impl Paths {
         self.paths
             .iter()
             .find_map(|p| {
-                if p.borrow().received_on(local, remote) {
+                if p.borrow().received_on(local, remote, false) {
                     Some(Rc::clone(p))
                 } else {
                     None
@@ -95,6 +95,48 @@ impl Paths {
                     p.prime_rtt(primary.borrow().rtt());
                 }
                 Rc::new(RefCell::new(p))
+            })
+    }
+
+    /// Find the path, but allow for rebinding.  That matches the pair of addresses
+    /// to paths that match the remote address only based on IP addres, not port.
+    /// We use this when the other side migrates to skip address validation and
+    /// creating a new path.
+    pub fn find_path_with_rebinding(
+        &self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        cc: CongestionControlAlgorithm,
+        pacing: bool,
+        now: Instant,
+    ) -> PathRef {
+        self.paths
+            .iter()
+            .find_map(|p| {
+                if p.borrow().received_on(local, remote, false) {
+                    Some(Rc::clone(p))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.paths.iter().find_map(|p| {
+                    if p.borrow().received_on(local, remote, true) {
+                        Some(Rc::clone(p))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| {
+                Rc::new(RefCell::new(Path::temporary(
+                    local,
+                    remote,
+                    cc,
+                    pacing,
+                    self.qlog.clone(),
+                    now,
+                )))
             })
     }
 
@@ -582,8 +624,10 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
-        self.local == local && self.remote == remote
+    fn received_on(&self, local: SocketAddr, remote: SocketAddr, flexible: bool) -> bool {
+        self.local == local
+            && self.remote.ip() == remote.ip()
+            && (flexible || self.remote.port() == remote.port())
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
