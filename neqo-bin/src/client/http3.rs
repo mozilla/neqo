@@ -28,7 +28,7 @@ use neqo_transport::{
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::STREAM_IO_BUFFER_SIZE;
+use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
 
 pub struct Handler<'a> {
     #[allow(clippy::struct_field_names)]
@@ -312,9 +312,7 @@ impl StreamHandler for DownloadStreamHandler {
 }
 
 struct UploadStreamHandler {
-    data: Vec<u8>,
-    offset: usize,
-    chunk_size: usize,
+    data: SendData,
     start: Instant,
 }
 
@@ -344,21 +342,11 @@ impl StreamHandler for UploadStreamHandler {
     }
 
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
-        while self.offset < self.data.len() {
-            let end = self.offset + self.chunk_size.min(self.data.len() - self.offset);
-            let chunk = &self.data[self.offset..end];
-            match client.send_data(stream_id, chunk) {
-                Ok(amount) => {
-                    if amount == 0 {
-                        break;
-                    }
-                    self.offset += amount;
-                    if self.offset == self.data.len() {
-                        client.stream_close_send(stream_id).unwrap();
-                    }
-                }
-                Err(_) => break,
-            };
+        let done = self
+            .data
+            .send(|chunk| client.send_data(stream_id, chunk).unwrap());
+        if done {
+            client.stream_close_send(stream_id).unwrap();
         }
     }
 }
@@ -416,9 +404,7 @@ impl UrlHandler<'_> {
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {
-                        data: vec![42; self.args.upload_size],
-                        offset: 0,
-                        chunk_size: STREAM_IO_BUFFER_SIZE,
+                        data: SendData::zeroes(self.args.upload_size),
                         start: Instant::now(),
                     }),
                     _ => unimplemented!(),
