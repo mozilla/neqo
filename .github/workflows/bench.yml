@@ -37,6 +37,14 @@ jobs:
           path: msquic
           submodules: true
 
+      - name: Checkout google-quiche
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: google/quiche
+          ref: main
+          path: google-quiche
+          submodules: true
+
       - name: Set PATH
         run: echo "/home/bench/.cargo/bin" >> "${GITHUB_PATH}"
 
@@ -68,6 +76,11 @@ jobs:
           cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
+      - name: Build google-quiche
+        run: |
+          cd google-quiche
+          bazel build quiche:quic_server quiche:quic_client
+
       - name: Download cached main-branch results
         id: criterion-cache
         uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
@@ -94,14 +107,14 @@ jobs:
 
       # Compare various configurations of neqo against msquic, and gather perf data
       # during the hyperfine runs.
-      - name: Compare neqo and msquic
+      - name: Compare neqo, msquic and google-quiche
         env:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
         run: |
           TMP=$(mktemp -d)
-          # Make a cert and key for msquic.
+          # Make a cert and key for msquic and google-quiche.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make a test file for msquic to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
@@ -109,10 +122,12 @@ jobs:
           declare -A client_cmd=(
             ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            [google-quiche]="google-quiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE"
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT 2> /dev/null"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit > /dev/null || true"
+            [google-quiche]="google-quiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port=$PORT --certificate_file=$TMP/cert --key_file=$TMP/key > $SIZE || true"
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -137,10 +152,10 @@ jobs:
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
           for mtu in 1504 65536; do
             sudo ip link set dev lo mtu "$mtu"
-            for server in msquic neqo; do
+            for server in google-quiche msquic neqo; do
               for client in msquic neqo; do
-                # msquic doesn't let us configure the congestion control or pacing.
-                if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
+                # google-quiche and msquic doesn't let us configure the congestion control or pacing.
+                if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
                   cc_opt=("")
                   pacing_opt=("")
                 else
