@@ -46,7 +46,7 @@ pub enum Opt {
     HelloDowngradeCheck,
     SuppressEndOfEarlyData,
     Grease,
-    EnableChExtensionPermutation
+    EnableChExtensionPermutation,
 }
 
 impl Opt {
