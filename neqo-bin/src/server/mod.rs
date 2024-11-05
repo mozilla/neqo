@@ -348,8 +348,7 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.alpn = "h3".into();
             }
             "zerortt" => args.shared.quic_parameters.max_streams_bidi = 100,
-            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn"
-            | "rebind-port" | "rebind-addr" => {}
+            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
             "connectionmigration" => {
                 if args.shared.quic_parameters.preferred_address().is_none() {
                     qerror!("No preferred addresses set for connectionmigration test");

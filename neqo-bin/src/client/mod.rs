@@ -249,8 +249,6 @@ impl Args {
             | "transfer"
             | "retry"
             | "ecn"
-            | "rebind-port"
-            | "rebind-addr"
             | "connectionmigration" => {}
             "resumption" => {
                 if self.urls.len() < 2 {
