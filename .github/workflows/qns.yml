@@ -212,7 +212,7 @@ jobs:
                   touch "$BASELINE"
                 fi
                 echo "$RUN $RESULT"
-                DIFF=$(wdiff "$BASELINE" - <<< "$RESULT")
+                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
                 echo "$DIFF"
                 [ -n "$RESULT" ] || continue
                 echo "* [$PAIR]($LOG): **$RESULT**" >> "$ROLE.$GROUP.md"
