@@ -211,11 +211,10 @@ jobs:
                 else
                   touch "$BASELINE"
                 fi
-                echo "$RUN $RESULT"
-                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
-                echo "$DIFF"
                 [ -n "$RESULT" ] || continue
-                echo "* [$PAIR]($LOG): **$RESULT**" >> "$ROLE.$GROUP.md"
+                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-|-\]/\*/g" "s/{\+|\+}/~/g")
+                echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
           done
