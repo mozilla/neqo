@@ -211,6 +211,7 @@ jobs:
                 else
                   touch "$BASELINE"
                 fi
+                echo "$RUN $RESULT"
                 DIFF=$(wdiff "$BASELINE" - <<< "$RESULT")
                 echo "$DIFF"
                 [ -n "$RESULT" ] || continue
