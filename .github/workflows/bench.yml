@@ -13,6 +13,8 @@ env:
   TOOLCHAIN: stable
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
+  SCCACHE_CACHE_SIZE: 128G
+  SCCACHE_DIRECT: true
 
 permissions:
   contents: read
@@ -79,7 +81,7 @@ jobs:
       - name: Build google-quiche
         run: |
           cd google-quiche
-          bazel build quiche:quic_server quiche:quic_client
+          bazel build --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
 
       - name: Download cached main-branch results
         id: criterion-cache
