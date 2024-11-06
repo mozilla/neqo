@@ -206,7 +206,7 @@ jobs:
                 RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
                 BASELINE=$(mktemp)
-                jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE" || true
+                (jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' || echo "") | fmt -w 1000 > "$BASELINE"
                 DIFF=$(wdiff "$BASELINE" - <<< "$RESULT")
                 echo "$DIFF"
                 [ -n "$RESULT" ] || continue
