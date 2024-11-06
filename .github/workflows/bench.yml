@@ -153,7 +153,7 @@ jobs:
           for mtu in 1504 65536; do
             sudo ip link set dev lo mtu "$mtu"
             for server in google-quiche msquic neqo; do
-              for client in msquic neqo; do
+              for client in google-quiche msquic neqo; do
                 # google-quiche and msquic doesn't let us configure the congestion control or pacing.
                 if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
                   cc_opt=("")
