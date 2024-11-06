@@ -81,7 +81,7 @@ jobs:
       - name: Build google-quiche
         run: |
           cd google-quiche
-          bazel build --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
+          bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
 
       - name: Download cached main-branch results
         id: criterion-cache
