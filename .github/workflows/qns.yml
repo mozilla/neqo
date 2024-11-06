@@ -173,6 +173,7 @@ jobs:
           key: qns-${{ runner.name }}-${{ github.sha }}
           restore-keys: qns-${{ runner.name }}-
 
+      - run: sudo apt-get install -y --no-install-recommends wdiff
       - run: |
           mapfile -t LIST < <(echo '${{ needs.implementations.outputs.pairs }}' | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
@@ -205,7 +206,7 @@ jobs:
                 RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
                 BASELINE=$(mktemp)
-                jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
+                jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE" || true
                 DIFF=$(wdiff "$BASELINE" - <<< "$RESULT")
                 echo "$DIFF"
                 [ -n "$RESULT" ] || continue
