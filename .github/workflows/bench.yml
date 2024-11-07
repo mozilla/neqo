@@ -82,9 +82,8 @@ jobs:
         run: |
           cd google-quiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
-          ls -l google-quiche
-          ls -l google-quiche/bazel-bin
-          ls -l google-quiche/bazel-bin/quiche
+          ls -l bazel-bin
+          ls -l bazel-bin/quiche
 
       - name: Download cached main-branch results
         id: criterion-cache
