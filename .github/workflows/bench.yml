@@ -82,8 +82,6 @@ jobs:
         run: |
           cd google-quiche
           bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
-          ls -l bazel-bin
-          ls -l bazel-bin/quiche
 
       - name: Download cached main-branch results
         id: criterion-cache
@@ -173,10 +171,12 @@ jobs:
                     echo "Running benchmarks for $TAG" | tee -a comparison.txt
                     transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
                     # shellcheck disable=SC2086
+                    echo "$CMD"
                     taskset -c 0 nice -n -20 \
                       perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                     PID=$!
                     transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
+                    echo "$CMD"
                     # shellcheck disable=SC2086
                     taskset -c 1 nice -n -20 \
                       perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
