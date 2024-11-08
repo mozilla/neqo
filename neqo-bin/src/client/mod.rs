@@ -252,12 +252,6 @@ impl Args {
                 }
             }
             "handshake" | "transfer" | "retry" | "ecn" => {}
-            "rebind-port" | "rebind-addr" | "connectionmigration" => {
-                if self.cid_len == 0 {
-                    qinfo!("Rebind/migration test won't work with len-0 CID; overwriting to 8");
-                    self.cid_len = 8;
-                }
-            }
             "resumption" => {
                 if self.urls.len() < 2 {
                     qerror!("Warning: resumption test won't work without >1 URL");
