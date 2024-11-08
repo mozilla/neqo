@@ -1,10 +1,11 @@
 name: Firefox
 on:
   workflow_dispatch:
-  pull_request:
-    branches: ["main"]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  # Don't run this as part of CI anymore; takes too many resources and fails too often.
+  # pull_request:
+  #   branches: ["main"]
+  #   types: [opened, synchronize, reopened, ready_for_review]
+  #   paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -19,7 +20,7 @@ env:
 jobs:
   firefox:
     name: Build Firefox
-    if: github.event.pull_request.draft == false
+    # if: github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +141,7 @@ jobs:
 
   comment:
     name: Comment on PR
-    if: github.event.pull_request.draft == false
+    # if: github.event.pull_request.draft == false
     needs: firefox
     runs-on: ubuntu-latest
     steps:
