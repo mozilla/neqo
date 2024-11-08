@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Checkout neqo
-        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Checkout msquic
-        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
           ref: main
@@ -70,7 +70,7 @@ jobs:
 
       - name: Download cached main-branch results
         id: criterion-cache
-        uses: actions/cache/restore@3624ceb22c1c5a301c8db4169662070a689d9ea8 # v4.1.1
+        uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
@@ -87,8 +87,10 @@ jobs:
           #
           # Run all benchmarks at elevated priority.
           taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
-          nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
-
+          for MTU in 1500 65536; do
+            sudo ip link set dev lo mtu "$MTU"
+            MTU=$MTU nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
+          done
 
       # Compare various configurations of neqo against msquic, and gather perf data
       # during the hyperfine runs.
@@ -132,37 +134,41 @@ jobs:
             fi
           }
 
-          for server in msquic neqo; do
-            for client in msquic neqo; do
-              # msquic doesn't let us configure the congestion control or pacing.
-              if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
-                cc_opt=("")
-                pacing_opt=("")
-              else
-                cc_opt=("reno" "cubic")
-                pacing_opt=("on" "")
-              fi
-              for cc in "${cc_opt[@]}"; do
-                for pacing in "${pacing_opt[@]}"; do
-                  # Make a tag string for this test, for the results.
-                  TAG="$client,$server,$cc,$pacing"
-                  echo "Running benchmarks for $TAG" | tee -a comparison.txt
-                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
-                  # shellcheck disable=SC2086
-                  taskset -c 0 nice -n -20 \
-                    perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
-                  PID=$!
-                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
-                  # shellcheck disable=SC2086
-                  taskset -c 1 nice -n -20 \
-                    perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine -N --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
-                      tee -a comparison.txt
-                  echo >> comparison.txt
-                  kill $PID
-                  cat step.md >> steps.md
-                  # Sanity check the size of the last retrieved file.
-                  [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+          # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
+          for mtu in 1504 65536; do
+            sudo ip link set dev lo mtu "$mtu"
+            for server in msquic neqo; do
+              for client in msquic neqo; do
+                # msquic doesn't let us configure the congestion control or pacing.
+                if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
+                  cc_opt=("")
+                  pacing_opt=("")
+                else
+                  cc_opt=("reno" "cubic")
+                  pacing_opt=("on" "")
+                fi
+                for cc in "${cc_opt[@]}"; do
+                  for pacing in "${pacing_opt[@]}"; do
+                    # Make a tag string for this test, for the results.
+                    TAG="$client,$server,$cc,$pacing,$mtu"
+                    echo "Running benchmarks for $TAG" | tee -a comparison.txt
+                    transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
+                    # shellcheck disable=SC2086
+                    taskset -c 0 nice -n -20 \
+                      perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
+                    PID=$!
+                    transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
+                    # shellcheck disable=SC2086
+                    taskset -c 1 nice -n -20 \
+                      perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
+                        hyperfine -N --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                        tee -a comparison.txt
+                    echo >> comparison.txt
+                    kill $PID
+                    cat step.md >> steps.md
+                    # Sanity check the size of the last retrieved file.
+                    [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+                  done
                 done
               done
             done
@@ -170,12 +176,15 @@ jobs:
           # Merge the results tables generated by hyperfine into a single table.
           echo "Transfer of $SIZE bytes over loopback." > comparison.md
           awk '(!/^\| Command/ || !c++) && (!/^\|:/ || !d++)' < steps.md |\
-            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing/g' >> comparison.md
+            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing \| MTU/g' >> comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
-        run: sudo /root/bin/unprep.sh
+        run: |
+          sudo /root/bin/unprep.sh
+          # In case the previous test failed:
+          sudo ip link set dev lo mtu 65536
         if: success() || failure() || cancelled()
 
       - name: Post-process perf data
@@ -231,7 +240,7 @@ jobs:
 
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@3624ceb22c1c5a301c8db4169662070a689d9ea8 # v4.1.1
+        uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}

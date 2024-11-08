@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:acfab68709ad444b7cc9106d7e90a2bce4a77ed63889712fb6686e0e6ecfe8aa AS chef
+FROM lukemathwalker/cargo-chef@sha256:49338f8970645f531cbef198e3929910f1dbf17491d73289ab838d5ac7ae3511 AS chef
 
 WORKDIR /app
 
@@ -33,7 +33,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 ADD . /neqo
 RUN set -eux; \
     cd /neqo; \
-    cargo build --release --bin neqo-client --bin neqo-server
+    CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
 

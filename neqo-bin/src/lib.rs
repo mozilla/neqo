@@ -21,6 +21,7 @@ use neqo_transport::{
 };
 
 pub mod client;
+mod send_data;
 pub mod server;
 pub mod udp;
 
@@ -309,7 +310,7 @@ mod tests {
 
         let temp_dir = TempDir::new();
 
-        let mut client_args = client::Args::new(&[1]);
+        let mut client_args = client::Args::new(&[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
         server_args.set_qlog_dir(temp_dir.path());
