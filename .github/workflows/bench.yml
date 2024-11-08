@@ -170,8 +170,8 @@ jobs:
                     TAG="$client,$server,$cc,$pacing,$mtu"
                     echo "Running benchmarks for $TAG" | tee -a comparison.txt
                     transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
-                    # shellcheck disable=SC2086
                     echo "$CMD"
+                    # shellcheck disable=SC2086
                     taskset -c 0 nice -n -20 \
                       perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                     PID=$!
@@ -180,7 +180,7 @@ jobs:
                     # shellcheck disable=SC2086
                     taskset -c 1 nice -n -20 \
                       perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                        hyperfine -N --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                        hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                         tee -a comparison.txt
                     echo >> comparison.txt
                     kill $PID
