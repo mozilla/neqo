@@ -129,7 +129,7 @@ jobs:
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT 2> /dev/null"
             ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit > /dev/null || true"
-            ["gquiche"]="(gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key || true)"
+            ["gquiche"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key || true"
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -180,7 +180,7 @@ jobs:
                     # shellcheck disable=SC2086
                     taskset -c 1 nice -n -20 \
                       perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                        hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                        hyperfine --ignore-failure -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                         tee -a comparison.txt
                     echo >> comparison.txt
                     kill $PID
