@@ -69,6 +69,10 @@ runs:
         if [ -n "${{ inputs.test }}" ]; then
           ARGS="$ARGS --test ${{ inputs.test }}"
         fi
+        # Pull latest docker images
+        docker image ls
+        python -u pull.py --implementations {{ inputs.client }},${{ inputs.server }}
+        docker image ls
         # Don't fail CI if the interop test fails
         set -o pipefail
         python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
