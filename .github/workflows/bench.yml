@@ -191,6 +191,7 @@ jobs:
                     cat step.md >> steps.md
                     # Sanity check the size of the last retrieved file.
                     # google-quiche prints the HTTP header, too, so we can't just check for -eq.
+                    ls -lt
                     [ "$(wc -c <"$SIZE")" -gt "$SIZE" ] || exit 1
                   done
                 done
