@@ -48,7 +48,7 @@ use crate::{
     quic_datagrams::{DatagramTracking, QuicDatagrams},
     recovery::{LossRecovery, RecoveryToken, SendProfile, SentPacket},
     recv_stream::RecvStreamStats,
-    rtt::{RttEstimate, GRANULARITY, INITIAL_RTT},
+    rtt::{RttEstimate, GRANULARITY},
     send_stream::SendStream,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
@@ -604,7 +604,7 @@ impl Connection {
                     // When we have no actual RTT sample, do not encode a guestimated RTT larger
                     // than the default initial RTT. (The guess can be very large under lossy
                     // conditions.)
-                    if rtt < INITIAL_RTT {
+                    if rtt < self.conn_params.get_initial_rtt() {
                         rtt
                     } else {
                         Duration::from_millis(0)
@@ -638,7 +638,7 @@ impl Connection {
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
         self.paths.primary().map_or_else(
-            || RttEstimate::default().pto(self.confirmed()),
+            || RttEstimate::new(self.conn_params.get_initial_rtt()).pto(self.confirmed()),
             |p| p.borrow().rtt().pto(self.confirmed()),
         )
     }

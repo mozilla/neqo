@@ -51,6 +51,19 @@ pub struct RttEstimate {
 }
 
 impl RttEstimate {
+    pub fn new(rtt: Duration) -> Self {
+        // Only allow this when there are no samples.
+        Self {
+            first_sample_time: None,
+            latest_rtt: rtt,
+            smoothed_rtt: rtt,
+            rttvar: rtt / 2,
+            min_rtt: rtt,
+            ack_delay: PeerAckDelay::default(),
+            best_source: RttSource::Guesstimate,
+        }
+    }
+
     fn init(&mut self, rtt: Duration) {
         // Only allow this when there are no samples.
         debug_assert!(self.first_sample_time.is_none());
@@ -217,14 +230,6 @@ impl RttEstimate {
 
 impl Default for RttEstimate {
     fn default() -> Self {
-        Self {
-            first_sample_time: None,
-            latest_rtt: INITIAL_RTT,
-            smoothed_rtt: INITIAL_RTT,
-            rttvar: INITIAL_RTT / 2,
-            min_rtt: INITIAL_RTT,
-            ack_delay: PeerAckDelay::default(),
-            best_source: RttSource::Guesstimate,
-        }
+        Self::new(INITIAL_RTT)
     }
 }
