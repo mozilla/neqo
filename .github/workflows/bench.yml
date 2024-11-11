@@ -96,7 +96,6 @@ jobs:
         run: sudo /root/bin/prep.sh
 
       - name: Run cargo bench
-        if: 0
         run: |
           # Pin all but neqo-bin benchmarks to CPU 0. neqo-bin benchmarks run
           # both a client and a server, thus benefiting from multiple CPU cores.
@@ -181,11 +180,7 @@ jobs:
                 for cc in "${cc_opt[@]}"; do
                   for pacing in "${pacing_opt[@]}"; do
                     # Make a tag string for this test, for the results.
-                    if [[ "$client" != "neqo" && "$server" != "neqo" || "$cc" == "cubic" && "$pacing" == "on" ]] ; then
-                      TAG="**$client**,**$server**,**$cc**,**$pacing**,**$mtu**"
-                    else
-                      TAG="$client,$server,$cc,$pacing,$mtu"
-                    fi
+                    TAG="$client,$server,$cc,$pacing,$mtu"
                     echo "Running benchmarks for $TAG" | tee -a comparison.txt
                     transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                     echo "$CMD"
@@ -201,15 +196,10 @@ jobs:
                         hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                         tee -a comparison.txt
                     echo >> comparison.txt
-                    echo "$PID"
-                    ps -efww | grep $PID
                     kill $PID
-                    sleep 1
-                    ps -efww | grep $PID
                     cat step.md >> steps.md
                     # Sanity check the size of the last retrieved file.
                     # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
-                    ls -lt
                     [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
                   done
                 done
