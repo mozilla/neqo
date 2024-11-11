@@ -210,7 +210,7 @@ jobs:
                     # Sanity check the size of the last retrieved file.
                     # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
                     ls -lt
-                    [ "$(wc -c <"$SIZE")" -gt "$SIZE" ] || exit 1
+                    [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
                   done
                 done
               done
