@@ -71,7 +71,7 @@ runs:
         fi
         # Pull latest docker images
         docker image ls
-        python -u pull.py --implementations {{ inputs.client }},${{ inputs.server }}
+        python -u pull.py --implementations ${{ inputs.client }},${{ inputs.server }}
         docker image ls
         # Don't fail CI if the interop test fails
         set -o pipefail
