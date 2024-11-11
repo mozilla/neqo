@@ -41,7 +41,7 @@ qlog = { workspace = true }
 quinn-udp = { workspace = true }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
-url = { version = "2.5", default-features = false }
+url = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
