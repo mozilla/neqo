@@ -129,8 +129,8 @@ jobs:
           )
           declare -A server_cmd=(
             ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit || true"
-            ["gquiche"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key || true"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
+            ["gquiche"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
           )
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
@@ -191,7 +191,7 @@ jobs:
                     echo "$CMD"
                     # shellcheck disable=SC2086
                     taskset -c 0 nice -n -20 \
-                      perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
+                      perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD || true &
                     PID=$!
                     transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                     echo "$CMD"
