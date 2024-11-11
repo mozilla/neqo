@@ -202,10 +202,10 @@ jobs:
                         tee -a comparison.txt
                     echo >> comparison.txt
                     echo "$PID"
-                    pf -efww | grep $PID
+                    ps -efww | grep $PID
                     kill $PID
                     sleep 1
-                    pf -efww | grep $PID
+                    ps -efww | grep $PID
                     cat step.md >> steps.md
                     # Sanity check the size of the last retrieved file.
                     # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
