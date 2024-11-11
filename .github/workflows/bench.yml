@@ -191,7 +191,7 @@ jobs:
                     echo "$CMD"
                     # shellcheck disable=SC2086
                     taskset -c 0 nice -n -20 \
-                      perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD || true &
+                      perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                     PID=$!
                     transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                     echo "$CMD"
@@ -201,7 +201,11 @@ jobs:
                         hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                         tee -a comparison.txt
                     echo >> comparison.txt
+                    echo "$PID"
+                    pf -efww | grep $PID
                     kill $PID
+                    sleep 1
+                    pf -efww | grep $PID
                     cat step.md >> steps.md
                     # Sanity check the size of the last retrieved file.
                     # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
