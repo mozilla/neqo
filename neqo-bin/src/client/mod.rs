@@ -245,11 +245,7 @@ impl Args {
                     self.method = String::from("POST");
                 }
             }
-            "handshake"
-            | "transfer"
-            | "retry"
-            | "ecn"
-            | "connectionmigration" => {}
+            "handshake" | "transfer" | "retry" | "ecn" | "connectionmigration" => {}
             "resumption" => {
                 if self.urls.len() < 2 {
                     qerror!("Warning: resumption test won't work without >1 URL");
