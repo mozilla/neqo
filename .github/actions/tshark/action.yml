@@ -25,7 +25,7 @@ runs:
           echo C:/msys64/usr/bin
           echo C:/msys64/mingw64/bin
         } >> "$GITHUB_PATH"
-        /c/msys64/usr/bin/pacman -S --noconfirm wireshark
+        /c/msys64/usr/bin/pacman -S --noconfirm mingw-w64-x86_64-wireshark
         echo "LOOPBACK=loopback_0" >> "$GITHUB_ENV"
 
     - shell: bash

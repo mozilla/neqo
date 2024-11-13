@@ -99,7 +99,7 @@ jobs:
         run: |
           PCAP="$(mktemp)"
           tshark -D
-          tshark -i "$LOOPBACK" -w "$PCAP" -l host localhost and port 4433 &
+          sudo tshark -i "$LOOPBACK" -w "$PCAP" -l host localhost and port 4433 &
           DUMP=$!
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
