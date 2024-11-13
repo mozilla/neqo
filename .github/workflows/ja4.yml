@@ -65,7 +65,7 @@ jobs:
           # Putting the pcap under /tmp doesn't work on Linux, due to a permissions error.
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           DUMP=$!
-          netcat -l -u "$HOST" "$PORT" > /dev/null &
+          netcat -l -u -s "$HOST" -p "$PORT" > /dev/null &
           target/debug/neqo-client --idle 3 "https://$HOST:$PORT/$SIZE" || true
           kill "$DUMP"
           tshark -r pcap
@@ -88,7 +88,7 @@ jobs:
           # Putting the pcap under /tmp doesn't work on Linux, due to a permissions error.
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           DUMP=$!
-          netcat -l "$HOST" "$PORT" > /dev/null &
+          netcat -l -s "$HOST" -p "$PORT" > /dev/null &
           # openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
           firefox --headless "https://$HOST:$PORT/$SIZE" &
           PID=$!
