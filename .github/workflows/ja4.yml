@@ -51,8 +51,6 @@ jobs:
           sudo add-apt-repository ppa:wireshark-dev/stable
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tshark netcat firefox
-          # Not set by default, causes dumpcap to fail.
-          echo "TMPDIR=$(mktemp -d)" >> "$GITHUB_ENV"
 
       - if: runner.os == 'MacOS'
         run: brew install wireshark netcat firefox
@@ -60,28 +58,19 @@ jobs:
       - run: |
           cargo build --bin neqo-client
           PCAP="$(mktemp)"
-          sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
-          DUMP=$!
-          netcat -u "$HOST" "$PORT" &
-          SERVER=$!
-          target/debug/neqo-client "https://$HOST:$PORT/$SIZE"
-          kill $SERVER $DUMP
+          sudo tshark -i loopback -a packets:1 -w "$PCAP" -l host "$HOST" and port "$PORT" &
+          netcat -l -u "$HOST" "$PORT" &
+          target/debug/neqo-client --idle 3 "https://$HOST:$PORT/$SIZE" || true
           tshark -r "$PCAP"
           read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
-        env:
-          HOST: localhost
-          PORT: 4433
 
       - run: |
           PCAP="$(mktemp)"
-          sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
-          DUMP=$!
-          netcat "$HOST" "$PORT" &
-          SERVER=$!
+          sudo tshark -i loopback -a packets:1 -w "$PCAP" -l host "$HOST" and port "$PORT" &
+          netcat -l "$HOST" "$PORT" &
           firefox --headless "https://$HOST:$PORT/$SIZE"
-          kill $SERVER $DUMP
           tshark -r "$PCAP"
           read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
           echo "$JA4"
