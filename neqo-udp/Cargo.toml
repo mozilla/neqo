@@ -16,6 +16,7 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 quinn-udp = { workspace = true }
