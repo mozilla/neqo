@@ -61,12 +61,11 @@ jobs:
       - name: JA4+ fingerprint for H3
         run: |
           cargo build --bin neqo-client
-          PCAP="$(mktemp)"
-          sudo tcpdump -U -i "$LOOPBACK" -w "$PCAP" host "$HOST" and port "$PORT" &
+          sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           netcat -l -u "$HOST" "$PORT" > /dev/null &
           target/debug/neqo-client --idle 3 "https://$HOST:$PORT/$SIZE" || true
-          tshark -r "$PCAP"
-          read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
+          tshark -r pcap
+          read -r JA4 <<<"$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
 
@@ -75,14 +74,13 @@ jobs:
           # Make a cert and key.
           TMP=$(mktemp -d)
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
-          PCAP="$(mktemp)"
-          sudo tcpdump -U -i "$LOOPBACK" -w "$PCAP" host "$HOST" and port "$PORT" &
+          sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
           firefox --headless "https://$HOST:$PORT/$SIZE" &
           PID=$!
           sleep 10
           kill "$PID"
-          tshark -r "$PCAP"
-          read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
+          tshark -r pcap
+          read -r JA4 <<<"$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "H2_JA4=$JA4" >> "$GITHUB_ENV"
