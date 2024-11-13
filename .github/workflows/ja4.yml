@@ -51,6 +51,8 @@ jobs:
           sudo add-apt-repository ppa:wireshark-dev/stable
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tshark netcat firefox
+          # Not set by default, causes dumpcap to fail.
+          echo "TMPDIR=$(mktemp -d)" >> "$GITHUB_ENV"
 
       - if: runner.os == 'MacOS'
         run: brew install wireshark netcat firefox
@@ -60,7 +62,7 @@ jobs:
           PCAP="$(mktemp)"
           sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
           DUMP=$!
-          netcat -u -n "$HOST" "$PORT" &
+          netcat -u "$HOST" "$PORT" &
           SERVER=$!
           target/debug/neqo-client "https://$HOST:$PORT/$SIZE"
           kill $SERVER $DUMP
@@ -76,7 +78,7 @@ jobs:
           PCAP="$(mktemp)"
           sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
           DUMP=$!
-          netcat -n "$HOST" "$PORT" &
+          netcat "$HOST" "$PORT" &
           SERVER=$!
           firefox --headless "https://$HOST:$PORT/$SIZE"
           kill $SERVER $DUMP
