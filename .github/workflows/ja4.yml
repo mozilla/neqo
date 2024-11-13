@@ -53,17 +53,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends tshark netcat firefox
 
       - if: runner.os == 'MacOS'
-        run: brew install tshark netcat firefox
-
-      - run: netcat localhost 12345 &
-      - run: ps auxww
+        run: brew install wireshark netcat firefox
 
       - run: |
           cargo build --bin neqo-client
           PCAP="$(mktemp)"
           sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
           DUMP=$!
-          netcat --udp -n "$HOST" "$PORT" &
+          netcat -u -n "$HOST" "$PORT" &
           SERVER=$!
           target/debug/neqo-client "https://$HOST:$PORT/$SIZE"
           kill $SERVER $DUMP
@@ -79,7 +76,7 @@ jobs:
           PCAP="$(mktemp)"
           sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
           DUMP=$!
-          netcat --tcp -n "$HOST" "$PORT" &
+          netcat -n "$HOST" "$PORT" &
           SERVER=$!
           firefox --headless "https://$HOST:$PORT/$SIZE"
           kill $SERVER $DUMP
