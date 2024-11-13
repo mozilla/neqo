@@ -3,22 +3,26 @@ description: 'Install a recent build of tshark.'
 
 runs:
   using: "composite"
-  if: runner.environment == 'github-hosted'
   steps:
-    - if: runner.os == 'Linux'
+    - if: runner.os == 'Linux' && runner.environment == 'github-hosted'
       shell: bash
       run: |
-          sudo add-apt-repository ppa:wireshark-dev/stable
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tshark
+        sudo add-apt-repository ppa:wireshark-dev/stable
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends tshark tcpdump
+        echo "LOOPBACK:lo" >> "$GITHUB_ENV"
 
-    - if: runner.os == 'MacOS'
+    - if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
       shell: bash
-      run: brew install wireshark
+      run: |
+        brew install wireshark tcpdump
+        echo "LOOPBACK:lo0" >> "$GITHUB_ENV"
 
-    - if: runner.os == 'Windows'
+    - if: runner.os == 'Windows' && runner.environment == 'github-hosted'
       shell: bash
-      run: /c/msys64/usr/bin/pacman -S --noconfirm wireshark
+      run: |
+        /c/msys64/usr/bin/pacman -S --noconfirm wireshark tcpdump
+        echo "LOOPBACK:loopback_0" >> "$GITHUB_ENV"
 
     - shell: bash
       run: tshark --version

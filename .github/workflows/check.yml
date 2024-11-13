@@ -94,17 +94,22 @@ jobs:
             cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
           fi
 
+      - uses: ./.github/actions/tshark
       - name: Run client/server transfer
         run: |
+          PCAP="$(mktemp)"
+          tcpdump -U -i "$LOOPBACK" -w "$PCAP" host localhost and port 4433 >/dev/null 2>&1 &
+          TCPDUMP=$!
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
-          PID=$!
+          SERVER=$!
           # Give the server time to start.
           sleep 1
           "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
-          kill $PID
+          kill $SERVER $TCPDUMP
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+           tshark -r "$PCAP"
         env:
           HOST: localhost
           SIZE: 54321
