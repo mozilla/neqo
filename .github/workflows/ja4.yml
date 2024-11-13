@@ -55,7 +55,8 @@ jobs:
       - if: runner.os == 'MacOS'
         run: brew install wireshark netcat firefox
 
-      - run: |
+      - name: JA4+ fingerprint for H3
+        run: |
           cargo build --bin neqo-client
           PCAP="$(mktemp)"
           sudo tshark -i loopback -a packets:1 -w "$PCAP" -l host "$HOST" and port "$PORT" &
@@ -66,10 +67,14 @@ jobs:
           echo "$JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
 
-      - run: |
+      - name: JA4+ fingerprint for H2
+        run: |
+          TMP=$(mktemp -d)
+          # Make a cert and key.
+          openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           PCAP="$(mktemp)"
           sudo tshark -i loopback -a packets:1 -w "$PCAP" -l host "$HOST" and port "$PORT" &
-          netcat -l "$HOST" "$PORT" > /dev/null &
+          openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
           firefox --headless "https://$HOST:$PORT/$SIZE" &
           PID=$!
           sleep 10
