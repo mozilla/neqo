@@ -9,7 +9,7 @@ runs:
       run: |
         sudo add-apt-repository ppa:wireshark-dev/stable
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends tshark firefox
+        sudo apt-get install -y --no-install-recommends wireshark firefox
 
     - if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
       shell: bash
@@ -23,5 +23,5 @@ runs:
 
     - shell: bash
       run: |
-        tshark --version
+        wireshark --version
         firefox --version
