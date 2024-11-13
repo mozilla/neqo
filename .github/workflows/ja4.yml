@@ -69,7 +69,6 @@ jobs:
           kill "$DUMP"
           tshark -r pcap
           JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4 | grep -o '^[^[:space:]]\+' | head -n 1)"
-          echo "JA4: $JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
           rm pcap
 
@@ -85,11 +84,11 @@ jobs:
           kill "$PID" "$DUMP"
           tshark -r pcap
           JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4 | grep -o '^[^[:space:]]\+' | head -n 1)"
-          echo "JA4: $JA4"
           echo "H2_JA4=$JA4" >> "$GITHUB_ENV"
           rm pcap
 
       - run: |
           echo "H3_JA4=$H3_JA4"
           echo "H2_JA4=$H2_JA4"
+          # This actually does not work, because we have different TLS extensions in H2 and H3.
           [ "$H3_JA4" = "$H2_JA4" ]
