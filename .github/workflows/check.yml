@@ -109,7 +109,10 @@ jobs:
           "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
           kill $SERVER $TCPDUMP
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
-           tshark -r "$PCAP"
+          read JA4 <<<"$(tshark -r "$PCAP" -T fields -e tls.handshake.ja4)"
+          echo "$JA4"
+          echo "QUIC_JA4=$JA4" >> "$GITHUB_ENV"
+
         env:
           HOST: localhost
           SIZE: 54321
