@@ -15,6 +15,7 @@ env:
   PERF_OPT: record -F997 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
+  MTU: 1504
 
 permissions:
   contents: read
@@ -102,10 +103,8 @@ jobs:
           #
           # Run all benchmarks at elevated priority.
           taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
-          for MTU in 1500 65536; do
-            sudo ip link set dev lo mtu "$MTU"
-            MTU=$MTU nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
-          done
+          sudo ip link set dev lo mtu "$MTU"
+          nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
 
       # Compare various configurations of neqo against msquic, and gather perf data
       # during the hyperfine runs.
@@ -160,46 +159,44 @@ jobs:
           }
 
           # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
-          for mtu in 1504; do # We used to measure 65536 here, too, but that's somewhat unrealistic.
-            sudo ip link set dev lo mtu "$mtu"
-            for server in gquiche msquic neqo; do
-              for client in gquiche msquic neqo; do
-                # Do not run msquic against google-quiche; the latter only supports H3.
-                # Also, we're not really interested in the performance of those combinations.
-                if [[ "$client" == "gquiche" && "$server" == "msquic" || "$client" == "msquic" && "$server" == "gquiche" ]]; then
-                  continue
-                fi
-                # gquiche and msquic doesn't let us configure the congestion control or pacing.
-                if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
-                  cc_opt=("")
-                  pacing_opt=("")
-                else
-                  cc_opt=("reno" "cubic")
-                  pacing_opt=("on" "")
-                fi
-                for cc in "${cc_opt[@]}"; do
-                  for pacing in "${pacing_opt[@]}"; do
-                    # Make a tag string for this test, for the results.
-                    TAG="$client,$server,$cc,$pacing,$mtu"
-                    echo "Running benchmarks for $TAG" | tee -a comparison.txt
-                    transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
-                    # shellcheck disable=SC2086
-                    taskset -c 0 nice -n -20 \
-                      perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
-                    PID=$!
-                    transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
-                    # shellcheck disable=SC2086
-                    taskset -c 1 nice -n -20 \
-                      perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                        hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
-                        tee -a comparison.txt
-                    echo >> comparison.txt
-                    kill $PID
-                    cat step.md >> steps.md
-                    # Sanity check the size of the last retrieved file.
-                    # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
-                    [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
-                  done
+          sudo ip link set dev lo mtu "$MTU"
+          for server in gquiche msquic neqo; do
+            for client in gquiche msquic neqo; do
+              # Do not run msquic against google-quiche; the latter only supports H3.
+              # Also, we're not really interested in the performance of those combinations.
+              if [[ "$client" == "gquiche" && "$server" == "msquic" || "$client" == "msquic" && "$server" == "gquiche" ]]; then
+                continue
+              fi
+              # gquiche and msquic doesn't let us configure the congestion control or pacing.
+              if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
+                cc_opt=("")
+                pacing_opt=("")
+              else
+                cc_opt=("reno" "cubic")
+                pacing_opt=("on" "")
+              fi
+              for cc in "${cc_opt[@]}"; do
+                for pacing in "${pacing_opt[@]}"; do
+                  # Make a tag string for this test, for the results.
+                  TAG="$client,$server,$cc,$pacing,$MTU"
+                  echo "Running benchmarks for $TAG" | tee -a comparison.txt
+                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
+                  # shellcheck disable=SC2086
+                  taskset -c 0 nice -n -20 \
+                    perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
+                  PID=$!
+                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
+                  # shellcheck disable=SC2086
+                  taskset -c 1 nice -n -20 \
+                    perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
+                      hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      tee -a comparison.txt
+                  echo >> comparison.txt
+                  kill $PID
+                  cat step.md >> steps.md
+                  # Sanity check the size of the last retrieved file.
+                  # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
+                  [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
                 done
               done
             done
