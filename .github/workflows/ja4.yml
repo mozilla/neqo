@@ -59,7 +59,7 @@ jobs:
           cargo build --bin neqo-client
           PCAP="$(mktemp)"
           sudo tshark -i loopback -a packets:1 -w "$PCAP" -l host "$HOST" and port "$PORT" &
-          netcat -l -u "$HOST" "$PORT" &
+          netcat -l -u "$HOST" "$PORT" > /dev/null &
           target/debug/neqo-client --idle 3 "https://$HOST:$PORT/$SIZE" || true
           tshark -r "$PCAP"
           read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
@@ -69,8 +69,11 @@ jobs:
       - run: |
           PCAP="$(mktemp)"
           sudo tshark -i loopback -a packets:1 -w "$PCAP" -l host "$HOST" and port "$PORT" &
-          netcat -l "$HOST" "$PORT" &
-          firefox --headless "https://$HOST:$PORT/$SIZE"
+          netcat -l "$HOST" "$PORT" > /dev/null &
+          firefox --headless "https://$HOST:$PORT/$SIZE" &
+          PID=$!
+          sleep 10
+          kill "$PID"
           tshark -r "$PCAP"
           read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
           echo "$JA4"
