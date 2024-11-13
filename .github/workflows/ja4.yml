@@ -37,8 +37,6 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: ./.github/actions/rust
         with:
-          components: clippy
-          tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
