@@ -68,8 +68,7 @@ jobs:
           target/debug/neqo-client --idle 3 "https://$HOST:$PORT/$SIZE" || true
           kill "$DUMP"
           tshark -r pcap
-          JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
-          JA4="${JA4%"${JA4##*[![:space:]]}"}"
+          JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4 | grep -o '^[^[:space:]]\+' | head -n 1)"
           echo "JA4: $JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
           rm pcap
@@ -85,8 +84,7 @@ jobs:
           sleep 10
           kill "$PID" "$DUMP"
           tshark -r pcap
-          JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
-          JA4="${JA4%"${JA4##*[![:space:]]}"}"
+          JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4 | grep -o '^[^[:space:]]\+' | head -n 1)"
           echo "JA4: $JA4"
           echo "H2_JA4=$JA4" >> "$GITHUB_ENV"
           rm pcap
