@@ -98,8 +98,8 @@ jobs:
       - name: Run client/server transfer
         run: |
           PCAP="$(mktemp)"
-          wireshark -D
-          sudo wireshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
+          tshark -D
+          sudo tshark -i loopback -w "$PCAP" -l host "$HOST" and port "$PORT" &
           DUMP=$!
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
@@ -110,7 +110,7 @@ jobs:
           "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:$PORT/$SIZE"
           kill $SERVER $DUMP
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
-          read -r JA4 <<<"$(wireshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
+          read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "QUIC_JA4=$JA4" >> "$GITHUB_ENV"
 

@@ -9,19 +9,19 @@ runs:
       run: |
         sudo add-apt-repository ppa:wireshark-dev/stable
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends wireshark firefox
+        sudo apt-get install -y --no-install-recommends tshark firefox
 
     - if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
       shell: bash
       run: |
-        brew install wireshark firefox
+        brew install tshark firefox
 
     - if: runner.os == 'Windows' && runner.environment == 'github-hosted'
       shell: bash
-      run: |
-        choco install -y wireshark firefox
+      run: echo "Windows is unsupported"
 
     - shell: bash
+      if: runner.os != 'Windows' && runner.environment == 'github-hosted'
       run: |
-        wireshark --version
+        tshark --version
         firefox --version
