@@ -121,6 +121,14 @@ impl NeqoQlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
+    ///
+    /// This function is similar to [`NeqoQlog::add_event_data_with_instant`],
+    /// but it does not take `now: Instant` as an input parameter. Instead, it
+    /// internally calls [`std::time::Instant::now`]. Prefer calling
+    /// [`NeqoQlog::add_event_data_with_instant`] when `now` is available, as it
+    /// ensures consistency with the current time, which might differ from
+    /// [`std::time::Instant::now`] (e.g., when using simulated time instead of
+    /// real time).
     pub fn add_event_data_now<F>(&self, f: F)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,

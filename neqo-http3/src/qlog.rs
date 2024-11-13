@@ -10,6 +10,9 @@ use neqo_common::qlog::NeqoQlog;
 use neqo_transport::StreamId;
 use qlog::events::{DataRecipient, EventData};
 
+/// Uses [`NeqoQlog::add_event_data_now`] instead of
+/// [`NeqoQlog::add_event_data_with_instant`], given that `now` is not available
+/// on call-site. See docs on [`NeqoQlog::add_event_data_now`] for details.
 pub fn h3_data_moved_up(qlog: &NeqoQlog, stream_id: StreamId, amount: usize) {
     qlog.add_event_data_now(|| {
         let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
@@ -25,6 +28,9 @@ pub fn h3_data_moved_up(qlog: &NeqoQlog, stream_id: StreamId, amount: usize) {
     });
 }
 
+/// Uses [`NeqoQlog::add_event_data_now`] instead of
+/// [`NeqoQlog::add_event_data_with_instant`], given that `now` is not available
+/// on call-site. See docs on [`NeqoQlog::add_event_data_now`] for details.
 pub fn h3_data_moved_down(qlog: &NeqoQlog, stream_id: StreamId, amount: usize) {
     qlog.add_event_data_now(|| {
         let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
