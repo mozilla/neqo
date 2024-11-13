@@ -69,8 +69,8 @@ jobs:
           kill "$DUMP"
           tshark -r pcap
           JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
-          echo "$JA4"
           JA4="${JA4%"${JA4##*[![:space:]]}"}"
+          echo "JA4: $JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
           rm pcap
 
@@ -86,9 +86,8 @@ jobs:
           kill "$PID" "$DUMP"
           tshark -r pcap
           JA4="$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
-          echo "$JA4"
           JA4="${JA4%"${JA4##*[![:space:]]}"}"
-          echo "$JA4"
+          echo "JA4: $JA4"
           echo "H2_JA4=$JA4" >> "$GITHUB_ENV"
           rm pcap
 
