@@ -57,6 +57,7 @@ jobs:
         run: |
           brew install wireshark tcpdump netcat firefox
           echo "LOOPBACK=lo0" >> "$GITHUB_ENV"
+          echo "POLICY="
 
       - name: JA4+ fingerprint for H3
         run: |
@@ -75,13 +76,20 @@ jobs:
 
       - name: JA4+ fingerprint for H2
         run: |
-          # Make a cert and key.
-          TMP=$(mktemp -d)
-          openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
+          # # Make a cert and key signed by a dummy CA.
+          # TMP=$(mktemp -d)
+          # echo "subjectAltName=DNS:localhost,DNS:server,IP:127.0.0.1,IP:::1" > "$TMP/cnf"
+          # openssl req -batch -newkey rsa:2048 -sha256 -keyout "$TMP/ca.key" -days 9365 -nodes -x509 -subj "/O=dummy CA/" -out "$TMP/ca.crt"
+          # openssl ecparam -out "$TMP/eckey" -noout -name prime256v1 -genkey
+          # openssl pkcs8 -topk8 -inform pem -in "$TMP/eckey" -nocrypt -out "$TMP/key"
+          # openssl req -batch -new -sha256 -key "$TMP/key" -subj "/" -addext "subjectAltName = DNS:localhost" -out "$TMP/csr"
+          # openssl x509 -req -sha256 -days 9365 -in "$TMP/csr" -out "$TMP/crt" -CA "$TMP/ca.crt" -CAkey "$TMP/ca.key" -CAcreateserial -extfile "$TMP/cnf"
+          # echo '{ "policies": { "Certificates": { "Install": [ '"$TMP/ca.crt"' ] } } }' > /usr/lib/firefox/distribution/policies.json
           # Putting the pcap under /tmp doesn't work on Linux, due to a permissions error.
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           DUMP=$!
-          openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
+          netcat -l "$HOST" "$PORT" > /dev/null &
+          # openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
           firefox --headless "https://$HOST:$PORT/$SIZE" &
           PID=$!
           sleep 10
