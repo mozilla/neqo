@@ -62,8 +62,10 @@ jobs:
         run: |
           cargo build --bin neqo-client
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
+          DUMP=$!
           netcat -l -u "$HOST" "$PORT" > /dev/null &
           target/debug/neqo-client --idle 3 "https://$HOST:$PORT/$SIZE" || true
+          kill "$DUMP"
           tshark -r pcap
           read -r JA4 <<<"$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
           echo "$JA4"
@@ -75,11 +77,12 @@ jobs:
           TMP=$(mktemp -d)
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
+          DUMP=$!
           openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
           firefox --headless "https://$HOST:$PORT/$SIZE" &
           PID=$!
           sleep 10
-          kill "$PID"
+          kill "$PID" "$DUMP"
           tshark -r pcap
           read -r JA4 <<<"$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
           echo "$JA4"
