@@ -16,12 +16,12 @@ use std::{
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
-    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
-    TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
-    TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    hkdf, hp::HpKey, random, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError,
+    HandshakeState, PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey,
+    ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+    TLS_CT_HANDSHAKE, TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL,
+    TLS_EPOCH_ZERO_RTT, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
+    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
 
 use crate::{
@@ -1358,6 +1358,68 @@ pub enum CryptoStreams {
     },
 }
 
+/// [Fisher–Yates shuffle](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#Modern_method)
+fn shuffle<T>(a: &mut [T]) {
+    // To shuffle an array a of n elements (indices 0..n-1)
+    let n: usize = a.len();
+    for i in 0..(n - 1) {
+        // j ← random integer such that i ≤ j < n
+        let j = (random::<8>()[0] as usize) % (n - i) + i;
+        // Exchange a[i] and a[j]
+        a.swap(i, j);
+    }
+}
+
+/// Find the start and end indices of all sequences of `n` or more graphic ASCII bytes in `data`.
+fn ascii_sequences(data: &[u8], len: usize) -> Vec<(usize, usize)> {
+    let mut sequences = vec![];
+    let mut start = None;
+    for (i, &b) in data.iter().enumerate() {
+        if b.is_ascii_graphic() {
+            if start.is_none() {
+                start = Some(i);
+            }
+        } else if let Some(s) = start {
+            if i - s >= len {
+                sequences.push((s, i));
+            }
+            start = None;
+        }
+    }
+    if let Some(s) = start {
+        if data.len() - s >= len {
+            sequences.push((s, data.len()));
+        }
+    }
+    sequences
+}
+
+/// Look for ranges of `N` or more bytes of graphical ASCII data in `data`. Create at least one
+/// split point for each range, multiple ones each `N` bytes if the range is long enough. Create
+/// data chunks based on those split points. Shuffle the chunks and return them.
+fn reorder_chunks(offset: usize, data: &[u8]) -> Vec<(u64, &[u8])> {
+    const N: usize = 3;
+    let seq = ascii_sequences(data, N);
+    // For each sequence, split it into chunks of three bytes.
+    let mut splits = vec![];
+    for (mut start, end) in seq {
+        while start + N <= end {
+            splits.push(start + N / 2);
+            start += N;
+        }
+    }
+    let mut chunks = vec![];
+    let mut start = offset;
+    for split in splits {
+        let chunk = &data[start..split];
+        chunks.push((start as u64, chunk));
+        start = split;
+    }
+    chunks.push((start as u64, &data[start..]));
+    shuffle(&mut chunks);
+    chunks
+}
+
 impl CryptoStreams {
     /// Keep around 64k if a server wants to push excess data at us.
     const BUFFER_LIMIT: u64 = 65536;
@@ -1494,34 +1556,46 @@ impl CryptoStreams {
         stats: &mut FrameStats,
     ) {
         let cs = self.get_mut(space).unwrap();
+        let mut sent = vec![];
         if let Some((offset, data)) = cs.tx.next_bytes() {
-            let mut header_len = 1 + Encoder::varint_len(offset) + 1;
+            // Mix up Initial crypto data a bit.
+            let chunks = if space == PacketNumberSpace::Initial {
+                reorder_chunks(usize::try_from(offset).unwrap(), data)
+            } else {
+                vec![(offset, data)]
+            };
+            for (offset, data) in chunks {
+                let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
-            // Don't bother if there isn't room for the header and some data.
-            if builder.remaining() < header_len + 1 {
-                return;
+                // Don't bother if there isn't room for the header and some data.
+                if builder.remaining() < header_len + 1 {
+                    return;
+                }
+                // Calculate length of data based on the minimum of:
+                // - available data
+                // - remaining space, less the header, which counts only one byte for the length at
+                //   first to avoid underestimating length
+                let length = min(data.len(), builder.remaining() - header_len);
+                header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
+                let length = min(data.len(), builder.remaining() - header_len);
+
+                builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
+                builder.encode_varint(offset);
+                builder.encode_vvec(&data[..length]);
+                sent.push((offset, length));
+
+                qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
+                tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                    space,
+                    offset,
+                    length,
+                }));
+                stats.crypto += 1;
             }
-            // Calculate length of data based on the minimum of:
-            // - available data
-            // - remaining space, less the header, which counts only one byte for the length at
-            //   first to avoid underestimating length
-            let length = min(data.len(), builder.remaining() - header_len);
-            header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
-            let length = min(data.len(), builder.remaining() - header_len);
-
-            builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
-            builder.encode_varint(offset);
-            builder.encode_vvec(&data[..length]);
-
+        }
+        // FIXME: Is there a way to do this without populating and looping through `sent`?
+        for (offset, length) in sent {
             cs.tx.mark_as_sent(offset, length);
-
-            qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
-            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                space,
-                offset,
-                length,
-            }));
-            stats.crypto += 1;
         }
     }
 }
