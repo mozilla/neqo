@@ -98,8 +98,9 @@ jobs:
       - name: Run client/server transfer
         run: |
           PCAP="$(mktemp)"
-          tcpdump -U -i "$LOOPBACK" -w "$PCAP" host localhost and port 4433 >/dev/null 2>&1 &
-          TCPDUMP=$!
+          tshark -D
+          tshark -i "$LOOPBACK" -w "$PCAP" -l host localhost and port 4433 &
+          DUMP=$!
           # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
@@ -107,9 +108,9 @@ jobs:
           # Give the server time to start.
           sleep 1
           "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
-          kill $SERVER $TCPDUMP
+          kill $SERVER $DUMP
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
-          read JA4 <<<"$(tshark -r "$PCAP" -T fields -e tls.handshake.ja4)"
+          read -r JA4 <<<"$(tshark -n -r "$PCAP" -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "QUIC_JA4=$JA4" >> "$GITHUB_ENV"
 

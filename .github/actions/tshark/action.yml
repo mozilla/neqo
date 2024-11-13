@@ -9,19 +9,23 @@ runs:
       run: |
         sudo add-apt-repository ppa:wireshark-dev/stable
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends tshark tcpdump
+        sudo apt-get install -y --no-install-recommends tshark
         echo "LOOPBACK=lo" >> "$GITHUB_ENV"
 
     - if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
       shell: bash
       run: |
-        brew install wireshark tcpdump
+        brew install wireshark
         echo "LOOPBACK=lo0" >> "$GITHUB_ENV"
 
     - if: runner.os == 'Windows' && runner.environment == 'github-hosted'
       shell: bash
       run: |
-        /c/msys64/usr/bin/pacman -S --noconfirm wireshark tcpdump
+        {
+          echo C:/msys64/usr/bin
+          echo C:/msys64/mingw64/bin
+        } >> "$GITHUB_PATH"
+        /c/msys64/usr/bin/pacman -S --noconfirm wireshark
         echo "LOOPBACK=loopback_0" >> "$GITHUB_ENV"
 
     - shell: bash
