@@ -9,6 +9,9 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
+  schedule:
+    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    - cron: '0 1 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -164,6 +167,13 @@ jobs:
           pattern: '*results'
           path: results
 
+      - uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: results-main
+          key: qns-${{ runner.name }}-${{ github.sha }}
+          restore-keys: qns-${{ runner.name }}-
+
+      - run: sudo apt-get install -y --no-install-recommends wdiff
       - run: |
           mapfile -t LIST < <(echo '${{ needs.implementations.outputs.pairs }}' | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
@@ -195,8 +205,16 @@ jobs:
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
                 RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
+                BASELINE=$(mktemp)
+                if [ -e "results-main/${PREFIX} results/$ROLE.grouped.json" ]; then
+                  jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
+                else
+                  touch "$BASELINE"
+                fi
                 [ -n "$RESULT" ] || continue
-                echo "* [$PAIR]($LOG): **$RESULT**" >> "$ROLE.$GROUP.md"
+                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-|-\]/~~/g; s/\{\+|\+\}/\*\*/g")
+                echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
           done
@@ -233,6 +251,12 @@ jobs:
             echo
             echo "</details>"
           } >> comment.md
+
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: results
+          key: qns-${{ runner.name }}-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
