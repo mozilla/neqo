@@ -61,6 +61,7 @@ jobs:
       - name: JA4+ fingerprint for H3
         run: |
           cargo build --bin neqo-client
+          # Putting the pcap under /tmp doesn't work on Linux, due to a permissions error.
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           DUMP=$!
           netcat -l -u "$HOST" "$PORT" > /dev/null &
@@ -70,12 +71,14 @@ jobs:
           read -r JA4 <<<"$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "H3_JA4=$JA4" >> "$GITHUB_ENV"
+          rm pcap
 
       - name: JA4+ fingerprint for H2
         run: |
           # Make a cert and key.
           TMP=$(mktemp -d)
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
+          # Putting the pcap under /tmp doesn't work on Linux, due to a permissions error.
           sudo tcpdump -U -i "$LOOPBACK" -w pcap host "$HOST" and port "$PORT" &
           DUMP=$!
           openssl s_server -key "$TMP/key" -cert "$TMP/cert" -accept "$PORT" -www &
@@ -87,3 +90,9 @@ jobs:
           read -r JA4 <<<"$(tshark -n -r pcap -T fields -e tls.handshake.ja4)"
           echo "$JA4"
           echo "H2_JA4=$JA4" >> "$GITHUB_ENV"
+          rm pcap
+
+      - run: |
+          echo "H3_JA4=$H3_JA4"
+          echo "H2_JA4=$H2_JA4"
+          [ "$H3_JA4" = "$H2_JA4" ]
