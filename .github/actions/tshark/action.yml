@@ -1,0 +1,24 @@
+name: 'Install tshark'
+description: 'Install a recent build of tshark.'
+
+runs:
+  using: "composite"
+  if: runner.environment == 'github-hosted'
+  steps:
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: |
+          sudo add-apt-repository ppa:wireshark-dev/stable
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tshark
+
+    - if: runner.os == 'MacOS'
+      shell: bash
+      run: brew install wireshark
+
+    - if: runner.os == 'Windows'
+      shell: bash
+      run: /c/msys64/usr/bin/pacman -S --noconfirm wireshark
+
+    - shell: bash
+      run: tshark --version
