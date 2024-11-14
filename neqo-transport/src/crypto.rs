@@ -324,10 +324,12 @@ impl Crypto {
         &mut self,
         space: PacketNumberSpace,
         builder: &mut PacketBuilder,
+        shuffle: bool,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        self.streams.write_frame(space, builder, tokens, stats);
+        self.streams
+            .write_frame(space, builder, shuffle, tokens, stats);
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -1359,12 +1361,18 @@ pub enum CryptoStreams {
 }
 
 /// [Fisher–Yates shuffle](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#Modern_method)
+/// Modified to make sure no element stays in place.
 fn shuffle<T>(a: &mut [T]) {
     // To shuffle an array a of n elements (indices 0..n-1)
     let n: usize = a.len();
     for i in 0..(n - 1) {
         // j ← random integer such that i ≤ j < n
-        let j = (random::<8>()[0] as usize) % (n - i) + i;
+        let j = loop {
+            let j = (random::<8>()[0] as usize) % (n - i) + i;
+            if j != i {
+                break j;
+            }
+        };
         // Exchange a[i] and a[j]
         a.swap(i, j);
     }
@@ -1399,23 +1407,22 @@ fn ascii_sequences(data: &[u8], len: usize) -> Vec<(usize, usize)> {
 /// data chunks based on those split points. Shuffle the chunks and return them.
 fn reorder_chunks(offset: usize, data: &[u8]) -> Vec<(u64, &[u8])> {
     const N: usize = 3;
-    let seq = ascii_sequences(data, N);
-    // For each sequence, split it into chunks of three bytes.
     let mut splits = vec![];
-    for (mut start, end) in seq {
+    // For each sequence, split it into chunks of `N` bytes.
+    for (mut start, end) in ascii_sequences(data, N) {
         while start + N <= end {
             splits.push(start + N / 2);
             start += N;
         }
     }
     let mut chunks = vec![];
-    let mut start = offset;
+    let mut start = 0;
     for split in splits {
         let chunk = &data[start..split];
         chunks.push((start as u64, chunk));
         start = split;
     }
-    chunks.push((start as u64, &data[start..]));
+    chunks.push(((offset + start) as u64, &data[start..]));
     shuffle(&mut chunks);
     chunks
 }
@@ -1552,6 +1559,7 @@ impl CryptoStreams {
         &mut self,
         space: PacketNumberSpace,
         builder: &mut PacketBuilder,
+        shuffle: bool,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
@@ -1559,11 +1567,13 @@ impl CryptoStreams {
         let mut sent = vec![];
         if let Some((offset, data)) = cs.tx.next_bytes() {
             // Mix up Initial crypto data a bit.
-            let chunks = if space == PacketNumberSpace::Initial {
+            let chunks = if shuffle {
                 reorder_chunks(usize::try_from(offset).unwrap(), data)
             } else {
                 vec![(offset, data)]
             };
+            // TODO: Should we do some sort of binpacking here, to minimize the number of packets
+            // and amount of unneeded padding sent?
             for (offset, data) in chunks {
                 let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 

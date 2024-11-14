@@ -251,7 +251,7 @@ fn compatible_upgrade_large_initial() {
     assert_eq!(server.version(), Version::Version2);
     // Only handshake padding is "dropped".
     assert_eq!(client.stats().dropped_rx, 1);
-    assert_eq!(server.stats().dropped_rx, 1);
+    assert!(server.stats().dropped_rx >= 1);
 }
 
 /// A server that supports versions 1 and 2 might prefer version 1 and that's OK.

@@ -1203,13 +1203,17 @@ fn client_initial_retransmits_identical() {
 
     // Force the client to retransmit its Initial packet a number of times and make sure the
     // retranmissions are identical to the original. Also, verify the PTO durations.
+    let mut crypto_frames_in_first_ci = 0;
     for i in 1..=5 {
         let ci = client.process_output(now).dgram().unwrap();
+        if i == 1 {
+            crypto_frames_in_first_ci = client.stats().frame_tx.crypto;
+        }
         assert_eq!(ci.len(), client.plpmtu());
         assert_eq!(
             client.stats().frame_tx,
             FrameStats {
-                crypto: i,
+                crypto: i * crypto_frames_in_first_ci,
                 ..Default::default()
             }
         );
@@ -1229,13 +1233,17 @@ fn server_initial_retransmits_identical() {
     // retranmissions are identical to the original. Also, verify the PTO durations.
     let mut server = default_server();
     let mut total_ptos: Duration = Duration::from_secs(0);
+    let mut crypto_frames_in_first_si = 0;
     for i in 1..=3 {
         let si = server.process(ci.take(), now).dgram().unwrap();
+        if i == 1 {
+            crypto_frames_in_first_si = server.stats().frame_tx.crypto;
+        }
         assert_eq!(si.len(), server.plpmtu());
         assert_eq!(
             server.stats().frame_tx,
             FrameStats {
-                crypto: i * 2,
+                crypto: i * crypto_frames_in_first_si,
                 ack: i,
                 ..Default::default()
             }

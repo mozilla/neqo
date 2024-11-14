@@ -311,6 +311,7 @@ fn idle_caching() {
     server.crypto.streams.write_frame(
         PacketNumberSpace::Initial,
         &mut builder,
+        false,
         &mut tokens,
         &mut FrameStats::default(),
     );
@@ -319,6 +320,7 @@ fn idle_caching() {
     server.crypto.streams.write_frame(
         PacketNumberSpace::Initial,
         &mut builder,
+        false,
         &mut tokens,
         &mut FrameStats::default(),
     );
