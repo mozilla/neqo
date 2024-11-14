@@ -39,7 +39,7 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-udp = { path = "./../neqo-udp" }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
-regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
+regex = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt", "rt-multi-thread"] }
 url = { workspace = true }
 
