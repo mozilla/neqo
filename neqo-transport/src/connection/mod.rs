@@ -1547,7 +1547,7 @@ impl Connection {
     /// This takes two times: when the datagram was received, and the current time.
     fn input(&mut self, d: Datagram<impl AsRef<[u8]>>, received: Instant, now: Instant) {
         // First determine the path.
-        let path = self.paths.find_path_with_rebinding(
+        let path = self.paths.find_path(
             d.destination(),
             d.source(),
             self.conn_params.get_cc_algorithm(),
@@ -1934,10 +1934,11 @@ impl Connection {
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
-        let spa = if matches!(
+        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<[u8; 16]>)> = if matches!(
             self.conn_params.get_preferred_address(),
             PreferredAddressConfig::Disabled
         ) {
+            qdebug!([self], "Preferred address is disabled");
             None
         } else {
             self.tps.borrow_mut().remote().get_preferred_address()
@@ -1975,6 +1976,8 @@ impl Connection {
             } else {
                 qwarn!([self], "Unable to migrate to a different address family");
             }
+        } else {
+            qdebug!([self], "No preferred address to migrate to");
         }
         Ok(())
     }

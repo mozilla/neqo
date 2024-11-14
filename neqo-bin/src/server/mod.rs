@@ -370,37 +370,30 @@ pub async fn server(mut args: Args) -> Res<()> {
             qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
         }
 
-        // This is the default for all tests except http3.
+        // These are the default for all tests except http3.
         args.shared.use_old_http = true;
+        args.shared.alpn = String::from(HQ_INTEROP);
         // TODO: More options to deduplicate with client?
         match testcase.as_str() {
-            "http3" => args.shared.use_old_http = false,
-            "zerortt" => {
-                args.shared.alpn = String::from(HQ_INTEROP);
-                args.shared.quic_parameters.max_streams_bidi = 100;
+            "http3" => {
+                args.shared.use_old_http = false;
+                args.shared.alpn = "h3".into();
             }
-            "handshake"
-            | "transfer"
-            | "resumption"
-            | "multiconnect"
-            | "v2"
-            | "ecn"
-            | "rebind-port"
-            | "rebind-addr"
-            | "connectionmigration" => {
-                args.shared.alpn = String::from(HQ_INTEROP);
+            "zerortt" => args.shared.quic_parameters.max_streams_bidi = 100,
+            "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
+            "connectionmigration" => {
+                if args.shared.quic_parameters.preferred_address().is_none() {
+                    qerror!("No preferred addresses set for connectionmigration test");
+                    exit(127);
+                }
             }
             "chacha20" => {
-                args.shared.alpn = String::from(HQ_INTEROP);
                 args.shared.ciphers.clear();
                 args.shared
                     .ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
-            "retry" => {
-                args.shared.alpn = String::from(HQ_INTEROP);
-                args.retry = true;
-            }
+            "retry" => args.retry = true,
             _ => exit(127),
         }
     }
