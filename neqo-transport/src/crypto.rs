@@ -1405,7 +1405,7 @@ fn ascii_sequences(data: &[u8], len: usize) -> Vec<(usize, usize)> {
 /// Look for ranges of `N` or more bytes of graphical ASCII data in `data`. Create at least one
 /// split point for each range, multiple ones each `N` bytes if the range is long enough. Create
 /// data chunks based on those split points. Shuffle the chunks and return them.
-fn reorder_chunks(offset: usize, data: &[u8]) -> Vec<(u64, &[u8])> {
+fn reorder_chunks(data: &[u8]) -> Vec<(u64, &[u8])> {
     const N: usize = 3;
     let mut splits = vec![];
     // For each sequence, split it into chunks of `N` bytes.
@@ -1422,7 +1422,7 @@ fn reorder_chunks(offset: usize, data: &[u8]) -> Vec<(u64, &[u8])> {
         chunks.push((start as u64, chunk));
         start = split;
     }
-    chunks.push(((offset + start) as u64, &data[start..]));
+    chunks.push((start as u64, &data[start..]));
     shuffle(&mut chunks);
     chunks
 }
@@ -1563,23 +1563,27 @@ impl CryptoStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        let cs = self.get_mut(space).unwrap();
-        let mut sent = vec![];
+        let cs: &mut CryptoStream = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
             // Mix up Initial crypto data a bit.
             let chunks = if shuffle {
-                reorder_chunks(usize::try_from(offset).unwrap(), data)
+                reorder_chunks(data)
+                    .into_iter()
+                    .map(|(off, d)| (offset + off, d))
+                    .collect()
             } else {
                 vec![(offset, data)]
             };
+
             // TODO: Should we do some sort of binpacking here, to minimize the number of packets
             // and amount of unneeded padding sent?
+            let mut sent = vec![];
             for (offset, data) in chunks {
                 let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
                 // Don't bother if there isn't room for the header and some data.
                 if builder.remaining() < header_len + 1 {
-                    return;
+                    break;
                 }
                 // Calculate length of data based on the minimum of:
                 // - available data
@@ -1602,10 +1606,11 @@ impl CryptoStreams {
                 }));
                 stats.crypto += 1;
             }
-        }
-        // FIXME: Is there a way to do this without populating and looping through `sent`?
-        for (offset, length) in sent {
-            cs.tx.mark_as_sent(offset, length);
+
+            // FIXME: Is there a way to do this without populating and looping through `sent`?
+            for (offset, length) in sent {
+                cs.tx.mark_as_sent(offset, length);
+            }
         }
     }
 }

@@ -2503,7 +2503,7 @@ impl Connection {
             // Perform additional padding for Initial packets as necessary.
             let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
-                if needs_padding {
+                if needs_padding && packets.len() < profile.limit() {
                     qdebug!(
                         [self],
                         "pad Initial from {} to PLPMTU {}",
