@@ -20,8 +20,8 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    CloseReason, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
-    StreamId, StreamType,
+    CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
+    Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
 use url::Url;
 
@@ -133,11 +133,17 @@ pub fn create_client(
         "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.shared.alpn.as_str(),
         _ => "hq-interop",
     };
-
+    let cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>> = if args.cid_len == 0 {
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default()))
+    } else {
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(
+            args.cid_len.into(),
+        )))
+    };
     let mut client = Connection::new_client(
         hostname,
         &[alpn],
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        cid_generator,
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(alpn),
