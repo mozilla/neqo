@@ -1378,7 +1378,7 @@ fn shuffle<T>(a: &mut [T]) {
     }
 }
 
-/// Find the start and end indices of all sequences of `n` or more graphic ASCII bytes in `data`.
+/// Find the start and end indices of all sequences of `len` or more graphic ASCII bytes in `data`.
 fn ascii_sequences(data: &[u8], len: usize) -> Vec<(usize, usize)> {
     let mut sequences = vec![];
     let mut start = None;
@@ -1403,8 +1403,9 @@ fn ascii_sequences(data: &[u8], len: usize) -> Vec<(usize, usize)> {
 }
 
 /// Look for ranges of `N` or more bytes of graphical ASCII data in `data`. Create at least one
-/// split point for each range, multiple ones each `N` bytes if the range is long enough. Create
-/// data chunks based on those split points. Shuffle the chunks and return them.
+/// split point at `N/2` into the range for each range, multiple ones each `N` bytes afterwards if
+/// the range is long enough. Create data chunks based on those split points. Shuffle the chunks and
+/// return them.
 fn reorder_chunks(data: &[u8]) -> Vec<(u64, &[u8])> {
     const N: usize = 3;
     let mut splits = vec![];
