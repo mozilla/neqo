@@ -170,8 +170,8 @@ jobs:
       - uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: results-main
-          key: qns-${{ runner.name }}-${{ github.sha }}
-          restore-keys: qns-${{ runner.name }}-
+          key: qns-${{ github.sha }}
+          restore-keys: qns-
 
       - run: sudo apt-get install -y --no-install-recommends wdiff
       - run: |
@@ -256,7 +256,7 @@ jobs:
         uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: results
-          key: qns-${{ runner.name }}-${{ github.sha }}
+          key: qns-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
