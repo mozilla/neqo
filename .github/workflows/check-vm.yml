@@ -41,7 +41,7 @@ jobs:
           run: |
             sh rustup.sh --default-toolchain stable --component llvm-tools -y
             . "$HOME/.cargo/env"
-            export RUST_LOG=trace
+            # export RUST_LOG=trace
             cargo install cargo-llvm-cov --locked
             cargo check --all-targets
             cargo clippy
@@ -57,10 +57,10 @@ jobs:
             pkg_add rust llvm-16.0.6p30 nss pkgconf # rustup doesn't support OpenBSD at all
           run: |
             export LIBCLANG_PATH=/usr/local/llvm16/lib
-            export RUST_LOG=trace
+            # export RUST_LOG=trace
             cargo check --all-targets
-            cargo clippy
-            # FIXME: This should run llvm-cov, but it's not available on OpenBSD:
+            # FIXME: unsupported: cargo clippy
+            # FIXME: Next line should run llvm-cov, but it's not available on OpenBSD:
             cargo test --features ci --no-fail-fast
             cargo test --features ci --no-fail-fast --release
 
@@ -76,7 +76,7 @@ jobs:
             sh rustup.sh --default-toolchain stable --component llvm-tools -y
             . "$HOME/.cargo/env"
             export LIBCLANG_PATH=/usr/pkg/lib
-            export RUST_LOG=trace
+            # export RUST_LOG=trace
             cargo install cargo-llvm-cov --locked
             cargo check --all-targets
             cargo clippy
@@ -96,7 +96,7 @@ jobs:
           run: |
             sh rustup.sh --default-toolchain stable --component llvm-tools -y
             . "$HOME/.cargo/env"
-            export RUST_LOG=trace
+            # export RUST_LOG=trace
             cargo check --all-targets --features ci
             # FIXME: This should run llvm-cov:
             cargo test --features ci --no-fail-fast
