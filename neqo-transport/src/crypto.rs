@@ -1716,14 +1716,17 @@ mod tests {
 
     #[test]
     fn reorder_chunks() {
-        // Test that all data is included in the chunks
         fn assert_complete(data: &[u8], chunks: &[(u64, &[u8])]) {
+            // Footgun prevention
+            const EMPTY: u8 = 0xff;
+            assert!(!data.contains(&EMPTY));
+
             // Test that the chunk lengths sum to the total length
             let total_length: usize = chunks.iter().map(|(_, chunk)| chunk.len()).sum();
             assert_eq!(total_length, data.len());
 
             // Test that the combined chunks cover the entire data
-            let mut reconstructed = vec![0; data.len()];
+            let mut reconstructed = vec![EMPTY; data.len()];
             for &(index, data) in chunks {
                 let idx: usize = index.try_into().unwrap();
                 reconstructed.splice(idx..idx + data.len(), data.iter().copied());
