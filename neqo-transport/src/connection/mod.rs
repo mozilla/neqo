@@ -1870,8 +1870,8 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// Fails if this is not a client, not confirmed, or there are not enough connection
-    /// IDs available to use.
+    /// Fails if this is not a client, not confirmed, the peer disabled connection migration, or
+    /// there are not enough connection IDs available to use.
     pub fn migrate(
         &mut self,
         local: Option<SocketAddr>,
@@ -1883,6 +1883,14 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
         if !matches!(self.state(), State::Confirmed) {
+            return Err(Error::InvalidMigration);
+        }
+        if self
+            .tps
+            .borrow()
+            .remote()
+            .get_empty(tparams::DISABLE_MIGRATION)
+        {
             return Err(Error::InvalidMigration);
         }
 
