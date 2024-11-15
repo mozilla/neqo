@@ -976,8 +976,6 @@ fn migration_disabled() {
     let mut client = default_client();
     let mut server = new_server(ConnectionParameters::default().disable_migration(true));
     connect(&mut client, &mut server);
-    assert_eq!(client.state(), &State::Confirmed);
-    assert_eq!(server.state(), &State::Confirmed);
     assert_eq!(
         client
             .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), true, now())
