@@ -29,6 +29,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
 
       - if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@debf37ca7b7fa40e19c542ef7ba30d6054a706a4
