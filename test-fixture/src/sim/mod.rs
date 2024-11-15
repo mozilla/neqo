@@ -15,12 +15,14 @@ use std::{
     cell::RefCell,
     cmp::min,
     fmt::Debug,
+    fs::{create_dir_all, File},
     ops::{Deref, DerefMut},
+    path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo, qtrace, Datagram, Encoder};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, Datagram, Encoder};
 use neqo_transport::Output;
 use rng::Random;
 use NodeState::{Active, Idle, Waiting};
@@ -64,11 +66,7 @@ macro_rules! simulate {
                 let f: Box<dyn FnOnce(&_) -> _> = Box::new($v);
                 nodes.push(Box::new(f(&fixture)));
             )*
-            let mut sim = Simulator::new(stringify!($n), nodes);
-            if let Ok(seed) = std::env::var("SIMULATION_SEED") {
-                sim.seed_str(seed);
-            }
-            sim.run();
+            Simulator::new(stringify!($n), nodes).run();
         }
     };
 }
@@ -151,23 +149,37 @@ impl Simulator {
             .into_iter()
             .chain(it.map(|node| NodeHolder { node, state: Idle }))
             .collect::<Vec<_>>();
-        Self {
+        let mut sim = Self {
             name,
             nodes,
             rng: Rc::default(),
+        };
+        // Seed from the `SIMULATION_SEED` environment variable, if set.
+        if let Ok(seed) = std::env::var("SIMULATION_SEED") {
+            sim.seed_str(seed);
         }
-    }
-
-    pub fn seed(&mut self, seed: [u8; 32]) {
-        self.rng = Rc::new(RefCell::new(Random::new(&seed)));
+        // Dump the seed to a file to the directory in the `DUMP_SIMULATION_SEEDS` environment
+        // variable, if set.
+        if let Ok(dir) = std::env::var("DUMP_SIMULATION_SEEDS") {
+            if create_dir_all(&dir).is_err() {
+                qerror!("Failed to create directory {dir}");
+            } else {
+                let seed_str = sim.rng.borrow().seed_str();
+                let path = PathBuf::from(format!("{dir}/{}-{seed_str}", sim.name));
+                if File::create(&path).is_err() {
+                    qerror!("Failed to write seed to {}", path.to_string_lossy());
+                }
+            }
+        }
+        sim
     }
 
     /// Seed from a hex string.
     /// # Panics
     /// When the provided string is not 32 bytes of hex (64 characters).
     pub fn seed_str(&mut self, seed: impl AsRef<str>) {
-        let seed = Encoder::from_hex(seed);
-        self.seed(<[u8; 32]>::try_from(seed.as_ref()).unwrap());
+        let seed = <[u8; 32]>::try_from(Encoder::from_hex(seed).as_ref()).unwrap();
+        self.rng = Rc::new(RefCell::new(Random::new(&seed)));
     }
 
     fn next_time(&self, now: Instant) -> Instant {

@@ -23,12 +23,12 @@ use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError, Output,
-    StreamId,
+    RandomConnectionIdGenerator, StreamId,
 };
 use url::Url;
 
 use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::STREAM_IO_BUFFER_SIZE;
+use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
 
 pub struct Handler<'a> {
     #[allow(clippy::struct_field_names)]
@@ -45,11 +45,6 @@ impl<'a> Handler<'a> {
             handled_urls: Vec::new(),
             stream_handlers: HashMap::new(),
             all_paths: Vec::new(),
-            handler_type: if args.test.is_some() {
-                StreamHandlerType::Upload
-            } else {
-                StreamHandlerType::Download
-            },
             args,
         };
 
@@ -69,10 +64,18 @@ pub fn create_client(
     hostname: &str,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Http3Client> {
+    let cid_generator: Rc<RefCell<dyn neqo_transport::ConnectionIdGenerator>> = if args.cid_len == 0
+    {
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default()))
+    } else {
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(
+            args.cid_len.into(),
+        )))
+    };
     let mut transport = Connection::new_client(
         hostname,
         &[&args.shared.alpn],
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        cid_generator,
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(args.shared.alpn.as_str()),
@@ -132,10 +135,11 @@ impl super::Client for Http3Client {
         self.process_output(now)
     }
 
-    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
+    fn process_multiple_input<'a>(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        now: Instant,
+    ) {
         self.process_multiple_input(dgrams, now);
     }
 
@@ -155,7 +159,7 @@ impl super::Client for Http3Client {
     }
 }
 
-impl<'a> Handler<'a> {
+impl Handler<'_> {
     fn reinit(&mut self) {
         for url in self.url_handler.handled_urls.drain(..) {
             self.url_handler.url_queue.push_front(url);
@@ -165,7 +169,7 @@ impl<'a> Handler<'a> {
     }
 }
 
-impl<'a> super::Handler for Handler<'a> {
+impl super::Handler for Handler<'_> {
     type Client = Http3Client;
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
@@ -270,36 +274,6 @@ trait StreamHandler {
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId);
 }
 
-enum StreamHandlerType {
-    Download,
-    Upload,
-}
-
-impl StreamHandlerType {
-    fn make_handler(
-        handler_type: &Self,
-        url: &Url,
-        args: &Args,
-        all_paths: &mut Vec<PathBuf>,
-        client: &mut Http3Client,
-        client_stream_id: StreamId,
-    ) -> Box<dyn StreamHandler> {
-        match handler_type {
-            Self::Download => {
-                let out_file = get_output_file(url, &args.output_dir, all_paths);
-                client.stream_close_send(client_stream_id).unwrap();
-                Box::new(DownloadStreamHandler { out_file })
-            }
-            Self::Upload => Box::new(UploadStreamHandler {
-                data: vec![42; args.upload_size],
-                offset: 0,
-                chunk_size: STREAM_IO_BUFFER_SIZE,
-                start: Instant::now(),
-            }),
-        }
-    }
-}
-
 struct DownloadStreamHandler {
     out_file: Option<BufWriter<File>>,
 }
@@ -346,9 +320,7 @@ impl StreamHandler for DownloadStreamHandler {
 }
 
 struct UploadStreamHandler {
-    data: Vec<u8>,
-    offset: usize,
-    chunk_size: usize,
+    data: SendData,
     start: Instant,
 }
 
@@ -378,21 +350,11 @@ impl StreamHandler for UploadStreamHandler {
     }
 
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {
-        while self.offset < self.data.len() {
-            let end = self.offset + self.chunk_size.min(self.data.len() - self.offset);
-            let chunk = &self.data[self.offset..end];
-            match client.send_data(stream_id, chunk) {
-                Ok(amount) => {
-                    if amount == 0 {
-                        break;
-                    }
-                    self.offset += amount;
-                    if self.offset == self.data.len() {
-                        client.stream_close_send(stream_id).unwrap();
-                    }
-                }
-                Err(_) => break,
-            };
+        let done = self
+            .data
+            .send(|chunk| client.send_data(stream_id, chunk).unwrap());
+        if done {
+            client.stream_close_send(stream_id).unwrap();
         }
     }
 }
@@ -402,11 +364,10 @@ struct UrlHandler<'a> {
     handled_urls: Vec<Url>,
     stream_handlers: HashMap<StreamId, Box<dyn StreamHandler>>,
     all_paths: Vec<PathBuf>,
-    handler_type: StreamHandlerType,
     args: &'a Args,
 }
 
-impl<'a> UrlHandler<'a> {
+impl UrlHandler<'_> {
     fn stream_handler(&mut self, stream_id: StreamId) -> Option<&mut Box<dyn StreamHandler>> {
         self.stream_handlers.get_mut(&stream_id)
     }
@@ -440,14 +401,23 @@ impl<'a> UrlHandler<'a> {
             Ok(client_stream_id) => {
                 qdebug!("Successfully created stream id {client_stream_id} for {url}");
 
-                let handler: Box<dyn StreamHandler> = StreamHandlerType::make_handler(
-                    &self.handler_type,
-                    &url,
-                    self.args,
-                    &mut self.all_paths,
-                    client,
-                    client_stream_id,
-                );
+                let handler: Box<dyn StreamHandler> = match self.args.method.as_str() {
+                    "GET" => {
+                        let out_file = get_output_file(
+                            &url,
+                            self.args.output_dir.as_ref(),
+                            &mut self.all_paths,
+                        );
+                        client.stream_close_send(client_stream_id).unwrap();
+                        Box::new(DownloadStreamHandler { out_file })
+                    }
+                    "POST" => Box::new(UploadStreamHandler {
+                        data: SendData::zeroes(self.args.upload_size),
+                        start: Instant::now(),
+                    }),
+                    _ => unimplemented!(),
+                };
+
                 self.stream_handlers.insert(client_stream_id, handler);
                 self.handled_urls.push(url);
                 true
