@@ -1,11 +1,12 @@
 name: Find mutants
 on:
-  schedule:
-    - cron: '42 3 * * 2,5' # Runs at 03:42 UTC (m and h chosen arbitrarily) twice a week.
-  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   pull_request:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -16,23 +17,21 @@ permissions:
 
 jobs:
   mutants:
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Get minimum NSS version
-        id: nss-version
+      - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Install NSS
-        uses: ./.github/actions/nss
+      - uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-      - name: Install Rust
-        uses: ./.github/actions/rust
+      - uses: ./.github/actions/rust
         with:
           tools: cargo-mutants
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -53,19 +52,16 @@ jobs:
           echo 'TITLE=All Mutants' >> "$GITHUB_ENV"
 
       - name: Post step summary
-        if: always()
         run: |
           {
             echo "### $TITLE"
             echo "See https://mutants.rs/using-results.html for more information."
             echo '```'
-            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt
+            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt || true
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
-      - name: Archive mutants.out
-        uses: actions/upload-artifact@89ef406dd8d7e03cfd12d9e0a4a378f454709029 # v4.3.5
-        if: always()
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: mutants.out
           path: mutants.out

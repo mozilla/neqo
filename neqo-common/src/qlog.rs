@@ -11,6 +11,7 @@ use std::{
     io::BufWriter,
     path::PathBuf,
     rc::Rc,
+    time::{Instant, SystemTime},
 };
 
 use qlog::{
@@ -94,20 +95,41 @@ impl NeqoQlog {
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event<F>(&self, f: F)
+    pub fn add_event_with_instant<F>(&self, f: F, now: Instant)
     where
         F: FnOnce() -> Option<qlog::events::Event>,
     {
         self.add_event_with_stream(|s| {
             if let Some(evt) = f() {
-                s.add_event(evt)?;
+                s.add_event_with_instant(evt, now)?;
             }
             Ok(())
         });
     }
 
     /// If logging enabled, closure may generate an event to be logged.
-    pub fn add_event_data<F>(&self, f: F)
+    pub fn add_event_data_with_instant<F>(&self, f: F, now: Instant)
+    where
+        F: FnOnce() -> Option<qlog::events::EventData>,
+    {
+        self.add_event_with_stream(|s| {
+            if let Some(ev_data) = f() {
+                s.add_event_data_with_instant(ev_data, now)?;
+            }
+            Ok(())
+        });
+    }
+
+    /// If logging enabled, closure may generate an event to be logged.
+    ///
+    /// This function is similar to [`NeqoQlog::add_event_data_with_instant`],
+    /// but it does not take `now: Instant` as an input parameter. Instead, it
+    /// internally calls [`std::time::Instant::now`]. Prefer calling
+    /// [`NeqoQlog::add_event_data_with_instant`] when `now` is available, as it
+    /// ensures consistency with the current time, which might differ from
+    /// [`std::time::Instant::now`] (e.g., when using simulated time instead of
+    /// real time).
+    pub fn add_event_data_now<F>(&self, f: F)
     where
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
@@ -172,13 +194,10 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
         common_fields: Some(CommonFields {
             group_id: None,
             protocol_type: None,
-            reference_time: {
-                // It is better to allow this than deal with a conversion from i64 to f64.
-                // We can't do the obvious two-step conversion with f64::from(i32::try_from(...)),
-                // because that overflows earlier than is ideal.  This should be fine for a while.
-                #[allow(clippy::cast_precision_loss)]
-                Some(time::OffsetDateTime::now_utc().unix_timestamp() as f64)
-            },
+            reference_time: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64() * 1_000.0)
+                .ok(),
             time_format: Some("relative".to_string()),
         }),
     }
@@ -186,7 +205,10 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
 
 #[cfg(test)]
 mod test {
+    use std::time::Instant;
+
     use qlog::events::Event;
+    use regex::Regex;
     use test_fixture::EXPECTED_LOG_HEADER;
 
     const EV_DATA: qlog::events::EventData =
@@ -207,15 +229,14 @@ mod test {
     }
 
     #[test]
-    fn add_event() {
+    fn add_event_with_instant() {
         let (log, contents) = test_fixture::new_neqo_qlog();
-        log.add_event(|| Some(Event::with_time(1.1, EV_DATA)));
+        log.add_event_with_instant(|| Some(Event::with_time(0.0, EV_DATA)), Instant::now());
         assert_eq!(
-            contents.to_string(),
-            format!(
-                "{EXPECTED_LOG_HEADER}{e}",
-                e = EXPECTED_LOG_EVENT.replace("\"time\":0.0,", "\"time\":1.1,")
-            )
+            Regex::new("\"time\":[0-9].[0-9]*,")
+                .unwrap()
+                .replace(&contents.to_string(), "\"time\":0.0,"),
+            format!("{EXPECTED_LOG_HEADER}{EXPECTED_LOG_EVENT}"),
         );
     }
 }

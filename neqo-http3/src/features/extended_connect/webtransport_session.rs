@@ -70,7 +70,7 @@ impl WebTransportSession {
                     message_type: MessageType::Response,
                     stream_type: Http3StreamType::ExtendedConnect,
                     stream_id: session_id,
-                    header_frame_type_read: false,
+                    first_frame_type: None,
                 },
                 qpack_decoder,
                 Box::new(stream_event_listener.clone()),
@@ -415,7 +415,7 @@ impl WebTransportSession {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.session_id.as_u64() / 4);
             dgram_data.encode(buf);
-            conn.send_datagram(dgram_data.as_ref(), id)?;
+            conn.send_datagram(dgram_data.into(), id)?;
         } else {
             debug_assert!(false);
             return Err(Error::Unavailable);

@@ -10,9 +10,12 @@ env:
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  TOOLCHAIN: nightly
+  TOOLCHAIN: stable
   RUSTFLAGS: -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment, -C force-frame-pointers=yes
   PERF_OPT: record -F997 --call-graph fp -g
+  SCCACHE_CACHE_SIZE: 128G
+  SCCACHE_DIRECT: true
+  MTU: 1504
 
 permissions:
   contents: read
@@ -27,14 +30,22 @@ jobs:
 
     steps:
       - name: Checkout neqo
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Checkout msquic
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: microsoft/msquic
           ref: main
           path: msquic
+          submodules: true
+
+      - name: Checkout gquiche
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: google/quiche
+          ref: main
+          path: gquiche
           submodules: true
 
       - name: Set PATH
@@ -58,8 +69,8 @@ jobs:
 
       - name: Build neqo
         run: |
-          cargo "+$TOOLCHAIN" bench --features bench --no-run
-          cargo "+$TOOLCHAIN" build --release
+          cargo "+$TOOLCHAIN" bench --workspace --features bench --no-run
+          cargo "+$TOOLCHAIN" build --release --bin neqo-client --bin neqo-server
 
       - name: Build msquic
         run: |
@@ -68,9 +79,14 @@ jobs:
           cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQUIC_BUILD_TOOLS=1 -DQUIC_BUILD_PERF=1 ..
           cmake --build .
 
+      - name: Build gquiche
+        run: |
+          cd gquiche
+          bazel build -c opt --sandbox_writable_path=/home/bench/.cache/sccache quiche:quic_server quiche:quic_client
+
       - name: Download cached main-branch results
         id: criterion-cache
-        uses: actions/cache/restore@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
@@ -87,30 +103,38 @@ jobs:
           #
           # Run all benchmarks at elevated priority.
           taskset -c 0 nice -n -20 cargo "+$TOOLCHAIN" bench --workspace --exclude neqo-bin --features bench -- --noplot | tee results.txt
+          sudo ip link set dev lo mtu "$MTU"
           nice -n -20 cargo "+$TOOLCHAIN" bench --package neqo-bin --features bench -- --noplot | tee -a results.txt
-
 
       # Compare various configurations of neqo against msquic, and gather perf data
       # during the hyperfine runs.
-      - name: Compare neqo and msquic
+      - name: Compare neqo, msquic and gquiche
         env:
           HOST: 127.0.0.1
           PORT: 4433
           SIZE: 33554432 # 32 MB
         run: |
           TMP=$(mktemp -d)
-          # Make a cert and key for msquic.
+          # Make a cert and key for msquic and gquiche.
           openssl req -nodes -new -x509 -keyout "$TMP/key" -out "$TMP/cert" -subj "/CN=DOMAIN" 2>/dev/null
           # Make a test file for msquic to serve.
           truncate -s "$SIZE" "$TMP/$SIZE"
           # Define the commands to run for each client and server.
           declare -A client_cmd=(
-            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . -o -a hq-interop -Q 1 https://$HOST:$PORT/$SIZE"
+            ["neqo"]="target/release/neqo-client _cc _pacing --output-dir . _flags -Q 1 https://$HOST:$PORT/$SIZE"
             ["msquic"]="msquic/build/bin/Release/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
+            ["gquiche"]="gquiche/bazel-bin/quiche/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE > $SIZE"
           )
           declare -A server_cmd=(
-            ["neqo"]="target/release/neqo-server _cc _pacing -o -a hq-interop -Q 1 $HOST:$PORT 2> /dev/null"
-            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit > /dev/null || true"
+            ["neqo"]="target/release/neqo-server _cc _pacing _flags -Q 1 $HOST:$PORT"
+            ["msquic"]="msquic/build/bin/Release/quicinteropserver -root:$TMP -listen:$HOST -port:$PORT -file:$TMP/cert -key:$TMP/key -noexit"
+            ["gquiche"]="gquiche/bazel-bin/quiche/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TMP/cert --key_file $TMP/key"
+          )
+          # Flags to pass to neqo when it runs against another implementation.
+          declare -A neqo_flags=(
+            ["neqo"]=""
+            ["msquic"]="-o -a hq-interop"
+            ["gquiche"]=""
           )
 
           # Replace various placeholders in the commands with the actual values.
@@ -119,6 +143,7 @@ jobs:
             CMD=$1
             local cc=$2
             local pacing=$3
+            local flags=$4
             if [ "$cc" != "" ]; then
               CMD=${CMD//_cc/--cc $cc}
               EXT="-$cc"
@@ -130,12 +155,20 @@ jobs:
               CMD=${CMD//_pacing/--no-pacing}
               EXT="$EXT-nopacing"
             fi
+            CMD=${CMD//_flags/$flags}
           }
 
-          for server in msquic neqo; do
-            for client in msquic neqo; do
-              # msquic doesn't let us configure the congestion control or pacing.
-              if [ "$client" == "msquic" ] && [ "$server" == "msquic" ]; then
+          # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
+          sudo ip link set dev lo mtu "$MTU"
+          for server in gquiche msquic neqo; do
+            for client in gquiche msquic neqo; do
+              # Do not run msquic against google-quiche; the latter only supports H3.
+              # Also, we're not really interested in the performance of those combinations.
+              if [[ "$client" == "gquiche" && "$server" == "msquic" || "$client" == "msquic" && "$server" == "gquiche" ]]; then
+                continue
+              fi
+              # gquiche and msquic doesn't let us configure the congestion control or pacing.
+              if [ "$client" != "neqo" ] && [ "$server" != "neqo" ]; then
                 cc_opt=("")
                 pacing_opt=("")
               else
@@ -145,24 +178,25 @@ jobs:
               for cc in "${cc_opt[@]}"; do
                 for pacing in "${pacing_opt[@]}"; do
                   # Make a tag string for this test, for the results.
-                  TAG="$client,$server,$cc,$pacing"
+                  TAG="$client,$server,$cc,$pacing,$MTU"
                   echo "Running benchmarks for $TAG" | tee -a comparison.txt
-                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing"
+                  transmogrify "${server_cmd[$server]}" "$cc" "$pacing" "${neqo_flags[$client]}"
                   # shellcheck disable=SC2086
                   taskset -c 0 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.server.perf" $CMD &
                   PID=$!
-                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing"
+                  transmogrify "${client_cmd[$client]}" "$cc" "$pacing" "${neqo_flags[$server]}"
                   # shellcheck disable=SC2086
                   taskset -c 1 nice -n -20 \
                     perf $PERF_OPT -o "$client-$server$EXT.client.perf" \
-                      hyperfine -N --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
+                      hyperfine --output null -w 1 -s "sleep 1" -n "$TAG" -u millisecond --export-markdown step.md "$CMD" |
                       tee -a comparison.txt
                   echo >> comparison.txt
                   kill $PID
                   cat step.md >> steps.md
                   # Sanity check the size of the last retrieved file.
-                  [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
+                  # google-quiche outputs the HTTP header, too, so we can't just check for -eq.
+                  [ "$(wc -c <"$SIZE")" -ge "$SIZE" ] || exit 1
                 done
               done
             done
@@ -170,12 +204,16 @@ jobs:
           # Merge the results tables generated by hyperfine into a single table.
           echo "Transfer of $SIZE bytes over loopback." > comparison.md
           awk '(!/^\| Command/ || !c++) && (!/^\|:/ || !d++)' < steps.md |\
-            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing/g' >> comparison.md
+            sed -E 's/`//g; s/^\|:/\|:---\|:---\|:---\|:---\|:/g; s/,/ \| /g; s/^\| Command/\| Client \| Server \| CC \| Pacing \| MTU/g' |\
+            cut -f1-9 -d\| | sed -e 's/$/|/' >> comparison.md
           rm -r "$TMP"
 
       # Re-enable turboboost, hyperthreading and use powersave governor.
       - name: Restore machine
-        run: sudo /root/bin/unprep.sh
+        run: |
+          sudo /root/bin/unprep.sh
+          # In case the previous test failed:
+          sudo ip link set dev lo mtu 65536
         if: success() || failure() || cancelled()
 
       - name: Post-process perf data
@@ -231,14 +269,14 @@ jobs:
 
       - name: Cache main-branch results
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: ./target/criterion
           key: criterion-${{ runner.name }}-${{ github.sha }}
 
       - name: Export perf data
         id: export
-        uses: actions/upload-artifact@89ef406dd8d7e03cfd12d9e0a4a378f454709029 # v4.3.5
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: ${{ github.event.repository.name }}-${{ github.sha }}
           path: |

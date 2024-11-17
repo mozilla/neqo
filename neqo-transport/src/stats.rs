@@ -16,7 +16,7 @@ use std::{
 
 use neqo_common::qwarn;
 
-use crate::packet::PacketNumber;
+use crate::{ecn::EcnCount, packet::PacketNumber};
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
@@ -24,7 +24,6 @@ pub const MAX_PTO_COUNTS: usize = 16;
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[allow(clippy::module_name_repetitions)]
 pub struct FrameStats {
-    pub all: usize,
     pub ack: usize,
     pub largest_acknowledged: PacketNumber,
 
@@ -97,6 +96,34 @@ impl Debug for FrameStats {
     }
 }
 
+#[cfg(test)]
+impl FrameStats {
+    pub const fn all(&self) -> usize {
+        self.ack
+            + self.crypto
+            + self.stream
+            + self.reset_stream
+            + self.stop_sending
+            + self.ping
+            + self.padding
+            + self.max_streams
+            + self.streams_blocked
+            + self.max_data
+            + self.data_blocked
+            + self.max_stream_data
+            + self.stream_data_blocked
+            + self.new_connection_id
+            + self.retire_connection_id
+            + self.path_challenge
+            + self.path_response
+            + self.connection_close
+            + self.handshake_done
+            + self.new_token
+            + self.ack_frequency
+            + self.datagram
+    }
+}
+
 /// Datagram stats
 #[derive(Default, Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -166,6 +193,25 @@ pub struct Stats {
     pub incoming_datagram_dropped: usize,
 
     pub datagram_tx: DatagramStats,
+
+    /// Number of paths known to be ECN capable.
+    pub ecn_paths_capable: usize,
+    /// Number of paths known to be ECN incapable.
+    pub ecn_paths_not_capable: usize,
+    /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
+    ///
+    /// Note: Given that QUIC ACKs only carry [`Ect0`], [`Ect1`] and [`Ce`], but
+    /// never [`NotEct`], the [`NotEct`] value will always be 0.
+    ///
+    /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
+    ///
+    /// [`Ect0`]: neqo_common::tos::IpTosEcn::Ect0
+    /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
+    /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
+    /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
+    pub ecn_tx: EcnCount,
+    /// ECN counts for incoming UDP datagrams, read from IP TOS header.
+    pub ecn_rx: EcnCount,
 }
 
 impl Stats {
@@ -222,7 +268,12 @@ impl Debug for Stats {
         writeln!(f, "  frames rx:")?;
         self.frame_rx.fmt(f)?;
         writeln!(f, "  frames tx:")?;
-        self.frame_tx.fmt(f)
+        self.frame_tx.fmt(f)?;
+        writeln!(
+            f,
+            "  ecn: {:?} for tx {:?} for rx {} capable paths {} not capable paths",
+            self.ecn_tx, self.ecn_rx, self.ecn_paths_capable, self.ecn_paths_not_capable
+        )
     }
 }
 

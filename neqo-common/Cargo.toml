@@ -16,24 +16,24 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-enum-map = { version = "2.7", default-features = false }
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+enum-map = { workspace = true }
 env_logger = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
-time = { version = "0.3", default-features = false, features = ["formatting"] }
+
+[target."cfg(windows)".dependencies]
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+windows = { version = "0.58", default-features = false, features = ["Win32_Media"] }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+regex = { workspace = true }
 
 [features]
 ci = []
 build-fuzzing-corpus = ["hex"]
-
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3"
-features = ["timeapi"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

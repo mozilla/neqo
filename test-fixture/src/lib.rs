@@ -53,7 +53,8 @@ pub fn fixture_init() {
 
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+// But make it a second, so that tests with reasonable RTTs don't fail.
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
@@ -234,7 +235,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     };
     while !is_done(a) {
         _ = maybe_authenticate(a);
-        let d = a.process(datagram.as_ref(), now());
+        let d = a.process(datagram, now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);
     }
@@ -357,8 +358,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
-        Datagram::new(d.source(), d.destination(), d.tos(), a),
-        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b)),
+        Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
+        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
 }
 
