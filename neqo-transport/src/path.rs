@@ -140,7 +140,7 @@ impl Paths {
             if self
                 .migration_target
                 .as_ref()
-                .map_or(false, |target| Rc::ptr_eq(target, &removed))
+                .is_some_and(|target| Rc::ptr_eq(target, &removed))
             {
                 qinfo!(
                     [path.borrow()],
@@ -323,7 +323,7 @@ impl Paths {
                 if self
                     .migration_target
                     .as_ref()
-                    .map_or(false, |target| Rc::ptr_eq(target, p))
+                    .is_some_and(|target| Rc::ptr_eq(target, p))
                 {
                     let primary = self.migration_target.take();
                     mem::drop(self.select_primary(&primary.unwrap(), now));
@@ -361,7 +361,7 @@ impl Paths {
                 if !has_replacement
                     && migration_target
                         .as_ref()
-                        .map_or(false, |target| Rc::ptr_eq(target, p))
+                        .is_some_and(|target| Rc::ptr_eq(target, p))
                 {
                     qinfo!(
                         [path],
@@ -665,7 +665,7 @@ impl Path {
     pub fn is_stateless_reset(&self, token: &[u8; 16]) -> bool {
         self.remote_cid
             .as_ref()
-            .map_or(false, |rcid| rcid.is_stateless_reset(token))
+            .is_some_and(|rcid| rcid.is_stateless_reset(token))
     }
 
     /// Make a datagram.
