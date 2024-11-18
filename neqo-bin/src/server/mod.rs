@@ -229,7 +229,7 @@ impl ServerRunner {
         let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
         rest.iter_mut()
             .map(|(_host, socket)| socket)
-            .find(|socket| socket.local_addr().ok() == Some(addr))
+            .find(|socket| socket.local_addr().is_ok_and(|a| a == addr))
             .unwrap_or(first_socket)
     }
 
