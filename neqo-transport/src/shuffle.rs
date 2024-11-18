@@ -59,31 +59,29 @@ fn ascii_sequences(data: &[u8], len: usize) -> impl Iterator<Item = Range<usize>
     sequences.into_iter()
 }
 
-/// Reorder `data` into chunks delimited by ASCII "LDHD" (letters, digits, hyphens, dots) sequences.
+/// Reorder `data` into chunks roughly delimited by the midpoints of ASCII "LDHD" (letters, digits,
+/// hyphens, dots) sequences.
 ///
-/// Look for ranges of `N` or more bytes of graphical ASCII "LDHD" data in `data`. Create at least
-/// one split point at `N/2` into the range for each range, multiple ones each `N` bytes afterwards
-/// if the range is long enough. Create data chunks based on those split points. Shuffle the chunks
-/// and return them.
+/// Look for ranges of `N` or more bytes of graphical ASCII "LDHD" characters in `data`. Create a
+/// split point halfway into the range. Create data chunks based on those split points. Shuffle the
+/// chunks and return them.
+///
+/// # Panics
+///
+/// When `u64` values cannot be converted to `usize`.
 #[must_use]
-pub fn reorder_chunks(data: &[u8]) -> Vec<(u64, &[u8])> {
+pub fn reorder_chunks(mut data: &[u8]) -> Vec<(u64, &[u8])> {
     const N: usize = 3;
-    let mut splits = vec![];
-    // For each sequence, split it into chunks of `N` bytes.
-    for Range { mut start, end } in ascii_sequences(data, N) {
-        while start + N <= end {
-            splits.push(start + N / 2);
-            start += N;
-        }
-    }
     let mut chunks = vec![];
-    let mut start = 0;
-    for split in splits {
-        let chunk = &data[start..split];
-        chunks.push((start as u64, chunk));
-        start = split;
+    let mut last = 0;
+    for Range { start, end } in ascii_sequences(data, N) {
+        let mid = start + (end - start) / 2 - last;
+        let (left, right) = data.split_at(mid);
+        chunks.push((u64::try_from(last).unwrap(), left));
+        last += mid;
+        data = right;
     }
-    chunks.push((start as u64, &data[start..]));
+    chunks.push((u64::try_from(last).unwrap(), data));
     shuffle(&mut chunks);
     chunks
 }
