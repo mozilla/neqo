@@ -26,7 +26,9 @@ use super::{
 };
 use crate::{
     cid::LOCAL_ACTIVE_CID_LIMIT,
-    connection::tests::{assert_path_challenge_min_len, send_something_paced, send_with_extra},
+    connection::tests::{
+        assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
+    },
     frame::FRAME_TYPE_NEW_CONNECTION_ID,
     packet::PacketBuilder,
     path::MAX_PATH_PROBES,
@@ -967,6 +969,19 @@ fn migration_invalid_state() {
     assert!(client
         .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
         .is_err());
+}
+
+#[test]
+fn migration_disabled() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().disable_migration(true));
+    connect(&mut client, &mut server);
+    assert_eq!(
+        client
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
 }
 
 #[test]

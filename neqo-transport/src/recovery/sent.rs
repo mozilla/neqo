@@ -146,7 +146,7 @@ impl SentPacket {
     /// that it can be expired and no longer tracked.
     pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
         self.time_declared_lost
-            .map_or(false, |loss_time| (loss_time + expiration_period) <= now)
+            .is_some_and(|loss_time| (loss_time + expiration_period) <= now)
     }
 
     /// Whether the packet contents were cleared out after a PTO.
@@ -222,7 +222,7 @@ impl SentPackets {
     pub fn remove_expired(&mut self, now: Instant, cd: Duration) -> usize {
         let mut it = self.packets.iter();
         // If the first item is not expired, do nothing (the most common case).
-        if it.next().map_or(false, |(_, p)| p.expired(now, cd)) {
+        if it.next().is_some_and(|(_, p)| p.expired(now, cd)) {
             // Find the index of the first unexpired packet.
             let to_remove = if let Some(first_keep) =
                 it.find_map(|(i, p)| if p.expired(now, cd) { None } else { Some(*i) })

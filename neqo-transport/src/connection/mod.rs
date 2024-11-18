@@ -1255,7 +1255,7 @@ impl Connection {
             return false;
         }
         <&[u8; 16]>::try_from(&d.as_ref()[d.len() - 16..])
-            .map_or(false, |token| path.borrow().is_stateless_reset(token))
+            .is_ok_and(|token| path.borrow().is_stateless_reset(token))
     }
 
     fn check_stateless_reset(
@@ -1372,7 +1372,7 @@ impl Connection {
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
-        if dcid.map_or(false, |d| d != &packet.dcid()) {
+        if dcid.is_some_and(|d| d != &packet.dcid()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
@@ -1870,8 +1870,8 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// Fails if this is not a client, not confirmed, or there are not enough connection
-    /// IDs available to use.
+    /// Fails if this is not a client, not confirmed, the peer disabled connection migration, or
+    /// there are not enough connection IDs available to use.
     pub fn migrate(
         &mut self,
         local: Option<SocketAddr>,
@@ -1883,6 +1883,14 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
         if !matches!(self.state(), State::Confirmed) {
+            return Err(Error::InvalidMigration);
+        }
+        if self
+            .tps
+            .borrow()
+            .remote()
+            .get_empty(tparams::DISABLE_MIGRATION)
+        {
             return Err(Error::InvalidMigration);
         }
 
