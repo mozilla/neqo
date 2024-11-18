@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::min, ops::Range};
+use std::{mem, ops::Range};
 
-use neqo_crypto::randomize;
+use neqo_crypto::random;
 
 /// [Fisher–Yates shuffle](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#Modern_method)
 /// Modified to make sure no element stays in place if `a` has more than one element.
@@ -16,22 +16,23 @@ use neqo_crypto::randomize;
 /// so we don't need to.
 fn shuffle<T>(a: &mut [T]) {
     // To shuffle an array a of n elements (indices 0..n-1)
+    const USIZE: usize = mem::size_of::<usize>();
     let n: usize = a.len();
     if n < 2 {
         return;
     }
-    let mut randomness = [0; 32];
-    let count = min(randomness.len(), n - 1);
-    randomize(&mut randomness[..count]);
-    for (i, r) in randomness.iter().enumerate().take(count) {
-        let j = usize::from(*r) % (n - i - 1) + i + 1;
+    for i in 0..(n - 1) {
+        // j ← random integer such that i ≤ j < n
+        let j = usize::from_ne_bytes(random::<USIZE>()) % (n - i - 1) + i + 1;
+        // Exchange a[i] and a[j]
+        debug_assert!(i != j);
         a.swap(i, j);
     }
 }
 
 /// Find the ranges of all sequences of `len` or more ASCII "LDHD" (letters, digits,
 /// hyphens, dots) bytes in `data`.
-fn ascii_sequences(data: &[u8], len: usize) -> Vec<Range<usize>> {
+fn ascii_sequences(data: &[u8], len: usize) -> impl Iterator<Item = Range<usize>> {
     const fn is_ascii_ldhd(b: u8) -> bool {
         b.is_ascii_alphanumeric() || b == b'-' || b == b'.'
     }
@@ -55,7 +56,7 @@ fn ascii_sequences(data: &[u8], len: usize) -> Vec<Range<usize>> {
             sequences.push(s..data.len());
         }
     }
-    sequences
+    sequences.into_iter()
 }
 
 /// Reorder `data` into chunks delimited by ASCII "LDHD" (letters, digits, hyphens, dots) sequences.
@@ -67,20 +68,6 @@ fn ascii_sequences(data: &[u8], len: usize) -> Vec<Range<usize>> {
 #[must_use]
 pub fn reorder_chunks(data: &[u8]) -> Vec<(u64, &[u8])> {
     const N: usize = 3;
-    // FIXME: Suggestion from @martinthomson; fails tests:
-    // let mut data = data;
-    // let mut used = 0;
-    // let ranges = ascii_sequences(data, N);
-    // let mut chunks = Vec::with_capacity(ranges.len() + 1);
-    // for Range { start, end: _ } in ranges {
-    //     debug_assert!(start > used);
-    //     let (left, right) = data.split_at(start + N / 2 - used);
-    //     chunks.push((u64::try_from(used).unwrap(), left));
-    //     used += left.len();
-    //     data = right;
-    // }
-    // shuffle(&mut chunks);
-    // chunks
     let mut splits = vec![];
     // For each sequence, split it into chunks of `N` bytes.
     for Range { mut start, end } in ascii_sequences(data, N) {
@@ -142,38 +129,38 @@ mod tests {
 
         // Empty input
         let data = b"";
-        let sequences = super::ascii_sequences(data, N);
-        assert!(sequences.is_empty());
+        let mut sequences = super::ascii_sequences(data, N);
+        assert!(sequences.next().is_none());
 
         // No LDHD ASCII
         let data = b"\x00\x01\x02";
-        let sequences = super::ascii_sequences(data, N);
-        assert!(sequences.is_empty());
+        let mut sequences = super::ascii_sequences(data, N);
+        assert!(sequences.next().is_none());
 
         // Sequences shorter than required length
         let data = b"ab\x00cd";
-        let sequences = super::ascii_sequences(data, N);
-        assert!(sequences.is_empty());
+        let mut sequences = super::ascii_sequences(data, N);
+        assert!(sequences.next().is_none());
 
         // One valid sequence of the required length
         let data = b"abc";
         let sequences = super::ascii_sequences(data, N);
-        assert_eq!(sequences, vec![0..3]);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..3]);
 
         // Multiple valid sequences
         let data = b"abc\x00defgh\x00ijklmno";
         let sequences = super::ascii_sequences(data, N);
-        assert_eq!(sequences, vec![0..3, 4..9, 10..17]);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..3, 4..9, 10..17]);
 
         // One sequence at the end of data
         let data = b"\x00\x00abcde";
         let sequences = super::ascii_sequences(data, N);
-        assert_eq!(sequences, vec![2..7]);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![2..7]);
 
         // One sequence at the beginning of data
         let data = b"abcde\x00\x00";
         let sequences = super::ascii_sequences(data, N);
-        assert_eq!(sequences, vec![0..5]);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..5]);
     }
 
     #[test]
