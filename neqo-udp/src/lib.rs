@@ -35,7 +35,7 @@ pub fn send_inner(
         src_ip: None,
     };
 
-    state.send(socket, &transmit)?;
+    state.try_send(socket, &transmit)?;
 
     qtrace!(
         "sent {} bytes from {} to {}",
