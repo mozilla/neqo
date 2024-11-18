@@ -1497,21 +1497,11 @@ impl CryptoStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        let cs: &mut CryptoStream = self.get_mut(space).unwrap();
-        if let Some((offset, data)) = cs.tx.next_bytes() {
-            // Mix up Initial crypto data a bit.
-            let chunks = if shuffle {
-                reorder_chunks(data)
-                    .into_iter()
-                    .map(|(off, d)| (offset + off, d))
-                    .collect()
-            } else {
-                vec![(offset, data)]
-            };
-
-            // TODO: Should we do some sort of binpacking here, to minimize the number of packets
-            // and amount of unneeded padding sent?
-            let mut sent = vec![];
+        fn write_chunks(
+            chunks: Vec<(u64, &[u8])>,
+            builder: &mut PacketBuilder,
+        ) -> Vec<(u64, usize)> {
+            let mut written = vec![];
             for (offset, data) in chunks {
                 let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
@@ -1530,8 +1520,24 @@ impl CryptoStreams {
                 builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
                 builder.encode_varint(offset);
                 builder.encode_vvec(&data[..length]);
-                sent.push((offset, length));
+                written.push((offset, length));
+            }
+            written
+        }
 
+        let cs: &mut CryptoStream = self.get_mut(space).unwrap();
+        if let Some((offset, data)) = cs.tx.next_bytes() {
+            let chunks = if shuffle {
+                // Mix up the crypto data a bit.
+                reorder_chunks(data)
+                    .into_iter()
+                    .map(|(off, d)| (offset + off, d))
+                    .collect()
+            } else {
+                vec![(offset, data)]
+            };
+            for (offset, length) in write_chunks(chunks, builder) {
+                cs.tx.mark_as_sent(offset, length);
                 qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
                 tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
                     space,
@@ -1539,11 +1545,6 @@ impl CryptoStreams {
                     length,
                 }));
                 stats.crypto += 1;
-            }
-
-            // FIXME: Is there a way to do this without populating and looping through `sent`?
-            for (offset, length) in sent {
-                cs.tx.mark_as_sent(offset, length);
             }
         }
     }
