@@ -107,7 +107,7 @@ impl SendProfile {
     /// Send only ACKs either: when the space available is too small, or when a PTO
     /// exists for a later packet number space (which should get the most space).
     pub fn ack_only(&self, space: PacketNumberSpace) -> bool {
-        self.limit < ACK_ONLY_SIZE_LIMIT || self.pto.map_or(false, |sp| space < sp)
+        self.limit < ACK_ONLY_SIZE_LIMIT || self.pto.is_some_and(|sp| space < sp)
     }
 
     pub const fn paced(&self) -> bool {
@@ -229,7 +229,7 @@ impl LossRecoverySpace {
             return false;
         };
         self.last_ack_eliciting
-            .map_or(false, |t| now > t + (pto * n_pto))
+            .is_some_and(|t| now > t + (pto * n_pto))
     }
 
     fn remove_outstanding(&mut self, count: usize) {
@@ -558,7 +558,7 @@ impl LossRecovery {
         now: Instant,
         ack_delay: Duration,
     ) {
-        let source = if self.confirmed_time.map_or(false, |t| t < send_time) {
+        let source = if self.confirmed_time.is_some_and(|t| t < send_time) {
             RttSource::AckConfirmed
         } else {
             RttSource::Ack
@@ -913,7 +913,7 @@ impl LossRecovery {
                 // More than an MTU available; we might need to pace.
                 if sender
                     .next_paced(path.rtt().estimate())
-                    .map_or(false, |t| t > now)
+                    .is_some_and(|t| t > now)
                 {
                     SendProfile::new_paced()
                 } else {

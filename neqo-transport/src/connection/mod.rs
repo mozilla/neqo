@@ -1255,7 +1255,7 @@ impl Connection {
             return false;
         }
         <&[u8; 16]>::try_from(&d.as_ref()[d.len() - 16..])
-            .map_or(false, |token| path.borrow().is_stateless_reset(token))
+            .is_ok_and(|token| path.borrow().is_stateless_reset(token))
     }
 
     fn check_stateless_reset(
@@ -1372,7 +1372,7 @@ impl Connection {
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
-        if dcid.map_or(false, |d| d != &packet.dcid()) {
+        if dcid.is_some_and(|d| d != &packet.dcid()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
