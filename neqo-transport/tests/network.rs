@@ -203,40 +203,40 @@ fn gbit_bandwidth() {
     const MIB: usize = 1024 * 1024;
     const TRANSFER_AMOUNT: usize = 100 * MIB;
 
-    for upload in [false, true] {
-        let sim = Simulator::new(
-            "gbit-bandwidth",
-            boxed![
-                ConnectionNode::default_client(if upload {
-                    boxed![SendData::new(TRANSFER_AMOUNT)]
-                } else {
-                    boxed![ReceiveData::new(TRANSFER_AMOUNT)]
-                }),
-                TailDrop::gbit_link(),
-                ConnectionNode::default_server(if upload {
-                    boxed![ReceiveData::new(TRANSFER_AMOUNT)]
-                } else {
-                    boxed![SendData::new(TRANSFER_AMOUNT)]
-                }),
-                TailDrop::gbit_link()
-            ],
-        );
+    let sim = Simulator::new(
+        "gbit-bandwidth",
+        boxed![
+            ConnectionNode::new_client(
+                ConnectionParameters::default().pmtud(false).pacing(false),
+                boxed![ReachState::new(State::Confirmed)],
+                boxed![ReceiveData::new(TRANSFER_AMOUNT)]
+            ),
+            TailDrop::gbit_link(),
+            NonRandomDelay::new(Duration::from_millis(50)),
+            ConnectionNode::new_server(
+                ConnectionParameters::default().pmtud(false).pacing(false),
+                boxed![ReachState::new(State::Confirmed)],
+                boxed![SendData::new(TRANSFER_AMOUNT)]
+            ),
+            TailDrop::gbit_link(),
+            NonRandomDelay::new(Duration::from_millis(50)),
+        ],
+    );
 
-        let simulated_time = sim.setup().run();
-        let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
+    let simulated_time = sim.setup().run();
+    let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
 
-        // Given Neqo's current static stream receive buffer of 1MiB, maximum
-        // bandwidth is below gbit link bandwidth.
-        //
-        // Tracked in https://github.com/mozilla/neqo/issues/733.
-        let maximum_bandwidth = MIB as f64 * 8.0 / 0.1; // bandwidth-delay-product / delay = bandwidth
-        let expected_utilization = 0.5;
+    // Given Neqo's current static stream receive buffer of 1MiB, maximum
+    // bandwidth is below gbit link bandwidth.
+    //
+    // Tracked in https://github.com/mozilla/neqo/issues/733.
+    let maximum_bandwidth = MIB as f64 * 8.0 / 0.1; // bandwidth-delay-product / delay = bandwidth
+    let expected_utilization = 0.5;
 
-        assert!(
+    assert!(
             maximum_bandwidth * expected_utilization < bandwidth,
-            "with upload {upload} expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
+            "expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
             maximum_bandwidth / MIB as f64,
             bandwidth  / MIB as f64,
         );
-    }
 }

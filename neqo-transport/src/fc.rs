@@ -33,7 +33,7 @@ use crate::{
 /// for the size of the stream receive window.
 //
 // TODO: Find reasonable limit.
-const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
+const STREAM_MAX_ACTIVE_LIMIT: u64 = 100 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -261,7 +261,7 @@ where
 
         self.retired = retired;
         // TODO: Move the `/ 2` logic into function? It is duplicated, no?
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.retired + self.max_active - self.max_active / 8 > self.max_allowed {
             self.frame_pending = true;
         }
     }
@@ -335,7 +335,7 @@ impl ReceiverFlowControl<()> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.retired + self.max_active - self.max_active / 8 > self.max_allowed {
             self.frame_pending = true;
         }
     }
@@ -382,7 +382,7 @@ impl ReceiverFlowControl<StreamId> {
             let secs = (now - previous).as_secs_f64();
             let bits = (self.retired - previous_retired) as f64 * 8.0;
             let mbits = (bits / secs) / 1024.0 / 1024.0;
-            qdebug!("{mbits} mbit/s");
+            println!("{mbits} mbit/s");
         }
 
         // Auto-tune max_active.
@@ -390,7 +390,7 @@ impl ReceiverFlowControl<StreamId> {
         // TODO: Should one also auto-tune down?
         //
         // TODO: Deduplicate the /2 logic. Used in other places as well.
-        if self.retired + self.max_active / 2 > self.max_allowed
+        if self.retired + self.max_active - self.max_active / 8 > self.max_allowed
             && self
                 .max_allowed_sent_at
                 .is_some_and(|at| now - at < rtt * 2)
@@ -398,7 +398,7 @@ impl ReceiverFlowControl<StreamId> {
         {
             let prev_max_active = self.max_active;
             self.max_active = min(self.max_active * 2, STREAM_MAX_ACTIVE_LIMIT);
-            qdebug!(
+            println!(
                 "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB now: {now:?} rtt: {rtt:?} stream_id: {}",
                 prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024, self.subject,
             );
@@ -424,7 +424,7 @@ impl ReceiverFlowControl<StreamId> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.retired + self.max_active - self.max_active / 8 > self.max_allowed {
             self.frame_pending = true;
         }
     }

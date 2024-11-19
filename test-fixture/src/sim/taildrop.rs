@@ -95,8 +95,8 @@ impl TailDrop {
     #[must_use]
     pub const fn gbit_link() -> Self {
         let rate = 1_000_000_000 / 8;
-        let delay = Duration::from_millis(50);
-        let capacity = rate / 20; // rate * 0.05
+        let delay = Duration::from_millis(1);
+        let capacity = rate / 10; // rate * 0.05 * 2 (to accout for full rtt)
         Self::new(rate, capacity, delay)
     }
 
