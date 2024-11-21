@@ -1528,8 +1528,10 @@ impl CryptoStreams {
         let cs: &mut CryptoStream = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
             let chunks = if shuffle {
-                // Mix up the crypto data a bit.
-                reorder_chunks(data)
+                // Mix up the crypto data a bit. Create five chunks (roughly) per packet that split
+                // ASCII sequences, and reorder them.
+                let n = 5 * max(1, data.len() / builder.remaining());
+                reorder_chunks(data, n)
                     .into_iter()
                     .map(|(off, d)| (offset + off, d))
                     .collect()

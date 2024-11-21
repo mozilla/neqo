@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{mem, ops::Range};
+use std::{collections::BinaryHeap, mem, ops::Range};
 
 use neqo_crypto::random;
 
@@ -30,14 +30,29 @@ fn shuffle<T>(a: &mut [T]) {
     }
 }
 
-/// Find the ranges of all sequences of `len` or more ASCII "LDHD" (letters, digits,
-/// hyphens, dots) bytes in `data`.
-fn ascii_sequences(data: &[u8], len: usize) -> impl Iterator<Item = Range<usize>> {
+/// Find the ranges of all sequences of two or more ASCII "LDHD" (letters, digits, hyphens, dots)
+/// bytes in `data`, and return the `n` longest ones in ascending order by start index.
+fn ascii_sequences(data: &[u8], n: usize) -> impl Iterator<Item = Range<usize>> {
+    #[derive(Eq, PartialEq, Debug)]
+    struct Sequence(Range<usize>);
+
+    impl PartialOrd for Sequence {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for Sequence {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.0.len().cmp(&other.0.len())
+        }
+    }
+
     const fn is_ascii_ldhd(b: u8) -> bool {
         b.is_ascii_alphanumeric() || b == b'-' || b == b'.'
     }
 
-    let mut sequences = vec![];
+    let mut sequences = BinaryHeap::new();
     let mut start = None;
     for (i, &b) in data.iter().enumerate() {
         if is_ascii_ldhd(b) {
@@ -45,36 +60,37 @@ fn ascii_sequences(data: &[u8], len: usize) -> impl Iterator<Item = Range<usize>
                 start = Some(i);
             }
         } else if let Some(s) = start {
-            if i - s >= len {
-                sequences.push(s..i);
+            if i - s >= 2 {
+                sequences.push(Sequence(s..i));
             }
             start = None;
         }
     }
     if let Some(s) = start {
-        if data.len() - s >= len {
-            sequences.push(s..data.len());
+        if data.len() - s >= 2 {
+            sequences.push(Sequence(s..data.len()));
         }
     }
-    sequences.into_iter()
+    let mut sequences = sequences.into_iter().take(n).collect::<Vec<_>>();
+    sequences.sort_by(|a, b| a.0.start.cmp(&b.0.start));
+    sequences.into_iter().map(|Sequence(r)| r)
 }
 
 /// Reorder `data` into chunks roughly delimited by the midpoints of ASCII "LDHD" (letters, digits,
 /// hyphens, dots) sequences.
 ///
-/// Look for ranges of `N` or more bytes of graphical ASCII "LDHD" characters in `data`. Create a
-/// split point halfway into the range. Create data chunks based on those split points. Shuffle the
-/// chunks and return them.
+/// Look for the `n` longest ranges of ASCII "LDHD" characters in `data`. Create split points
+/// halfway into each range. Chunks the data based on those split points, shuffle the chunks and
+/// return them.
 ///
 /// # Panics
 ///
 /// When `u64` values cannot be converted to `usize`.
 #[must_use]
-pub fn reorder_chunks(mut data: &[u8]) -> Vec<(u64, &[u8])> {
-    const N: usize = 3;
+pub fn reorder_chunks(mut data: &[u8], n: usize) -> Vec<(u64, &[u8])> {
     let mut chunks = vec![];
     let mut last = 0;
-    for Range { start, end } in ascii_sequences(data, N) {
+    for Range { start, end } in ascii_sequences(data, n) {
         let mid = start + (end - start) / 2 - last;
         let (left, right) = data.split_at(mid);
         chunks.push((u64::try_from(last).unwrap(), left));
@@ -123,41 +139,42 @@ mod tests {
 
     #[test]
     fn ascii_sequences() {
-        const N: usize = 3;
-
         // Empty input
         let data = b"";
-        let mut sequences = super::ascii_sequences(data, N);
+        let mut sequences = super::ascii_sequences(data, 1);
         assert!(sequences.next().is_none());
 
         // No LDHD ASCII
         let data = b"\x00\x01\x02";
-        let mut sequences = super::ascii_sequences(data, N);
+        let mut sequences = super::ascii_sequences(data, 2);
         assert!(sequences.next().is_none());
 
-        // Sequences shorter than required length
-        let data = b"ab\x00cd";
-        let mut sequences = super::ascii_sequences(data, N);
+        // Sequences shorter than two
+        let data = b"a\x00b";
+        let mut sequences = super::ascii_sequences(data, 3);
         assert!(sequences.next().is_none());
 
         // One valid sequence of the required length
-        let data = b"abc";
-        let sequences = super::ascii_sequences(data, N);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..3]);
+        let data = b"ab";
+        let sequences = super::ascii_sequences(data, 1);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..2]);
 
         // Multiple valid sequences
-        let data = b"abc\x00defgh\x00ijklmno";
-        let sequences = super::ascii_sequences(data, N);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..3, 4..9, 10..17]);
+        let data = b"abc\x00defg\x00hi";
+        let sequences = super::ascii_sequences(data, 3);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..3, 4..8, 9..11]);
+        // Multiple valid sequences, pick one
+        let sequences = super::ascii_sequences(data, 1);
+        assert_eq!(sequences.collect::<Vec<_>>(), vec![4..8]);
 
         // One sequence at the end of data
         let data = b"\x00\x00abcde";
-        let sequences = super::ascii_sequences(data, N);
+        let sequences = super::ascii_sequences(data, 2);
         assert_eq!(sequences.collect::<Vec<_>>(), vec![2..7]);
 
         // One sequence at the beginning of data
         let data = b"abcde\x00\x00";
-        let sequences = super::ascii_sequences(data, N);
+        let sequences = super::ascii_sequences(data, 2);
         assert_eq!(sequences.collect::<Vec<_>>(), vec![0..5]);
     }
 
@@ -185,34 +202,43 @@ mod tests {
 
         // Empty input -> empty output
         let data = b"";
-        let chunks = super::reorder_chunks(data);
+        let chunks = super::reorder_chunks(data, 1);
         assert_eq!(chunks, vec![(0, data.as_ref())]);
         assert_complete(data, &chunks);
 
-        // Data without graphic ASCII sequences -> output == input
+        // Data without ASCII sequences -> output == input
         let data = b"\x00\x01\x02";
-        let chunks = super::reorder_chunks(data);
+        let chunks = super::reorder_chunks(data, 1);
         assert_eq!(chunks, vec![(0, data.as_ref())]);
         assert_complete(data, &chunks);
 
-        // Data containing one graphic ASCII sequence -> one predictable reordering
-        let data = b"abc";
-        let chunks = super::reorder_chunks(data);
-        assert_eq!(chunks, vec![(1, &data[1..3]), (0, &data[0..1])]);
-        assert_complete(data, &chunks);
+        // Data containing one ASCII sequence -> one predictable reordering
+        let data = b"ab";
+        for n in 1..=2 {
+            let chunks = super::reorder_chunks(data, n);
+            assert_eq!(chunks, vec![(1, &data[1..2]), (0, &data[0..1])]);
+            assert_complete(data, &chunks);
+        }
 
-        // Data containing two graphic ASCII sequences -> one of two predictable reorderings
+        // Data containing two ASCII sequences -> one of two predictable reorderings
         let data = b"abc\x00def";
-        let chunks = super::reorder_chunks(data);
+        let chunks = super::reorder_chunks(data, 2);
         assert_eq!(chunks.len(), 3); // 2 splits create 3 chunks
         let order1 = [(1, &data[1..5]), (5, &data[5..7]), (0, &data[0..1])];
         let order2 = [(5, &data[5..7]), (0, &data[0..1]), (1, &data[1..5])];
         assert!(chunks == order1 || chunks == order2);
         assert_complete(data, &chunks);
 
-        // Data containing three graphic ASCII sequences
+        // Data containing two ASCII sequences, pick one -> one predictable reordering
+        let data = b"abcd\x00ef";
+        let chunks = super::reorder_chunks(data, 1);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks, vec![(2, &data[2..7]), (0, &data[0..2])]);
+        assert_complete(data, &chunks);
+
+        // Data containing three ASCII sequences
         let data = b"abc\x00defg\x00hijkl";
-        let chunks = super::reorder_chunks(data);
+        let chunks = super::reorder_chunks(data, 3);
         // Too many possibilities to check, just check that the output is valid
         assert_eq!(chunks.len(), 4); // 3 splits create 4 chunks
         assert_complete(data, &chunks);
