@@ -20,19 +20,23 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.9.2"
+version = "0.10.0"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-# Keep in sync with .github/workflows/check.yml
 rust-version = "1.76.0"
 
 [workspace.dependencies]
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+enum-map = { version = "2.7", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.13", default-features = false }
-quinn-udp = { version = "0.5.4", default-features = false, features = ["direct-log"] }
+quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log"] }
+regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
+static_assertions = { version = "1.1", default-features = false }
+url = { version = "=2.5.1", default-features = false }
 
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }

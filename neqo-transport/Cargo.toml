@@ -16,23 +16,23 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-enum-map = { version = "2.7", default-features = false }
-indexmap = { version = "2.2", default-features = false }                                    # See https://github.com/mozilla/neqo/issues/1858
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+enum-map = { workspace = true }
+indexmap = { version = "2.2", default-features = false } # See https://github.com/mozilla/neqo/issues/1858
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 mtu = { git = "https://github.com/mozilla/mtu.git", branch = "feat-from-routing", default-features = false } # TODO: Point to the crate on crates.io
 qlog = { workspace = true }
-smallvec = { version = "1.11", default-features = false }
-static_assertions = { version = "1.1", default-features = false }
+smallvec = { version = "1.13", default-features = false }
+static_assertions = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = []
+bench = ["test-fixture/bench"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-crypto/disable-encryption",
