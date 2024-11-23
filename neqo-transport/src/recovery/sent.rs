@@ -186,7 +186,7 @@ impl SentPackets {
         self.packets.values_mut()
     }
 
-    /// Take values from a specified ranges of packet numbers.
+    /// Take values from specified ranges of packet numbers.
     /// The values returned will be reversed, so that the most recent packet appears first.
     /// This is because ACK frames arrive with ranges starting from the largest acknowledged
     /// and we want to match that.
@@ -196,19 +196,50 @@ impl SentPackets {
         R::IntoIter: ExactSizeIterator,
     {
         let mut result = Vec::new();
-        // Remove all packets. We will add them back as we don't need them.
+
+        // Start with all packets. We will add them back as we don't need them.
+        //  [---------------------------packets----------------------------]
         let mut packets = std::mem::take(&mut self.packets);
+
         for range in acked_ranges {
-            // For each acked range, split off the acknowledged part,
-            // then split off the part that hasn't been acknowledged.
-            // This order works better when processing ranges that
-            // have already been processed, which is common.
-            let mut acked = packets.split_off(range.start());
-            let keep = acked.split_off(&(*range.end() + 1));
-            self.packets.extend(keep);
-            result.extend(acked.into_values().rev());
+            // Split off at the end of the acked range.
+            //
+            //  [---------packets--------][----------after_acked_range---------]
+            let after_acked_range = packets.split_off(&(*range.end() + 1));
+
+            // Split off at the start of the acked range.
+            //
+            //  [-packets-][-acked_range-][----------after_acked_range---------]
+            let acked_range = packets.split_off(range.start());
+
+            // According to RFC 9000 19.3.1 ACK ranges are in descending order:
+            //
+            // > Each ACK Range consists of alternating Gap and ACK Range Length
+            // > values in **descending packet number order**.
+            //
+            // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
+            //
+            // Thus none of the following ACK ranges will acknowledge packets in
+            // `after_acked_range`. Let's put those back early.
+            //
+            //  [-packets-][-acked_range-][------------self.packets------------]
+            if self.packets.is_empty() {
+                // Don't re-insert un-acked packets into empty collection, but
+                // instead replace the empty one entirely.
+                self.packets = after_acked_range;
+            } else {
+                // Need to extend existing one. Not the first iteration, thus
+                // `after_acked_range` should be small.
+                self.packets.extend(after_acked_range);
+            }
+
+            // Take the acked packets.
+            result.extend(acked_range.into_values().rev());
         }
+
+        // Put remaining non-acked packets back.
         self.packets.extend(packets);
+
         result
     }
 
