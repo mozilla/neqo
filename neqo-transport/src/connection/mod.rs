@@ -2216,7 +2216,7 @@ impl Connection {
             return true;
         }
 
-        let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
+        let pto = path.borrow().rtt().pto(self.confirmed());
         let probe = if untracked && builder.packet_empty() || force_probe {
             // If we received an untracked packet and we aren't probing already
             // or the PTO timer fired: probe.
