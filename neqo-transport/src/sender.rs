@@ -116,8 +116,8 @@ impl PacketSender {
     /// Initiate a congestion response.
     ///
     /// Returns true if the congestion window was reduced.
-    pub fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
-        self.cc.on_congestion_event(last_packet)
+    pub fn on_congestion_event(&mut self, last_packet: &SentPacket, now: Instant) -> bool {
+        self.cc.on_congestion_event(last_packet, now)
     }
 
     /// Called when packets are lost.  Returns true if the congestion window was reduced.

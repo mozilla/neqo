@@ -865,10 +865,10 @@ impl LossRecovery {
             if self
                 .spaces
                 .get(pn_space)
-                .map_or(false, |space| space.largest_acked.is_none())
+                .is_some_and(|space| space.largest_acked.is_none())
             {
                 path.borrow_mut()
-                    .on_congestion_event(lost, &mut self.stats.borrow_mut());
+                    .on_congestion_event(lost, &mut self.stats.borrow_mut(), now);
             }
             self.fire_pto(pn_space, allow_probes, now);
         }

@@ -343,7 +343,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     /// Handle a congestion event.
     /// Returns true if this was a true congestion event.
-    fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool {
+    fn on_congestion_event(&mut self, last_packet: &SentPacket, now: Instant) -> bool {
         // Start a new congestion event if lost or ECN CE marked packet was sent
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
@@ -371,8 +371,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 QlogMetric::SsThresh(self.ssthresh),
                 QlogMetric::InRecovery(true),
             ],
+            now,
         );
-        self.set_state(State::RecoveryStart);
+        self.set_state(State::RecoveryStart, now);
         true
     }
 
