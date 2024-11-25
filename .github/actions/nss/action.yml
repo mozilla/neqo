@@ -8,16 +8,16 @@ inputs:
   minimum-version:
     description: "Minimum required version of NSS"
     required: true
-  cache-key-id:
-    description: "Prefix for the cache key"
-    default: "nss"
+  ndk:
+    description: "Path to the Android NDK"
+    default: ""
 
 runs:
   using: composite
   steps:
     - name: Install system NSS (Linux)
       shell: bash
-      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+      if: runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.ndk == ''
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -26,7 +26,7 @@ runs:
 
     - name: Install system NSS (MacOS)
       shell: bash
-      if: runner.os == 'MacOS' && runner.environment == 'github-hosted'
+      if: runner.os == 'MacOS' && runner.environment == 'github-hosted' && inputs.ndk == ''
       run: |
         brew update
         brew install nss
@@ -117,7 +117,7 @@ runs:
       uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
       with:
         path: dist
-        key: ${{ inputs.cache-key-id }}-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
+        key: ${{ inputs.ndk != '' && 'nss-android' || 'nss' }}-${{ runner.os }}-${{ inputs.type }}-${{ env.NSS_HEAD }}-${{ env.NSPR_HEAD }}
 
     - name: Check if build is needed
       if: env.USE_SYSTEM_NSS == '0'
@@ -204,5 +204,10 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
+        if [ "${{ inputs.ndk }}" != "" ]; then
+          export BUILD_ANDROID=1
+          export ANDROID_NDK="${{ inputs.ndk }}"
+        fi
+        env | sort
         [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static

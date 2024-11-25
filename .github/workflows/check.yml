@@ -139,6 +139,8 @@ jobs:
 
   test-android:
     runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 25.2.9519653
 
     strategy:
       matrix:
@@ -166,7 +168,7 @@ jobs:
       uses: android-actions/setup-android@v3
 
     - name: Install Android NDK
-      run: sdkmanager --install "ndk;25.2.9519653"
+      run: sdkmanager --install "ndk;$NDK_VERSION"
 
     - uses: ./.github/actions/rust
       with:
@@ -183,7 +185,7 @@ jobs:
     - uses: ./.github/actions/nss
       with:
         minimum-version: ${{ steps.nss-version.outputs.minimum }}
-        cache-key-id: nss-android
+        ndk: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
 
     - name: Build unit tests for Android
       run: cargo ndk -t ${{ matrix.target }} test --no-run
