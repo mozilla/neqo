@@ -60,6 +60,7 @@ pub trait CongestionControl: Display + Debug {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
+        now: Instant,
     ) -> bool;
 
     /// Initiate a congestion response.
@@ -68,16 +69,16 @@ pub trait CongestionControl: Display + Debug {
     fn on_congestion_event(&mut self, last_packet: &SentPacket) -> bool;
 
     /// Returns true if the congestion window was reduced.
-    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket) -> bool;
+    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket, now: Instant) -> bool;
 
     #[must_use]
     fn recovery_packet(&self) -> bool;
 
-    fn discard(&mut self, pkt: &SentPacket);
+    fn discard(&mut self, pkt: &SentPacket, now: Instant);
 
-    fn on_packet_sent(&mut self, pkt: &SentPacket);
+    fn on_packet_sent(&mut self, pkt: &SentPacket, now: Instant);
 
-    fn discard_in_flight(&mut self);
+    fn discard_in_flight(&mut self, now: Instant);
 }
 
 #[derive(Debug, Copy, Clone)]
