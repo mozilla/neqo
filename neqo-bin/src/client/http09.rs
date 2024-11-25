@@ -20,8 +20,8 @@ use std::{
 use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
-    CloseReason, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, State,
-    StreamId, StreamType,
+    CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
+    Error, Output, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
 use url::Url;
 
@@ -39,7 +39,7 @@ pub struct Handler<'a> {
     read_buffer: Vec<u8>,
 }
 
-impl<'a> Handler<'a> {
+impl Handler<'_> {
     fn reinit(&mut self) {
         for url in self.handled_urls.drain(..) {
             self.url_queue.push_front(url);
@@ -49,7 +49,7 @@ impl<'a> Handler<'a> {
     }
 }
 
-impl<'a> super::Handler for Handler<'a> {
+impl super::Handler for Handler<'_> {
     type Client = Connection;
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool> {
@@ -133,11 +133,17 @@ pub fn create_client(
         "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.shared.alpn.as_str(),
         _ => "hq-interop",
     };
-
+    let cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>> = if args.cid_len == 0 {
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default()))
+    } else {
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(
+            args.cid_len.into(),
+        )))
+    };
     let mut client = Connection::new_client(
         hostname,
         &[alpn],
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        cid_generator,
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(alpn),
@@ -181,10 +187,11 @@ impl super::Client for Connection {
         self.process_output(now)
     }
 
-    fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
+    fn process_multiple_input<'a>(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        now: Instant,
+    ) {
         self.process_multiple_input(dgrams, now);
     }
 
@@ -255,7 +262,8 @@ impl<'b> Handler<'b> {
                     .stream_send(client_stream_id, req.as_bytes())
                     .unwrap();
                 client.stream_close_send(client_stream_id).unwrap();
-                let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
+                let out_file =
+                    get_output_file(&url, self.args.output_dir.as_ref(), &mut self.all_paths);
                 self.streams.insert(client_stream_id, out_file);
                 self.handled_urls.push(url);
                 true

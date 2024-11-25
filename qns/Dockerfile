@@ -1,7 +1,6 @@
-FROM lukemathwalker/cargo-chef:latest-rust-latest AS chef
+FROM lukemathwalker/cargo-chef@sha256:d66c794ee07b3c832b431104c593867cee4a1871d7416f249032a6db83126454 AS chef
 
 WORKDIR /app
-
 
 FROM chef AS planner
 
@@ -34,10 +33,9 @@ RUN cargo chef cook --release --recipe-path recipe.json
 ADD . /neqo
 RUN set -eux; \
     cd /neqo; \
-    cargo build --release --bin neqo-client --bin neqo-server
+    CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
-
 
 FROM martenseemann/quic-network-simulator-endpoint@sha256:42d79cc04b88f2e4b4c8beb418b0843c123f26852ff6bbba4caa6badc0043d23
 

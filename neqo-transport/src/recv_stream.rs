@@ -92,32 +92,19 @@ impl RecvStreams {
     }
 
     pub fn clear_terminal(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
-        let recv_to_remove = self
-            .streams
-            .iter()
-            .filter_map(|(id, stream)| {
-                // Remove all streams for which the receiving is done (or aborted).
-                // But only if they are unidirectional, or we have finished sending.
-                if stream.is_terminal() && (id.is_uni() || !send_streams.exists(*id)) {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
         let mut removed_bidi = 0;
         let mut removed_uni = 0;
-        for id in &recv_to_remove {
-            self.streams.remove(id);
-            if id.is_remote_initiated(role) {
+        self.streams.retain(|id, s| {
+            let dead = s.is_terminal() && (id.is_uni() || !send_streams.exists(*id));
+            if dead && id.is_remote_initiated(role) {
                 if id.is_bidi() {
                     removed_bidi += 1;
                 } else {
                     removed_uni += 1;
                 }
             }
-        }
+            !dead
+        });
 
         (removed_bidi, removed_uni)
     }
@@ -211,7 +198,7 @@ impl RxStreamOrderer {
         if self
             .data_ranges
             .last_entry()
-            .map_or(false, |e| *e.key() >= new_start)
+            .is_some_and(|e| *e.key() >= new_start)
         {
             // Is this at the end (common case)?  If so, nothing to do in this block
             // Common case:
@@ -287,7 +274,7 @@ impl RxStreamOrderer {
         self.data_ranges
             .keys()
             .next()
-            .map_or(false, |&start| start <= self.retired)
+            .is_some_and(|&start| start <= self.retired)
     }
 
     /// How many bytes are readable?
@@ -808,7 +795,7 @@ impl RecvStream {
     fn data_ready(&self) -> bool {
         self.state
             .recv_buf()
-            .map_or(false, RxStreamOrderer::data_ready)
+            .is_some_and(RxStreamOrderer::data_ready)
     }
 
     /// # Errors

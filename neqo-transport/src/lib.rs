@@ -107,7 +107,6 @@ pub enum Error {
     DecodingFrame,
     DecryptError,
     DisabledVersion,
-    HandshakeFailed,
     IdleTimeout,
     IntegerOverflow,
     InvalidInput,
@@ -127,6 +126,7 @@ pub enum Error {
     KeyUpdateBlocked,
     NoAvailablePath,
     NoMoreData,
+    NotAvailable,
     NotConnected,
     PacketNumberOverlap,
     PeerApplicationError(AppError),
@@ -138,7 +138,6 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
-    NotAvailable,
 }
 
 impl Error {
