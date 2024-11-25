@@ -37,6 +37,7 @@ pub struct SentPacket {
 }
 
 impl SentPacket {
+    #[must_use]
     pub const fn new(
         pt: PacketType,
         pn: PacketNumber,
@@ -61,41 +62,54 @@ impl SentPacket {
     }
 
     /// The type of this packet.
+    #[must_use]
     pub const fn packet_type(&self) -> PacketType {
         self.pt
     }
 
     /// The number of the packet.
+    #[must_use]
     pub const fn pn(&self) -> PacketNumber {
         self.pn
     }
 
     /// The ECN mark of the packet.
+    #[must_use]
     pub const fn ecn_mark(&self) -> IpTosEcn {
         self.ecn_mark
     }
 
     /// The time that this packet was sent.
+    #[must_use]
     pub const fn time_sent(&self) -> Instant {
         self.time_sent
     }
 
     /// Returns `true` if the packet will elicit an ACK.
+    #[must_use]
     pub const fn ack_eliciting(&self) -> bool {
         self.ack_eliciting
     }
 
     /// Returns `true` if the packet was sent on the primary path.
+    #[must_use]
     pub const fn on_primary_path(&self) -> bool {
         self.primary_path
     }
 
     /// The length of the packet that was sent.
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.len
     }
 
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Access the recovery tokens that this holds.
+    #[must_use]
     pub fn tokens(&self) -> &[RecoveryToken] {
         &self.tokens
     }
@@ -113,6 +127,7 @@ impl SentPacket {
     }
 
     /// Whether the packet has been declared lost.
+    #[must_use]
     pub const fn lost(&self) -> bool {
         self.time_declared_lost.is_some()
     }
@@ -123,11 +138,13 @@ impl SentPacket {
     /// and has not previously been declared lost.
     /// Note that this should count packets that contain only ACK and PADDING,
     /// but we don't send PADDING, so we don't track that.
+    #[must_use]
     pub const fn cc_outstanding(&self) -> bool {
         self.ack_eliciting() && self.on_primary_path() && !self.lost()
     }
 
     /// Whether the packet should be tracked as in-flight.
+    #[must_use]
     pub const fn cc_in_flight(&self) -> bool {
         self.ack_eliciting() && self.on_primary_path()
     }
@@ -144,18 +161,21 @@ impl SentPacket {
 
     /// Ask whether this tracked packet has been declared lost for long enough
     /// that it can be expired and no longer tracked.
+    #[must_use]
     pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
         self.time_declared_lost
             .is_some_and(|loss_time| (loss_time + expiration_period) <= now)
     }
 
     /// Whether the packet contents were cleared out after a PTO.
+    #[must_use]
     pub const fn pto_fired(&self) -> bool {
         self.pto
     }
 
     /// On PTO, we need to get the recovery tokens so that we can ensure that
     /// the frames we sent can be sent again in the PTO packet(s).  Do that just once.
+    #[must_use]
     pub fn pto(&mut self) -> bool {
         if self.pto || self.lost() {
             false
@@ -174,6 +194,8 @@ pub struct SentPackets {
 }
 
 impl SentPackets {
+    #[allow(clippy::len_without_is_empty)]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.packets.len()
     }
