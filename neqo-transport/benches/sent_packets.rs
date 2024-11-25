@@ -31,6 +31,12 @@ fn sent_packets() -> SentPackets {
     pkts
 }
 
+/// Confirm that taking a small number of ranges from the front of
+/// a large span of sent packets is performant.
+/// This is the most common pattern when sending at a higher rate.
+/// New acknowledgments will include low-numbered packets,
+/// while the acknowledgment rate will ensure that most of the
+/// outstanding packets remain in flight.
 fn take_ranges(c: &mut Criterion) {
     c.bench_function("SentPackets::take_ranges", |b| {
         b.iter_batched_ref(
