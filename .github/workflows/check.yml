@@ -183,6 +183,7 @@ jobs:
     - uses: ./.github/actions/nss
       with:
         minimum-version: ${{ steps.nss-version.outputs.minimum }}
+        cache-key-id: nss-android
 
     - name: Build unit tests for Android
       run: cargo ndk -t ${{ matrix.target }} test --no-run
