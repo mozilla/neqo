@@ -201,6 +201,8 @@ impl SentPackets {
         //  [---------------------------packets----------------------------]
         let mut packets = std::mem::take(&mut self.packets);
 
+        let mut previous_range_start: Option<PacketNumber> = None;
+
         for range in acked_ranges {
             // Split off at the end of the acked range.
             //
@@ -218,7 +220,15 @@ impl SentPackets {
             // > values in **descending packet number order**.
             //
             // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            //
+            if let Some(prev_start) = previous_range_start {
+                debug_assert!(
+                    *range.end() < prev_start,
+                    "ACK ranges not in descending order: current range end {}, previous range start {prev_start}",
+                    *range.end(),
+                );
+            }
+            previous_range_start = Some(*range.start());
+
             // Thus none of the following ACK ranges will acknowledge packets in
             // `after_acked_range`. Let's put those back early.
             //
