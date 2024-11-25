@@ -197,7 +197,7 @@ impl SentPackets {
     {
         let mut result = Vec::new();
 
-        // Start with all packets. We will add them back as we don't need them.
+        // Start with all packets. We will add unacknowledged packets back.
         //  [---------------------------packets----------------------------]
         let mut packets = std::mem::take(&mut self.packets);
 
