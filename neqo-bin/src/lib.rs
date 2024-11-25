@@ -21,6 +21,7 @@ use neqo_transport::{
 };
 
 pub mod client;
+mod send_data;
 pub mod server;
 pub mod udp;
 
@@ -155,7 +156,7 @@ impl Default for QuicParameters {
 }
 
 impl QuicParameters {
-    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
+    fn get_sock_addr<F>(opt: Option<&String>, v: &str, f: F) -> Option<SocketAddr>
     where
         F: FnMut(&SocketAddr) -> bool,
     {
@@ -176,12 +177,20 @@ impl QuicParameters {
 
     #[must_use]
     pub fn preferred_address_v4(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", SocketAddr::is_ipv4)
+        Self::get_sock_addr(
+            self.preferred_address_v4.as_ref(),
+            "IPv4",
+            SocketAddr::is_ipv4,
+        )
     }
 
     #[must_use]
     pub fn preferred_address_v6(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", SocketAddr::is_ipv6)
+        Self::get_sock_addr(
+            self.preferred_address_v6.as_ref(),
+            "IPv6",
+            SocketAddr::is_ipv6,
+        )
     }
 
     #[must_use]
@@ -209,14 +218,18 @@ impl QuicParameters {
 
     #[must_use]
     pub fn get(&self, alpn: &str) -> ConnectionParameters {
-        let params = ConnectionParameters::default()
+        let mut params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud);
-
+        params = if let Some(pa) = self.preferred_address() {
+            params.preferred_address(pa)
+        } else {
+            params
+        };
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
                 &self.quic_version[1..]
@@ -301,7 +314,7 @@ mod tests {
 
         let temp_dir = TempDir::new();
 
-        let mut client_args = client::Args::new(&[1]);
+        let mut client_args = client::Args::new(&[1], false);
         client_args.set_qlog_dir(temp_dir.path());
         let mut server_args = server::Args::default();
         server_args.set_qlog_dir(temp_dir.path());

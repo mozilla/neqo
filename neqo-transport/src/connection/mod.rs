@@ -629,13 +629,17 @@ impl Connection {
             .unwrap()
     }
 
+    fn confirmed(&self) -> bool {
+        self.state == State::Confirmed
+    }
+
     /// Get the simplest PTO calculation for all those cases where we need
     /// a value of this approximate order.  Don't use this for loss recovery,
     /// only use it where a more precise value is not important.
     fn pto(&self) -> Duration {
         self.paths.primary().map_or_else(
-            || RttEstimate::default().pto(PacketNumberSpace::ApplicationData),
-            |p| p.borrow().rtt().pto(PacketNumberSpace::ApplicationData),
+            || RttEstimate::default().pto(self.confirmed()),
+            |p| p.borrow().rtt().pto(self.confirmed()),
         )
     }
 
@@ -917,7 +921,7 @@ impl Connection {
                 State::Init => {
                     // We have not even sent anything just close the connection without sending any
                     // error. This may happen when client_start fails.
-                    self.set_state(State::Closed(error));
+                    self.set_state(State::Closed(error), now);
                 }
                 State::WaitInitial => {
                     // We don't have any state yet, so don't bother with
@@ -926,22 +930,25 @@ impl Connection {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                     }
-                    self.set_state(State::Closed(error));
+                    self.set_state(State::Closed(error), now);
                 }
                 _ => {
                     if let Some(path) = path.or_else(|| self.paths.primary()) {
                         self.state_signaling
                             .close(path, error.clone(), frame_type, msg);
                         if matches!(v, Error::KeysExhausted) {
-                            self.set_state(State::Closed(error));
+                            self.set_state(State::Closed(error), now);
                         } else {
-                            self.set_state(State::Closing {
-                                error,
-                                timeout: self.get_closing_period_time(now),
-                            });
+                            self.set_state(
+                                State::Closing {
+                                    error,
+                                    timeout: self.get_closing_period_time(now),
+                                },
+                                now,
+                            );
                         }
                     } else {
-                        self.set_state(State::Closed(error));
+                        self.set_state(State::Closed(error), now);
                     }
                 }
             }
@@ -963,7 +970,7 @@ impl Connection {
             State::Closing { error, timeout } | State::Draining { error, timeout } => {
                 if *timeout <= now {
                     let st = State::Closed(error.clone());
-                    self.set_state(st);
+                    self.set_state(st, now);
                     qinfo!("Closing timer expired");
                     return;
                 }
@@ -978,7 +985,10 @@ impl Connection {
         let pto = self.pto();
         if self.idle_timeout.expired(now, pto) {
             qinfo!([self], "idle timeout expired");
-            self.set_state(State::Closed(CloseReason::Transport(Error::IdleTimeout)));
+            self.set_state(
+                State::Closed(CloseReason::Transport(Error::IdleTimeout)),
+                now,
+            );
             return;
         }
 
@@ -995,7 +1005,7 @@ impl Connection {
         if let Some(path) = self.paths.primary() {
             let lost = self.loss_recovery.timeout(&path, now);
             self.handle_lost_packets(&lost);
-            qlog::packets_lost(&self.qlog, &lost);
+            qlog::packets_lost(&self.qlog, &lost, now);
         }
 
         if self.release_resumption_token_timer.is_some() {
@@ -1018,15 +1028,16 @@ impl Connection {
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_input(&mut self, d: &Datagram, now: Instant) {
+    pub fn process_input(&mut self, d: Datagram<impl AsRef<[u8]>>, now: Instant) {
         self.process_multiple_input(iter::once(d), now);
     }
 
     /// Process new input datagrams on the connection.
-    pub fn process_multiple_input<'a, I>(&mut self, dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = &'a Datagram>,
-    {
+    pub fn process_multiple_input(
+        &mut self,
+        dgrams: impl IntoIterator<Item = Datagram<impl AsRef<[u8]>>>,
+        now: Instant,
+    ) {
         let mut dgrams = dgrams.into_iter().peekable();
         if dgrams.peek().is_none() {
             return;
@@ -1049,7 +1060,7 @@ impl Connection {
             return timeout.duration_since(now);
         }
 
-        let mut delays = SmallVec::<[_; 6]>::new();
+        let mut delays = SmallVec::<[_; 7]>::new();
         if let Some(ack_time) = self.acks.ack_time(now) {
             qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
@@ -1058,11 +1069,18 @@ impl Connection {
         if let Some(p) = self.paths.primary() {
             let path = p.borrow();
             let rtt = path.rtt();
-            let pto = rtt.pto(PacketNumberSpace::ApplicationData);
+            let pto = rtt.pto(self.confirmed());
 
             let idle_time = self.idle_timeout.expiry(now, pto);
-            qtrace!([self], "Idle/keepalive timer {:?}", idle_time);
+            qtrace!([self], "Idle timer {:?}", idle_time);
             delays.push(idle_time);
+
+            if self.streams.need_keep_alive() {
+                if let Some(keep_alive_time) = self.idle_timeout.next_keep_alive(now, pto) {
+                    qtrace!([self], "Keep alive timer {:?}", keep_alive_time);
+                    delays.push(keep_alive_time);
+                }
+            }
 
             if let Some(lr_time) = self.loss_recovery.next_timeout(&path) {
                 qtrace!([self], "Loss recovery timer {:?}", lr_time);
@@ -1135,9 +1153,22 @@ impl Connection {
         }
     }
 
+    /// A test-only output function that uses the provided writer to
+    /// pack something extra into the output.
+    #[cfg(test)]
+    pub fn test_write_frames<W>(&mut self, writer: W, now: Instant) -> Output
+    where
+        W: test_internal::FrameWriter + 'static,
+    {
+        self.test_frame_writer = Some(Box::new(writer));
+        let res = self.process_output(now);
+        self.test_frame_writer = None;
+        res
+    }
+
     /// Process input and generate output.
     #[must_use = "Output of the process function must be handled"]
-    pub fn process(&mut self, dgram: Option<&Datagram>, now: Instant) -> Output {
+    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
         if let Some(d) = dgram {
             self.input(d, now, now);
             self.process_saved(now);
@@ -1217,20 +1248,20 @@ impl Connection {
         }
     }
 
-    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram) -> bool {
+    fn is_stateless_reset(&self, path: &PathRef, d: &Datagram<impl AsRef<[u8]>>) -> bool {
         // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
         if d.len() < 16 || !self.state.connected() {
             return false;
         }
-        <&[u8; 16]>::try_from(&d[d.len() - 16..])
-            .map_or(false, |token| path.borrow().is_stateless_reset(token))
+        <&[u8; 16]>::try_from(&d.as_ref()[d.len() - 16..])
+            .is_ok_and(|token| path.borrow().is_stateless_reset(token))
     }
 
     fn check_stateless_reset(
         &mut self,
         path: &PathRef,
-        d: &Datagram,
+        d: &Datagram<impl AsRef<[u8]>>,
         first: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1239,10 +1270,13 @@ impl Connection {
             // indicate that there is a stateless reset present.
             qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
             self.state_signaling.reset();
-            self.set_state(State::Draining {
-                error: CloseReason::Transport(Error::StatelessReset),
-                timeout: self.get_closing_period_time(now),
-            });
+            self.set_state(
+                State::Draining {
+                    error: CloseReason::Transport(Error::StatelessReset),
+                    timeout: self.get_closing_period_time(now),
+                },
+                now,
+            );
             Err(Error::StatelessReset)
         } else {
             Ok(())
@@ -1256,24 +1290,27 @@ impl Connection {
             debug_assert!(self.crypto.states.rx_hp(self.version, cspace).is_some());
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(&saved.d, saved.t, now);
+                self.input(saved.d, saved.t, now);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    fn save_datagram(&mut self, cspace: CryptoSpace, d: &Datagram, remaining: usize, now: Instant) {
-        let d = if remaining < d.len() {
-            Datagram::new(
-                d.source(),
-                d.destination(),
-                d.tos(),
-                &d[d.len() - remaining..],
-            )
-        } else {
-            d.clone()
-        };
+    #[allow(clippy::needless_pass_by_value)] // To consume an owned datagram below.
+    fn save_datagram(
+        &mut self,
+        cspace: CryptoSpace,
+        d: Datagram<impl AsRef<[u8]>>,
+        remaining: usize,
+        now: Instant,
+    ) {
+        let d = Datagram::new(
+            d.source(),
+            d.destination(),
+            d.tos(),
+            d[d.len() - remaining..].to_vec(),
+        );
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
     }
@@ -1311,14 +1348,16 @@ impl Connection {
                 self.conn_params.get_versions().all(),
                 supported,
                 version,
+                now,
             );
             Ok(())
         } else {
             qinfo!([self], "Version negotiation: failed with {:?}", supported);
             // This error goes straight to closed.
-            self.set_state(State::Closed(CloseReason::Transport(
-                Error::VersionNegotiation,
-            )));
+            self.set_state(
+                State::Closed(CloseReason::Transport(Error::VersionNegotiation)),
+                now,
+            );
             Err(Error::VersionNegotiation)
         }
     }
@@ -1333,7 +1372,7 @@ impl Connection {
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
-        if dcid.map_or(false, |d| d != &packet.dcid()) {
+        if dcid.is_some_and(|d| d != &packet.dcid()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
@@ -1371,7 +1410,7 @@ impl Connection {
                 let dcid = ConnectionId::from(packet.dcid());
                 self.crypto.states.init_server(version, &dcid)?;
                 self.original_destination_cid = Some(dcid);
-                self.set_state(State::WaitInitial);
+                self.set_state(State::WaitInitial, now);
 
                 // We need to make sure that we set this transport parameter.
                 // This has to happen prior to processing the packet so that
@@ -1474,7 +1513,7 @@ impl Connection {
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
-        d: &Datagram,
+        d: &Datagram<impl AsRef<[u8]>>,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
@@ -1506,9 +1545,9 @@ impl Connection {
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
     /// This takes two times: when the datagram was received, and the current time.
-    fn input(&mut self, d: &Datagram, received: Instant, now: Instant) {
+    fn input(&mut self, d: Datagram<impl AsRef<[u8]>>, received: Instant, now: Instant) {
         // First determine the path.
-        let path = self.paths.find_path_with_rebinding(
+        let path = self.paths.find_path(
             d.destination(),
             d.source(),
             self.conn_params.get_cc_algorithm(),
@@ -1520,12 +1559,17 @@ impl Connection {
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
-    fn input_path(&mut self, path: &PathRef, d: &Datagram, now: Instant) -> Res<()> {
-        let mut slc = &d[..];
+    fn input_path(
+        &mut self,
+        path: &PathRef,
+        d: Datagram<impl AsRef<[u8]>>,
+        now: Instant,
+    ) -> Res<()> {
+        let mut slc = d.as_ref();
         let mut dcid = None;
 
-        qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
-        let pto = path.borrow().rtt().pto(PacketNumberSpace::ApplicationData);
+        qtrace!([self], "{} input {}", path.borrow(), hex(&d));
+        let pto = path.borrow().rtt().pto(self.confirmed());
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
@@ -1573,7 +1617,7 @@ impl Connection {
                         neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
                     }
 
-                    qlog::packet_received(&self.qlog, &packet, &payload);
+                    qlog::packet_received(&self.qlog, &packet, &payload, now);
                     let space = PacketNumberSpace::from(payload.packet_type());
                     if let Some(space) = self.acks.get_mut(space) {
                         if space.is_duplicate(payload.pn()) {
@@ -1582,7 +1626,7 @@ impl Connection {
                         } else {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
-                                    self.postprocess_packet(path, d, &packet, migrate, now);
+                                    self.postprocess_packet(path, &d, &packet, migrate, now);
                                 }
                                 Err(e) => {
                                     self.ensure_error_path(path, &packet, now);
@@ -1624,15 +1668,15 @@ impl Connection {
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(path, d, dcid.is_none(), now)?;
+                    self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&self.qlog, &packet);
+                    qlog::packet_dropped(&self.qlog, &packet, now);
                 }
             }
             slc = remainder;
             dcid = Some(ConnectionId::from(packet.dcid()));
         }
-        self.check_stateless_reset(path, d, dcid.is_none(), now)?;
+        self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
         Ok(())
     }
 
@@ -1652,6 +1696,17 @@ impl Connection {
         // on the assert for doesn't exist.
         // OK, we have a valid packet.
 
+        // Get the next packet number we'll send, for ACK verification.
+        // TODO: Once PR #2118 lands, this can move to `input_frame`. For now, it needs to be here,
+        // because we can drop packet number spaces as we parse throught the packet, and if an ACK
+        // frame follows a CRYPTO frame that makes us drop a space, we need to know this
+        // packet number to verify the ACK against.
+        let next_pn = self
+            .crypto
+            .states
+            .select_tx(self.version, PacketNumberSpace::from(packet.packet_type()))
+            .map_or(0, |(_, tx)| tx.next_pn());
+
         let mut ack_eliciting = false;
         let mut probing = true;
         let mut d = Decoder::from(&packet[..]);
@@ -1664,7 +1719,14 @@ impl Connection {
             ack_eliciting |= f.ack_eliciting();
             probing &= f.path_probing();
             let t = f.get_type();
-            if let Err(e) = self.input_frame(path, packet.version(), packet.packet_type(), f, now) {
+            if let Err(e) = self.input_frame(
+                path,
+                packet.version(),
+                packet.packet_type(),
+                f,
+                next_pn,
+                now,
+            ) {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
             }
         }
@@ -1708,6 +1770,7 @@ impl Connection {
                     .unwrap()
                     .clone(),
             ),
+            now,
         );
         if self.role == Role::Client {
             path.borrow_mut().set_valid(now);
@@ -1715,13 +1778,13 @@ impl Connection {
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
-    fn ensure_permanent(&mut self, path: &PathRef) -> Res<()> {
+    fn ensure_permanent(&mut self, path: &PathRef, now: Instant) -> Res<()> {
         if self.paths.is_temporary(path) {
             // If there isn't a connection ID to use for this path, the packet
             // will be processed, but it won't be attributed to a path.  That means
             // no path probes or PATH_RESPONSE.  But it's not fatal.
             if let Some(cid) = self.connection_ids.next() {
-                self.paths.make_permanent(path, None, cid);
+                self.paths.make_permanent(path, None, cid, now);
                 Ok(())
             } else if let Some(primary) = self.paths.primary() {
                 if primary
@@ -1730,7 +1793,7 @@ impl Connection {
                     .map_or(true, |id| id.is_empty())
                 {
                     self.paths
-                        .make_permanent(path, None, ConnectionIdEntry::empty_remote());
+                        .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
                     Ok(())
                 } else {
                     qtrace!([self], "Unable to make path permanent: {}", path.borrow());
@@ -1757,7 +1820,7 @@ impl Connection {
                 self.setup_handshake_path(path, now);
             } else {
                 // Otherwise try to get a usable connection ID.
-                mem::drop(self.ensure_permanent(path));
+                mem::drop(self.ensure_permanent(path, now));
             }
         }
     }
@@ -1792,9 +1855,9 @@ impl Connection {
             self.stats.borrow().frame_rx.crypto > 0
         };
         if got_version {
-            self.set_state(State::Handshaking);
+            self.set_state(State::Handshaking, now);
         } else {
-            self.set_state(State::WaitVersion);
+            self.set_state(State::WaitVersion, now);
         }
     }
 
@@ -1807,8 +1870,8 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// Fails if this is not a client, not confirmed, or there are not enough connection
-    /// IDs available to use.
+    /// Fails if this is not a client, not confirmed, the peer disabled connection migration, or
+    /// there are not enough connection IDs available to use.
     pub fn migrate(
         &mut self,
         local: Option<SocketAddr>,
@@ -1820,6 +1883,14 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
         if !matches!(self.state(), State::Confirmed) {
+            return Err(Error::InvalidMigration);
+        }
+        if self
+            .tps
+            .borrow()
+            .remote()
+            .get_empty(tparams::DISABLE_MIGRATION)
+        {
             return Err(Error::InvalidMigration);
         }
 
@@ -1854,7 +1925,7 @@ impl Connection {
             self.conn_params.pacing_enabled(),
             now,
         );
-        self.ensure_permanent(&path)?;
+        self.ensure_permanent(&path, now)?;
         qinfo!(
             [self],
             "Migrate to {} probe {}",
@@ -1871,10 +1942,11 @@ impl Connection {
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
-        let spa = if matches!(
+        let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<[u8; 16]>)> = if matches!(
             self.conn_params.get_preferred_address(),
             PreferredAddressConfig::Disabled
         ) {
+            qdebug!([self], "Preferred address is disabled");
             None
         } else {
             self.tps.borrow_mut().remote().get_preferred_address()
@@ -1912,11 +1984,19 @@ impl Connection {
             } else {
                 qwarn!([self], "Unable to migrate to a different address family");
             }
+        } else {
+            qdebug!([self], "No preferred address to migrate to");
         }
         Ok(())
     }
 
-    fn handle_migration(&mut self, path: &PathRef, d: &Datagram, migrate: bool, now: Instant) {
+    fn handle_migration(
+        &mut self,
+        path: &PathRef,
+        d: &Datagram<impl AsRef<[u8]>>,
+        migrate: bool,
+        now: Instant,
+    ) {
         if !migrate {
             return;
         }
@@ -1924,7 +2004,7 @@ impl Connection {
             return;
         }
 
-        if self.ensure_permanent(path).is_ok() {
+        if self.ensure_permanent(path, now).is_ok() {
             self.paths
                 .handle_migration(path, d.source(), now, &mut self.stats.borrow_mut());
         } else {
@@ -1947,7 +2027,7 @@ impl Connection {
             | State::Confirmed => self.paths.select_path().map_or_else(
                 || Ok(SendOption::default()),
                 |path| {
-                    let res = self.output_path(&path, now, &None);
+                    let res = self.output_path(&path, now, None);
                     self.capture_error(Some(path), now, 0, res)
                 },
             ),
@@ -1964,7 +2044,7 @@ impl Connection {
                             qerror!([self], "Attempting to close with a temporary path");
                             Err(Error::InternalError)
                         } else {
-                            self.output_path(&path, now, &Some(details))
+                            self.output_path(&path, now, Some(&details))
                         };
                         self.capture_error(Some(path), now, 0, res)
                     },
@@ -2294,7 +2374,7 @@ impl Connection {
         &mut self,
         path: &PathRef,
         now: Instant,
-        closing_frame: &Option<ClosingFrame>,
+        closing_frame: Option<&ClosingFrame>,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
@@ -2355,7 +2435,7 @@ impl Connection {
             // Add frames to the packet.
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) = (Vec::new(), false, false);
-            if let Some(ref close) = closing_frame {
+            if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
@@ -2383,6 +2463,7 @@ impl Connection {
                 pn,
                 builder.len() - header_start + aead_expansion,
                 &builder.as_ref()[payload_start..],
+                now,
             );
 
             self.stats.borrow_mut().packets_tx += 1;
@@ -2408,7 +2489,7 @@ impl Connection {
             );
             if padded {
                 needs_padding = false;
-                self.loss_recovery.on_packet_sent(path, sent);
+                self.loss_recovery.on_packet_sent(path, sent, now);
             } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
@@ -2418,7 +2499,7 @@ impl Connection {
                 if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
                 }
-                self.loss_recovery.on_packet_sent(path, sent);
+                self.loss_recovery.on_packet_sent(path, sent, now);
             }
 
             if *space == PacketNumberSpace::Handshake
@@ -2450,7 +2531,7 @@ impl Connection {
                     // packet, which is why we don't increase `frame_tx.padding` count here.
                     packets.resize(profile.limit(), 0);
                 }
-                self.loss_recovery.on_packet_sent(path, initial);
+                self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(packets.len());
             Ok(SendOption::Yes(
@@ -2484,12 +2565,16 @@ impl Connection {
         qdebug!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
         if let Some(path) = self.paths.primary() {
-            qlog::client_connection_started(&self.qlog, &path);
+            qlog::client_connection_started(&self.qlog, &path, now);
         }
-        qlog::client_version_information_initiated(&self.qlog, self.conn_params.get_versions());
+        qlog::client_version_information_initiated(
+            &self.qlog,
+            self.conn_params.get_versions(),
+            now,
+        );
 
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
-        self.set_state(State::WaitInitial);
+        self.set_state(State::WaitInitial, now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
             qdebug!([self], "Enabled 0-RTT");
             ZeroRttState::Sending
@@ -2510,9 +2595,9 @@ impl Connection {
         let timeout = self.get_closing_period_time(now);
         if let Some(path) = self.paths.primary() {
             self.state_signaling.close(path, error.clone(), 0, msg);
-            self.set_state(State::Closing { error, timeout });
+            self.set_state(State::Closing { error, timeout }, now);
         } else {
-            self.set_state(State::Closed(error));
+            self.set_state(State::Closed(error), now);
         }
     }
 
@@ -2542,7 +2627,7 @@ impl Connection {
     }
 
     /// Process the final set of transport parameters.
-    fn process_tps(&mut self) -> Res<()> {
+    fn process_tps(&mut self, now: Instant) -> Res<()> {
         self.validate_cids()?;
         self.validate_versions()?;
         {
@@ -2587,7 +2672,7 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        qlog::connection_tparams_set(&self.qlog, &self.tps.borrow());
+        qlog::connection_tparams_set(&self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
 
@@ -2790,8 +2875,8 @@ impl Connection {
         Ok(())
     }
 
-    fn set_confirmed(&mut self) -> Res<()> {
-        self.set_state(State::Confirmed);
+    fn set_confirmed(&mut self, now: Instant) -> Res<()> {
+        self.set_state(State::Confirmed, now);
         if self.conn_params.pmtud_enabled() {
             self.paths
                 .primary()
@@ -2810,6 +2895,7 @@ impl Connection {
         packet_version: Version,
         packet_type: PacketType,
         frame: Frame,
+        next_pn: PacketNumber,
         now: Instant,
     ) -> Res<()> {
         if !frame.is_allowed(packet_type) {
@@ -2841,16 +2927,17 @@ impl Connection {
                 ack_ranges,
                 ecn_count,
             } => {
+                // Ensure that the largest acknowledged packet number was actually sent.
+                // (If we ever start using non-contiguous packet numbers, we need to check all the
+                // packet numbers in the ACKed ranges.)
+                if largest_acknowledged >= next_pn {
+                    qwarn!("Largest ACKed {} was never sent", largest_acknowledged);
+                    return Err(Error::AckedUnsentPacket);
+                }
+
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(
-                    space,
-                    largest_acknowledged,
-                    ranges,
-                    ecn_count,
-                    ack_delay,
-                    now,
-                );
+                self.handle_ack(space, ranges, ecn_count, ack_delay, now);
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -2910,7 +2997,7 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
                 // If we were challenged, try to make the path permanent.
                 // Report an error if we don't have enough connection IDs.
-                self.ensure_permanent(path)?;
+                self.ensure_permanent(path, now)?;
                 path.borrow_mut().challenged(data);
             }
             Frame::PathResponse { data } => {
@@ -2952,17 +3039,20 @@ impl Connection {
                 let error = CloseReason::Transport(detail);
                 self.state_signaling
                     .drain(Rc::clone(path), error.clone(), frame_type, "");
-                self.set_state(State::Draining {
-                    error,
-                    timeout: self.get_closing_period_time(now),
-                });
+                self.set_state(
+                    State::Draining {
+                        error,
+                        timeout: self.get_closing_period_time(now),
+                    },
+                    now,
+                );
             }
             Frame::HandshakeDone => {
                 self.stats.borrow_mut().frame_rx.handshake_done += 1;
                 if self.role == Role::Server || !self.state.connected() {
                     return Err(Error::ProtocolViolation);
                 }
-                self.set_confirmed()?;
+                self.set_confirmed(now)?;
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
@@ -3038,7 +3128,6 @@ impl Connection {
     fn handle_ack<R>(
         &mut self,
         space: PacketNumberSpace,
-        largest_acknowledged: PacketNumber,
         ack_ranges: R,
         ack_ecn: Option<EcnCount>,
         ack_delay: u64,
@@ -3055,12 +3144,12 @@ impl Connection {
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
-            largest_acknowledged,
             ack_ranges,
             ack_ecn,
             self.decode_ack_delay(ack_delay),
             now,
         );
+        let largest_acknowledged = acked_packets.first().map(SentPacket::pn);
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
@@ -3081,10 +3170,12 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
-        qlog::packets_lost(&self.qlog, &lost_packets);
+        qlog::packets_lost(&self.qlog, &lost_packets, now);
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
-        stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
+        if let Some(largest_acknowledged) = largest_acknowledged {
+            stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
+        }
     }
 
     /// Tell 0-RTT packets that they were "lost".
@@ -3121,7 +3212,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&self.qlog, &path);
+            qlog::server_connection_started(&self.qlog, &path, now);
         } else {
             self.zero_rtt_state = if self
                 .crypto
@@ -3141,8 +3232,8 @@ impl Connection {
         let pto = self.pto();
         self.crypto
             .install_application_keys(self.version, now + pto)?;
-        self.process_tps()?;
-        self.set_state(State::Connected);
+        self.process_tps(now)?;
+        self.set_state(State::Connected, now);
         self.create_resumption_token(now);
         self.saved_datagrams
             .make_available(CryptoSpace::ApplicationData);
@@ -3154,13 +3245,13 @@ impl Connection {
             .resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
-            self.set_confirmed()?;
+            self.set_confirmed(now)?;
         }
         qinfo!([self], "Connection established");
         Ok(())
     }
 
-    fn set_state(&mut self, state: State) {
+    fn set_state(&mut self, state: State, now: Instant) {
         if state > self.state {
             qdebug!([self], "State change from {:?} -> {:?}", self.state, state);
             self.state = state.clone();
@@ -3168,7 +3259,7 @@ impl Connection {
                 self.streams.clear_streams();
             }
             self.events.connection_state_change(state);
-            qlog::connection_state_updated(&self.qlog, &self.state);
+            qlog::connection_state_updated(&self.qlog, &self.state, now);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.

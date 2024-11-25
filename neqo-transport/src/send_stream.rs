@@ -976,7 +976,7 @@ impl SendStream {
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
-            let fin = final_size.map_or(false, |fs| fs == offset + u64::try_from(length).unwrap());
+            let fin = final_size.is_some_and(|fs| fs == offset + u64::try_from(length).unwrap());
             if length == 0 && !fin {
                 qtrace!([self], "write_frame no data, no fin");
                 return;
@@ -1487,7 +1487,7 @@ impl OrderGroup {
     }
 }
 
-impl<'a> Iterator for OrderGroupIter<'a> {
+impl Iterator for OrderGroupIter<'_> {
     type Item = StreamId;
     fn next(&mut self) -> Option<Self::Item> {
         // Stop when we would return the started_at element on the next

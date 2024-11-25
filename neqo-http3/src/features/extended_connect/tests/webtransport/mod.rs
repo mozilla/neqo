@@ -63,8 +63,8 @@ pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
     loop {
-        out = client.process(out.as_ref(), now()).dgram();
-        out = server.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
         if out.is_none() {
             break;
         }
@@ -74,31 +74,31 @@ fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
 // Perform only Quic transport handshake.
 fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     assert_eq!(client.state(), Http3State::Initializing);
-    let out = client.process(None, now());
+    let out = client.process_output(now());
     assert_eq!(client.state(), Http3State::Initializing);
 
-    let out = server.process(out.as_dgram_ref(), now());
-    let out = client.process(out.as_dgram_ref(), now());
-    let out = server.process(out.as_dgram_ref(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
 
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
     client.authenticated(AuthenticationStatus::Ok, now());
 
-    let out = client.process(out.as_dgram_ref(), now());
+    let out = client.process(out.dgram(), now());
     let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
     assert!(client.events().any(connected));
 
     assert_eq!(client.state(), Http3State::Connected);
 
     // Exchange H3 setttings
-    let out = server.process(out.as_dgram_ref(), now());
-    let out = client.process(out.as_dgram_ref(), now());
-    let out = server.process(out.as_dgram_ref(), now());
-    let out = client.process(out.as_dgram_ref(), now());
-    let out = server.process(out.as_dgram_ref(), now());
-    std::mem::drop(client.process(out.as_dgram_ref(), now()));
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    std::mem::drop(client.process(out.dgram(), now()));
 }
 
 fn connect(
@@ -200,10 +200,10 @@ impl WtTest {
         let mut now = now();
         loop {
             now += RTT / 2;
-            out = self.client.process(out.as_ref(), now).dgram();
+            out = self.client.process(out, now).dgram();
             let client_none = out.is_none();
             now += RTT / 2;
-            out = self.server.process(out.as_ref(), now).dgram();
+            out = self.server.process(out, now).dgram();
             if client_none && out.is_none() {
                 break;
             }
@@ -221,7 +221,7 @@ impl WtTest {
         e: &Http3ClientEvent,
         id: StreamId,
         expected_reason: &SessionCloseReason,
-        expected_headers: &Option<Vec<Header>>,
+        expected_headers: Option<&Vec<Header>>,
     ) -> bool {
         if let Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
             stream_id,
@@ -229,7 +229,7 @@ impl WtTest {
             headers,
         }) = e
         {
-            *stream_id == id && reason == expected_reason && headers == expected_headers
+            *stream_id == id && reason == expected_reason && headers.as_ref() == expected_headers
         } else {
             false
         }
@@ -239,7 +239,7 @@ impl WtTest {
         &mut self,
         wt_session_id: StreamId,
         expected_reason: &SessionCloseReason,
-        expected_headers: &Option<Vec<Header>>,
+        expected_headers: Option<&Vec<Header>>,
     ) {
         let mut event_found = false;
 
@@ -404,7 +404,7 @@ impl WtTest {
         expected_stop_sending_ids: &[StreamId],
         expected_error_stream_stop_sending: Option<u64>,
         expected_local: bool,
-        expected_session_close: &Option<(StreamId, SessionCloseReason)>,
+        expected_session_close: Option<&(StreamId, SessionCloseReason)>,
     ) {
         let mut reset_ids_count = 0;
         let mut stop_sending_ids_count = 0;
@@ -546,7 +546,7 @@ impl WtTest {
         expected_error_stream_reset: Option<u64>,
         expected_stop_sending_ids: &[StreamId],
         expected_error_stream_stop_sending: Option<u64>,
-        expected_session_close: &Option<(StreamId, SessionCloseReason)>,
+        expected_session_close: Option<&(StreamId, SessionCloseReason)>,
     ) {
         let mut reset_ids_count = 0;
         let mut stop_sending_ids_count = 0;
