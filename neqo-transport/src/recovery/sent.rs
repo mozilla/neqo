@@ -98,14 +98,10 @@ impl SentPacket {
     }
 
     /// The length of the packet that was sent.
+    #[allow(clippy::len_without_is_empty)]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.len
-    }
-
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Access the recovery tokens that this holds.
