@@ -253,9 +253,12 @@ jobs:
           } >> comment.md
 
       - if: github.ref == 'refs/heads/main'
+        run: mv results results-main
+
+      - if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
-          path: results
+          path: results-main
           key: qns-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
