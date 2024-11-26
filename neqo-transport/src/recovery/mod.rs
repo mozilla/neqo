@@ -526,9 +526,9 @@ impl LossRecovery {
     ///
     /// # Panics
     ///
-    /// Panics when the largest acknowledged or `loss_time` is already set. In
-    /// addition, the client should not have received any ACK frames when it
-    /// drops 0-RTT.
+    /// Panics when the largest acknowledged or `loss_time` is already set.
+    /// The client should not have received any ACK frames in the
+    /// application data packet number space when it drops 0-RTT.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
         assert!(self
             .spaces
