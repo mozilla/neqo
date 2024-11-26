@@ -26,7 +26,7 @@ fn sent_packets() -> SentPackets {
             true,
             Vec::new(),
             100,
-        ))
+        ));
     }
     pkts
 }
@@ -40,7 +40,7 @@ fn sent_packets() -> SentPackets {
 fn take_ranges(c: &mut Criterion) {
     c.bench_function("SentPackets::take_ranges", |b| {
         b.iter_batched_ref(
-            || sent_packets(),
+            sent_packets,
             // Take the first 90 packets, minus some gaps.
             |pkts| pkts.take_ranges([70..=89, 40..=59, 10..=29]),
             criterion::BatchSize::SmallInput,
