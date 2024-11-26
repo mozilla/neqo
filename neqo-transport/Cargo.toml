@@ -58,3 +58,8 @@ required-features = ["bench"]
 name = "range_tracker"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "sent_packets"
+harness = false
+required-features = ["bench"]
