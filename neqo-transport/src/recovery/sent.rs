@@ -238,13 +238,7 @@ impl SentPackets {
             // > values in **descending packet number order**.
             //
             // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            if let Some(prev_start) = previous_range_start {
-                debug_assert!(
-                    *range.end() < prev_start,
-                    "ACK ranges not in descending order: current range end {}, previous range start {prev_start}",
-                    *range.end(),
-                );
-            }
+            debug_assert!(previous_range_start.map_or(true, |s| s > *range.end()));
             previous_range_start = Some(*range.start());
 
             // Thus none of the following ACK ranges will acknowledge packets in
