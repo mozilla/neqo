@@ -42,7 +42,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+      - uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -253,9 +253,12 @@ jobs:
           } >> comment.md
 
       - if: github.ref == 'refs/heads/main'
+        run: mv results results-main
+
+      - if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
-          path: results
+          path: results-main
           key: qns-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
