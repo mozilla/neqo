@@ -260,6 +260,10 @@ impl SentPackets {
         }
 
         // Put remaining non-acked packets back.
+        //
+        // This is inefficient if the acknowledged packets include the last sent
+        // packet AND there is a large unacknowledged span of packets. That's
+        // rare enough that we won't do anything special for that case.
         self.packets.extend(packets);
 
         result
