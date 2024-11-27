@@ -4,244 +4,186 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{array, collections::BinaryHeap, mem, ops::Range};
+use std::ops::Range;
 
-use neqo_crypto::random;
+use neqo_common::qtrace;
 
-/// [Fisher–Yates shuffle](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#Modern_method)
-/// Modified to make sure no element stays in place if `a` has more than one element.
+/// Finds the range where the SNI extension lives.
 ///
-/// We could use <https://docs.rs/rand/latest/rand/seq/trait.SliceRandom.html#tymethod.shuffle>
-/// instead, but we're currently not depending on the `rand` crate and this is a simple enough
-/// so we don't need to.
-fn shuffle<T>(a: &mut [T]) {
-    // To shuffle an array a of n elements (indices 0..n-1)
-    const USIZE: usize = mem::size_of::<usize>();
-    let n: usize = a.len();
-    if n < 2 {
-        return;
+/// If this isn't a `ClientHello` or the range cannot be found, return the whole message.
+fn find_sni(buf: &[u8]) -> Range<usize> {
+    // Read a big-endian integer from `buf`.
+    fn read_len(buf: &[u8]) -> usize {
+        let mut len = 0;
+        for v in buf {
+            len = (len << 8) + usize::from(*v);
+        }
+        len
     }
-    for i in 0..(n - 1) {
-        // j ← random integer such that i ≤ j < n
-        let j = usize::from_ne_bytes(random::<USIZE>()) % (n - i - 1) + i + 1;
-        // Exchange a[i] and a[j]
-        debug_assert!(i != j);
-        a.swap(i, j);
+
+    // Advance `i` by the value read from the `N` bytes at `i`, and return the new index.
+    // If the buffer is too short, return `None`.
+    fn skip_vec<const N: usize>(i: usize, buf: &[u8]) -> Option<usize> {
+        if i + N > buf.len() {
+            return None;
+        }
+        let i = i + N + read_len(&buf[i..i + N]);
+        if i > buf.len() {
+            None
+        } else {
+            Some(i)
+        }
     }
+
+    let mut i = 1 + 3 + 2 + 32; // msg_type, length, version, random
+
+    // Return if buf is too short or does not contain a ClientHello (first byte== 1)
+    if buf.len() < i || buf[0] != 1 {
+        return 0..buf.len();
+    }
+
+    // Skip session_id
+    i = if let Some(i) = skip_vec::<1>(i, buf) {
+        i
+    } else {
+        return 0..buf.len();
+    };
+
+    // Skip cipher_suites
+    i = if let Some(i) = skip_vec::<2>(i, buf) {
+        i
+    } else {
+        return 0..buf.len();
+    };
+
+    // Skip compression_methods
+    i = if let Some(i) = skip_vec::<1>(i, buf) {
+        i
+    } else {
+        return 0..buf.len();
+    };
+
+    i += 2; // Skip extensions length
+
+    while i + 4 < buf.len() {
+        if buf[i] == 0 && buf[i + 1] == 0 {
+            // SNI!
+            i += 2;
+            let len = read_len(&buf[i..i + 2]);
+            if i + len > buf.len() {
+                break;
+            }
+            return i + 2..i + len;
+        }
+        // Skip extension
+        i = if let Some(i) = skip_vec::<2>(i, buf) {
+            i
+        } else {
+            break;
+        };
+    }
+    0..buf.len()
 }
 
-/// Find the ranges of all sequences of two or more ASCII "LDHD" (letters, digits, hyphens, dots)
-/// bytes in `data`, and return the `N` longest ones in ascending order by start index.
-fn ascii_sequences<const N: usize>(data: &[u8]) -> impl Iterator<Item = Range<usize>> {
-    #[derive(Eq, PartialEq, Debug)]
-    struct Sequence(Range<usize>);
-
-    impl PartialOrd for Sequence {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl Ord for Sequence {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            self.0.len().cmp(&other.0.len())
-        }
-    }
-
-    const fn is_ascii_ldhd(b: u8) -> bool {
-        b.is_ascii_alphanumeric() || b == b'-' || b == b'.'
-    }
-
-    let mut sequences = BinaryHeap::new();
-    let mut start = None;
-    for (i, &b) in data.iter().enumerate() {
-        if is_ascii_ldhd(b) {
-            if start.is_none() {
-                start = Some(i);
-            }
-        } else if let Some(s) = start {
-            if i - s >= 2 {
-                sequences.push(Sequence(s..i));
-            }
-            start = None;
-        }
-    }
-    if let Some(s) = start {
-        if data.len() - s >= 2 {
-            sequences.push(Sequence(s..data.len()));
-        }
-    }
-    let mut sequences: [_; N] = array::from_fn(|_| sequences.pop().unwrap());
-    sequences.sort_by(|a, b| a.0.start.cmp(&b.0.start));
-    sequences.into_iter().map(|Sequence(r)| r)
-}
-
-/// Reorder `data` into chunks roughly delimited by the midpoints of ASCII "LDHD" (letters, digits,
-/// hyphens, dots) sequences.
-///
-/// Look for the `N` longest ranges of ASCII "LDHD" characters in `data`. Create split points
-/// halfway into each range. Chunks the data based on those split points, shuffle the chunks and
-/// return them.
+/// Find the index range of the SNI extension in `data`, split `data` in half at the midpoint of
+/// the SNI extension, and return the two halves and their respective starting indexes in reverse
+/// order.
 ///
 /// # Panics
 ///
 /// When `u64` values cannot be converted to `usize`.
 #[must_use]
-pub fn reorder_chunks<const N: usize>(mut data: &[u8]) -> Vec<(u64, &[u8])> {
-    let mut chunks = vec![];
-    let mut last = 0;
-    for Range { start, end } in ascii_sequences::<N>(data) {
-        let mid = start + (end - start) / 2 - last;
-        let (left, right) = data.split_at(mid);
-        chunks.push((u64::try_from(last).unwrap(), left));
-        last += mid;
-        data = right;
-    }
-    chunks.push((u64::try_from(last).unwrap(), data));
-    shuffle(&mut chunks);
-    chunks
+pub fn reorder_chunks(data: &[u8]) -> [(u64, &[u8]); 2] {
+    let Range { start, end } = find_sni(data);
+    qtrace!("SNI: {:?}", String::from_utf8_lossy(&data[start..end]));
+    let mid = start + (end - start) / 2;
+    let (left, right) = data.split_at(mid);
+    [(mid.try_into().unwrap(), right), (0, left)]
 }
 
 #[cfg(test)]
 mod tests {
-    use test_fixture::fixture_init;
+
+    const BUF_WITH_SNI: &[u8] = &[
+        0x01, // msg_type == 1 (ClientHello)
+        0x00, 0x00, 0x3a, // length (arbitrary)
+        0x03, 0x03, // version (TLS 1.2)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, // random
+        0x00, // session_id length
+        0x00, 0x02, // cipher_suites length
+        0x13, 0x01, // cipher_suites
+        0x00, // compression_methods length
+        0x00, 0x16, // extensions length
+        // SNI extension
+        0x00, 0x00, // Extension type (SNI)
+        0x00, 0x12, // Extension length
+        0x00, 0x10, // Server Name Indication length
+        0x00, // Name type (host_name)
+        0x00, 0x0d, // Host name length
+        b'e', b'x', b'a', b'm', b'p', b'l', b'e', b'.', b'c', b'o', b'm', // example.com
+    ];
 
     #[test]
-    fn shuffle() {
-        fixture_init();
-
-        // Empty arrays should remain empty.
-        let mut a: [i32; 0] = [];
-        let b = a;
-        super::shuffle(&mut a);
-        assert_eq!(a, b);
-
-        // For a one-element array, the only possible shuffle is the identity.
-        let mut a = [1];
-        let b = a;
-        super::shuffle(&mut a);
-        assert_eq!(a, b);
-
-        // For a two-element array, the only possible shuffle is the reverse, since `shuffle`
-        // doesn't leave any element in place.
-        let mut a = [1, 2];
-        let mut b = a;
-        super::shuffle(&mut a);
-        b.reverse();
-        assert_eq!(a, b);
-
-        // For three-element and longer arrays, the shuffle is always different from the original.
-        let mut a = [1, 2, 3];
-        let b = a;
-        super::shuffle(&mut a);
-        assert_ne!(a, b);
+    fn find_sni() {
+        // Construct a buffer representing a ClientHello with SNI extension
+        let range = super::find_sni(BUF_WITH_SNI);
+        let expected_range = BUF_WITH_SNI.len() - 16..BUF_WITH_SNI.len();
+        assert_eq!(range, expected_range);
+        assert_eq!(&BUF_WITH_SNI[range], b"\x00\x10\x00\x00\x0dexample.com");
     }
 
     #[test]
-    fn ascii_sequences() {
-        // Empty input
-        let data = b"";
-        let mut sequences = super::ascii_sequences::<1>(data);
-        assert!(sequences.next().is_none());
+    fn find_sni_no_sni() {
+        // Construct a buffer representing a ClientHello without SNI extension
+        let mut buf = Vec::from(&BUF_WITH_SNI[..BUF_WITH_SNI.len() - 20]);
+        let len = buf.len();
+        buf[len - 1] = 0x00; // Change the last byte of extensions length to 0
+        let range = super::find_sni(&buf);
+        assert_eq!(range, 0..buf.len());
+    }
 
-        // No LDHD ASCII
-        let data = b"\x00\x01\x02";
-        let mut sequences = super::ascii_sequences::<2>(data);
-        assert!(sequences.next().is_none());
+    #[test]
+    fn find_sni_invalid_sni() {
+        // Construct a buffer representing a ClientHello with an invalid SNI extension
+        let truncated = &BUF_WITH_SNI[..BUF_WITH_SNI.len() - 13];
+        let range = super::find_sni(truncated);
+        assert_eq!(range, 0..truncated.len());
+    }
 
-        // Sequences shorter than two
-        let data = b"a\x00b";
-        let mut sequences = super::ascii_sequences::<3>(data);
-        assert!(sequences.next().is_none());
+    #[test]
+    fn find_sni_no_client_hello() {
+        // Buffer that does not represent a ClientHello (msg_type != 1)
+        let buf = vec![2; 50];
+        let range = super::find_sni(&buf);
+        assert_eq!(range, 0..buf.len());
+    }
 
-        // One valid sequence of the required length
-        let data = b"ab";
-        let sequences = super::ascii_sequences::<1>(data);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..2]);
-
-        // Multiple valid sequences
-        let data = b"abc\x00defg\x00hi";
-        let sequences = super::ascii_sequences::<3>(data);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..3, 4..8, 9..11]);
-        // Multiple valid sequences, pick one
-        let sequences = super::ascii_sequences::<1>(data);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![4..8]);
-
-        // One sequence at the end of data
-        let data = b"\x00\x00abcde";
-        let sequences = super::ascii_sequences::<2>(data);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![2..7]);
-
-        // One sequence at the beginning of data
-        let data = b"abcde\x00\x00";
-        let sequences = super::ascii_sequences::<2>(data);
-        assert_eq!(sequences.collect::<Vec<_>>(), vec![0..5]);
+    #[test]
+    fn find_sni_malformed() {
+        // Buffers that are too short to contain a ClientHello
+        for len in 0..1024 {
+            let buf = vec![1; len];
+            let range = super::find_sni(&buf);
+            assert_eq!(range, 0..buf.len());
+        }
     }
 
     #[test]
     fn reorder_chunks() {
-        fn assert_complete(data: &[u8], chunks: &[(u64, &[u8])]) {
-            // Footgun prevention
-            const EMPTY: u8 = 0xff;
-            assert!(!data.contains(&EMPTY));
+        let chunks = super::reorder_chunks(BUF_WITH_SNI);
 
-            // Test that the chunk lengths sum to the total length
-            let total_length: usize = chunks.iter().map(|(_, chunk)| chunk.len()).sum();
-            assert_eq!(total_length, data.len());
+        // Test that the chunk lengths sum to the total length
+        let total_length: usize = chunks.iter().map(|(_, chunk)| chunk.len()).sum();
+        assert_eq!(total_length, BUF_WITH_SNI.len());
 
-            // Test that the combined chunks cover the entire data
-            let mut reconstructed = vec![EMPTY; data.len()];
-            for &(index, data) in chunks {
-                let idx: usize = index.try_into().unwrap();
-                reconstructed.splice(idx..idx + data.len(), data.iter().copied());
-            }
-            assert_eq!(data, reconstructed.as_slice());
+        // Test that the combined chunks cover the entire data
+        let mut reconstructed = vec![0; BUF_WITH_SNI.len()];
+        for (index, data) in chunks {
+            let idx: usize = index.try_into().unwrap();
+            reconstructed.splice(idx..idx + data.len(), data.iter().copied());
         }
-
-        fixture_init();
-
-        // Empty input -> empty output
-        let data = b"";
-        let chunks = super::reorder_chunks::<1>(data);
-        assert_eq!(chunks, vec![(0, data.as_ref())]);
-        assert_complete(data, &chunks);
-
-        // Data without ASCII sequences -> output == input
-        let data = b"\x00\x01\x02";
-        let chunks = super::reorder_chunks::<1>(data);
-        assert_eq!(chunks, vec![(0, data.as_ref())]);
-        assert_complete(data, &chunks);
-
-        // Data containing one ASCII sequence -> one predictable reordering
-        let data = b"ab";
-        let chunks = super::reorder_chunks::<1>(data);
-        assert_eq!(chunks, vec![(1, &data[1..2]), (0, &data[0..1])]);
-        assert_complete(data, &chunks);
-        let chunks = super::reorder_chunks::<2>(data);
-        assert_eq!(chunks, vec![(1, &data[1..2]), (0, &data[0..1])]);
-        assert_complete(data, &chunks);
-
-        // Data containing two ASCII sequences -> one of two predictable reorderings
-        let data = b"abc\x00def";
-        let chunks = super::reorder_chunks::<2>(data);
-        assert_eq!(chunks.len(), 3); // 2 splits create 3 chunks
-        let order1 = [(1, &data[1..5]), (5, &data[5..7]), (0, &data[0..1])];
-        let order2 = [(5, &data[5..7]), (0, &data[0..1]), (1, &data[1..5])];
-        assert!(chunks == order1 || chunks == order2);
-        assert_complete(data, &chunks);
-
-        // Data containing two ASCII sequences, pick one -> one predictable reordering
-        let data = b"abcd\x00ef";
-        let chunks = super::reorder_chunks::<1>(data);
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks, vec![(2, &data[2..7]), (0, &data[0..2])]);
-        assert_complete(data, &chunks);
-
-        // Data containing three ASCII sequences
-        let data = b"abc\x00defg\x00hijkl";
-        let chunks = super::reorder_chunks::<3>(data);
-        // Too many possibilities to check, just check that the output is valid
-        assert_eq!(chunks.len(), 4); // 3 splits create 4 chunks
-        assert_complete(data, &chunks);
+        assert_eq!(BUF_WITH_SNI, reconstructed.as_slice());
     }
 }

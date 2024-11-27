@@ -1530,7 +1530,7 @@ impl CryptoStreams {
             let chunks = if shuffle {
                 // Mix up the crypto data a bit. Create five chunks that split ASCII LDHD sequences,
                 // and reorder them.
-                reorder_chunks::<5>(data)
+                reorder_chunks(data)
                     .into_iter()
                     .map(|(off, d)| (offset + off, d))
                     .collect()
