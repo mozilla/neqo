@@ -4,4 +4,3 @@
 /.vscode/
 /lcov.info
 /target/
-Cargo.lock
