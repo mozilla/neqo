@@ -29,8 +29,8 @@ use crate::{
     packet::{PacketBuilder, PacketNumber},
     recovery::RecoveryToken,
     recv_stream::RxStreamOrderer,
-    reorder_chunks,
     send_stream::TxBuffer,
+    shuffle::find_sni,
     stats::FrameStats,
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
@@ -325,12 +325,10 @@ impl Crypto {
         &mut self,
         space: PacketNumberSpace,
         builder: &mut PacketBuilder,
-        shuffle: bool,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        self.streams
-            .write_frame(space, builder, shuffle, tokens, stats);
+        self.streams.write_frame(space, builder, tokens, stats);
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -1493,50 +1491,44 @@ impl CryptoStreams {
         &mut self,
         space: PacketNumberSpace,
         builder: &mut PacketBuilder,
-        shuffle: bool,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        fn write_chunks(
-            chunks: Vec<(u64, &[u8])>,
-            builder: &mut PacketBuilder,
-        ) -> Vec<(u64, usize)> {
-            let mut written = vec![];
-            for (offset, data) in chunks {
-                let mut header_len = 1 + Encoder::varint_len(offset) + 1;
+        fn write_chunk(chunk: (u64, &[u8]), builder: &mut PacketBuilder) -> Option<(u64, usize)> {
+            let (offset, data) = chunk;
+            let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
-                // Don't bother if there isn't room for the header and some data.
-                if builder.remaining() < header_len + 1 {
-                    break;
-                }
-                // Calculate length of data based on the minimum of:
-                // - available data
-                // - remaining space, less the header, which counts only one byte for the length at
-                //   first to avoid underestimating length
-                let length = min(data.len(), builder.remaining() - header_len);
-                header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
-                let length = min(data.len(), builder.remaining() - header_len);
-
-                builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
-                builder.encode_varint(offset);
-                builder.encode_vvec(&data[..length]);
-                written.push((offset, length));
+            // Don't bother if there isn't room for the header and some data.
+            if builder.remaining() < header_len + 1 {
+                return None;
             }
-            written
+            // Calculate length of data based on the minimum of:
+            // - available data
+            // - remaining space, less the header, which counts only one byte for the length at
+            //   first to avoid underestimating length
+            let length = min(data.len(), builder.remaining() - header_len);
+            header_len += Encoder::varint_len(u64::try_from(length).unwrap()) - 1;
+            let length = min(data.len(), builder.remaining() - header_len);
+
+            builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
+            builder.encode_varint(offset);
+            builder.encode_vvec(&data[..length]);
+            Some((offset, length))
         }
 
         let cs: &mut CryptoStream = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
-            let chunks = if shuffle {
-                // Cut the crypto data in two at random and swap the chunks.
-                reorder_chunks(data)
-                    .into_iter()
-                    .map(|(off, d)| (offset + off, d))
-                    .collect()
+            // Cut the crypto data in two at random and swap the chunks.
+            let mut written = [None, None];
+            if let Some(sni) = find_sni(data) {
+                let mid = sni.start + (sni.end - sni.start) / 2;
+                let (left, right) = data.split_at(mid);
+                written[1] = write_chunk((offset + mid as u64, right), builder);
+                written[0] = write_chunk((offset, left), builder);
             } else {
-                vec![(offset, data)]
-            };
-            for (offset, length) in write_chunks(chunks, builder) {
+                written[0] = write_chunk((offset, data), builder);
+            }
+            for (offset, length) in written.into_iter().flatten() {
                 cs.tx.mark_as_sent(offset, length);
                 qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
                 tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {

@@ -2176,7 +2176,6 @@ impl Connection {
         self.crypto.write_frame(
             PacketNumberSpace::ApplicationData,
             builder,
-            false,
             tokens,
             frame_stats,
         );
@@ -2310,13 +2309,7 @@ impl Connection {
                 self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
-                self.crypto.write_frame(
-                    space,
-                    builder,
-                    space == PacketNumberSpace::Initial && self.role == Role::Client,
-                    &mut tokens,
-                    stats,
-                );
+                self.crypto.write_frame(space, builder, &mut tokens, stats);
             }
         }
 

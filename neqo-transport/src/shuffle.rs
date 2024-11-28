@@ -6,184 +6,128 @@
 
 use std::ops::Range;
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, Decoder};
 
-/// Finds the range where the SNI extension lives.
-///
-/// If this isn't a `ClientHello` or the range cannot be found, return the whole message.
-fn find_sni(buf: &[u8]) -> Range<usize> {
-    // Read a big-endian integer from `buf`.
-    fn read_len(buf: &[u8]) -> usize {
-        let mut len = 0;
-        for v in buf {
-            len = (len << 8) + usize::from(*v);
-        }
-        len
-    }
-
-    // Advance `i` by the value read from the `N` bytes at `i`, and return the new index.
-    // If the buffer is too short, return `None`.
-    fn skip_vec<const N: usize>(i: usize, buf: &[u8]) -> Option<usize> {
-        if i + N > buf.len() {
+/// Finds the range where the SNI extension lives, or returns `None`.
+#[must_use]
+pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
+    #[must_use]
+    fn skip(dec: &mut Decoder, len: usize) -> Option<()> {
+        if len > dec.remaining() {
             return None;
         }
-        let i = i + N + read_len(&buf[i..i + N]);
-        if i > buf.len() {
-            None
-        } else {
-            Some(i)
-        }
+        dec.skip(len);
+        Some(())
     }
 
-    let mut i = 1 + 3 + 2 + 32; // msg_type, length, version, random
+    #[must_use]
+    fn skip_vec<const N: usize>(dec: &mut Decoder) -> Option<()> {
+        let len = dec.decode_uint(N)?.try_into().ok()?;
+        skip(dec, len)
+    }
+
+    let mut dec = Decoder::from(buf);
 
     // Return if buf is too short or does not contain a ClientHello (first byte== 1)
-    if buf.len() < i || buf[0] != 1 {
-        return 0..buf.len();
+    if buf.is_empty() || dec.decode_byte()? != 1 {
+        return None;
     }
+    skip(&mut dec, 3 + 2 + 32)?; // Skip length, version, random
+    skip_vec::<1>(&mut dec)?; // Skip session_id
+    skip_vec::<2>(&mut dec)?; // Skip cipher_suites
+    skip_vec::<1>(&mut dec)?; // Skip compression_methods
+    skip(&mut dec, 2)?;
 
-    // Skip session_id
-    i = if let Some(i) = skip_vec::<1>(i, buf) {
-        i
-    } else {
-        return 0..buf.len();
-    };
-
-    // Skip cipher_suites
-    i = if let Some(i) = skip_vec::<2>(i, buf) {
-        i
-    } else {
-        return 0..buf.len();
-    };
-
-    // Skip compression_methods
-    i = if let Some(i) = skip_vec::<1>(i, buf) {
-        i
-    } else {
-        return 0..buf.len();
-    };
-
-    i += 2; // Skip extensions length
-
-    while i + 4 < buf.len() {
-        if buf[i] == 0 && buf[i + 1] == 0 {
+    while dec.remaining() >= 4 {
+        let ext_type: u16 = dec.decode_uint(2)?.try_into().ok()?;
+        let ext_len: u16 = dec.decode_uint(2)?.try_into().ok()?;
+        if ext_type == 0 {
             // SNI!
-            i += 2;
-            let len = read_len(&buf[i..i + 2]);
-            if len < 2 || i + len > buf.len() {
-                break;
+            let sni_len: u16 = dec.decode_uint(2)?.try_into().ok()?;
+            skip(&mut dec, 3)?; // Skip name_type and host_name length
+            let start = dec.offset();
+            let end = start + usize::from(sni_len) - 3;
+            if end > dec.offset() + dec.remaining() {
+                return None;
             }
-            return i + 2..i + len;
+            qtrace!(
+                "SNI range {start}..{end}: {:?}",
+                String::from_utf8_lossy(&buf[start..end])
+            );
+            return Some(start..end);
         }
         // Skip extension
-        i = if let Some(i) = skip_vec::<2>(i, buf) {
-            i
-        } else {
-            break;
-        };
+        skip(&mut dec, ext_len.into())?;
     }
-    0..buf.len()
-}
-
-/// Find the index range of the SNI extension in `data`, split `data` in half at the midpoint of
-/// the SNI extension, and return the two halves and their respective starting indexes in reverse
-/// order.
-///
-/// # Panics
-///
-/// When `u64` values cannot be converted to `usize`.
-#[must_use]
-pub fn reorder_chunks(data: &[u8]) -> [(u64, &[u8]); 2] {
-    let Range { start, end } = find_sni(data);
-    qtrace!("Extracted SNI: {:?}", String::from_utf8_lossy(&data[start..end]));
-    let mid = start + (end - start) / 2;
-    let (left, right) = data.split_at(mid);
-    [(mid.try_into().unwrap(), right), (0, left)]
+    None
 }
 
 #[cfg(test)]
 mod tests {
-
     const BUF_WITH_SNI: &[u8] = &[
         0x01, // msg_type == 1 (ClientHello)
-        0x00, 0x00, 0x3a, // length (arbitrary)
+        0x00, 0x01, 0xfc, // length (arbitrary)
         0x03, 0x03, // version (TLS 1.2)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, // random
+        0x0e, 0x2d, 0x03, 0x37, 0xd9, 0x14, 0x2b, 0x32, 0x4e, 0xa8, 0xcf, 0x1f, 0xfa, 0x5b, 0x6c,
+        0xeb, 0xdd, 0x10, 0xa6, 0x49, 0x6e, 0xbf, 0xe4, 0x32, 0x3d, 0x0c, 0xe4, 0xbf, 0x90, 0xcf,
+        0x08, 0x42, // random
         0x00, // session_id length
-        0x00, 0x02, // cipher_suites length
-        0x13, 0x01, // cipher_suites
-        0x00, // compression_methods length
-        0x00, 0x16, // extensions length
+        0x00, 0x08, // cipher_suites length
+        0x13, 0x01, 0x13, 0x03, 0x13, 0x02, 0xca, 0xca, // cipher_suites
+        0x01, // compression_methods length
+        0x00, // compression_methods
+        0x01, 0xcb, // extensions length
+        0xff, 0x01, 0x00, 0x01, 0x00, // renegiation_info
+        0x00, 0x2d, 0x00, 0x03, 0x02, 0x01, 0x87, // psk_exchange_modes
         // SNI extension
         0x00, 0x00, // Extension type (SNI)
-        0x00, 0x12, // Extension length
-        0x00, 0x10, // Server Name Indication length
+        0x00, 0x0e, // Extension length
+        0x00, 0x0c, // Server Name List length
         0x00, // Name type (host_name)
-        0x00, 0x0d, // Host name length
-        b'e', b'x', b'a', b'm', b'p', b'l', b'e', b'.', b'c', b'o', b'm', // example.com
+        0x00, 0x09, // Host name length
+        0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x68, 0x6f, 0x73, 0x74, // server_name: "localhost"
+        0x00, 0x05, 0x00, 0x05, 0x01, 0x00, 0x00, 0x00, 0x00, // status_request
     ];
 
     #[test]
     fn find_sni() {
-        // Construct a buffer representing a ClientHello with SNI extension
-        let range = super::find_sni(BUF_WITH_SNI);
-        let expected_range = BUF_WITH_SNI.len() - 16..BUF_WITH_SNI.len();
+        // ClientHello with SNI extension
+        let range = super::find_sni(BUF_WITH_SNI).unwrap();
+        let expected_range = BUF_WITH_SNI.len() - 18..BUF_WITH_SNI.len() - 9;
         assert_eq!(range, expected_range);
-        assert_eq!(&BUF_WITH_SNI[range], b"\x00\x10\x00\x00\x0dexample.com");
+        assert_eq!(&BUF_WITH_SNI[range], b"localhost");
     }
 
     #[test]
     fn find_sni_no_sni() {
-        // Construct a buffer representing a ClientHello without SNI extension
-        let mut buf = Vec::from(&BUF_WITH_SNI[..BUF_WITH_SNI.len() - 20]);
+        // ClientHello without SNI extension
+        let mut buf = Vec::from(&BUF_WITH_SNI[..BUF_WITH_SNI.len() - 39]);
         let len = buf.len();
-        buf[len - 1] = 0x00; // Change the last byte of extensions length to 0
-        let range = super::find_sni(&buf);
-        assert_eq!(range, 0..buf.len());
+        assert!(buf[len - 2] == 0x01 && buf[len - 1] == 0xcb); // Check extensions length
+                                                               // Set extensions length to 0
+        buf[len - 2] = 0x00;
+        buf[len - 1] = 0x00;
+        assert!(super::find_sni(&buf).is_none());
     }
 
     #[test]
     fn find_sni_invalid_sni() {
-        // Construct a buffer representing a ClientHello with an invalid SNI extension
-        let truncated = &BUF_WITH_SNI[..BUF_WITH_SNI.len() - 13];
-        let range = super::find_sni(truncated);
-        assert_eq!(range, 0..truncated.len());
+        // ClientHello with an SNI extension truncated somewhere in the hostname
+        let truncated = &BUF_WITH_SNI[..BUF_WITH_SNI.len() - 15];
+        assert!(super::find_sni(truncated).is_none());
     }
 
     #[test]
-    fn find_sni_no_client_hello() {
-        // Buffer that does not represent a ClientHello (msg_type != 1)
-        let buf = vec![2; 50];
-        let range = super::find_sni(&buf);
-        assert_eq!(range, 0..buf.len());
+    fn find_sni_no_ci() {
+        // Not a ClientHello (msg_type != 1)
+        let buf = [0; 1];
+        assert!(super::find_sni(&buf).is_none());
     }
 
     #[test]
-    fn find_sni_malformed() {
-        // Buffers that are too short to contain a ClientHello
-        for len in 0..1024 {
-            let buf = vec![1; len];
-            let range = super::find_sni(&buf);
-            assert_eq!(range, 0..buf.len());
-        }
-    }
-
-    #[test]
-    fn reorder_chunks() {
-        let chunks = super::reorder_chunks(BUF_WITH_SNI);
-
-        // Test that the chunk lengths sum to the total length
-        let total_length: usize = chunks.iter().map(|(_, chunk)| chunk.len()).sum();
-        assert_eq!(total_length, BUF_WITH_SNI.len());
-
-        // Test that the combined chunks cover the entire data
-        let mut reconstructed = vec![0; BUF_WITH_SNI.len()];
-        for (index, data) in chunks {
-            let idx: usize = index.try_into().unwrap();
-            reconstructed.splice(idx..idx + data.len(), data.iter().copied());
-        }
-        assert_eq!(BUF_WITH_SNI, reconstructed.as_slice());
+    fn find_sni_malformed_ci() {
+        // Buffer starting with `1` but otherwise malformed
+        let buf = [1; 1];
+        assert!(super::find_sni(&buf).is_none());
     }
 }
