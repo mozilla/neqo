@@ -20,7 +20,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.10.0"
+version = "0.11.0"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -36,7 +36,7 @@ qlog = { version = "0.13", default-features = false }
 quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log"] }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 static_assertions = { version = "1.1", default-features = false }
-url = { version = "=2.5.1", default-features = false }
+url = { version = "2.5.3", default-features = false, features = ["std"] }
 
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }
