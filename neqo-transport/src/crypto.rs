@@ -1516,18 +1516,20 @@ impl CryptoStreams {
             Some((offset, length))
         }
 
-        let cs: &mut CryptoStream = self.get_mut(space).unwrap();
+        let cs = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
-            // Cut the crypto data in two at random and swap the chunks.
-            let mut written = [None, None];
-            if let Some(sni) = find_sni(data) {
+            let written = if let Some(sni) = find_sni(data) {
+                // Cut the crypto data in two in the middle of the SNI and swap the chunks.
                 let mid = sni.start + (sni.end - sni.start) / 2;
                 let (left, right) = data.split_at(mid);
-                written[1] = write_chunk((offset + mid as u64, right), builder);
-                written[0] = write_chunk((offset, left), builder);
+                [
+                    write_chunk((offset + mid as u64, right), builder),
+                    write_chunk((offset, left), builder),
+                ]
             } else {
-                written[0] = write_chunk((offset, data), builder);
-            }
+                // Just write the whole chunk.
+                [write_chunk((offset, data), builder), None]
+            };
             for (offset, length) in written.into_iter().flatten() {
                 cs.tx.mark_as_sent(offset, length);
                 qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
