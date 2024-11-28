@@ -6,6 +6,9 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#[cfg(feature = "bench")]
+pub mod sent;
+#[cfg(not(feature = "bench"))]
 mod sent;
 mod token;
 
@@ -62,6 +65,7 @@ pub struct SendProfile {
 }
 
 impl SendProfile {
+    #[must_use]
     pub fn new_limited(limit: usize) -> Self {
         // When the limit is too low, we only send ACK frames.
         // Set the limit to `ACK_ONLY_SIZE_LIMIT - 1` to ensure that
@@ -74,6 +78,7 @@ impl SendProfile {
         }
     }
 
+    #[must_use]
     pub fn new_paced() -> Self {
         // When pacing, we still allow ACK frames to be sent.
         Self {
@@ -84,6 +89,7 @@ impl SendProfile {
         }
     }
 
+    #[must_use]
     pub fn new_pto(pn_space: PacketNumberSpace, mtu: usize, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(mtu > ACK_ONLY_SIZE_LIMIT);
         debug_assert!(probe[pn_space]);
@@ -98,6 +104,7 @@ impl SendProfile {
     /// Whether probing this space is helpful.  This isn't necessarily the space
     /// that caused the timer to pop, but it is helpful to send a PING in a space
     /// that has the PTO timer armed.
+    #[must_use]
     pub fn should_probe(&self, space: PacketNumberSpace) -> bool {
         self.probe[space]
     }
@@ -106,14 +113,17 @@ impl SendProfile {
     /// number space.
     /// Send only ACKs either: when the space available is too small, or when a PTO
     /// exists for a later packet number space (which should get the most space).
+    #[must_use]
     pub fn ack_only(&self, space: PacketNumberSpace) -> bool {
         self.limit < ACK_ONLY_SIZE_LIMIT || self.pto.is_some_and(|sp| space < sp)
     }
 
+    #[must_use]
     pub const fn paced(&self) -> bool {
         self.paced
     }
 
+    #[must_use]
     pub const fn limit(&self) -> usize {
         self.limit
     }
@@ -141,6 +151,7 @@ pub struct LossRecoverySpace {
 }
 
 impl LossRecoverySpace {
+    #[must_use]
     pub fn new(space: PacketNumberSpace) -> Self {
         Self {
             space,
@@ -161,6 +172,7 @@ impl LossRecoverySpace {
         self.first_ooo_time
     }
 
+    #[must_use]
     pub const fn in_flight_outstanding(&self) -> bool {
         self.in_flight_outstanding > 0
     }
@@ -176,6 +188,7 @@ impl LossRecoverySpace {
         })
     }
 
+    #[must_use]
     pub fn pto_base_time(&self) -> Option<Instant> {
         if self.in_flight_outstanding() {
             debug_assert!(self.last_ack_eliciting.is_some());
@@ -217,6 +230,7 @@ impl LossRecoverySpace {
     /// send a PING frame after 1 PTO.  Note that this can't be within a PTO, or
     /// we would risk setting up a feedback loop; having this many packets
     /// outstanding can be normal and we don't want to PING too often.
+    #[must_use]
     pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
         let n_pto = if self.sent_packets.len() >= MAX_OUTSTANDING_UNACK {
             1
@@ -373,6 +387,7 @@ impl LossRecoverySpaces {
         sp.unwrap().remove_ignored()
     }
 
+    #[must_use]
     pub fn get(&self, space: PacketNumberSpace) -> Option<&LossRecoverySpace> {
         self.spaces[space].as_ref()
     }
@@ -483,6 +498,7 @@ pub struct LossRecovery {
 }
 
 impl LossRecovery {
+    #[must_use]
     pub fn new(stats: StatsCell, fast_pto: u8) -> Self {
         Self {
             confirmed_time: None,
@@ -494,6 +510,7 @@ impl LossRecovery {
         }
     }
 
+    #[must_use]
     pub fn largest_acknowledged_pn(&self, pn_space: PacketNumberSpace) -> Option<PacketNumber> {
         self.spaces.get(pn_space).and_then(|sp| sp.largest_acked)
     }
@@ -502,9 +519,14 @@ impl LossRecovery {
         self.qlog = qlog;
     }
 
+    /// Drop all 0rtt packets.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the largest acknowledged or `loss_time` is already set.
+    /// The client should not have received any ACK frames in the
+    /// application data packet number space when it drops 0-RTT.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
-        // The largest acknowledged or loss_time should still be unset.
-        // The client should not have received any ACK frames when it drops 0-RTT.
         assert!(self
             .spaces
             .get(PacketNumberSpace::ApplicationData)
@@ -540,6 +562,12 @@ impl LossRecovery {
         }
     }
 
+    /// Whether to probe the path.
+    ///
+    /// # Panics
+    ///
+    /// Assumes application data packet number space to be present.
+    #[must_use]
     pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
         self.spaces
             .get(PacketNumberSpace::ApplicationData)
@@ -571,6 +599,7 @@ impl LossRecovery {
 
     /// Returns (acked packets, lost packets)
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::missing_panics_doc)]
     pub fn on_ack_received<R>(
         &mut self,
         primary_path: &PathRef,
@@ -722,6 +751,7 @@ impl LossRecovery {
 
     /// Calculate when the next timeout is likely to be.  This is the earlier of the loss timer
     /// and the PTO timer; either or both might be disabled, so this can return `None`.
+    #[must_use]
     pub fn next_timeout(&self, path: &Path) -> Option<Instant> {
         let rtt = path.rtt();
         let loss_time = self.earliest_loss_time(rtt);
