@@ -70,7 +70,7 @@ fn find_sni(buf: &[u8]) -> Range<usize> {
             // SNI!
             i += 2;
             let len = read_len(&buf[i..i + 2]);
-            if i + len > buf.len() {
+            if len < 2 || i + len > buf.len() {
                 break;
             }
             return i + 2..i + len;
@@ -95,7 +95,7 @@ fn find_sni(buf: &[u8]) -> Range<usize> {
 #[must_use]
 pub fn reorder_chunks(data: &[u8]) -> [(u64, &[u8]); 2] {
     let Range { start, end } = find_sni(data);
-    qtrace!("SNI: {:?}", String::from_utf8_lossy(&data[start..end]));
+    qtrace!("Extracted SNI: {:?}", String::from_utf8_lossy(&data[start..end]));
     let mid = start + (end - start) / 2;
     let (left, right) = data.split_at(mid);
     [(mid.try_into().unwrap(), right), (0, left)]
