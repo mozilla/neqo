@@ -821,10 +821,12 @@ dependencies = [
 name = "neqo-common"
 version = "0.11.0"
 dependencies = [
+ "criterion",
  "enum-map",
  "env_logger",
  "hex",
  "log",
+ "neqo-crypto",
  "qlog",
  "regex",
  "test-fixture",
