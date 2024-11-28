@@ -1528,8 +1528,7 @@ impl CryptoStreams {
         let cs: &mut CryptoStream = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
             let chunks = if shuffle {
-                // Mix up the crypto data a bit. Create five chunks that split ASCII LDHD sequences,
-                // and reorder them.
+                // Cut the crypto data in two at random and swap the chunks.
                 reorder_chunks(data)
                     .into_iter()
                     .map(|(off, d)| (offset + off, d))
