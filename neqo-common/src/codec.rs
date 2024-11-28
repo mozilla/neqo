@@ -102,13 +102,10 @@ impl<'a> Decoder<'a> {
         if self.remaining() < n {
             return None;
         }
-        let mut v = 0_u64;
-        for i in 0..n {
-            let b = self.buf[self.offset + i];
-            v = v << 8 | u64::from(b);
-        }
+        let mut buf = [0; 8];
+        buf[8 - n..].copy_from_slice(&self.buf[self.offset..self.offset + n]);
         self.offset += n;
-        Some(v)
+        Some(u64::from_be_bytes(buf))
     }
 
     /// Decodes a QUIC varint.
