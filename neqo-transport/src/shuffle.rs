@@ -28,7 +28,7 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
 
     let mut dec = Decoder::from(buf);
 
-    // Return if buf is too short or does not contain a ClientHello (first byte== 1)
+    // Return if buf is empty or does not contain a ClientHello (first byte == 1)
     if buf.is_empty() || dec.decode_byte()? != 1 {
         return None;
     }
