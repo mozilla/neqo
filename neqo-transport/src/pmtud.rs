@@ -89,11 +89,11 @@ impl Pmtud {
     }
 
     /// Checks whether the PMTUD raise timer should be fired, and does so if needed.
-    pub fn maybe_fire_raise_timer(&mut self, now: Instant) {
+    pub fn maybe_fire_raise_timer(&mut self, now: Instant, stats: &mut Stats) {
         if self.probe_state == Probe::NotNeeded && self.raise_timer.is_some_and(|t| now >= t) {
             qdebug!("PMTUD raise timer fired");
             self.raise_timer = None;
-            self.start(now);
+            self.start(now, stats);
         }
     }
 
@@ -182,15 +182,17 @@ impl Pmtud {
         // total number of successful probes.
         stats.pmtud_ack += acked;
         self.mtu = self.search_table[self.probe_index];
+        stats.pmtud_pmtu = self.mtu;
         qdebug!("PMTUD probe of size {} succeeded", self.mtu);
-        self.start(now);
+        self.start(now, stats);
     }
 
     /// Stops the PMTUD process, setting the MTU to the largest successful probe size.
-    fn stop(&mut self, idx: usize, now: Instant) {
+    fn stop(&mut self, idx: usize, now: Instant, stats: &mut Stats) {
         self.probe_state = Probe::NotNeeded; // We don't need to send any more probes
         self.probe_index = idx; // Index of the last successful probe
         self.mtu = self.search_table[idx]; // Leading to this MTU
+        stats.pmtud_pmtu = self.mtu;
         self.probe_count = 0; // Reset the count
         self.loss_counts.fill(0); // Reset the loss counts
         self.raise_timer = Some(now + PMTU_RAISE_TIMER);
@@ -281,11 +283,11 @@ impl Pmtud {
             // start from scratch, but we don't strictly need to do that.
             self.reset(stats);
             qdebug!("PMTUD reset and restarting, PLPMTU is now {}", self.mtu);
-            self.start(now);
+            self.start(now, stats);
         } else {
             // We saw multiple losses of packets > the current MTU during PMTU discovery, so
             // we're done.
-            self.stop(last_ok, now);
+            self.stop(last_ok, now, stats);
         }
     }
 
@@ -293,13 +295,14 @@ impl Pmtud {
     fn reset(&mut self, stats: &mut Stats) {
         self.probe_index = 0;
         self.mtu = self.search_table[self.probe_index];
+        stats.pmtud_pmtu = self.mtu;
         self.loss_counts.fill(0);
         self.raise_timer = None;
         stats.pmtud_change += 1;
     }
 
     /// Starts the next upward PMTUD probe.
-    pub fn start(&mut self, now: Instant) {
+    pub fn start(&mut self, now: Instant, stats: &mut Stats) {
         if self.probe_index < SEARCH_TABLE_LEN - 1 // Not at the end of the search table
         // Next size is <= iface MTU
             && self.search_table[self.probe_index + 1] <= self.iface_mtu
@@ -313,7 +316,7 @@ impl Pmtud {
             );
         } else {
             // If we're at the end of the search table or hit the local interface MTU, we're done.
-            self.stop(self.probe_index, now);
+            self.stop(self.probe_index, now, stats);
         }
     }
 
@@ -411,7 +414,7 @@ mod tests {
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
-        pmtud.start(now);
+        pmtud.start(now, &mut stats);
         assert!(pmtud.needs_probe());
 
         while pmtud.needs_probe() {
@@ -450,7 +453,7 @@ mod tests {
         let mut prot = CryptoDxState::test_default();
 
         assert!(smaller_mtu >= pmtud.search_table[0]);
-        pmtud.start(now);
+        pmtud.start(now, &mut stats);
         assert!(pmtud.needs_probe());
 
         while pmtud.needs_probe() {
@@ -503,7 +506,7 @@ mod tests {
         let mut prot = CryptoDxState::test_default();
 
         assert!(larger_mtu >= pmtud.search_table[0]);
-        pmtud.start(now);
+        pmtud.start(now, &mut stats);
         assert!(pmtud.needs_probe());
 
         while pmtud.needs_probe() {
@@ -513,7 +516,7 @@ mod tests {
 
         qdebug!("Increasing MTU to {}", larger_mtu);
         let now = now + PMTU_RAISE_TIMER;
-        pmtud.maybe_fire_raise_timer(now);
+        pmtud.maybe_fire_raise_timer(now, &mut stats);
         while pmtud.needs_probe() {
             pmtud_step(&mut pmtud, &mut stats, &mut prot, addr, larger_mtu, now);
         }

@@ -337,6 +337,7 @@ impl Connection {
             c.conn_params.pacing_enabled(),
             NeqoQlog::default(),
             now,
+            &mut c.stats.borrow_mut(),
         );
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
         Ok(c)
@@ -1553,6 +1554,7 @@ impl Connection {
             self.conn_params.get_cc_algorithm(),
             self.conn_params.pacing_enabled(),
             now,
+            &mut self.stats.borrow_mut(),
         );
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
@@ -1924,6 +1926,7 @@ impl Connection {
             self.conn_params.get_cc_algorithm(),
             self.conn_params.pacing_enabled(),
             now,
+            &mut self.stats.borrow_mut(),
         );
         self.ensure_permanent(&path, now)?;
         qinfo!(
@@ -2884,7 +2887,7 @@ impl Connection {
                 .ok_or(Error::InternalError)?
                 .borrow_mut()
                 .pmtud_mut()
-                .start(now);
+                .start(now, &mut self.stats.borrow_mut());
         }
         Ok(())
     }

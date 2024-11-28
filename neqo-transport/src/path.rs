@@ -81,6 +81,7 @@ impl Paths {
         cc: CongestionControlAlgorithm,
         pacing: bool,
         now: Instant,
+        stats: &mut Stats,
     ) -> PathRef {
         self.paths
             .iter()
@@ -92,7 +93,8 @@ impl Paths {
                 }
             })
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now);
+                let mut p =
+                    Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -255,7 +257,9 @@ impl Paths {
         } else {
             // See if the PMTUD raise timer wants to fire.
             if let Some(path) = self.primary() {
-                path.borrow_mut().pmtud_mut().maybe_fire_raise_timer(now);
+                path.borrow_mut()
+                    .pmtud_mut()
+                    .maybe_fire_raise_timer(now, stats);
             }
             true
         }
@@ -530,10 +534,12 @@ impl Path {
         pacing: bool,
         qlog: NeqoQlog,
         now: Instant,
+        stats: &mut Stats,
     ) -> Self {
         let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
             Ok((name, mtu)) => {
                 qdebug!("Outbound interface {name} has MTU {mtu}");
+                stats.pmtud_iface_mtu = mtu;
                 mtu
             }
             Err(e) => {
