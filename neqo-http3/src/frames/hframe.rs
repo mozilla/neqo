@@ -87,7 +87,8 @@ impl HFrame {
             Self::PriorityUpdateRequest { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_REQUEST,
             Self::PriorityUpdatePush { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH,
             Self::Grease => {
-                HFrameType(Decoder::from(&random::<7>()).decode_uint(7).unwrap() * 0x1f + 0x21)
+                let r = Decoder::from(&random::<8>()).decode_uint::<u64>().unwrap();
+                HFrameType((r >> 5) * 0x1f + 0x21)
             }
         }
     }
