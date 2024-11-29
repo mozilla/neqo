@@ -1494,7 +1494,7 @@ impl CryptoStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        fn write_chunk(chunk: (u64, &[u8]), builder: &mut PacketBuilder) -> Option<(u64, usize)> {
+        fn write_chunk(offset: u64, data: &[u8], builder: &mut PacketBuilder) -> Option<(u64, usize)> {
             let (offset, data) = chunk;
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
