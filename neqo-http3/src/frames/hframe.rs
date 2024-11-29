@@ -88,7 +88,8 @@ impl HFrame {
             Self::PriorityUpdatePush { .. } => H3_FRAME_TYPE_PRIORITY_UPDATE_PUSH,
             Self::Grease => {
                 let r = Decoder::from(&random::<8>()).decode_uint::<u64>().unwrap();
-                HFrameType((r >> 5) * 0x1f + 0x21)
+                // Zero out the top 7 bits: 2 for being a varint; 5 to account for the *0x1f.
+                HFrameType((r >> 7) * 0x1f + 0x21)
             }
         }
     }
