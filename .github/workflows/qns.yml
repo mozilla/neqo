@@ -213,7 +213,7 @@ jobs:
                 fi
                 [ -n "$RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
-                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ <ins>~~/g; s/-\]/~~<\/ins> /g; s/\{\+/ _\*\*/g; s/\+\}/\*\*_ /g")
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ :rocket:~~/g; s/-\]/~~ /g; s/\{\+/ :warning:\*\*/g; s/\+\}/\*\* /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
