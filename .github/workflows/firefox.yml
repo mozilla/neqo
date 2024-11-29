@@ -118,6 +118,11 @@ jobs:
             echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
             echo 'start = "2021-11-15"'
             echo 'end = "2024-09-12"'
+            echo '[[trusted.windows-metadata]]'
+            echo 'criteria = "safe-to-deploy"'
+            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
+            echo 'start = "2021-11-15"'
+            echo 'end = "2024-09-12"'
           } >> supply-chain/audits.toml
           cargo update neqo-http3 neqo-transport neqo-common neqo-qpack neqo-crypto
           ./mach vendor rust --ignore-modified
