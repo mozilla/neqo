@@ -1494,8 +1494,11 @@ impl CryptoStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        fn write_chunk(offset: u64, data: &[u8], builder: &mut PacketBuilder) -> Option<(u64, usize)> {
-            let (offset, data) = chunk;
+        fn write_chunk(
+            offset: u64,
+            data: &[u8],
+            builder: &mut PacketBuilder,
+        ) -> Option<(u64, usize)> {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
             // Don't bother if there isn't room for the header and some data.
@@ -1518,17 +1521,22 @@ impl CryptoStreams {
 
         let cs = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
-            let written = if let Some(sni) = find_sni(data) {
-                // Cut the crypto data in two in the middle of the SNI and swap the chunks.
-                let mid = sni.start + (sni.end - sni.start) / 2;
-                let (left, right) = data.split_at(mid);
-                [
-                    write_chunk((offset + mid as u64, right), builder),
-                    write_chunk((offset, left), builder),
-                ]
+            let written = if offset == 0 {
+                if let Some(sni) = find_sni(data) {
+                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let (left, right) = data.split_at(mid);
+                    [
+                        write_chunk(offset + mid as u64, right, builder),
+                        write_chunk(offset, left, builder),
+                    ]
+                } else {
+                    // No SNI found, write the entire data.
+                    [write_chunk(offset, data, builder), None]
+                }
             } else {
-                // Just write the whole chunk.
-                [write_chunk((offset, data), builder), None]
+                // Not at the start of the crypto stream, write the entire data.
+                [write_chunk(offset, data, builder), None]
             };
             for (offset, length) in written.into_iter().flatten() {
                 cs.tx.mark_as_sent(offset, length);
