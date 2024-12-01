@@ -169,6 +169,11 @@ pub struct Args {
     /// Print connection stats after close.
     #[arg(name = "stats", long)]
     stats: bool,
+
+    /// The length of the local connection ID.
+    #[arg(name = "cid-length", short = 'l', long, default_value = "0",
+          value_parser = clap::value_parser!(u8).range(..=20))]
+    cid_len: u8,
 }
 
 impl Args {
@@ -198,6 +203,7 @@ impl Args {
             test: None,
             upload_size: if upload { requests[0] } else { 100 },
             stats: false,
+            cid_len: 0,
         }
     }
 
@@ -245,13 +251,7 @@ impl Args {
                     self.method = String::from("POST");
                 }
             }
-            "handshake"
-            | "transfer"
-            | "retry"
-            | "ecn"
-            | "rebind-port"
-            | "rebind-addr"
-            | "connectionmigration" => {}
+            "handshake" | "transfer" | "retry" | "ecn" => {}
             "resumption" => {
                 if self.urls.len() < 2 {
                     qerror!("Warning: resumption test won't work without >1 URL");
@@ -557,13 +557,12 @@ pub async fn client(mut args: Args) -> Res<()> {
             exit(127);
         }
 
-        let mut remote_addrs = format!("{host}:{port}").to_socket_addrs()?.filter(|addr| {
+        let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
                 (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
             )
         });
-        let remote_addr = remote_addrs.next();
         let Some(remote_addr) = remote_addr else {
             qerror!("No compatible address found for: {host}");
             exit(1);
@@ -576,18 +575,6 @@ pub async fn client(mut args: Args) -> Res<()> {
             real_local,
             remote_addr,
         );
-
-        let migration = if args.shared.qns_test.as_deref() == Some("connectionmigration") {
-            #[allow(clippy::option_if_let_else)]
-            if let Some(addr) = remote_addrs.next() {
-                Some((real_local.port(), addr))
-            } else {
-                qerror!("Cannot migrate from {host} when there is no address that follows");
-                exit(127);
-            }
-        } else {
-            None
-        };
 
         let hostname = format!("{host}");
         let mut token: Option<ResumptionToken> = None;
@@ -606,7 +593,7 @@ pub async fn client(mut args: Args) -> Res<()> {
                     http09::create_client(&args, real_local, remote_addr, &hostname, token)
                         .expect("failed to create client");
 
-                let handler = http09::Handler::new(to_request, &args, migration.as_ref());
+                let handler = http09::Handler::new(to_request, &args);
 
                 Runner::new(real_local, &mut socket, client, handler, &args)
                     .run()

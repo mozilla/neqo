@@ -16,6 +16,7 @@ readme.workspace = true
 cargo-fuzz = true
 
 [dependencies]
+# Not used in Firefox, so we can be liberal with dependency versions
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
 neqo-transport = { path = "../neqo-transport" }

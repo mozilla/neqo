@@ -23,14 +23,17 @@ pub mod frame;
 #[cfg(not(fuzzing))]
 mod frame;
 mod pace;
-#[cfg(fuzzing)]
+#[cfg(any(fuzzing, feature = "bench"))]
 pub mod packet;
-#[cfg(not(fuzzing))]
+#[cfg(not(any(fuzzing, feature = "bench")))]
 mod packet;
 mod path;
 mod pmtud;
 mod qlog;
 mod quic_datagrams;
+#[cfg(feature = "bench")]
+pub mod recovery;
+#[cfg(not(feature = "bench"))]
 mod recovery;
 #[cfg(feature = "bench")]
 pub mod recv_stream;
@@ -43,6 +46,7 @@ pub mod send_stream;
 mod send_stream;
 mod sender;
 pub mod server;
+mod shuffle;
 mod stats;
 pub mod stream_id;
 pub mod streams;
@@ -67,6 +71,7 @@ pub use self::{
     quic_datagrams::DatagramTracking,
     recv_stream::{RecvStreamStats, INITIAL_RECV_BUFFER_SIZE},
     send_stream::{SendStreamStats, INITIAL_SEND_BUFFER_SIZE},
+    shuffle::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,

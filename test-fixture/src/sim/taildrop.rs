@@ -151,7 +151,7 @@ impl TailDrop {
     /// If the last packet that was sending has been sent, start sending
     /// the next one.
     fn maybe_send(&mut self, now: Instant) {
-        if self.next_deque.as_ref().map_or(false, |t| *t <= now) {
+        if self.next_deque.as_ref().is_some_and(|t| *t <= now) {
             if let Some(d) = self.queue.pop_front() {
                 self.used -= self.size(&d);
                 self.send(d, now);

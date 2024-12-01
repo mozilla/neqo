@@ -9,6 +9,9 @@ on:
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
   workflow_dispatch:
+  schedule:
+    # Run at 1 AM each day, so there is a `main`-branch baseline in the cache.
+    - cron: '0 1 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -39,7 +42,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+      - uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -164,6 +167,13 @@ jobs:
           pattern: '*results'
           path: results
 
+      - uses: actions/cache/restore@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: results-main
+          key: qns-${{ github.sha }}
+          restore-keys: qns-
+
+      - run: sudo apt-get install -y --no-install-recommends wdiff
       - run: |
           mapfile -t LIST < <(echo '${{ needs.implementations.outputs.pairs }}' | jq '.[]' | sort)
           for PREFIX in "${LIST[@]}"; do
@@ -195,15 +205,28 @@ jobs:
               for GROUP in $(jq -r < "$RUN/$ROLE.grouped.json" '.results | keys[]'); do
                 RESULT=$(jq < "$RUN/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000)
                 LOG=$(jq -r < "$RUN/$ROLE.grouped.json" -r '.log_url')
+                BASELINE=$(mktemp)
+                if [ -e "results-main/${PREFIX} results/$ROLE.grouped.json" ]; then
+                  jq < "results-main/${PREFIX} results/$ROLE.grouped.json" -r '.results.'"$GROUP"'[]' | fmt -w 1000 > "$BASELINE"
+                else
+                  touch "$BASELINE"
+                fi
                 [ -n "$RESULT" ] || continue
-                echo "* [$PAIR]($LOG): **$RESULT**" >> "$ROLE.$GROUP.md"
+                DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ :rocket:~~/g; s/-\]/~~ /g; s/\{\+/ :warning:\*\*/g; s/\+\}/\*\* /g")
+                echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
           done
           {
             echo "### Failed Interop Tests"
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
-              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              SHA=$(cat results-main/baseline-sha.txt || true)
+              if [ -n "$SHA" ]; then
+                echo ", differences relative to $SHA."
+              fi
+              echo
               echo "#### $LATEST as client"
               cat client.failed.md
               echo "#### $LATEST as server"
@@ -233,6 +256,17 @@ jobs:
             echo
             echo "</details>"
           } >> comment.md
+
+      - if: github.ref == 'refs/heads/main'
+        run: |
+          mv results results-main
+          echo "${{ github.sha }}" > results-main/baseline-sha.txt
+
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: results-main
+          key: qns-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
         with:
