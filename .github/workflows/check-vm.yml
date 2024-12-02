@@ -39,7 +39,7 @@ jobs:
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
           prepare: | # This executes as root
             set -e
-            pkg install -y curl llvm
+            pkg install -y curl llvm nss pkgconf
           run: | # This executes as user
             set -e
             sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
@@ -57,7 +57,7 @@ jobs:
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
           prepare: | # This executes as root
             set -e
-            pkg_add rust rust-clippy llvm-16.0.6p30 # rustup doesn't support OpenBSD at all
+            pkg_add rust rust-clippy llvm-16.0.6p30 nss pkgconf # rustup doesn't support OpenBSD at all
           run: | # This executes as user
             set -e
             export LIBCLANG_PATH=/usr/local/llvm16/lib
@@ -81,7 +81,7 @@ jobs:
           prepare: | # This executes as root
             set -e
             /usr/sbin/pkg_add pkgin
-            pkgin -y install curl clang
+            pkgin -y install curl clang nss pkgconf
           run: | # This executes as user
             set -e
             sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
@@ -104,7 +104,7 @@ jobs:
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
           prepare: | # This executes as root
             set -e
-            pkg install clang-libs
+            pkg install clang-libs nss pkg-config
           run: | # This executes as also as root on Solaris
             set -e
             source <(curl -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install) || true # This doesn't exit with zero on success
