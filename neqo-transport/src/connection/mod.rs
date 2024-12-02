@@ -2163,6 +2163,7 @@ impl Connection {
         }
 
         for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
+            // TODO: Note this is using send path rtt for receive window auto-tuning. Can we do better?
             self.streams
                 .write_frames(prio, builder, tokens, &mut stats.frame_tx, now, rtt);
             if builder.is_full() {
@@ -2194,6 +2195,7 @@ impl Connection {
             return;
         }
 
+        // TODO: Note this is using send path rtt for receive window auto-tuning. Can we do better?
         self.streams.write_frames(
             TransmissionPriority::Low,
             builder,
