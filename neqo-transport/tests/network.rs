@@ -207,36 +207,38 @@ fn gbit_bandwidth() {
         "gbit-bandwidth",
         boxed![
             ConnectionNode::new_client(
-                ConnectionParameters::default().pmtud(false).pacing(false),
+                ConnectionParameters::default().pmtud(false).pacing(true),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
             ),
             TailDrop::gbit_link(),
-            NonRandomDelay::new(Duration::from_millis(50)),
+            NonRandomDelay::new(Duration::from_millis(25)),
             ConnectionNode::new_server(
-                ConnectionParameters::default().pmtud(false).pacing(false),
+                ConnectionParameters::default().pmtud(false).pacing(true),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]
             ),
             TailDrop::gbit_link(),
-            NonRandomDelay::new(Duration::from_millis(50)),
+            NonRandomDelay::new(Duration::from_millis(25)),
         ],
     );
 
     let simulated_time = sim.setup().run();
     let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
 
-    // Given Neqo's current static stream receive buffer of 1MiB, maximum
-    // bandwidth is below gbit link bandwidth.
-    //
-    // Tracked in https://github.com/mozilla/neqo/issues/733.
-    let maximum_bandwidth = MIB as f64 * 8.0 / 0.1; // bandwidth-delay-product / delay = bandwidth
+    let maximum_bandwidth = 1_000_000_000.0; // bandwidth-delay-product / delay = bandwidth
     let expected_utilization = 0.5;
 
+    println!(
+        "expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
+        maximum_bandwidth / MIB as f64,
+        bandwidth  / MIB as f64,
+    );
+
     assert!(
-            maximum_bandwidth * expected_utilization < bandwidth,
-            "expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
-            maximum_bandwidth / MIB as f64,
-            bandwidth  / MIB as f64,
-        );
+        maximum_bandwidth * expected_utilization < bandwidth,
+        "expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
+        maximum_bandwidth / MIB as f64,
+        bandwidth  / MIB as f64,
+    );
 }
