@@ -201,7 +201,7 @@ fn transfer_fixed_seed() {
 #[allow(clippy::cast_precision_loss)]
 fn gbit_bandwidth() {
     const MIB: usize = 1024 * 1024;
-    const TRANSFER_AMOUNT: usize = 100 * MIB;
+    const TRANSFER_AMOUNT: usize = 200 * MIB;
 
     let sim = Simulator::new(
         "gbit-bandwidth",
@@ -212,14 +212,14 @@ fn gbit_bandwidth() {
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
             ),
             TailDrop::gbit_link(),
-            NonRandomDelay::new(Duration::from_millis(25)),
+            NonRandomDelay::new(Duration::from_millis(20)),
             ConnectionNode::new_server(
                 ConnectionParameters::default().pmtud(false).pacing(true),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]
             ),
             TailDrop::gbit_link(),
-            NonRandomDelay::new(Duration::from_millis(25)),
+            NonRandomDelay::new(Duration::from_millis(20)),
         ],
     );
 

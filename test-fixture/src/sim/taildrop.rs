@@ -96,7 +96,7 @@ impl TailDrop {
     pub const fn gbit_link() -> Self {
         let rate = 1_000_000_000 / 8;
         let delay = Duration::from_micros(1);
-        let capacity = rate / 10;
+        let capacity = 5 * 1024 * 1024; // TODO: BDP 5 MiB
         Self::new(rate, capacity, delay)
     }
 
