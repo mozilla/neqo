@@ -259,6 +259,7 @@ jobs:
 
       - if: github.ref == 'refs/heads/main'
         run: |
+          rm -rf results-main || true
           mv results results-main
           echo "${{ github.sha }}" > results-main/baseline-sha.txt
 
