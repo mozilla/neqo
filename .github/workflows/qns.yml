@@ -42,7 +42,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+      - uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}-qns
@@ -55,7 +55,7 @@ jobs:
             # set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+      - uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
         if: github.event_name != 'pull_request'
         with:
           push: true
@@ -66,7 +66,7 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: 'linux/amd64, linux/arm64'
 
-      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+      - uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
         id: docker_build_and_push
         with:
           tags: ${{ steps.meta.outputs.tags }}
@@ -213,7 +213,7 @@ jobs:
                 fi
                 [ -n "$RESULT" ] || continue
                 DIFF=$(wdiff -n "$BASELINE" - <<< "$RESULT" || true)
-                RESULT=$(echo "$DIFF" | sed -E "s/\[-|-\]/~~/g; s/\{\+|\+\}/\*\*/g")
+                RESULT=$(echo "$DIFF" | sed -E "s/\[-/ :rocket:~~/g; s/-\]/~~ /g; s/\{\+/ :warning:\*\*/g; s/\+\}/\*\* /g")
                 echo "* [$PAIR]($LOG): $RESULT" >> "$ROLE.$GROUP.md"
               done
             done
@@ -221,7 +221,12 @@ jobs:
           {
             echo "### Failed Interop Tests"
             if [ -e client.failed.md ] || [ -e server.failed.md ]; then
-              echo "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              echo -n "[QUIC Interop Runner](https://github.com/quic-interop/quic-interop-runner), *client* vs. *server*"
+              SHA=$(cat results-main/baseline-sha.txt || true)
+              if [ -n "$SHA" ]; then
+                echo ", differences relative to $SHA."
+              fi
+              echo
               echo "#### $LATEST as client"
               cat client.failed.md
               echo "#### $LATEST as server"
@@ -253,9 +258,14 @@ jobs:
           } >> comment.md
 
       - if: github.ref == 'refs/heads/main'
+        run: |
+          mv results results-main
+          echo "${{ github.sha }}" > results-main/baseline-sha.txt
+
+      - if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
-          path: results
+          path: results-main
           key: qns-${{ github.sha }}
 
       - uses: ./.github/actions/pr-comment-data-export
