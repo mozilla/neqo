@@ -63,3 +63,8 @@ required-features = ["bench"]
 name = "sent_packets"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "transfer_once"
+harness = false
+required-features = ["bench"]
