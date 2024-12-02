@@ -49,6 +49,7 @@ jobs:
             cargo install cargo-llvm-cov --locked
             cargo llvm-cov test --no-fail-fast --lcov --output-path lcov.info
             cargo test --no-fail-fast --release
+            rm -rf target # Don't sync this back to host
 
       - if: matrix.os == 'openbsd'
         uses: vmactions/openbsd-vm@0cfe06e734a0ea3a546fca7ebf200b984b94d58a
@@ -72,6 +73,7 @@ jobs:
             # cargo llvm-cov test --no-fail-fast --lcov --output-path lcov.info
             cargo test --no-fail-fast # Remove this once profiler is supported
             cargo test --no-fail-fast --release
+            rm -rf target # Don't sync this back to host
 
       - if: matrix.os == 'netbsd'
         uses: vmactions/netbsd-vm@7c9086fdb4cc1aa814cda6e305390c2b966551a9
@@ -95,6 +97,7 @@ jobs:
             # cargo llvm-cov test --no-fail-fast --lcov --output-path lcov.info
             cargo test --no-fail-fast # Remove this once profiler is supported
             cargo test --no-fail-fast --release
+            rm -rf target # Don't sync this back to host
 
       - if: matrix.os == 'solaris'
         uses: vmactions/solaris-vm@a89b9438868c70db27e41625f0a5de6ff5e90809
@@ -118,6 +121,7 @@ jobs:
             # cargo llvm-cov test --no-fail-fast --lcov --output-path lcov.info
             cargo test --no-fail-fast # Remove this once profiler is supported
             cargo test --no-fail-fast --release
+            rm -rf target # Don't sync this back to host
 
       - uses: codecov/codecov-action@015f24e6818733317a2da2edd6290ab26238649a # v5.0.7
         with:
