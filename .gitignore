@@ -3,4 +3,5 @@
 *~
 /.vscode/
 /lcov.info
+/mutants.out*/
 /target/
