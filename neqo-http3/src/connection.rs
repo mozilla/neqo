@@ -1177,6 +1177,7 @@ impl Http3Connection {
         }
 
         let send_stream = self.send_streams.get_mut(&stream_id);
+        conn.stream_keep_alive(stream_id, true)?;
 
         match (send_stream, recv_stream, accept_res) {
             (None, None, _) => Err(Error::InvalidStreamId),
@@ -1285,8 +1286,6 @@ impl Http3Connection {
         // This really can't fail, panics if it does
         conn.stream_fairness(stream_id, true).unwrap();
 
-        conn.stream_keep_alive(session_id, true).unwrap();
-
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
@@ -1304,7 +1303,6 @@ impl Http3Connection {
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
-        conn: &mut Connection,
     ) -> Res<()> {
         qtrace!(
             "Create new WebTransport stream session={} stream_id={}",
@@ -1318,8 +1316,6 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)?
             .webtransport()
             .ok_or(Error::InvalidStreamId)?;
-
-        conn.stream_keep_alive(session_id, true).unwrap();
 
         self.webtransport_create_stream_internal(
             wt,
