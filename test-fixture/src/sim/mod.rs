@@ -293,7 +293,8 @@ pub struct ReadySimulator {
 }
 
 impl ReadySimulator {
-    pub fn run(mut self) {
+    #[allow(clippy::must_use_candidate)]
+    pub fn run(mut self) -> Duration {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;
@@ -303,5 +304,6 @@ impl ReadySimulator {
             wall = real_start.elapsed(),
         );
         self.sim.print_summary();
+        sim_time
     }
 }
