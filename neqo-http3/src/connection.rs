@@ -17,7 +17,7 @@ use std::{
 use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Header, MessageType, Role};
 use neqo_qpack::{decoder::QPackDecoder, encoder::QPackEncoder};
 use neqo_transport::{
-    streams::SendOrder, AppError, Connection, ConnectionError, DatagramTracking, State, StreamId,
+    streams::SendOrder, AppError, CloseReason, Connection, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
 };
 
@@ -44,7 +44,7 @@ use crate::{
     SendStreamEvents,
 };
 
-pub(crate) struct RequestDescription<'b, 't, T>
+pub struct RequestDescription<'b, 't, T>
 where
     T: AsRequestTarget<'t> + ?Sized + Debug,
 {
@@ -63,8 +63,8 @@ pub enum WebTransportSessionAcceptAction {
 impl ::std::fmt::Display for WebTransportSessionAcceptAction {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         match self {
-            WebTransportSessionAcceptAction::Accept => f.write_str("Accept"),
-            WebTransportSessionAcceptAction::Reject(_) => f.write_str("Reject"),
+            Self::Accept => f.write_str("Accept"),
+            Self::Reject(_) => f.write_str("Reject"),
         }
     }
 }
@@ -81,31 +81,28 @@ enum Http3RemoteSettingsState {
 /// - `ZeroRtt`: 0-RTT has been enabled and is active
 /// - Connected
 /// - GoingAway(StreamId): The connection has received a `GOAWAY` frame
-/// - Closing(ConnectionError): The connection is closed. The closing has been initiated by this end
-///   of the connection, e.g., the `CONNECTION_CLOSE` frame has been sent. In this state, the
+/// - Closing(CloseReason): The connection is closed. The closing has been initiated by this end of
+///   the connection, e.g., the `CONNECTION_CLOSE` frame has been sent. In this state, the
 ///   connection waits a certain amount of time to retransmit the `CONNECTION_CLOSE` frame if
 ///   needed.
-/// - Closed(ConnectionError): This is the final close state: closing has been initialized by the
-///   peer and an ack for the `CONNECTION_CLOSE` frame has been sent or the closing has been
-///   initiated by this end of the connection and the ack for the `CONNECTION_CLOSE` has been
-///   received or the waiting time has passed.
+/// - Closed(CloseReason): This is the final close state: closing has been initialized by the peer
+///   and an ack for the `CONNECTION_CLOSE` frame has been sent or the closing has been initiated by
+///   this end of the connection and the ack for the `CONNECTION_CLOSE` has been received or the
+///   waiting time has passed.
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub enum Http3State {
     Initializing,
     ZeroRtt,
     Connected,
     GoingAway(StreamId),
-    Closing(ConnectionError),
-    Closed(ConnectionError),
+    Closing(CloseReason),
+    Closed(CloseReason),
 }
 
 impl Http3State {
     #[must_use]
-    pub fn active(&self) -> bool {
-        matches!(
-            self,
-            Http3State::Connected | Http3State::GoingAway(_) | Http3State::ZeroRtt
-        )
+    pub const fn active(&self) -> bool {
+        matches!(self, Self::Connected | Self::GoingAway(_) | Self::ZeroRtt)
     }
 }
 
@@ -200,8 +197,9 @@ are local or remote:
     - will be canceled if is an unknown stream type or
     - the connection will fail if it is unallowed stream type (receiveing HTTP request on the
       client-side).
-    The output is handled in `handle_new_stream`, for control,  qpack streams and partially
-    `WebTransport` streams, otherwise the output is handled by `Http3Client` and `Http3ServerHandler`.
+
+The output is handled in `handle_new_stream`, for control,  qpack streams and partially
+`WebTransport` streams, otherwise the output is handled by `Http3Client` and `Http3ServerHandler`.
 
 
 ### Receiving data
@@ -298,7 +296,7 @@ The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Act
 data is done in the `read_data` function.
 */
 #[derive(Debug)]
-pub(crate) struct Http3Connection {
+pub struct Http3Connection {
     role: Role,
     pub state: Http3State,
     local_params: Http3Parameters,
@@ -375,7 +373,7 @@ impl Http3Connection {
         HttpZeroRttChecker::save(&self.local_params)
     }
 
-    fn create_qpack_streams(&mut self, conn: &mut Connection) -> Res<()> {
+    fn create_qpack_streams(&self, conn: &mut Connection) -> Res<()> {
         qdebug!([self], "create_qpack_streams.");
         self.qpack_encoder
             .borrow_mut()
@@ -469,7 +467,6 @@ impl Http3Connection {
 
     /// The function calls `receive` for a stream. It also deals with the outcome of a read by
     /// calling `handle_stream_manipulation_output`.
-    #[allow(clippy::option_if_let_else)] // False positive as borrow scope isn't lexical here.
     fn stream_receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<ReceiveOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
@@ -507,6 +504,7 @@ impl Http3Connection {
     /// 1) a `Push(_)`, `Htttp` or `WebTransportStream(_)` stream
     /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway` must
     ///    be handled by `Http3Client`/`Server`.
+    ///
     /// The function returns `ReceiveOutput`.
     pub fn handle_stream_readable(
         &mut self,
@@ -525,9 +523,9 @@ impl Http3Connection {
                 self.handle_unblocked_streams(unblocked_streams, conn)?;
                 Ok(ReceiveOutput::NoOutput)
             }
-            ReceiveOutput::ControlFrames(mut control_frames) => {
+            ReceiveOutput::ControlFrames(control_frames) => {
                 let mut rest = Vec::new();
-                for cf in control_frames.drain(..) {
+                for cf in control_frames {
                     if let Some(not_handled) = self.handle_control_frame(cf)? {
                         rest.push(not_handled);
                     }
@@ -535,7 +533,9 @@ impl Http3Connection {
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(
-                NewStreamType::Push(_) | NewStreamType::Http | NewStreamType::WebTransportStream(_),
+                NewStreamType::Push(_)
+                | NewStreamType::Http(_)
+                | NewStreamType::WebTransportStream(_),
             ) => Ok(output),
             ReceiveOutput::NewStream(_) => {
                 unreachable!("NewStream should have been handled already")
@@ -725,16 +725,14 @@ impl Http3Connection {
                     )),
                 );
             }
-            NewStreamType::Http => {
+            NewStreamType::Http(_) => {
                 qinfo!([self], "A new http stream {}.", stream_id);
             }
             NewStreamType::WebTransportStream(session_id) => {
                 let session_exists = self
                     .send_streams
                     .get(&StreamId::from(session_id))
-                    .map_or(false, |s| {
-                        s.stream_type() == Http3StreamType::ExtendedConnect
-                    });
+                    .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
                 if !session_exists {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
@@ -757,9 +755,9 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id)
             }
-            NewStreamType::Push(_) | NewStreamType::Http | NewStreamType::WebTransportStream(_) => {
-                Ok(ReceiveOutput::NewStream(stream_type))
-            }
+            NewStreamType::Push(_)
+            | NewStreamType::Http(_)
+            | NewStreamType::WebTransportStream(_) => Ok(ReceiveOutput::NewStream(stream_type)),
             NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
         }
     }
@@ -767,7 +765,7 @@ impl Http3Connection {
     /// This is called when an application closes the connection.
     pub fn close(&mut self, error: AppError) {
         qdebug!([self], "Close connection error {:?}.", error);
-        self.state = Http3State::Closing(ConnectionError::Application(error));
+        self.state = Http3State::Closing(CloseReason::Application(error));
         if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
             qwarn!("close(0) called when streams still active");
         }
@@ -780,6 +778,7 @@ impl Http3Connection {
     ///  - an error occurred or
     ///  - the stream is done, i.e. the second value in `output` tuple is true if the stream is done
     ///    and can be removed from the `recv_streams`
+    ///
     /// How it is handling `output`:
     ///  - if the stream is done, it removes the stream from `recv_streams`
     ///  - if the stream is not done and there is no error, return `output` and the caller will
@@ -891,7 +890,7 @@ impl Http3Connection {
     where
         T: AsRequestTarget<'t> + ?Sized + Debug,
     {
-        let final_headers = Http3Connection::create_fetch_headers(request)?;
+        let final_headers = Self::create_fetch_headers(request)?;
 
         let stream_type = if request.connect_type.is_some() {
             Http3StreamType::ExtendedConnect
@@ -920,7 +919,7 @@ impl Http3Connection {
                     message_type: MessageType::Response,
                     stream_type,
                     stream_id,
-                    header_frame_type_read: false,
+                    first_frame_type: None,
                 },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,
@@ -1138,7 +1137,7 @@ impl Http3Connection {
             Box::new(extended_conn.clone()),
         );
 
-        let final_headers = Http3Connection::create_fetch_headers(&RequestDescription {
+        let final_headers = Self::create_fetch_headers(&RequestDescription {
             method: "CONNECT",
             target,
             headers,
@@ -1429,7 +1428,7 @@ impl Http3Connection {
         }
     }
 
-    fn set_qpack_settings(&mut self, settings: &HSettings) -> Res<()> {
+    fn set_qpack_settings(&self, settings: &HSettings) -> Res<()> {
         let mut qpe = self.qpack_encoder.borrow_mut();
         qpe.set_max_capacity(settings.get(HSettingType::MaxTableCapacity))?;
         qpe.set_max_blocked_streams(settings.get(HSettingType::BlockedStreams))?;
@@ -1538,14 +1537,12 @@ impl Http3Connection {
     }
 
     fn recv_stream_is_critical(&self, stream_id: StreamId) -> bool {
-        if let Some(r) = self.recv_streams.get(&stream_id) {
+        self.recv_streams.get(&stream_id).is_some_and(|r| {
             matches!(
                 r.stream_type(),
                 Http3StreamType::Control | Http3StreamType::Encoder | Http3StreamType::Decoder
             )
-        } else {
-            false
-        }
+        })
     }
 
     fn send_stream_is_critical(&self, stream_id: StreamId) -> bool {
@@ -1634,7 +1631,7 @@ impl Http3Connection {
         stream
     }
 
-    pub fn webtransport_enabled(&self) -> bool {
+    pub const fn webtransport_enabled(&self) -> bool {
         self.webtransport.enabled()
     }
 }

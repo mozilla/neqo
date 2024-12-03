@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, cmp::min, fmt::Debug, num::NonZeroUsize, rc::Rc};
 
 use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
@@ -13,10 +13,11 @@ use neqo_transport::{Connection, StreamId};
 use crate::{
     frames::HFrame,
     headers_checks::{headers_valid, is_interim, trailers_valid},
-    qlog, BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
+    BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
     SendStream, SendStreamEvents, Stream,
 };
 
+const MIN_DATA_FRAME_SIZE: usize = 3; // Minimal DATA frame size: 2 (header) + 1 (payload)
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
 const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
 const MAX_DATA_HEADER_SIZE_3: usize = (1 << 14) - 1; // Maximal amount of data with DATA frame header size 3
@@ -26,7 +27,7 @@ const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 10737
 
 /// A HTTP message, request and response, consists of headers, optional data and an optional
 /// trailer header block. This state machine does not reflect what was already sent to the
-/// transport layer but only reflect what has been supplied to the `SendMessage`.It is
+/// transport layer but only reflect what has been supplied to the `SendMessage`. It is
 /// represented by the following states:
 ///   `WaitingForHeaders` - the headers have not been supplied yet. In this state only a
 ///                         request/response header can be added. When headers are supplied
@@ -41,7 +42,6 @@ const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 10737
 ///                   supply only a fin.
 ///   `Done` - in this state no more data or headers can be added. This state is entered when the
 ///            message is closed.
-
 #[derive(Debug, PartialEq)]
 enum MessageState {
     WaitingForHeaders,
@@ -102,7 +102,7 @@ impl MessageState {
 }
 
 #[derive(Debug)]
-pub(crate) struct SendMessage {
+pub struct SendMessage {
     state: MessageState,
     message_type: MessageType,
     stream_type: Http3StreamType,
@@ -177,7 +177,14 @@ impl SendStream for SendMessage {
         let available = conn
             .stream_avail_send_space(self.stream_id())
             .map_err(|e| Error::map_stream_send_errors(&e.into()))?;
-        if available <= 2 {
+        if available < MIN_DATA_FRAME_SIZE {
+            // Setting this once, instead of every time the available send space
+            // is exhausted, would suffice. That said, function call should be
+            // cheap, thus not worth optimizing.
+            conn.stream_set_writable_event_low_watermark(
+                self.stream_id(),
+                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).unwrap(),
+            )?;
             return Ok(0);
         }
         let to_send = if available <= MAX_DATA_HEADER_SIZE_2_LIMIT {
@@ -216,7 +223,6 @@ impl SendStream for SendMessage {
             .send_atomic(conn, &buf[..to_send])
             .map_err(|e| Error::map_stream_send_errors(&e))?;
         debug_assert!(sent);
-        qlog::h3_data_moved_down(conn.qlog_mut(), self.stream_id(), to_send);
         Ok(to_send)
     }
 
@@ -243,7 +249,6 @@ impl SendStream for SendMessage {
     /// info that the stream has been closed.)
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let sent = Error::map_error(self.stream.send_buffer(conn), Error::HttpInternal(5))?;
-        qlog::h3_data_moved_down(conn.qlog_mut(), self.stream_id(), sent);
 
         qtrace!([self], "{} bytes sent", sent);
         if !self.stream.has_buffered_data() {
@@ -308,7 +313,7 @@ impl SendStream for SendMessage {
 impl HttpSendStream for SendMessage {
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         self.state.new_headers(headers, self.message_type)?;
-        let buf = SendMessage::encode(
+        let buf = Self::encode(
             &mut self.encoder.borrow_mut(),
             headers,
             conn,

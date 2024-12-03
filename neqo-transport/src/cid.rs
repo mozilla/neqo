@@ -14,7 +14,7 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qinfo, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
@@ -124,13 +124,13 @@ pub struct ConnectionIdRef<'a> {
     cid: &'a [u8],
 }
 
-impl<'a> ::std::fmt::Debug for ConnectionIdRef<'a> {
+impl ::std::fmt::Debug for ConnectionIdRef<'_> {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "CID {}", hex_with_len(self.cid))
     }
 }
 
-impl<'a> ::std::fmt::Display for ConnectionIdRef<'a> {
+impl ::std::fmt::Display for ConnectionIdRef<'_> {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{}", hex(self.cid))
     }
@@ -142,7 +142,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> From<&'a T> for ConnectionIdRef<'a> {
     }
 }
 
-impl<'a> std::ops::Deref for ConnectionIdRef<'a> {
+impl std::ops::Deref for ConnectionIdRef<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -150,7 +150,7 @@ impl<'a> std::ops::Deref for ConnectionIdRef<'a> {
     }
 }
 
-impl<'a> PartialEq<ConnectionId> for ConnectionIdRef<'a> {
+impl PartialEq<ConnectionId> for ConnectionIdRef<'_> {
     fn eq(&self, other: &ConnectionId) -> bool {
         self.cid == &other.cid[..]
     }
@@ -210,7 +210,7 @@ pub struct RandomConnectionIdGenerator {
 
 impl RandomConnectionIdGenerator {
     #[must_use]
-    pub fn new(len: usize) -> Self {
+    pub const fn new(len: usize) -> Self {
         Self { len }
     }
 }
@@ -294,7 +294,7 @@ impl ConnectionIdEntry<[u8; 16]> {
     }
 
     /// The sequence number of this entry.
-    pub fn sequence_number(&self) -> u64 {
+    pub const fn sequence_number(&self) -> u64 {
         self.seqno
     }
 
@@ -314,17 +314,21 @@ impl ConnectionIdEntry<[u8; 16]> {
         stats.new_connection_id += 1;
         true
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.seqno == CONNECTION_ID_SEQNO_EMPTY || self.cid.is_empty()
+    }
 }
 
 impl ConnectionIdEntry<()> {
     /// Create an initial entry.
-    pub fn initial_local(cid: ConnectionId) -> Self {
+    pub const fn initial_local(cid: ConnectionId) -> Self {
         Self::new(0, cid, ())
     }
 }
 
 impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
-    pub fn new(seqno: u64, cid: ConnectionId, srt: SRT) -> Self {
+    pub const fn new(seqno: u64, cid: ConnectionId, srt: SRT) -> Self {
         Self { seqno, cid, srt }
     }
 
@@ -340,11 +344,11 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
         self.cid = cid;
     }
 
-    pub fn connection_id(&self) -> &ConnectionId {
+    pub const fn connection_id(&self) -> &ConnectionId {
         &self.cid
     }
 
-    pub fn reset_token(&self) -> &SRT {
+    pub const fn reset_token(&self) -> &SRT {
         &self.srt
     }
 }
@@ -405,7 +409,7 @@ impl ConnectionIdStore<[u8; 16]> {
     pub fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
         let mut retired = Vec::new();
         self.cids.retain(|e| {
-            if e.seqno < retire_prior {
+            if !e.is_empty() && e.seqno < retire_prior {
                 retired.push(e.seqno);
                 false
             } else {
@@ -510,8 +514,18 @@ impl ConnectionIdManager {
     pub fn retire(&mut self, seqno: u64) {
         // TODO(mt) - consider keeping connection IDs around for a short while.
 
-        self.connection_ids.retire(seqno);
-        self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+        let empty_cid = seqno == CONNECTION_ID_SEQNO_EMPTY
+            || self
+                .connection_ids
+                .cids
+                .iter()
+                .any(|c| c.seqno == seqno && c.cid.is_empty());
+        if empty_cid {
+            qdebug!("Connection ID {seqno} is zero-length, not retiring");
+        } else {
+            self.connection_ids.retire(seqno);
+            self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+        }
     }
 
     /// During the handshake, a server needs to regard the client's choice of destination

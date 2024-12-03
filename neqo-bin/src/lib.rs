@@ -21,11 +21,20 @@ use neqo_transport::{
 };
 
 pub mod client;
+mod send_data;
 pub mod server;
-mod udp;
+pub mod udp;
+
+/// Firefox default value
+///
+/// See `network.buffer.cache.size` pref <https://searchfox.org/mozilla-central/rev/f6e3b81aac49e602f06c204f9278da30993cdc8a/modules/libpref/init/all.js#3212>
+const STREAM_IO_BUFFER_SIZE: usize = 32 * 1024;
 
 #[derive(Debug, Parser)]
 pub struct SharedArgs {
+    #[command(flatten)]
+    verbose: Option<clap_verbosity_flag::Verbosity>,
+
     #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
@@ -62,10 +71,11 @@ pub struct SharedArgs {
     pub quic_parameters: QuicParameters,
 }
 
-#[cfg(feature = "bench")]
+#[cfg(any(test, feature = "bench"))]
 impl Default for SharedArgs {
     fn default() -> Self {
         Self {
+            verbose: None,
             alpn: "h3".into(),
             qlog_dir: None,
             max_table_size_encoder: 16384,
@@ -115,6 +125,10 @@ pub struct QuicParameters {
     /// Whether to disable pacing.
     pub no_pacing: bool,
 
+    #[arg(long)]
+    /// Whether to disable path MTU discovery.
+    pub no_pmtud: bool,
+
     #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
     pub preferred_address_v4: Option<String>,
@@ -124,7 +138,7 @@ pub struct QuicParameters {
     pub preferred_address_v6: Option<String>,
 }
 
-#[cfg(feature = "bench")]
+#[cfg(any(test, feature = "bench"))]
 impl Default for QuicParameters {
     fn default() -> Self {
         Self {
@@ -134,6 +148,7 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             congestion_control: CongestionControlAlgorithm::NewReno,
             no_pacing: false,
+            no_pmtud: false,
             preferred_address_v4: None,
             preferred_address_v6: None,
         }
@@ -141,7 +156,7 @@ impl Default for QuicParameters {
 }
 
 impl QuicParameters {
-    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
+    fn get_sock_addr<F>(opt: Option<&String>, v: &str, f: F) -> Option<SocketAddr>
     where
         F: FnMut(&SocketAddr) -> bool,
     {
@@ -162,12 +177,20 @@ impl QuicParameters {
 
     #[must_use]
     pub fn preferred_address_v4(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", SocketAddr::is_ipv4)
+        Self::get_sock_addr(
+            self.preferred_address_v4.as_ref(),
+            "IPv4",
+            SocketAddr::is_ipv4,
+        )
     }
 
     #[must_use]
     pub fn preferred_address_v6(&self) -> Option<SocketAddr> {
-        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", SocketAddr::is_ipv6)
+        Self::get_sock_addr(
+            self.preferred_address_v6.as_ref(),
+            "IPv6",
+            SocketAddr::is_ipv6,
+        )
     }
 
     #[must_use]
@@ -195,13 +218,18 @@ impl QuicParameters {
 
     #[must_use]
     pub fn get(&self, alpn: &str) -> ConnectionParameters {
-        let params = ConnectionParameters::default()
+        let mut params = ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .cc_algorithm(self.congestion_control)
-            .pacing(!self.no_pacing);
-
+            .pacing(!self.no_pacing)
+            .pmtud(!self.no_pmtud);
+        params = if let Some(pa) = self.preferred_address() {
+            params.preferred_address(pa)
+        } else {
+            params
+        };
         if let Some(&first) = self.quic_version.first() {
             let all = if self.quic_version[1..].contains(&first) {
                 &self.quic_version[1..]
@@ -242,3 +270,73 @@ impl Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf, str::FromStr, time::SystemTime};
+
+    use crate::{client, server};
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new() -> Self {
+            let mut dir = std::env::temp_dir();
+            dir.push(format!(
+                "neqo-bin-test-{}",
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            ));
+            fs::create_dir(&dir).unwrap();
+            Self { path: dir }
+        }
+
+        fn path(&self) -> PathBuf {
+            self.path.clone()
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            if self.path.exists() {
+                fs::remove_dir_all(&self.path).unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn write_qlog_file() {
+        neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
+
+        let temp_dir = TempDir::new();
+
+        let mut client_args = client::Args::new(&[1], false);
+        client_args.set_qlog_dir(temp_dir.path());
+        let mut server_args = server::Args::default();
+        server_args.set_qlog_dir(temp_dir.path());
+
+        let client = client::client(client_args);
+        let server = Box::pin(server::server(server_args));
+        tokio::select! {
+            _ = client => {}
+            res = server  => panic!("expect server not to terminate: {res:?}"),
+        };
+
+        // Verify that the directory contains two non-empty files
+        let entries: Vec<_> = fs::read_dir(temp_dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(entries.len(), 2, "expect 2 files in the directory");
+
+        for entry in entries {
+            let metadata = entry.metadata().unwrap();
+            assert!(metadata.is_file(), "expect a file, found something else");
+            assert!(metadata.len() > 0, "expect file not be empty");
+        }
+    }
+}

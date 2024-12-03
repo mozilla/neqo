@@ -27,7 +27,7 @@ pub const TLS_EPOCH_APPLICATION_DATA: Epoch = 3_u16;
 macro_rules! remap_enum {
     { $t:ident: $s:ty { $( $n:ident = $v:path ),+ $(,)? } } => {
         pub type $t = $s;
-        $( pub const $n: $t = $v as $t; )+
+        $(#[allow(clippy::cast_possible_truncation)] pub const $n: $t = $v as $t; )+
     };
     { $t:ident: $s:ty => $e:ident { $( $n:ident = $v:ident ),+ $(,)? } } => {
         remap_enum!{ $t: $s { $( $n = $e::$v ),+ } }
@@ -63,6 +63,7 @@ remap_enum! {
         TLS_GRP_EC_SECP521R1 = ssl_grp_ec_secp521r1,
         TLS_GRP_EC_X25519 = ssl_grp_ec_curve25519,
         TLS_GRP_KEM_XYBER768D00 = ssl_grp_kem_xyber768d00,
+        TLS_GRP_KEM_MLKEM768X25519 = ssl_grp_kem_mlkem768x25519,
     }
 }
 

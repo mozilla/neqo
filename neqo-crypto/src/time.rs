@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::upper_case_acronyms)]
-
 use std::{
     ops::Deref,
     os::raw::c_void,
@@ -74,7 +72,7 @@ fn get_base() -> &'static TimeZero {
     })
 }
 
-pub(crate) fn init() {
+pub fn init() {
     _ = get_base();
 }
 
@@ -123,21 +121,20 @@ impl TryInto<PRTime> for Time {
     fn try_into(self) -> Res<PRTime> {
         let base = get_base();
 
-        if let Some(delta) = self.t.checked_duration_since(base.instant) {
-            if let Ok(d) = PRTime::try_from(delta.as_micros()) {
-                d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
-            } else {
-                Err(Error::TimeTravelError)
-            }
-        } else {
-            // Try to go backwards from the base time.
-            let backwards = base.instant - self.t; // infallible
-            if let Ok(d) = PRTime::try_from(backwards.as_micros()) {
-                base.prtime.checked_sub(d).ok_or(Error::TimeTravelError)
-            } else {
-                Err(Error::TimeTravelError)
-            }
-        }
+        self.t.checked_duration_since(base.instant).map_or_else(
+            || {
+                // Try to go backwards from the base time.
+                let backwards = base.instant - self.t; // infallible
+                PRTime::try_from(backwards.as_micros()).map_or(Err(Error::TimeTravelError), |d| {
+                    base.prtime.checked_sub(d).ok_or(Error::TimeTravelError)
+                })
+            },
+            |delta| {
+                PRTime::try_from(delta.as_micros()).map_or(Err(Error::TimeTravelError), |d| {
+                    d.checked_add(base.prtime).ok_or(Error::TimeTravelError)
+                })
+            },
+        )
     }
 }
 
@@ -207,7 +204,7 @@ impl TimeHolder {
 
 impl Default for TimeHolder {
     fn default() -> Self {
-        TimeHolder { t: Box::pin(0) }
+        Self { t: Box::pin(0) }
     }
 }
 

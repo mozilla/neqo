@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use neqo_common::{event::Provider, Encoder};
 use neqo_crypto::AuthenticationStatus;
-use neqo_transport::{Connection, ConnectionError, StreamType};
+use neqo_transport::{CloseReason, Connection, StreamType};
 use test_fixture::{default_server_h3, now};
 
 use super::{connect, default_http3_client, default_http3_server, exchange_packets};
@@ -86,9 +86,9 @@ fn zero_rtt(
     assert_eq!(client.webtransport_enabled(), client_org && server_org);
 
     // exchange token
-    let out = server.process(None, now());
+    let out = server.process_output(now());
     // We do not have a token so we need to wait for a resumption token timer to trigger.
-    std::mem::drop(client.process(out.as_dgram_ref(), now() + Duration::from_millis(250)));
+    std::mem::drop(client.process(out.dgram(), now() + Duration::from_millis(250)));
     assert_eq!(client.state(), Http3State::Connected);
     let token = client
         .events()
@@ -116,12 +116,9 @@ fn zero_rtt(
         client_resumed && server_resumed
     );
 
-    let mut early_data_accepted = true;
     // The only case we should not do 0-RTT is when webtransport was enabled
     // originally and is disabled afterwards.
-    if server_org && !server_resumed {
-        early_data_accepted = false;
-    }
+    let early_data_accepted = !server_org || server_resumed;
     assert_eq!(
         client.tls_info().unwrap().early_data_accepted(),
         early_data_accepted
@@ -236,8 +233,8 @@ fn zero_rtt_wt_settings() {
 fn exchange_packets2(client: &mut Http3Client, server: &mut Connection) {
     let mut out = None;
     loop {
-        out = client.process(out.as_ref(), now()).dgram();
-        out = server.process(out.as_ref(), now()).dgram();
+        out = client.process(out, now()).dgram();
+        out = server.process(out, now()).dgram();
         if out.is_none() {
             break;
         }
@@ -270,10 +267,7 @@ fn wrong_setting_value() {
     exchange_packets2(&mut client, &mut server);
     match client.state() {
         Http3State::Closing(err) | Http3State::Closed(err) => {
-            assert_eq!(
-                err,
-                ConnectionError::Application(Error::HttpSettings.code())
-            );
+            assert_eq!(err, CloseReason::Application(Error::HttpSettings.code()));
         }
         _ => panic!("Wrong state {:?}", client.state()),
     };

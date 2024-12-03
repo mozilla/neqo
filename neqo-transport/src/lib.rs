@@ -18,12 +18,22 @@ mod crypto;
 mod ecn;
 mod events;
 mod fc;
+#[cfg(fuzzing)]
+pub mod frame;
+#[cfg(not(fuzzing))]
 mod frame;
 mod pace;
+#[cfg(any(fuzzing, feature = "bench"))]
+pub mod packet;
+#[cfg(not(any(fuzzing, feature = "bench")))]
 mod packet;
 mod path;
+mod pmtud;
 mod qlog;
 mod quic_datagrams;
+#[cfg(feature = "bench")]
+pub mod recovery;
+#[cfg(not(feature = "bench"))]
 mod recovery;
 #[cfg(feature = "bench")]
 pub mod recv_stream;
@@ -36,6 +46,7 @@ pub mod send_stream;
 mod send_stream;
 mod sender;
 pub mod server;
+mod shuffle;
 mod stats;
 pub mod stream_id;
 pub mod streams;
@@ -55,9 +66,12 @@ pub use self::{
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
+    packet::MIN_INITIAL_PACKET_SIZE,
+    pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
     recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
     send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
+    shuffle::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
@@ -98,7 +112,6 @@ pub enum Error {
     DecodingFrame,
     DecryptError,
     DisabledVersion,
-    HandshakeFailed,
     IdleTimeout,
     IntegerOverflow,
     InvalidInput,
@@ -118,6 +131,7 @@ pub enum Error {
     KeyUpdateBlocked,
     NoAvailablePath,
     NoMoreData,
+    NotAvailable,
     NotConnected,
     PacketNumberOverlap,
     PeerApplicationError(AppError),
@@ -129,7 +143,6 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
-    NotAvailable,
 }
 
 impl Error {
@@ -203,23 +216,34 @@ impl ::std::fmt::Display for Error {
 
 pub type AppError = u64;
 
+#[deprecated(note = "use `CloseReason` instead")]
+pub type ConnectionError = CloseReason;
+
+/// Reason why a connection closed.
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
-pub enum ConnectionError {
+pub enum CloseReason {
     Transport(Error),
     Application(AppError),
 }
 
-impl ConnectionError {
+impl CloseReason {
     #[must_use]
-    pub fn app_code(&self) -> Option<AppError> {
+    pub const fn app_code(&self) -> Option<AppError> {
         match self {
             Self::Application(e) => Some(*e),
             Self::Transport(_) => None,
         }
     }
+
+    /// Checks enclosed error for [`Error::NoError`] and
+    /// [`CloseReason::Application(0)`].
+    #[must_use]
+    pub const fn is_error(&self) -> bool {
+        !matches!(self, Self::Transport(Error::NoError) | Self::Application(0),)
+    }
 }
 
-impl From<CloseError> for ConnectionError {
+impl From<CloseError> for CloseReason {
     fn from(err: CloseError) -> Self {
         match err {
             CloseError::Transport(c) => Self::Transport(Error::PeerError(c)),

@@ -334,8 +334,7 @@ impl Streams {
         // filter the list, removing closed streams
         self.send.remove_terminal();
 
-        let send = &self.send;
-        let (removed_bidi, removed_uni) = self.recv.clear_terminal(send, self.role);
+        let (removed_bidi, removed_uni) = self.recv.clear_terminal(&self.send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         // The updates will be send if any steams has been removed.
@@ -476,21 +475,17 @@ impl Streams {
     }
 
     pub fn handle_max_data(&mut self, maximum_data: u64) {
-        let conn_was_blocked = self.sender_fc.borrow().available() == 0;
-        let conn_credit_increased = self.sender_fc.borrow_mut().update(maximum_data);
+        let previous_limit = self.sender_fc.borrow().available();
+        let Some(current_limit) = self.sender_fc.borrow_mut().update(maximum_data) else {
+            return;
+        };
 
-        if conn_was_blocked && conn_credit_increased {
-            for (id, ss) in &mut self.send {
-                if ss.avail() > 0 {
-                    // These may not actually all be writable if one
-                    // uses up all the conn credit. Not our fault.
-                    self.events.send_stream_writable(*id);
-                }
-            }
+        for (_id, ss) in &mut self.send {
+            ss.maybe_emit_writable_event(previous_limit, current_limit);
         }
     }
 
-    pub fn handle_data_blocked(&mut self) {
+    pub fn handle_data_blocked(&self) {
         self.receiver_fc.borrow_mut().send_flowc_update();
     }
 
@@ -531,7 +526,10 @@ impl Streams {
     }
 
     pub fn handle_max_streams(&mut self, stream_type: StreamType, maximum_streams: u64) {
-        if self.local_stream_limits[stream_type].update(maximum_streams) {
+        let increased = self.local_stream_limits[stream_type]
+            .update(maximum_streams)
+            .is_some();
+        if increased {
             self.events.send_stream_creatable(stream_type);
         }
     }
@@ -560,7 +558,8 @@ impl Streams {
         self.recv.keep_alive(stream_id, keep)
     }
 
-    pub fn need_keep_alive(&mut self) -> bool {
+    #[must_use]
+    pub fn need_keep_alive(&self) -> bool {
         self.recv.need_keep_alive()
     }
 }

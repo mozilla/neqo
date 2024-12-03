@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg(feature = "disable-encryption")]
-
 use std::fmt;
 
 use crate::{
@@ -20,12 +18,17 @@ pub struct AeadNull {}
 
 impl AeadNull {
     #[allow(clippy::missing_errors_doc)]
-    pub fn new(_version: Version, _cipher: Cipher, _secret: &SymKey, _prefix: &str) -> Res<Self> {
+    pub const fn new(
+        _version: Version,
+        _cipher: Cipher,
+        _secret: &SymKey,
+        _prefix: &str,
+    ) -> Res<Self> {
         Ok(Self {})
     }
 
     #[must_use]
-    pub fn expansion(&self) -> usize {
+    pub const fn expansion(&self) -> usize {
         AEAD_NULL_TAG.len()
     }
 

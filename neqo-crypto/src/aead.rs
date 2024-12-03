@@ -69,8 +69,7 @@ impl RealAead {
     }
 
     #[must_use]
-    #[allow(clippy::unused_self)]
-    pub fn expansion(&self) -> usize {
+    pub const fn expansion(&self) -> usize {
         16
     }
 

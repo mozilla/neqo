@@ -7,6 +7,13 @@ on:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
   merge_group:
+  workflow_dispatch:
+    inputs:
+      run_benchmarks:
+        description: 'Run benchmarks'
+        type: boolean
+        required: false
+        default: false
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -15,16 +22,34 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
+  toolchains:
+    runs-on: ubuntu-latest
+    outputs:
+      toolchains: ${{ steps.toolchains.outputs.toolchains }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: Cargo.toml
+      - id: toolchains
+        run: |
+          msrv="$(grep rust-version Cargo.toml | tr -d '"' | cut -f3 -d\ )"
+          echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
+
   check:
-    name: Build & test
+    needs: toolchains
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
-        # Don't increase beyond what Firefox is currently using:
-        # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
-        rust-toolchain: [1.74.0, stable, nightly]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         include:
           - os: ubuntu-latest
@@ -33,76 +58,41 @@ jobs:
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (MacOS)
-        if: runner.os == 'MacOS'
-        run: |
-          brew update
-          brew install llvm nss
-          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          # shellcheck disable=SC2028
-          {
-            echo C:/msys64/usr/bin
-            echo C:/msys64/mingw64/bin
-          } >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall
-          python3 -m pip install git+https://github.com/nodejs/gyp-next
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-
-      - name: Set up MSVC build environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Set up NSS/NSPR build environment (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          {
-            echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
-            echo "GYP_MSVS_VERSION=2022"
-            echo "BASH=$SHELL"
-          } >> "$GITHUB_ENV"
-          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
-
-      - name: Install Rust
-        uses: ./.github/actions/rust
+      - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fetch and build NSS and NSPR
-        uses: ./.github/actions/nss
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Build
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - name: Check
         run: |
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci
+          cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
+        env:
+          RUST_LOG: trace
         run: |
+          DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
+          export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --no-fail-fast --lcov --output-path lcov.info
-          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --profile ci --lcov --output-path lcov.info
+          else
+            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
+          fi
 
       - name: Run client/server transfer
         run: |
@@ -121,39 +111,35 @@ jobs:
           RUST_LOG: warn
           BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - name: Check formatting
-        run: |
-          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
-            CONFIG_PATH="--config-path=$(mktemp)"
-          fi
-          # shellcheck disable=SC2086
-          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
-        if: success() || failure()
-
-      - name: Clippy
-        run: |
-          # Use cargo-hack to run clippy on each crate individually with its
-          # respective default features only. Can reveal warnings otherwise
-          # hidden given that a plain cargo clippy combines all features of the
-          # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
-          cargo +${{ matrix.rust-toolchain }} hack clippy --all-targets --feature-powerset --exclude-features gecko -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
-        if: success() || failure()
-
-      - name: Check rustdoc links
-        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
-        env:
-          RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
-        if: success() || failure()
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@015f24e6818733317a2da2edd6290ab26238649a # v5.0.7
         with:
-          file: lcov.info
+          files: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
+      - name: Save simulation seeds artifact
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
+          path: simulation-seeds
+          compression-level: 9
+
+  check-cargo-lock:
+    name: Ensure `Cargo.lock` contains all required dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: cargo update -w --locked
+
   bench:
-    name: "Benchmark"
     needs: [check]
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks) ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request')
     uses: ./.github/workflows/bench.yml

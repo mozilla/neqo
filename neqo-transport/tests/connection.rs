@@ -7,7 +7,9 @@
 mod common;
 
 use neqo_common::{Datagram, Decoder, Encoder, Role};
-use neqo_transport::{ConnectionError, ConnectionParameters, Error, State, Version};
+use neqo_transport::{
+    CloseReason, ConnectionParameters, Error, State, Version, MIN_INITIAL_PACKET_SIZE,
+};
 use test_fixture::{
     default_client, default_server,
     header_protection::{
@@ -27,9 +29,9 @@ fn truncate_long_packet() {
     let mut client = default_client();
     let mut server = default_server();
 
-    let out = client.process(None, now());
+    let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
-    let out = server.process(out.as_dgram_ref(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
     // This will truncate the Handshake packet from the server.
@@ -40,21 +42,20 @@ fn truncate_long_packet() {
         dupe.source(),
         dupe.destination(),
         dupe.tos(),
-        dupe.ttl(),
         &dupe[..(dupe.len() - tail)],
     );
-    let hs_probe = client.process(Some(&truncated), now()).dgram();
+    let hs_probe = client.process(Some(truncated), now()).dgram();
     assert!(hs_probe.is_some());
 
     // Now feed in the untruncated packet.
-    let out = client.process(out.as_dgram_ref(), now());
+    let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // Throw this ACK away.
     assert!(test_fixture::maybe_authenticate(&mut client));
-    let out = client.process(None, now());
+    let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
 
     assert!(client.state().connected());
-    let out = server.process(out.as_dgram_ref(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert!(server.state().connected());
 }
@@ -72,12 +73,13 @@ fn reorder_server_initial() {
 
     let client_initial = client.process_output(now());
     let (_, client_dcid, _, _) =
-        decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client);
+        decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();
 
-    let server_packet = server.process(client_initial.as_dgram_ref(), now()).dgram();
+    let server_packet = server.process(client_initial.dgram(), now()).dgram();
     let (server_initial, server_hs) = split_datagram(server_packet.as_ref().unwrap());
-    let (protected_header, _, _, payload) = decode_initial_header(&server_initial, Role::Server);
+    let (protected_header, _, _, payload) =
+        decode_initial_header(&server_initial, Role::Server).unwrap();
 
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
@@ -103,7 +105,7 @@ fn reorder_server_initial() {
 
     // And rebuild a packet.
     let mut packet = header.clone();
-    packet.resize(1200, 0);
+    packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
     aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
     apply_header_protection(&hp, &mut packet, protected_header.len()..header.len());
@@ -111,30 +113,29 @@ fn reorder_server_initial() {
         server_initial.source(),
         server_initial.destination(),
         server_initial.tos(),
-        server_initial.ttl(),
         packet,
     );
 
     // Now a connection can be made successfully.
     // Though we modified the server's Initial packet, we get away with it.
     // TLS only authenticates the content of the CRYPTO frame, which was untouched.
-    client.process_input(&reordered, now());
-    client.process_input(&server_hs.unwrap(), now());
+    client.process_input(reordered, now());
+    client.process_input(server_hs.unwrap(), now());
     assert!(test_fixture::maybe_authenticate(&mut client));
     let finished = client.process_output(now());
     assert_eq!(*client.state(), State::Connected);
 
-    let done = server.process(finished.as_dgram_ref(), now());
+    let done = server.process(finished.dgram(), now());
     assert_eq!(*server.state(), State::Confirmed);
 
-    client.process_input(done.as_dgram_ref().unwrap(), now());
+    client.process_input(done.dgram().unwrap(), now());
     assert_eq!(*client.state(), State::Confirmed);
 }
 
-fn set_payload(server_packet: &Option<Datagram>, client_dcid: &[u8], payload: &[u8]) -> Datagram {
+fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[u8]) -> Datagram {
     let (server_initial, _server_hs) = split_datagram(server_packet.as_ref().unwrap());
     let (protected_header, _, _, orig_payload) =
-        decode_initial_header(&server_initial, Role::Server);
+        decode_initial_header(&server_initial, Role::Server).unwrap();
 
     // Now decrypt the packet.
     let (aead, hp) = initial_aead_and_hp(client_dcid, Role::Server);
@@ -157,7 +158,6 @@ fn set_payload(server_packet: &Option<Datagram>, client_dcid: &[u8], payload: &[
         server_initial.source(),
         server_initial.destination(),
         server_initial.tos(),
-        server_initial.ttl(),
         packet,
     )
 }
@@ -171,15 +171,16 @@ fn packet_without_frames() {
     let mut server = default_server();
 
     let client_initial = client.process_output(now());
+    let client_initial_clone = client_initial.as_dgram_ref().unwrap().clone();
     let (_, client_dcid, _, _) =
-        decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client);
+        decode_initial_header(&client_initial_clone, Role::Client).unwrap();
 
-    let server_packet = server.process(client_initial.as_dgram_ref(), now()).dgram();
-    let modified = set_payload(&server_packet, client_dcid, &[]);
-    client.process_input(&modified, now());
+    let server_packet = server.process(client_initial.dgram(), now()).dgram();
+    let modified = set_payload(server_packet.as_ref(), client_dcid, &[]);
+    client.process_input(modified, now());
     assert_eq!(
         client.state(),
-        &State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+        &State::Closed(CloseReason::Transport(Error::ProtocolViolation))
     );
 }
 
@@ -192,12 +193,13 @@ fn packet_with_only_padding() {
     let mut server = default_server();
 
     let client_initial = client.process_output(now());
+    let client_initial_clone = client_initial.as_dgram_ref().unwrap().clone();
     let (_, client_dcid, _, _) =
-        decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client);
+        decode_initial_header(&client_initial_clone, Role::Client).unwrap();
 
-    let server_packet = server.process(client_initial.as_dgram_ref(), now()).dgram();
-    let modified = set_payload(&server_packet, client_dcid, &[0]);
-    client.process_input(&modified, now());
+    let server_packet = server.process(client_initial.dgram(), now()).dgram();
+    let modified = set_payload(server_packet.as_ref(), client_dcid, &[0]);
+    client.process_input(modified, now());
     assert_eq!(client.state(), &State::WaitInitial);
 }
 
@@ -212,16 +214,17 @@ fn overflow_crypto() {
 
     let client_initial = client.process_output(now()).dgram();
     let (_, client_dcid, _, _) =
-        decode_initial_header(client_initial.as_ref().unwrap(), Role::Client);
+        decode_initial_header(client_initial.as_ref().unwrap(), Role::Client).unwrap();
     let client_dcid = client_dcid.to_owned();
 
-    let server_packet = server.process(client_initial.as_ref(), now()).dgram();
+    let server_packet = server.process(client_initial, now()).dgram();
     let (server_initial, _) = split_datagram(server_packet.as_ref().unwrap());
 
     // Now decrypt the server packet to get AEAD and HP instances.
     // We won't be using the packet, but making new ones.
     let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
-    let (_, server_dcid, server_scid, _) = decode_initial_header(&server_initial, Role::Server);
+    let (_, server_dcid, server_scid, _) =
+        decode_initial_header(&server_initial, Role::Server).unwrap();
 
     // Send in 100 packets, each with 1000 bytes of crypto frame data each,
     // eventually this will overrun the buffer we keep for crypto data.
@@ -235,7 +238,7 @@ fn overflow_crypto() {
         let plen = payload.len();
         payload.pad_to(plen + 1000, 44);
 
-        let mut packet = Encoder::with_capacity(1200);
+        let mut packet = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
         packet
             .encode_byte(0xc1) // Initial with packet number length of 2.
             .encode_uint(4, Version::Version1.wire_version())
@@ -252,22 +255,18 @@ fn overflow_crypto() {
         aead.encrypt(pn, &header, payload.as_ref(), &mut packet[header.len()..])
             .unwrap();
         apply_header_protection(&hp, &mut packet, pn_offset..(pn_offset + 2));
-        packet.resize(1200, 0); // Initial has to be 1200 bytes!
+        packet.resize(MIN_INITIAL_PACKET_SIZE, 0); // Initial has to be MIN_INITIAL_PACKET_SIZE bytes!
 
         let dgram = Datagram::new(
             server_initial.source(),
             server_initial.destination(),
             server_initial.tos(),
-            server_initial.ttl(),
             packet,
         );
-        client.process_input(&dgram, now());
+        client.process_input(dgram, now());
         if let State::Closing { error, .. } = client.state() {
             assert!(
-                matches!(
-                    error,
-                    ConnectionError::Transport(Error::CryptoBufferExceeded),
-                ),
+                matches!(error, CloseReason::Transport(Error::CryptoBufferExceeded)),
                 "the connection need to abort on crypto buffer"
             );
             assert!(pn > 64, "at least 64000 bytes of data is buffered");
@@ -275,4 +274,27 @@ fn overflow_crypto() {
         }
     }
     panic!("Was not able to overflow the crypto buffer");
+}
+
+#[test]
+fn handshake_mlkem768x25519() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    client
+        .set_groups(&[neqo_crypto::TLS_GRP_KEM_MLKEM768X25519])
+        .ok();
+    client.send_additional_key_shares(0).ok();
+
+    test_fixture::handshake(&mut client, &mut server);
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(*server.state(), State::Confirmed);
+    assert_eq!(
+        client.tls_info().unwrap().key_exchange(),
+        neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
+    );
+    assert_eq!(
+        server.tls_info().unwrap().key_exchange(),
+        neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
+    );
 }

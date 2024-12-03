@@ -7,12 +7,16 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enumset = { version = "1.1", default-features = false }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
@@ -21,8 +25,7 @@ neqo-qpack = { path = "./../neqo-qpack" }
 neqo-transport = { path = "./../neqo-transport" }
 qlog = { workspace = true }
 sfv = { version = "0.9", default-features = false }
-smallvec = { version = "1.11", default-features = false }
-url = { version = "2.5", default-features = false }
+url = { workspace = true }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }

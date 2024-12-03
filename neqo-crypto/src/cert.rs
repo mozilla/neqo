@@ -4,23 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ptr::{addr_of, NonNull};
+use std::ptr::NonNull;
 
 use neqo_common::qerror;
 
 use crate::{
-    err::secstatus_to_res,
-    null_safe_slice,
-    p11::{CERTCertListNode, CERT_GetCertificateDer, CertList, Item, SECItem, SECItemArray},
-    ssl::{
-        PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
-        SSL_PeerStapledOCSPResponses,
-    },
+    experimental_api, null_safe_slice,
+    p11::{ItemArray, ItemArrayIterator, SECItem, SECItemArray},
+    ssl::{PRFileDesc, SSL_PeerSignedCertTimestamps, SSL_PeerStapledOCSPResponses},
 };
 
+experimental_api!(SSL_PeerCertificateChainDER(
+    fd: *mut PRFileDesc,
+    out: *mut *mut SECItemArray,
+));
+
 pub struct CertificateInfo {
-    certs: CertList,
-    cursor: *const CERTCertListNode,
+    certs: ItemArray,
     /// `stapled_ocsp_responses` and `signed_cert_timestamp` are properties
     /// associated with each of the certificates. Right now, NSS only
     /// reports the value for the end-entity certificate (the first).
@@ -28,12 +28,14 @@ pub struct CertificateInfo {
     signed_cert_timestamp: Option<Vec<u8>>,
 }
 
-fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<(CertList, *const CERTCertListNode)> {
-    let chain = unsafe { SSL_PeerCertificateChain(fd) };
-    CertList::from_ptr(chain.cast()).ok().map(|certs| {
-        let cursor = CertificateInfo::head(&certs);
-        (certs, cursor)
-    })
+fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<ItemArray> {
+    let mut chain_ptr: *mut SECItemArray = std::ptr::null_mut();
+    let rv = unsafe { SSL_PeerCertificateChainDER(fd, &mut chain_ptr) };
+    if rv.is_ok() {
+        ItemArray::from_ptr(chain_ptr).ok()
+    } else {
+        None
+    }
 }
 
 // As explained in rfc6961, an OCSPResponseList can have at most
@@ -60,57 +62,49 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
 
 fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
     let sct_nss = unsafe { SSL_PeerSignedCertTimestamps(fd) };
-    match NonNull::new(sct_nss as *mut SECItem) {
-        Some(sct_ptr) => {
-            if unsafe { sct_ptr.as_ref().len == 0 || sct_ptr.as_ref().data.is_null() } {
-                Some(Vec::new())
-            } else {
-                let sct_slice =
-                    unsafe { null_safe_slice(sct_ptr.as_ref().data, sct_ptr.as_ref().len) };
-                Some(sct_slice.to_owned())
-            }
+    NonNull::new(sct_nss as *mut SECItem).map(|sct_ptr| {
+        if unsafe { sct_ptr.as_ref().len == 0 || sct_ptr.as_ref().data.is_null() } {
+            Vec::new()
+        } else {
+            let sct_slice = unsafe { null_safe_slice(sct_ptr.as_ref().data, sct_ptr.as_ref().len) };
+            sct_slice.to_owned()
         }
-        None => None,
-    }
+    })
 }
 
 impl CertificateInfo {
     pub(crate) fn new(fd: *mut PRFileDesc) -> Option<Self> {
-        peer_certificate_chain(fd).map(|(certs, cursor)| Self {
+        peer_certificate_chain(fd).map(|certs| Self {
             certs,
-            cursor,
             stapled_ocsp_responses: stapled_ocsp_responses(fd),
             signed_cert_timestamp: signed_cert_timestamp(fd),
         })
     }
+}
 
-    fn head(certs: &CertList) -> *const CERTCertListNode {
-        // Three stars: one for the reference, one for the wrapper, one to deference the pointer.
-        unsafe { addr_of!((***certs).list).cast() }
+impl CertificateInfo {
+    #[must_use]
+    pub fn iter(&self) -> ItemArrayIterator<'_> {
+        self.certs.into_iter()
     }
 }
 
-impl<'a> Iterator for &'a mut CertificateInfo {
+impl<'a> IntoIterator for &'a CertificateInfo {
+    type IntoIter = ItemArrayIterator<'a>;
     type Item = &'a [u8];
-    fn next(&mut self) -> Option<&'a [u8]> {
-        self.cursor = unsafe { *self.cursor }.links.next.cast();
-        if self.cursor == CertificateInfo::head(&self.certs) {
-            return None;
-        }
-        let mut item = Item::make_empty();
-        let cert = unsafe { *self.cursor }.cert;
-        secstatus_to_res(unsafe { CERT_GetCertificateDer(cert, &mut item) })
-            .expect("getting DER from certificate should work");
-        Some(unsafe { null_safe_slice(item.data, item.len) })
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
 impl CertificateInfo {
-    pub fn stapled_ocsp_responses(&mut self) -> &Option<Vec<Vec<u8>>> {
+    #[must_use]
+    pub const fn stapled_ocsp_responses(&self) -> &Option<Vec<Vec<u8>>> {
         &self.stapled_ocsp_responses
     }
 
-    pub fn signed_cert_timestamp(&mut self) -> &Option<Vec<u8>> {
+    #[must_use]
+    pub const fn signed_cert_timestamp(&self) -> &Option<Vec<u8>> {
         &self.signed_cert_timestamp
     }
 }

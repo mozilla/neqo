@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![allow(dead_code)]
-#![allow(clippy::upper_case_acronyms)]
 
 use std::{os::raw::c_char, str::Utf8Error};
 
@@ -151,7 +150,7 @@ pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
     }
 }
 
-pub fn is_blocked(result: &Res<()>) -> bool {
+pub const fn is_blocked(result: &Res<()>) -> bool {
     match result {
         Err(Error::NssError { code, .. }) => *code == nspr::PR_WOULD_BLOCK_ERROR,
         _ => false,

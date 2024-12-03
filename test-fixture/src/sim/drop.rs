@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     fmt::{self, Debug},
     time::Instant,
@@ -28,7 +26,7 @@ impl Drop {
     /// random value between 0 and `max` (exclusive).  If this value is less than
     /// `threshold` a value of `true` is returned.
     #[must_use]
-    pub fn new(threshold: u64, max: u64) -> Self {
+    pub const fn new(threshold: u64, max: u64) -> Self {
         Self {
             threshold,
             max,
@@ -47,7 +45,8 @@ impl Drop {
     /// # Panics
     /// When this is invoked after test configuration has been torn down,
     /// such that the RNG is no longer available.
-    pub fn drop(&mut self) -> bool {
+    #[must_use]
+    pub fn drop(&self) -> bool {
         let mut rng = self.rng.as_ref().unwrap().borrow_mut();
         let r = rng.random_from(0..self.max);
         r < self.threshold
@@ -61,16 +60,14 @@ impl Node for Drop {
 
     // Pass any datagram provided directly out, but drop some of them.
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
-        if let Some(dgram) = d {
+        d.map_or(Output::None, |dgram| {
             if self.drop() {
                 qtrace!("drop {}", dgram.len());
                 Output::None
             } else {
                 Output::Datagram(dgram)
             }
-        } else {
-            Output::None
-        }
+        })
     }
 }
 

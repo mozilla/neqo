@@ -14,7 +14,7 @@ use std::{
 
 use neqo_common::qlog::NeqoQlog;
 
-use crate::{path::PATH_MTU_V6, rtt::RttEstimate, tracking::SentPacket, Error};
+use crate::{recovery::SentPacket, rtt::RttEstimate, Error, Pmtud};
 
 mod classic_cc;
 mod cubic;
@@ -22,13 +22,9 @@ mod new_reno;
 
 pub use classic_cc::ClassicCongestionControl;
 #[cfg(test)]
-pub use classic_cc::{CWND_INITIAL, CWND_INITIAL_PKTS, CWND_MIN};
+pub use classic_cc::CWND_INITIAL_PKTS;
 pub use cubic::Cubic;
 pub use new_reno::NewReno;
-
-pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
-#[allow(clippy::cast_precision_loss)]
-pub const MAX_DATAGRAM_SIZE_F64: f64 = MAX_DATAGRAM_SIZE as f64;
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: NeqoQlog);
@@ -42,6 +38,19 @@ pub trait CongestionControl: Display + Debug {
     #[must_use]
     fn cwnd_avail(&self) -> usize;
 
+    #[must_use]
+    fn cwnd_min(&self) -> usize;
+
+    #[cfg(test)]
+    #[must_use]
+    fn cwnd_initial(&self) -> usize;
+
+    #[must_use]
+    fn pmtud(&self) -> &Pmtud;
+
+    #[must_use]
+    fn pmtud_mut(&mut self) -> &mut Pmtud;
+
     fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], rtt_est: &RttEstimate, now: Instant);
 
     /// Returns true if the congestion window was reduced.
@@ -51,16 +60,20 @@ pub trait CongestionControl: Display + Debug {
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
+        now: Instant,
     ) -> bool;
+
+    /// Returns true if the congestion window was reduced.
+    fn on_ecn_ce_received(&mut self, largest_acked_pkt: &SentPacket, now: Instant) -> bool;
 
     #[must_use]
     fn recovery_packet(&self) -> bool;
 
-    fn discard(&mut self, pkt: &SentPacket);
+    fn discard(&mut self, pkt: &SentPacket, now: Instant);
 
-    fn on_packet_sent(&mut self, pkt: &SentPacket);
+    fn on_packet_sent(&mut self, pkt: &SentPacket, now: Instant);
 
-    fn discard_in_flight(&mut self);
+    fn discard_in_flight(&mut self, now: Instant);
 }
 
 #[derive(Debug, Copy, Clone)]

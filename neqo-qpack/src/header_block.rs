@@ -25,7 +25,7 @@ use crate::{
     Error, Res,
 };
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct HeaderEncoder {
     buf: QpackData,
     base: u64,
@@ -172,13 +172,13 @@ impl Deref for HeaderEncoder {
     }
 }
 
-pub(crate) struct HeaderDecoder<'a> {
+pub struct HeaderDecoder<'a> {
     buf: ReceiverBufferWrapper<'a>,
     base: u64,
     req_insert_cnt: u64,
 }
 
-impl<'a> ::std::fmt::Display for HeaderDecoder<'a> {
+impl ::std::fmt::Display for HeaderDecoder<'_> {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "HeaderDecoder")
     }
@@ -191,7 +191,7 @@ pub enum HeaderDecoderResult {
 }
 
 impl<'a> HeaderDecoder<'a> {
-    pub fn new(buf: &'a [u8]) -> Self {
+    pub const fn new(buf: &'a [u8]) -> Self {
         Self {
             buf: ReceiverBufferWrapper::new(buf),
             base: 0,
@@ -278,7 +278,7 @@ impl<'a> HeaderDecoder<'a> {
         Ok(HeaderDecoderResult::Headers(h))
     }
 
-    pub fn get_req_insert_cnt(&self) -> u64 {
+    pub const fn get_req_insert_cnt(&self) -> u64 {
         self.req_insert_cnt
     }
 
@@ -612,7 +612,7 @@ mod tests {
     const LITERAL_VALUE: &str = "custom-key";
 
     #[test]
-    fn test_encode_indexed_static() {
+    fn encode_indexed_static() {
         for (index, result, _, _) in INDEX_STATIC_TEST {
             let mut encoded_h = HeaderEncoder::new(0, true, 1000);
             encoded_h.encode_indexed_static(*index);
@@ -622,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_indexed_dynamic() {
+    fn encode_indexed_dynamic() {
         for (index, result, _, _) in INDEX_DYNAMIC_TEST {
             let mut encoded_h = HeaderEncoder::new(66, true, 1000);
             encoded_h.encode_indexed_dynamic(*index);
@@ -632,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_indexed_dynamic_post() {
+    fn encode_indexed_dynamic_post() {
         for (index, result, _, _) in INDEX_DYNAMIC_POST_TEST {
             let mut encoded_h = HeaderEncoder::new(0, true, 1000);
             encoded_h.encode_indexed_dynamic(*index);
@@ -642,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_literal_with_name_ref_static() {
+    fn encode_literal_with_name_ref_static() {
         for (index, result, _, _) in NAME_REF_STATIC {
             let mut encoded_h = HeaderEncoder::new(0, false, 1000);
             encoded_h.encode_literal_with_name_ref(true, *index, VALUE);
@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_literal_with_name_ref_dynamic() {
+    fn encode_literal_with_name_ref_dynamic() {
         for (index, result, _, _) in NAME_REF_DYNAMIC {
             let mut encoded_h = HeaderEncoder::new(66, false, 1000);
             encoded_h.encode_literal_with_name_ref(false, *index, VALUE);
@@ -662,7 +662,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_literal_with_name_ref_dynamic_post() {
+    fn encode_literal_with_name_ref_dynamic_post() {
         for (index, result, _, _) in NAME_REF_DYNAMIC_POST {
             let mut encoded_h = HeaderEncoder::new(0, false, 1000);
             encoded_h.encode_literal_with_name_ref(false, *index, VALUE);
@@ -672,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_literal_with_name_ref_dynamic_huffman() {
+    fn encode_literal_with_name_ref_dynamic_huffman() {
         for (index, result, _, _) in NAME_REF_DYNAMIC_HUFFMAN {
             let mut encoded_h = HeaderEncoder::new(66, true, 1000);
             encoded_h.encode_literal_with_name_ref(false, *index, VALUE);
@@ -681,7 +681,7 @@ mod tests {
         }
     }
     #[test]
-    fn test_encode_literal_with_literal() {
+    fn encode_literal_with_literal() {
         let mut encoded_h = HeaderEncoder::new(66, false, 1000);
         encoded_h.encode_literal_with_name_literal(VALUE, VALUE);
         encoded_h.encode_header_block_prefix();

@@ -7,7 +7,7 @@
 use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::{version::WireVersion, Version};
+use neqo_transport::{version::WireVersion, Pmtud, Version, MIN_INITIAL_PACKET_SIZE};
 
 use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
 
@@ -62,7 +62,7 @@ pub fn assert_vn(payload: &[u8]) {
 ///
 /// If the tests fail.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
-    assert!(payload.len() >= 1200);
+    assert!(payload.len() >= MIN_INITIAL_PACKET_SIZE);
     let mut dec = Decoder::from(payload);
     let initial_type = dec.decode_byte().unwrap(); // Initial
     let version = assert_default_version(&mut dec);
@@ -160,7 +160,7 @@ pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
 pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, DEFAULT_ADDR_V4);
     if padded {
-        assert_eq!(dgram.len(), 1357 /* PATH_MTU_V4 */);
+        assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR_V4.ip()));
     }
 }
 
@@ -170,6 +170,6 @@ pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
 pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, DEFAULT_ADDR);
     if padded {
-        assert_eq!(dgram.len(), 1337 /* PATH_MTU_V6 */);
+        assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR.ip()));
     }
 }

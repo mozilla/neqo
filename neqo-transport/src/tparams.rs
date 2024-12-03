@@ -22,6 +22,7 @@ use neqo_crypto::{
 
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    packet::MIN_INITIAL_PACKET_SIZE,
     version::{Version, VersionConfig, WireVersion},
     Error, Res,
 };
@@ -110,11 +111,11 @@ impl PreferredAddress {
     }
 
     #[must_use]
-    pub fn ipv4(&self) -> Option<SocketAddrV4> {
+    pub const fn ipv4(&self) -> Option<SocketAddrV4> {
         self.v4
     }
     #[must_use]
-    pub fn ipv6(&self) -> Option<SocketAddrV6> {
+    pub const fn ipv6(&self) -> Option<SocketAddrV6> {
         self.v6
     }
 }
@@ -138,7 +139,7 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
-        qdebug!("TP encoded; type 0x{:02x} val {:?}", tp, self);
+        qtrace!("TP encoded; type 0x{:02x} val {:?}", tp, self);
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -183,9 +184,8 @@ impl TransportParameter {
 
     fn decode_preferred_address(d: &mut Decoder) -> Res<Self> {
         // IPv4 address (maybe)
-        let v4ip =
-            Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?).unwrap());
-        let v4port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?).unwrap();
+        let v4ip = Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?)?);
+        let v4port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?)?;
         // Can't have non-zero IP and zero port, or vice versa.
         if v4ip.is_unspecified() ^ (v4port == 0) {
             return Err(Error::TransportParameterError);
@@ -197,9 +197,10 @@ impl TransportParameter {
         };
 
         // IPv6 address (mostly the same as v4)
-        let v6ip =
-            Ipv6Addr::from(<[u8; 16]>::try_from(d.decode(16).ok_or(Error::NoMoreData)?).unwrap());
-        let v6port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?).unwrap();
+        let v6ip = Ipv6Addr::from(<[u8; 16]>::try_from(
+            d.decode(16).ok_or(Error::NoMoreData)?,
+        )?);
+        let v6port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?)?;
         if v6ip.is_unspecified() ^ (v6port == 0) {
             return Err(Error::TransportParameterError);
         }
@@ -221,7 +222,7 @@ impl TransportParameter {
 
         // Stateless reset token
         let srtbuf = d.decode(16).ok_or(Error::NoMoreData)?;
-        let srt = <[u8; 16]>::try_from(srtbuf).unwrap();
+        let srt = <[u8; 16]>::try_from(srtbuf)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }
@@ -278,7 +279,7 @@ impl TransportParameter {
             },
 
             MAX_UDP_PAYLOAD_SIZE => match d.decode_varint() {
-                Some(v) if v >= 1200 => Self::Integer(v),
+                Some(v) if v >= MIN_INITIAL_PACKET_SIZE.try_into()? => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
 
@@ -308,7 +309,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        qdebug!("TP decoded; type 0x{:02x} val {:?}", tp, value);
+        qtrace!("TP decoded; type 0x{:02x} val {:?}", tp, value);
         Ok(Some((tp, value)))
     }
 }
@@ -515,8 +516,10 @@ impl TransportParameters {
             ) {
                 continue;
             }
-            let ok = if let Some(v_self) = self.params.get(k) {
-                match (v_self, v_rem) {
+            let ok = self
+                .params
+                .get(k)
+                .is_some_and(|v_self| match (v_self, v_rem) {
                     (TransportParameter::Integer(i_self), TransportParameter::Integer(i_rem)) => {
                         if *k == MIN_ACK_DELAY {
                             // MIN_ACK_DELAY is backwards:
@@ -534,10 +537,7 @@ impl TransportParameters {
                         TransportParameter::Versions { current: v_rem, .. },
                     ) => v_self == v_rem,
                     _ => false,
-                }
-            } else {
-                false
-            };
+                });
             if !ok {
                 return false;
             }
@@ -622,7 +622,7 @@ impl TransportParametersHandler {
 
     /// Get the version as set (or as determined by a compatible upgrade).
     #[must_use]
-    pub fn version(&self) -> Version {
+    pub const fn version(&self) -> Version {
         self.versions.initial()
     }
 

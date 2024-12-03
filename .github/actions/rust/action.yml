@@ -8,51 +8,69 @@ inputs:
   components:
     description: 'Rust components to install'
     default: ''
+  tools:
+    description: 'Additional Rust tools to install'
+    default: ''
+  token:
+    description: 'A Github PAT'
+    required: true
+  targets:
+    description: Comma-separated list of target triples to install for this toolchain
+    required: false
 
 runs:
   using: composite
   steps:
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
         toolchain: ${{ inputs.version }}
         components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
 
-    - name: Install cargo-binstall (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: env.SCCACHE_ENABLED != '1' && runner.environment != 'github-hosted'
+      uses: mozilla-actions/sccache-action@2e7f9ec7921547d4b46598398ca573513895d0bd # v0.0.4
 
-    - name: Install cargo-binstall (Linux & MacOS)
-      if: runner.os != 'Windows'
+    - name: Enable sscache
+      if: runner.environment != 'github-hosted'
       shell: bash
-      run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+      run: |
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        if [ "${{ runner.environment }}" == "github-hosted" ]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
+
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: runner.os == 'Windows'
+      run: rm /usr/bin/link.exe || true
+
+    - name: Install cargo-quickinstall
+      shell: bash
+      if: inputs.tools != ''
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: cargo +${{ inputs.version }} install cargo-quickinstall
 
     - name: Install Rust tools
       shell: bash
-      run: cargo +${{ inputs.version }} binstall --no-confirm cargo-llvm-cov cargo-nextest flamegraph cargo-hack cargo-mutants hyperfine
-
-    # sccache slows CI down, so we leave it disabled.
-    # Leaving the steps below commented out, so we can re-evaluate enabling it later.
-    # - name: Use sccache
-    #   uses: mozilla-actions/sccache-action@v0.0.4
-
-    # - name: Enable sscache
-    #   shell: bash
-    #   run: |
-    #     if [ "${{ runner.os }}" = "Windows" ]; then
-    #       echo "CC=sccache cl" >> "$GITHUB_ENV"
-    #       echo "CXX=sccache cl" >> "$GITHUB_ENV"
-    #     else
-    #       echo "CC=sccache cc" >> "$GITHUB_ENV"
-    #       echo "CXX=sccache c++" >> "$GITHUB_ENV"
-    #     fi
-    #     echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-    #     echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-    #     echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-
-    # Ditto for rust-cache.
-    # - name: Use Rust cache
-    #   uses: Swatinem/rust-cache@v2
-    #   with:
-    #     cache-all-crates: "true"
+      if: inputs.tools != ''
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: cargo +${{ inputs.version }} quickinstall $(echo ${{ inputs.tools }} | tr -d ",")

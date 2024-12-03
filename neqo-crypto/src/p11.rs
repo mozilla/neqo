@@ -13,8 +13,9 @@ use std::{
     cell::RefCell,
     mem,
     ops::{Deref, DerefMut},
-    os::raw::{c_int, c_uint},
+    os::raw::c_uint,
     ptr::null_mut,
+    slice::Iter as SliceIter,
 };
 
 use neqo_common::hex_with_len;
@@ -24,9 +25,7 @@ use crate::{
     null_safe_slice,
 };
 
-#[allow(clippy::upper_case_acronyms)]
 #[allow(clippy::unreadable_literal)]
-#[allow(unknown_lints, clippy::borrow_as_ptr)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }
@@ -70,16 +69,14 @@ macro_rules! scoped_ptr {
         }
 
         impl Drop for $scoped {
-            #[allow(unused_must_use)]
             fn drop(&mut self) {
-                unsafe { $dtor(self.ptr) };
+                unsafe { _ = $dtor(self.ptr) };
             }
         }
     };
 }
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
-scoped_ptr!(CertList, CERTCertList, CERT_DestroyCertList);
 scoped_ptr!(PublicKey, SECKEYPublicKey, SECKEY_DestroyPublicKey);
 
 impl PublicKey {
@@ -100,10 +97,10 @@ impl PublicKey {
                 **self,
                 buf.as_mut_ptr(),
                 &mut len,
-                c_uint::try_from(buf.len()).unwrap(),
+                c_uint::try_from(buf.len())?,
             )
         })?;
-        buf.truncate(usize::try_from(len).unwrap());
+        buf.truncate(usize::try_from(len)?);
         Ok(buf)
     }
 }
@@ -187,7 +184,7 @@ scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 impl Slot {
     pub fn internal() -> Res<Self> {
         let p = unsafe { PK11_GetInternalSlot() };
-        Slot::from_ptr(p)
+        Self::from_ptr(p)
     }
 }
 
@@ -240,6 +237,12 @@ unsafe fn destroy_secitem(item: *mut SECItem) {
 }
 scoped_ptr!(Item, SECItem, destroy_secitem);
 
+impl AsRef<[u8]> for SECItem {
+    fn as_ref(&self) -> &[u8] {
+        unsafe { null_safe_slice(self.data, self.len) }
+    }
+}
+
 impl Item {
     /// Create a wrapper for a slice of this object.
     /// Creating this object is technically safe, but using it is extremely dangerous.
@@ -267,7 +270,7 @@ impl Item {
     }
 
     /// Make an empty `SECItem` for passing as a mutable `SECItem*` argument.
-    pub fn make_empty() -> SECItem {
+    pub const fn make_empty() -> SECItem {
         SECItem {
             type_: SECItemType::siBuffer,
             data: null_mut(),
@@ -290,14 +293,63 @@ impl Item {
     }
 }
 
+unsafe fn destroy_secitem_array(array: *mut SECItemArray) {
+    SECITEM_FreeArray(array, PRBool::from(true));
+}
+scoped_ptr!(ItemArray, SECItemArray, destroy_secitem_array);
+
+impl<'a> IntoIterator for &'a ItemArray {
+    type Item = &'a [u8];
+    type IntoIter = ItemArrayIterator<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        Self::IntoIter {
+            iter: AsRef::<[SECItem]>::as_ref(self).iter(),
+        }
+    }
+}
+
+impl AsRef<[SECItem]> for ItemArray {
+    fn as_ref(&self) -> &[SECItem] {
+        unsafe { null_safe_slice((*self.ptr).items, (*self.ptr).len) }
+    }
+}
+
+pub struct ItemArrayIterator<'a> {
+    iter: SliceIter<'a, SECItem>,
+}
+
+impl<'a> Iterator for ItemArrayIterator<'a> {
+    type Item = &'a [u8];
+    fn next(&mut self) -> Option<&'a [u8]> {
+        self.iter.next().map(AsRef::<[u8]>::as_ref)
+    }
+}
+
+#[cfg(feature = "disable-random")]
+thread_local! {
+    static CURRENT_VALUE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "disable-random")]
+/// Fill a buffer with a predictable sequence of bytes.
+pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
+    let m_buf = buf.as_mut();
+    for v in m_buf.iter_mut() {
+        *v = CURRENT_VALUE.get();
+        CURRENT_VALUE.set(v.wrapping_add(1));
+    }
+    buf
+}
+
 /// Fill a buffer with randomness.
 ///
 /// # Panics
 ///
 /// When `size` is too large or NSS fails.
+#[cfg(not(feature = "disable-random"))]
 pub fn randomize<B: AsMut<[u8]>>(mut buf: B) -> B {
     let m_buf = buf.as_mut();
-    let len = c_int::try_from(m_buf.len()).unwrap();
+    let len = std::os::raw::c_int::try_from(m_buf.len()).unwrap();
     secstatus_to_res(unsafe { PK11_GenerateRandom(m_buf.as_mut_ptr(), len) }).unwrap();
     buf
 }
@@ -311,8 +363,8 @@ impl RandomCache {
     const SIZE: usize = 256;
     const CUTOFF: usize = 32;
 
-    fn new() -> Self {
-        RandomCache {
+    const fn new() -> Self {
+        Self {
             cache: [0; Self::SIZE],
             used: Self::SIZE,
         }
@@ -344,7 +396,7 @@ impl RandomCache {
 /// When `size` is too large or NSS fails.
 #[must_use]
 pub fn random<const N: usize>() -> [u8; N] {
-    thread_local!(static CACHE: RefCell<RandomCache> = RefCell::new(RandomCache::new()));
+    thread_local!(static CACHE: RefCell<RandomCache> = const { RefCell::new(RandomCache::new()) });
 
     let buf = [0; N];
     if N <= RandomCache::CUTOFF {
@@ -359,10 +411,13 @@ mod test {
     use test_fixture::fixture_init;
 
     use super::RandomCache;
-    use crate::{random, randomize};
+    use crate::random;
 
+    #[cfg(not(feature = "disable-random"))]
     #[test]
     fn randomness() {
+        use crate::randomize;
+
         fixture_init();
         // If any of these ever fail, there is either a bug, or it's time to buy a lottery ticket.
         assert_ne!(random::<16>(), randomize([0; 16]));

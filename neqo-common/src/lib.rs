@@ -9,18 +9,21 @@
 mod codec;
 mod datagram;
 pub mod event;
+#[cfg(feature = "build-fuzzing-corpus")]
+mod fuzz;
 pub mod header;
 pub mod hrtime;
 mod incrdecoder;
 pub mod log;
 pub mod qlog;
-pub mod timer;
 pub mod tos;
 
 use std::fmt::Write;
 
 use enum_map::Enum;
 
+#[cfg(feature = "build-fuzzing-corpus")]
+pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
     codec::{Decoder, Encoder},
     datagram::Datagram,
@@ -87,7 +90,7 @@ pub enum Role {
 
 impl Role {
     #[must_use]
-    pub fn remote(self) -> Self {
+    pub const fn remote(self) -> Self {
         match self {
             Self::Client => Self::Server,
             Self::Server => Self::Client,
