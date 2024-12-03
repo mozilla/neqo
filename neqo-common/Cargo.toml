@@ -37,6 +37,7 @@ regex = { workspace = true }
 bench = ["test-fixture/bench"]
 build-fuzzing-corpus = ["hex"]
 ci = []
+test-fixture = []
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
