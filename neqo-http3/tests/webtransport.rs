@@ -13,7 +13,7 @@ use neqo_http3::{
     Http3ServerEvent, Http3State, WebTransportEvent, WebTransportRequest, WebTransportServerEvent,
     WebTransportSessionAcceptAction,
 };
-use neqo_transport::{StreamId, StreamType};
+use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use test_fixture::{
     anti_replay, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3,
     DEFAULT_KEYS, DEFAULT_SERVER_NAME,
@@ -227,6 +227,15 @@ fn receive_data_server(
     assert_eq!(new_stream, new_stream_received);
     assert_eq!(stream_closed, expected_fin);
     wt_stream.unwrap()
+}
+
+#[test]
+fn wt_keepalive() {
+    let (mut client, mut server) = connect();
+    let _wt_session = create_wt_session(&mut client, &mut server);
+    let idle_timeout = ConnectionParameters::default().get_idle_timeout();
+    assert_eq!(client.process_output(now()).callback(), idle_timeout / 2);
+    assert_eq!(server.process_output(now()).callback(), idle_timeout / 2);
 }
 
 #[test]

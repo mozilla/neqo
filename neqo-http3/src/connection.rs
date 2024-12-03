@@ -282,7 +282,7 @@ handle parsing and sending of HTTP part of the control stream. When HTTP headers
 `WebTransportSessionListener` as the `RecvMessage` event listener.
 
 `WebTransportSendStream` and `WebTransportRecvStream` are associated with a `WebTransportSession`
-and they will be canceled if the session is closed. To be avle to do this `WebTransportSession`
+and they will be canceled if the session is closed. To be able to do this `WebTransportSession`
 holds a list of its active streams and clean up is done in `remove_extended_connect`.
 
 ###  `WebTransportSendStream` and `WebTransportRecvStream`
@@ -1177,6 +1177,7 @@ impl Http3Connection {
         }
 
         let send_stream = self.send_streams.get_mut(&stream_id);
+        conn.stream_keep_alive(stream_id, true)?;
 
         match (send_stream, recv_stream, accept_res) {
             (None, None, _) => Err(Error::InvalidStreamId),
@@ -1336,7 +1337,6 @@ impl Http3Connection {
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
     ) {
-        // TODO conn.stream_keep_alive(stream_id, true)?;
         webtransport_session.borrow_mut().add_stream(stream_id);
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
