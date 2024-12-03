@@ -690,6 +690,7 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
         c.conn_params.get_cc_algorithm(),
         c.conn_params.pacing_enabled(),
         now,
+        &mut c.stats.borrow_mut(),
     );
     if path.borrow().amplification_limit() < path.borrow().plpmtu() {
         // If the amplification limit is less than the PLPMTU, then the path

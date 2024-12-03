@@ -1050,6 +1050,7 @@ mod tests {
     impl Default for Fixture {
         fn default() -> Self {
             const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
+            let stats = StatsCell::default();
             let mut path = Path::temporary(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
@@ -1057,6 +1058,7 @@ mod tests {
                 true,
                 NeqoQlog::default(),
                 now(),
+                &mut stats.borrow_mut(),
             );
             path.make_permanent(
                 None,
@@ -1065,7 +1067,7 @@ mod tests {
             path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);
             Self {
-                lr: LossRecovery::new(StatsCell::default(), FAST_PTO_SCALE),
+                lr: LossRecovery::new(stats, FAST_PTO_SCALE),
                 path: Rc::new(RefCell::new(path)),
             }
         }
