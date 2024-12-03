@@ -44,6 +44,8 @@ impl<'a> Decoder<'a> {
     }
 
     /// Skip helper that panics if `n` is `None` or not able to fit in `usize`.
+    /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
         self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
