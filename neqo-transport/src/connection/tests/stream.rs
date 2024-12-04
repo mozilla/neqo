@@ -11,21 +11,21 @@ use test_fixture::now;
 
 use super::{
     super::State, assert_error, connect, connect_force_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something, DEFAULT_STREAM_DATA,
+    maybe_authenticate, new_client, new_server, send_something, send_with_extra,
+    DEFAULT_STREAM_DATA,
 };
 use crate::{
     events::ConnectionEvent,
+    frame::{
+        FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_RESET_STREAM, FRAME_TYPE_STOP_SENDING,
+        FRAME_TYPE_STREAM_DATA_BLOCKED,
+    },
+    packet::PacketBuilder,
     recv_stream::RECV_BUFFER_SIZE,
     send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
     tparams::{self, TransportParameter},
-    CloseReason,
-    // tracking::DEFAULT_ACK_PACKET_TOLERANCE,
-    Connection,
-    ConnectionParameters,
-    Error,
-    StreamId,
-    StreamType,
+    CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
 };
 
 #[test]
@@ -537,6 +537,62 @@ fn do_not_accept_data_after_stop_sending() {
         Err(Error::FinalSizeError),
         client.stream_send(stream_id, &[0x00])
     );
+}
+
+struct IllegalWriter(Vec<u64>);
+
+impl crate::connection::test_internal::FrameWriter for IllegalWriter {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        builder.write_varint_frame(&self.0);
+    }
+}
+
+// Server sends a stream-related frame for client-initiated stream that is not yet created.
+fn illegal_frame_test(frame: &[u64]) {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let dgram = send_with_extra(&mut server, IllegalWriter(frame.to_vec()), now());
+    client.process_input(dgram, now());
+    assert!(client.state().closed());
+}
+
+#[test]
+fn illegal_stream_reset_frame() {
+    // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
+    for stream_id in [0, 2] {
+        illegal_frame_test(&[FRAME_TYPE_RESET_STREAM, stream_id, 0, 0]);
+    }
+}
+
+#[test]
+fn illegal_stop_sending_frame() {
+    // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
+    for stream_id in [0, 2] {
+        illegal_frame_test(&[FRAME_TYPE_STOP_SENDING, stream_id, 0]);
+    }
+}
+
+#[test]
+fn illegal_max_stream_data_frame() {
+    // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
+    for stream_id in [0, 2] {
+        illegal_frame_test(&[FRAME_TYPE_MAX_STREAM_DATA, stream_id, 0]);
+    }
+}
+
+#[test]
+fn illegal_stream_data_blocked_frame() {
+    for stream_id in [0, 2] {
+        illegal_frame_test(&[FRAME_TYPE_STREAM_DATA_BLOCKED, stream_id, 0]);
+    }
+}
+
+#[test]
+fn illegal_stream_frame() {
+    for stream_id in [0, 2] {
+        illegal_frame_test(&[0x08, stream_id, 0]);
+    }
 }
 
 #[test]
