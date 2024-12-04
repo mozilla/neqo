@@ -131,6 +131,8 @@ impl Streams {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.reset(*application_error_code, *final_size)?;
+                } else {
+                    return Err(Error::StreamStateError);
                 }
             }
             Frame::StopSending {
@@ -142,6 +144,8 @@ impl Streams {
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.reset(*application_error_code);
+                } else {
+                    return Err(Error::StreamStateError);
                 }
             }
             Frame::Stream {
@@ -154,6 +158,8 @@ impl Streams {
                 stats.stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.inbound_stream_frame(*fin, *offset, data)?;
+                } else {
+                    return Err(Error::StreamStateError);
                 }
             }
             Frame::MaxData { maximum_data } => {
@@ -172,6 +178,8 @@ impl Streams {
                 stats.max_stream_data += 1;
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.set_max_stream_data(*maximum_stream_data);
+                } else {
+                    return Err(Error::StreamStateError);
                 }
             }
             Frame::MaxStreams {
@@ -198,6 +206,8 @@ impl Streams {
 
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.send_flowc_update();
+                } else {
+                    return Err(Error::StreamStateError);
                 }
             }
             Frame::StreamsBlocked { .. } => {
