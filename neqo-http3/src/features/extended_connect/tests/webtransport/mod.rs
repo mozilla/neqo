@@ -60,6 +60,13 @@ pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
     .expect("create a server")
 }
 
+pub fn assert_wt(headers: &[Header]) {
+    assert!(
+        headers.contains(&Header::new(":method", "CONNECT"))
+            && headers.contains(&Header::new(":protocol", "webtransport"))
+    );
+}
+
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     let mut out = None;
     loop {
@@ -148,14 +155,7 @@ impl WtTest {
                     session,
                     headers,
                 }) => {
-                    assert!(
-                        headers
-                            .iter()
-                            .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                            && headers
-                                .iter()
-                                .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-                    );
+                    assert_wt(&headers);
                     session.response(accept).unwrap();
                     wt_server_session = Some(session);
                 }

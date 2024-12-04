@@ -167,12 +167,8 @@ impl RecvMessage {
         }
 
         let is_web_transport = self.message_type == MessageType::Request
-            && headers
-                .iter()
-                .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-            && headers
-                .iter()
-                .any(|h| h.name() == ":protocol" && h.value() == "webtransport");
+            && headers.contains(&Header::new(":method", "CONNECT"))
+            && headers.contains(&Header::new(":protocol", "webtransport"));
         if is_web_transport {
             self.conn_events
                 .extended_connect_new_session(self.stream_id, headers);
