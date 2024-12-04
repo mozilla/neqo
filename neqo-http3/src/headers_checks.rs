@@ -94,6 +94,13 @@ fn track_pseudo(
 ///
 /// Returns an error if headers are not well formed.
 pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
+    const PSEUDO_HEADER_ALL: EnumSet<PseudoHeaderState> = enum_set!(
+        PseudoHeaderState::Status
+            | PseudoHeaderState::Method
+            | PseudoHeaderState::Scheme
+            | PseudoHeaderState::Authority
+            | PseudoHeaderState::Path
+    );
     let mut method_value: Option<&str> = None;
     let mut protocol_value: Option<&str> = None;
     let mut scheme_value: Option<&str> = None;
@@ -119,11 +126,13 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     }
     // Clear the regular header bit, since we only check pseudo headers below.
     pseudo_state.remove(PseudoHeaderState::Regular);
-    let pseudo_header_mask = match message_type {
-        MessageType::Response => enum_set!(PseudoHeaderState::Status),
+    let (pseudo_header_required, pseudo_header_mask) = match message_type {
+        // Responses contain only :status
+        MessageType::Response => (enum_set!(PseudoHeaderState::Status), PSEUDO_HEADER_ALL),
         MessageType::Request => {
             if method_value == Some("CONNECT") {
-                let connect_mask = PseudoHeaderState::Method | PseudoHeaderState::Authority;
+                const CONNECT_MASK: EnumSet<PseudoHeaderState> =
+                    enum_set!(PseudoHeaderState::Method | PseudoHeaderState::Authority);
                 if let Some(protocol) = protocol_value {
                     // For a webtransport CONNECT, the :scheme field must be set to https.
                     if protocol == "webtransport" && scheme_value != Some("https") {
@@ -131,12 +140,18 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                     }
                     // The CONNECT request for with :protocol included must have the scheme,
                     // authority, and path set.
-                    connect_mask | PseudoHeaderState::Scheme | PseudoHeaderState::Path
+                    (
+                        CONNECT_MASK | PseudoHeaderState::Scheme | PseudoHeaderState::Path,
+                        PSEUDO_HEADER_ALL,
+                    )
                 } else {
-                    connect_mask
+                    (CONNECT_MASK, PSEUDO_HEADER_ALL)
                 }
             } else {
-                PseudoHeaderState::Method | PseudoHeaderState::Scheme | PseudoHeaderState::Path
+                (
+                    PseudoHeaderState::Method | PseudoHeaderState::Scheme | PseudoHeaderState::Path,
+                    PSEUDO_HEADER_ALL & !PseudoHeaderState::Authority,
+                )
             }
         }
     };
@@ -148,7 +163,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         return Err(Error::InvalidHeader);
     }
 
-    if pseudo_state & pseudo_header_mask != pseudo_header_mask {
+    if pseudo_state & pseudo_header_mask != pseudo_header_required {
         return Err(Error::InvalidHeader);
     }
 
