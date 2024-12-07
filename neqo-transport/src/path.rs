@@ -733,7 +733,8 @@ impl Path {
                     [self],
                     "Possible ECN blackhole, disabling ECN and re-probing path"
                 );
-                self.ecn_info.disable_ecn(stats);
+                self.ecn_info
+                    .disable_ecn(stats, crate::ecn::EcnValidationError::BlackHole);
                 ProbeState::ProbeNeeded { probe_count: 0 }
             } else {
                 qinfo!([self], "Probing failed");

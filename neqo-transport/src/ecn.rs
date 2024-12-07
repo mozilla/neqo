@@ -6,7 +6,7 @@
 
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
-use enum_map::EnumMap;
+use enum_map::{Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
 
 use crate::{
@@ -37,7 +37,7 @@ enum EcnValidationState {
     /// The validation test has concluded but the path's ECN capability is not yet known.
     Unknown,
     /// The path is known to **not** be ECN capable.
-    Failed,
+    Failed(EcnValidationError),
     /// The path is known to be ECN capable.
     Capable,
 }
@@ -57,13 +57,15 @@ impl EcnValidationState {
 
         match old {
             Self::Testing { .. } | Self::Unknown => {}
-            Self::Failed => debug_assert!(false, "Failed is a terminal state"),
-            Self::Capable => stats.ecn_paths_capable -= 1,
+            Self::Failed(_) => debug_assert!(false, "Failed is a terminal state"),
+            Self::Capable => stats.ecn_path_validation[EcnValidationOutcome::Capable] -= 1,
         }
         match new {
             Self::Testing { .. } | Self::Unknown => {}
-            Self::Failed => stats.ecn_paths_not_capable += 1,
-            Self::Capable => stats.ecn_paths_capable += 1,
+            Self::Failed(error) => {
+                stats.ecn_path_validation[EcnValidationOutcome::NotCapable(error)] += 1;
+            }
+            Self::Capable => stats.ecn_path_validation[EcnValidationOutcome::Capable] += 1,
         }
     }
 }
@@ -125,6 +127,36 @@ impl AddAssign<IpTosEcn> for EcnCount {
     }
 }
 
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+pub struct EcnValidationCount(EnumMap<EcnValidationOutcome, u64>);
+
+impl Deref for EcnValidationCount {
+    type Target = EnumMap<EcnValidationOutcome, u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for EcnValidationCount {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, Enum, PartialEq, Eq)]
+pub enum EcnValidationError {
+    BlackHole,
+    Bleaching,
+    ReceivedUnsentECT1,
+}
+
+#[derive(Debug, Clone, Copy, Enum, PartialEq, Eq)]
+pub enum EcnValidationOutcome {
+    Capable,
+    NotCapable(EcnValidationError),
+}
+
 #[derive(Debug, Default)]
 pub struct EcnInfo {
     /// The current state of ECN validation on this path.
@@ -164,8 +196,8 @@ impl EcnInfo {
     }
 
     /// Disable ECN.
-    pub fn disable_ecn(&mut self, stats: &mut Stats) {
-        self.state.set(EcnValidationState::Failed, stats);
+    pub fn disable_ecn(&mut self, stats: &mut Stats, reason: EcnValidationError) {
+        self.state.set(EcnValidationState::Failed(reason), stats);
     }
 
     /// Process ECN counts from an ACK frame.
@@ -202,7 +234,7 @@ impl EcnInfo {
                     "ECN validation failed, all {} initial marked packets were lost",
                     probes_lost
                 );
-                self.disable_ecn(stats);
+                self.disable_ecn(stats, EcnValidationError::BlackHole);
             }
         }
     }
@@ -220,7 +252,7 @@ impl EcnInfo {
         // > (see Section 13.4.2.1) causes the ECN state for the path to become "capable", unless
         // > no marked packet has been acknowledged.
         match self.state {
-            EcnValidationState::Testing { .. } | EcnValidationState::Failed => return,
+            EcnValidationState::Testing { .. } | EcnValidationState::Failed(_) => return,
             EcnValidationState::Unknown | EcnValidationState::Capable => {}
         }
 
@@ -245,7 +277,7 @@ impl EcnInfo {
         // > corresponding ECN counts are not present in the ACK frame.
         let Some(ack_ecn) = ack_ecn else {
             qwarn!("ECN validation failed, no ECN counts in ACK frame");
-            self.disable_ecn(stats);
+            self.disable_ecn(stats, EcnValidationError::Bleaching);
             return;
         };
 
@@ -262,7 +294,7 @@ impl EcnInfo {
             .unwrap();
         if newly_acked_sent_with_ect0 == 0 {
             qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
-            self.disable_ecn(stats);
+            self.disable_ecn(stats, EcnValidationError::Bleaching);
             return;
         }
         let ecn_diff = ack_ecn - self.baseline;
@@ -273,10 +305,10 @@ impl EcnInfo {
                 sum_inc,
                 newly_acked_sent_with_ect0
             );
-            self.disable_ecn(stats);
+            self.disable_ecn(stats, EcnValidationError::Bleaching);
         } else if ecn_diff[IpTosEcn::Ect1] > 0 {
             qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
-            self.disable_ecn(stats);
+            self.disable_ecn(stats, EcnValidationError::ReceivedUnsentECT1);
         } else if self.state != EcnValidationState::Capable {
             qinfo!("ECN validation succeeded, path is capable");
             self.state.set(EcnValidationState::Capable, stats);
@@ -290,7 +322,7 @@ impl EcnInfo {
     pub const fn ecn_mark(&self) -> IpTosEcn {
         match self.state {
             EcnValidationState::Testing { .. } | EcnValidationState::Capable => IpTosEcn::Ect0,
-            EcnValidationState::Failed | EcnValidationState::Unknown => IpTosEcn::NotEct,
+            EcnValidationState::Failed(_) | EcnValidationState::Unknown => IpTosEcn::NotEct,
         }
     }
 }
