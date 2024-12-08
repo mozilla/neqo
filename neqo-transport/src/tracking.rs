@@ -1062,7 +1062,7 @@ mod tests {
         assert_eq!(stats.ack, 1);
 
         let mut dec = builder.as_decoder();
-        _ = dec.decode_uint::<u8>().unwrap(); // Skip the short header.
+        dec.skip(1); // Skip the short header.
         let frame = Frame::decode(&mut dec).unwrap();
         if let Frame::Ack { ack_ranges, .. } = frame {
             assert_eq!(ack_ranges.len(), 0);
