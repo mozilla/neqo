@@ -44,12 +44,15 @@ impl<'a> Decoder<'a> {
     }
 
     /// Skip helper that panics if `n` is `None` or not able to fit in `usize`.
+    /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
         self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
 
     /// Skip a vector.  Panics if there isn't enough space.
     /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     pub fn skip_vec(&mut self, n: usize) {
         let len = self.decode_n(n);
         self.skip_inner(len);
@@ -57,6 +60,7 @@ impl<'a> Decoder<'a> {
 
     /// Skip a variable length vector.  Panics if there isn't enough space.
     /// Only use this for tests because we panic rather than reporting a result.
+    #[cfg(any(test, feature = "test-fixture"))]
     pub fn skip_vvec(&mut self) {
         let len = self.decode_varint();
         self.skip_inner(len);
@@ -272,6 +276,7 @@ impl Encoder {
     /// # Panics
     ///
     /// When `s` contains non-hex values or an odd number of values.
+    #[cfg(any(test, feature = "test-fixture"))]
     #[must_use]
     pub fn from_hex(s: impl AsRef<str>) -> Self {
         let s = s.as_ref();
