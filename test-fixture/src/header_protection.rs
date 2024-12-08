@@ -120,6 +120,7 @@ pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (V
     // Trim down to size.
     fixed_header.truncate(pn_offset + pn_len);
     // The packet number should be 1.
+    // This doesn't use a `Decoder` because the public API can't handle a three byte packet number.
     let mut pn = [0; 8];
     pn[8 - pn_len..].copy_from_slice(&fixed_header[pn_offset..pn_offset + pn_len]);
     (fixed_header, u64::from_be_bytes(pn))
