@@ -96,12 +96,8 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                 headers,
             }) => {
                 assert!(
-                    headers
-                        .iter()
-                        .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                        && headers
-                            .iter()
-                            .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
+                    headers.contains(&Header::new(":method", "CONNECT"))
+                        && headers.contains(&Header::new(":protocol", "webtransport"))
                 );
                 session
                     .response(&WebTransportSessionAcceptAction::Accept)

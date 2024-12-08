@@ -94,10 +94,7 @@ impl super::HttpServer for HttpServer {
                 } => {
                     qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
 
-                    if headers
-                        .iter()
-                        .any(|h| h.name() == ":method" && h.value() == "POST")
-                    {
+                    if headers.contains(&Header::new(":method", "POST")) {
                         self.posts.insert(stream, 0);
                         continue;
                     }

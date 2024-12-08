@@ -13,7 +13,7 @@ use test_fixture::now;
 use crate::{
     features::extended_connect::{
         tests::webtransport::{
-            default_http3_client, default_http3_server, wt_default_parameters, WtTest,
+            assert_wt, default_http3_client, default_http3_server, wt_default_parameters, WtTest,
         },
         SessionCloseReason,
     },
@@ -134,14 +134,7 @@ fn wt_session_response_with_1xx() {
             headers,
         }) = event
         {
-            assert!(
-                headers
-                    .iter()
-                    .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                    && headers
-                        .iter()
-                        .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-            );
+            assert_wt(&headers);
             wt_server_session = Some(session);
         }
     }
@@ -209,14 +202,7 @@ fn wt_session_respone_200_with_fin() {
             headers,
         }) = event
         {
-            assert!(
-                headers
-                    .iter()
-                    .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                    && headers
-                        .iter()
-                        .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
-            );
+            assert_wt(&headers);
             wt_server_session = Some(session);
         }
     }
