@@ -238,7 +238,7 @@ impl Server {
                         |p| {
                             qdebug!(
                                 [self],
-                                "type={:?} path:{} {}->{} {:?} len {}",
+                                "type={:?} path:{} {}->{} len {}",
                                 PacketType::Retry,
                                 initial.dst_cid,
                                 dgram.destination(),
