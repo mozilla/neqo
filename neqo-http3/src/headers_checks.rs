@@ -224,4 +224,18 @@ mod tests {
     fn valid_webtransport_connect() {
         assert!(headers_valid(&create_connect_headers(), MessageType::Request).is_ok());
     }
+
+    #[test]
+    fn invalid_webtransport_connect_with_status() {
+        assert!(headers_valid(
+            [
+                create_connect_headers(),
+                vec![Header::new(":status", "200")]
+            ]
+            .concat()
+            .as_slice(),
+            MessageType::Request
+        )
+        .is_err());
+    }
 }
