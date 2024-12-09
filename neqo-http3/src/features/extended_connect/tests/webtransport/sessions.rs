@@ -6,7 +6,7 @@
 
 use std::mem;
 
-use neqo_common::{event::Provider, Encoder};
+use neqo_common::{event::Provider, header::HeadersExt, Encoder};
 use neqo_transport::StreamType;
 use test_fixture::now;
 
@@ -161,7 +161,7 @@ fn wt_session_response_with_1xx() {
             }) if (
                 stream_id == wt_session_id &&
                 status == 200 &&
-                headers.contains(&Header::new(":status", "200"))
+                headers.contains_header(":status", "200")
             )
         )
     };
