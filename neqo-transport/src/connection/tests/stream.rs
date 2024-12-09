@@ -11,21 +11,21 @@ use test_fixture::now;
 
 use super::{
     super::State, assert_error, connect, connect_force_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something, DEFAULT_STREAM_DATA,
+    maybe_authenticate, new_client, new_server, send_something, send_with_extra,
+    DEFAULT_STREAM_DATA,
 };
 use crate::{
     events::ConnectionEvent,
+    frame::{
+        FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_RESET_STREAM, FRAME_TYPE_STOP_SENDING,
+        FRAME_TYPE_STREAM_DATA_BLOCKED,
+    },
+    packet::PacketBuilder,
     recv_stream::RECV_BUFFER_SIZE,
     send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
     tparams::{self, TransportParameter},
-    CloseReason,
-    // tracking::DEFAULT_ACK_PACKET_TOLERANCE,
-    Connection,
-    ConnectionParameters,
-    Error,
-    StreamId,
-    StreamType,
+    CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
 };
 
 #[test]
@@ -539,6 +539,41 @@ fn do_not_accept_data_after_stop_sending() {
     );
 }
 
+struct IllegalWriter(Vec<u64>);
+
+impl crate::connection::test_internal::FrameWriter for IllegalWriter {
+    fn write_frames(&mut self, builder: &mut PacketBuilder) {
+        builder.write_varint_frame(&self.0);
+    }
+}
+
+// Server sends a stream-related frame for client-initiated stream that is not yet created.
+fn illegal_frame_test(frame: &[u64]) {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let dgram = send_with_extra(&mut server, IllegalWriter(frame.to_vec()), now());
+    client.process_input(dgram, now());
+    assert!(client.state().closed());
+}
+
+#[test]
+fn illegal_stream_frames() {
+    // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
+    for stream_id in [0, 2] {
+        // Illegal RESET_STREAM frame
+        illegal_frame_test(&[FRAME_TYPE_RESET_STREAM, stream_id, 0, 0]);
+        // Illegal STOP_SENDING frame
+        illegal_frame_test(&[FRAME_TYPE_STOP_SENDING, stream_id, 0]);
+        // Illegal MAX_STREAM_DATA frame
+        illegal_frame_test(&[FRAME_TYPE_MAX_STREAM_DATA, stream_id, 0]);
+        // Illegal STREAM_DATA_BLOCKED frame
+        illegal_frame_test(&[FRAME_TYPE_STREAM_DATA_BLOCKED, stream_id, 0]);
+        // Illegal STREAM frame
+        illegal_frame_test(&[0x08, stream_id, 0]);
+    }
+}
+
 #[test]
 // Server sends stop_sending, the client simultaneous sends reset.
 fn simultaneous_stop_sending_and_reset() {
@@ -580,6 +615,31 @@ fn simultaneous_stop_sending_and_reset() {
         Err(Error::InvalidStreamId),
         client.stream_send(stream_id, &[0x00])
     );
+}
+
+//The client sends a duplicate stream reset.
+#[test]
+fn double_reset_stream() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // create a stream
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, &[0x00]).unwrap();
+    let out = client.process_output(now());
+    let ack = server.process(out.dgram(), now()).dgram();
+
+    client.stream_reset_send(stream_id, 0).unwrap();
+    let reset_frame1 = client.process(ack, now()).dgram();
+
+    let delay = client.process_output(now()).callback();
+    let reset_frame2 = client.process_output(now() + delay).dgram();
+
+    let ack = server.process(reset_frame1, now()).dgram();
+    assert!(ack.is_some());
+    let ack = server.process(reset_frame2, now()).dgram();
+    assert!(ack.is_some());
 }
 
 #[test]
