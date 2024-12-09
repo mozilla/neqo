@@ -185,7 +185,7 @@ impl TransportParameter {
     fn decode_preferred_address(d: &mut Decoder) -> Res<Self> {
         // IPv4 address (maybe)
         let v4ip = Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?)?);
-        let v4port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?)?;
+        let v4port = d.decode_uint::<u16>().ok_or(Error::NoMoreData)?;
         // Can't have non-zero IP and zero port, or vice versa.
         if v4ip.is_unspecified() ^ (v4port == 0) {
             return Err(Error::TransportParameterError);
@@ -200,7 +200,7 @@ impl TransportParameter {
         let v6ip = Ipv6Addr::from(<[u8; 16]>::try_from(
             d.decode(16).ok_or(Error::NoMoreData)?,
         )?);
-        let v6port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?)?;
+        let v6port = d.decode_uint().ok_or(Error::NoMoreData)?;
         if v6ip.is_unspecified() ^ (v6port == 0) {
             return Err(Error::TransportParameterError);
         }
@@ -229,11 +229,11 @@ impl TransportParameter {
 
     fn decode_versions(dec: &mut Decoder) -> Res<Self> {
         fn dv(dec: &mut Decoder) -> Res<WireVersion> {
-            let v = dec.decode_uint(4).ok_or(Error::NoMoreData)?;
+            let v = dec.decode_uint::<WireVersion>().ok_or(Error::NoMoreData)?;
             if v == 0 {
                 Err(Error::TransportParameterError)
             } else {
-                Ok(WireVersion::try_from(v)?)
+                Ok(v)
             }
         }
 
@@ -457,8 +457,7 @@ impl TransportParameters {
         let rbuf = random::<4>();
         let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
-        let grease =
-            (u32::try_from(dec.decode_uint(4).unwrap()).unwrap()) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
+        let grease = dec.decode_uint::<u32>().unwrap() & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
         for &v in versions.all() {
             if role == Role::Client && !versions.initial().is_compatible(v) {
