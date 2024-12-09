@@ -129,8 +129,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     let (pseudo_header_required, pseudo_header_mask) = match message_type {
         // Responses contain only :status
         MessageType::Response => (enum_set!(PseudoHeaderState::Status), PSEUDO_HEADER_ALL),
-        MessageType::Request => {
-            if method_value == Some("CONNECT") {
+        MessageType::Request if method_value == Some("CONNECT") => {
                 const CONNECT_MASK: EnumSet<PseudoHeaderState> =
                     enum_set!(PseudoHeaderState::Method | PseudoHeaderState::Authority);
                 if let Some(protocol) = protocol_value {
