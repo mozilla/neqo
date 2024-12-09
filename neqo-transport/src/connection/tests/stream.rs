@@ -617,8 +617,8 @@ fn simultaneous_stop_sending_and_reset() {
     );
 }
 
-#[test]
 //The client sends a duplicate stream reset.
+#[test]
 fn double_reset_stream() {
     let mut client = default_client();
     let mut server = default_server();
