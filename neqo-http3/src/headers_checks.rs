@@ -130,29 +130,27 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         // Responses contain only :status
         MessageType::Response => (enum_set!(PseudoHeaderState::Status), PSEUDO_HEADER_ALL),
         MessageType::Request if method_value == Some("CONNECT") => {
-                const CONNECT_MASK: EnumSet<PseudoHeaderState> =
-                    enum_set!(PseudoHeaderState::Method | PseudoHeaderState::Authority);
-                if let Some(protocol) = protocol_value {
-                    // For a webtransport CONNECT, the :scheme field must be set to https.
-                    if protocol == "webtransport" && scheme_value != Some("https") {
-                        return Err(Error::InvalidHeader);
-                    }
-                    // The CONNECT request for with :protocol included must have the scheme,
-                    // authority, and path set.
-                    (
-                        CONNECT_MASK | PseudoHeaderState::Scheme | PseudoHeaderState::Path,
-                        PSEUDO_HEADER_ALL,
-                    )
-                } else {
-                    (CONNECT_MASK, PSEUDO_HEADER_ALL)
+            const CONNECT_MASK: EnumSet<PseudoHeaderState> =
+                enum_set!(PseudoHeaderState::Method | PseudoHeaderState::Authority);
+            if let Some(protocol) = protocol_value {
+                // For a webtransport CONNECT, the :scheme field must be set to https.
+                if protocol == "webtransport" && scheme_value != Some("https") {
+                    return Err(Error::InvalidHeader);
                 }
-            } else {
+                // The CONNECT request for with :protocol included must have the scheme,
+                // authority, and path set.
                 (
-                    PseudoHeaderState::Method | PseudoHeaderState::Scheme | PseudoHeaderState::Path,
-                    PSEUDO_HEADER_ALL & !PseudoHeaderState::Authority,
+                    CONNECT_MASK | PseudoHeaderState::Scheme | PseudoHeaderState::Path,
+                    PSEUDO_HEADER_ALL,
                 )
+            } else {
+                (CONNECT_MASK, PSEUDO_HEADER_ALL)
             }
         }
+        MessageType::Request => (
+            PseudoHeaderState::Method | PseudoHeaderState::Scheme | PseudoHeaderState::Path,
+            PSEUDO_HEADER_ALL & !PseudoHeaderState::Authority,
+        ),
     };
 
     if (MessageType::Request == message_type)
