@@ -399,7 +399,7 @@ impl Server {
             );
             qdebug!(
                 [self],
-                "type={:?} path:{} {}->{} {:?} len {}",
+                "type={:?} path:{} {}->{} len {}",
                 PacketType::VersionNegotiation,
                 packet.dcid(),
                 dgram.destination(),
