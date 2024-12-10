@@ -159,7 +159,7 @@ The API consists of:
 Each `Http3Connection` holds a list of stream handlers. Each send and receive-handler is registered in
 `send_streams` and `recv_streams`. Unidirectional streams are registered only on one of the lists
 and bidirectional streams are registered in both lists and the 2 handlers are independent, e.g. one
-can be closed and removed ane second may still be active.
+can be closed and removed and second may still be active.
 
 The only streams that are not registered are the local control stream, local QPACK decoder stream,
 and local QPACK encoder stream. These streams are send-streams and sending data on this stream is
@@ -195,7 +195,7 @@ are local or remote:
     type has been decoded.  After this point the stream:
     - will be regegistered with the appropriate handler,
     - will be canceled if is an unknown stream type or
-    - the connection will fail if it is unallowed stream type (receiveing HTTP request on the
+    - the connection will fail if it is unallowed stream type (receiving HTTP request on the
       client-side).
 
 The output is handled in `handle_new_stream`, for control,  qpack streams and partially
@@ -277,7 +277,7 @@ For example for `Http`   stream the listener will produce  `HeaderReady` and `Da
 
 A `WebTransport` session is connected to a control stream that is in essence an HTTP transaction.
 Therefore, `WebTransportSession` will internally use a `SendMessage` and `RecvMessage` handler to
-handle parsing and sending of HTTP part of the control stream. When HTTP headers are exchenged,
+handle parsing and sending of HTTP part of the control stream. When HTTP headers are exchanged,
 `WebTransportSession` will take over handling of stream data. `WebTransportSession` sets
 `WebTransportSessionListener` as the `RecvMessage` event listener.
 
@@ -501,7 +501,7 @@ impl Http3Connection {
     /// This function handles reading from all streams, i.e. control, qpack, request/response
     /// stream and unidi stream that are still do not have a type.
     /// The function cannot handle:
-    /// 1) a `Push(_)`, `Htttp` or `WebTransportStream(_)` stream
+    /// 1) a `Push(_)`, `Http` or `WebTransportStream(_)` stream
     /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway` must
     ///    be handled by `Http3Client`/`Server`.
     ///
@@ -1236,7 +1236,7 @@ impl Http3Connection {
         error: u32,
         message: &str,
     ) -> Res<()> {
-        qtrace!("Clos WebTransport session {:?}", session_id);
+        qtrace!("Close WebTransport session {:?}", session_id);
         let send_stream = self
             .send_streams
             .get_mut(&session_id)

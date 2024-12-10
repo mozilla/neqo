@@ -116,7 +116,7 @@ fn transfer() {
     assert!(fin3);
 }
 
-// tests stream sendorder priorization
+// tests stream sendorder prioritization
 fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut client = default_client();
     let mut server = default_server();
@@ -217,7 +217,7 @@ fn sendorder_4() {
     ]);
 }
 
-// Tests stream sendorder priorization
+// Tests stream sendorder prioritization
 // Converts Vecs of u64's into StreamIds
 fn fairness_test<S, R>(source: S, number_iterates: usize, truncate_to: usize, result_array: &R)
 where
@@ -306,7 +306,7 @@ fn ordergroup_7() {
 }
 
 #[test]
-// Send fin even if a peer closes a reomte bidi send stream before sending any data.
+// Send fin even if a peer closes a remote bidi send stream before sending any data.
 fn report_fin_when_stream_closed_wo_data() {
     // Note that the two servers in this test will get different anti-replay filters.
     // That's OK because we aren't testing anti-replay.
@@ -719,7 +719,7 @@ fn after_stream_stop_sending_is_called_conn_events_for_stream_should_be_removed(
 
     mem::drop(client.process(out, now()));
 
-    // send stop seending.
+    // send stop sending.
     client
         .stream_stop_sending(id, Error::NoError.code())
         .unwrap();

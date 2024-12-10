@@ -128,7 +128,7 @@ fn frame_reading_with_stream_data() {
     let frame = fr.process(&[0x0, 0x3, 0x1, 0x2, 0x3]).unwrap();
     assert!(matches!(frame, HFrame::Data { len } if len == 3));
 
-    // payloead is still on the stream.
+    // payload is still on the stream.
     // assert that we have 3 bytes in the stream
     let mut buf = [0_u8; 100];
     let (amount, _) = fr.conn_c.stream_recv(fr.stream_id, &mut buf).unwrap();
@@ -150,7 +150,7 @@ fn unknown_frame() {
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<HFrame>(&buf).is_none());
 
-    // now receive a CANCEL_PUSH fram to see that frame reader is ok.
+    // now receive a CANCEL_PUSH frame to see that frame reader is ok.
     let frame = fr.process(&[0x03, 0x01, 0x05]);
     assert!(frame.is_some());
     if let HFrame::CancelPush { push_id } = frame.unwrap() {
@@ -194,7 +194,7 @@ fn unknown_wt_frame() {
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<WebTransportFrame>(&buf).is_none());
 
-    // now receive a WT_FRAME_CLOSE_SESSION fram to see that frame reader is ok.
+    // now receive a WT_FRAME_CLOSE_SESSION frame to see that frame reader is ok.
     let frame = fr.process(&[
         0x68, 0x43, 0x09, 0x00, 0x00, 0x00, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f,
     ]);
@@ -318,7 +318,7 @@ fn test_complete_and_incomplete_frame<T: FrameDecoder<T> + PartialEq + Debug>(
     done_state: usize,
 ) {
     use std::cmp::Ordering;
-    // Let's consume partial frames. It is enough to test partal frames
+    // Let's consume partial frames. It is enough to test partial frames
     // up to 10 byte. 10 byte is greater than frame type and frame
     // length and bit of data.
     let len = std::cmp::min(buf.len() - 1, 10);

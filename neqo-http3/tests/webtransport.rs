@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider, Header};
+use neqo_common::{event::Provider, header::HeadersExt};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
@@ -59,7 +59,7 @@ fn connect() -> (Http3Client, Http3Server) {
 
     assert_eq!(client.state(), Http3State::Connected);
 
-    // Exchange H3 setttings
+    // Exchange H3 settings
     loop {
         out = server.process(out, now()).dgram();
         let dgram_present = out.is_some();
@@ -96,12 +96,8 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
                 headers,
             }) => {
                 assert!(
-                    headers
-                        .iter()
-                        .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-                        && headers
-                            .iter()
-                            .any(|h| h.name() == ":protocol" && h.value() == "webtransport")
+                    headers.contains_header(":method", "CONNECT")
+                        && headers.contains_header(":protocol", "webtransport")
                 );
                 session
                     .response(&WebTransportSessionAcceptAction::Accept)
@@ -127,7 +123,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
             }) if (
                 stream_id == wt_session_id &&
                 status == 200 &&
-                headers.contains(&Header::new(":status", "200"))
+                headers.contains_header(":status", "200")
             )
         )
     };

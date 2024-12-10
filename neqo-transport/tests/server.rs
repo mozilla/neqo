@@ -15,6 +15,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
+    version::WireVersion,
     CloseReason, Connection, ConnectionParameters, Error, Output, State, StreamType, Version,
     MIN_INITIAL_PACKET_SIZE,
 };
@@ -584,13 +585,13 @@ fn version_negotiation_ignored() {
     let vn = vn.expect("a vn packet");
     let mut dec = Decoder::from(&vn[1..]); // Skip first byte.
 
-    assert_eq!(dec.decode_uint(4).expect("VN"), 0);
+    assert_eq!(dec.decode_uint::<u32>().expect("VN"), 0);
     assert_eq!(dec.decode_vec(1).expect("VN DCID"), &s_cid[..]);
     assert_eq!(dec.decode_vec(1).expect("VN SCID"), &d_cid[..]);
     let mut found = false;
     while dec.remaining() > 0 {
-        let v = dec.decode_uint(4).expect("supported version");
-        found |= v == u64::from(Version::default().wire_version());
+        let v = dec.decode_uint::<WireVersion>().expect("supported version");
+        found |= v == Version::default().wire_version();
     }
     assert!(found, "valid version not found");
 

@@ -474,7 +474,7 @@ fn keep_alive_lost() {
     assert!(client.process(out, now).dgram().is_none());
 
     // TODO: if we run server.process with current value of now, the server will
-    // return some small timeout for the recovry although it does not have
+    // return some small timeout for the recovery although it does not have
     // any outstanding data. Therefore we call it after AT_LEAST_PTO.
     now += AT_LEAST_PTO;
     assert_idle(&mut server, now, keep_alive_timeout() - AT_LEAST_PTO);
@@ -662,7 +662,7 @@ fn keep_alive_uni() {
     server.stream_keep_alive(stream, true).unwrap();
 }
 
-/// Test a keep-alive ping is send if there are outstading ack-eliciting packets and that
+/// Test a keep-alive ping is send if there are outstanding ack-eliciting packets and that
 /// the connection is closed after the idle timeout passes.
 #[test]
 fn keep_alive_with_ack_eliciting_packet_lost() {
@@ -672,7 +672,7 @@ fn keep_alive_with_ack_eliciting_packet_lost() {
     // + 2pto) After handshake all packets will be lost. The following steps will happen after
     // the handshake:
     //  - data will be sent on a stream that is marked for keep-alive, (at start time)
-    //  - PTO timer will trigger first, and the data will be retransmited toghether with a PING, (at
+    //  - PTO timer will trigger first, and the data will be retransmitted together with a PING, (at
     //    the start time + pto)
     //  - keep-alive timer will trigger and a keep-alive PING will be sent, (at the start time +
     //    IDLE_TIMEOUT / 2)

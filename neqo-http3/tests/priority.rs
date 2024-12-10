@@ -25,7 +25,7 @@ fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
     }
 }
 
-// Perform only Quic transport handshake.
+// Perform only QUIC transport handshake.
 fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     assert_eq!(client.state(), Http3State::Initializing);
     let out = client.process_output(now());
@@ -45,7 +45,7 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     assert!(client.events().any(connected));
 
     assert_eq!(client.state(), Http3State::Connected);
-    // Exchange H3 setttings
+    // Exchange H3 settings
     let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());

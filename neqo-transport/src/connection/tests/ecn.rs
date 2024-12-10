@@ -19,7 +19,7 @@ use crate::{
         new_server, send_and_receive, send_something, send_something_with_modifier,
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
-    ecn::ECN_TEST_COUNT,
+    ecn::{EcnValidationOutcome, ECN_TEST_COUNT},
     path::MAX_PATH_PROBES,
     ConnectionId, ConnectionParameters, StreamType,
 };
@@ -154,8 +154,12 @@ fn stats() {
     }
 
     for stats in [client.stats(), server.stats()] {
-        assert_eq!(stats.ecn_paths_capable, 1);
-        assert_eq!(stats.ecn_paths_not_capable, 0);
+        for (outcome, count) in stats.ecn_path_validation.iter() {
+            match outcome {
+                EcnValidationOutcome::Capable => assert_eq!(*count, 1),
+                EcnValidationOutcome::NotCapable(_) => assert_eq!(*count, 0),
+            }
+        }
 
         for codepoint in [IpTosEcn::Ect1, IpTosEcn::Ce] {
             assert_eq!(stats.ecn_tx[codepoint], 0);
@@ -348,15 +352,21 @@ pub fn migration_with_modifiers(
 
 #[test]
 fn ecn_migration_zero_burst_all_cases() {
-    for orig_path_mod in &[noop(), bleach(), remark(), ce()] {
-        for new_path_mod in &[noop(), bleach(), remark(), ce(), drop()] {
+    for orig_path_mod in [noop(), bleach(), remark(), ce()] {
+        for (new_path_mod_name, new_path_mod) in [
+            ("noop", noop()),
+            ("bleach", bleach()),
+            ("remark", remark()),
+            ("ce", ce()),
+            ("drop", drop()),
+        ] {
             let (before, after, migrated) =
-                migration_with_modifiers(*orig_path_mod, *new_path_mod, 0);
+                migration_with_modifiers(orig_path_mod, new_path_mod, 0);
             // Too few packets sent before and after migration to conclude ECN validation.
             assert_ecn_enabled(before);
             assert_ecn_enabled(after);
             // Migration succeeds except if the new path drops ECN.
-            assert!(*new_path_mod == drop() || migrated);
+            assert!(new_path_mod_name == "drop" || migrated);
         }
     }
 }
