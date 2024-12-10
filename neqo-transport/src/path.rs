@@ -424,7 +424,7 @@ impl Paths {
     #[cfg(test)]
     pub fn rtt(&self) -> Duration {
         // Rather than have this fail when there is no active path,
-        // make a new RTT esimate and interrogate that.
+        // make a new RTT estimate and interrogate that.
         // That is more expensive, but it should be rare and breaking encapsulation
         // is worse, especially as this is only used in tests.
         self.primary().map_or_else(
