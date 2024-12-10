@@ -54,6 +54,8 @@ pub mod tparams;
 mod tracking;
 pub mod version;
 
+pub use rtt::INITIAL_RTT;
+
 pub use self::{
     cc::CongestionControlAlgorithm,
     cid::{
