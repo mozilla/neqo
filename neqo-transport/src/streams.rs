@@ -156,11 +156,10 @@ impl Streams {
                 ..
             } => {
                 stats.stream += 1;
-                if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
-                    rs.inbound_stream_frame(*fin, *offset, data)?;
-                } else {
-                    return Err(Error::StreamStateError);
-                }
+                let (_, Some(rs)) = self.obtain_stream(*stream_id)? else {
+                    return Err(Error::StreamStateError);                    
+                };
+                rs.inbound_stream_frame(*fin, *offset, data)?;
             }
             Frame::MaxData { maximum_data } => {
                 stats.max_data += 1;
