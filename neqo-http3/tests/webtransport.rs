@@ -59,7 +59,7 @@ fn connect() -> (Http3Client, Http3Server) {
 
     assert_eq!(client.state(), Http3State::Connected);
 
-    // Exchange H3 setttings
+    // Exchange H3 settings
     loop {
         out = server.process(out, now()).dgram();
         let dgram_present = out.is_some();

@@ -156,7 +156,7 @@ pub struct IntReader {
 }
 
 impl IntReader {
-    /// `IntReader` is created by suppling the first byte anf prefix length.
+    /// `IntReader` is created by supplying the first byte and prefix length.
     /// A varint may take only one byte, In that case already the first by has set state to done.
     ///
     /// # Panics
@@ -251,7 +251,7 @@ pub struct LiteralReader {
 
 impl LiteralReader {
     /// Creates `LiteralReader` with the first byte. This constructor is always used
-    /// when a litreral has a prefix.
+    /// when a literal has a prefix.
     /// For literals without a prefix please use the default constructor.
     ///
     /// # Panics

@@ -1699,7 +1699,7 @@ impl Connection {
 
         // Get the next packet number we'll send, for ACK verification.
         // TODO: Once PR #2118 lands, this can move to `input_frame`. For now, it needs to be here,
-        // because we can drop packet number spaces as we parse throught the packet, and if an ACK
+        // because we can drop packet number spaces as we parse through the packet, and if an ACK
         // frame follows a CRYPTO frame that makes us drop a space, we need to know this
         // packet number to verify the ACK against.
         let next_pn = self
@@ -2291,7 +2291,7 @@ impl Connection {
         }
 
         if profile.ack_only(space) {
-            // If we are CC limited we can only send acks!
+            // If we are CC limited we can only send ACKs!
             return (tokens, false, false);
         }
 
@@ -3278,8 +3278,8 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// `ConnectionState` if the connecton stat does not allow to create streams.
-    /// `StreamLimitError` if we are limiied by server's stream concurence.
+    /// `ConnectionState` if the connection stat does not allow to create streams.
+    /// `StreamLimitError` if we are limited by server's stream concurrence.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         // Can't make streams while closing, otherwise rely on the stream limits.
         match self.state {
@@ -3548,7 +3548,7 @@ impl Connection {
     /// # Errors
     ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The funcion does not check if the
+    /// the allowed remote datagram size. The function does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet. The app is encourage to use `max_datagram_size`

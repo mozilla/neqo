@@ -202,7 +202,7 @@ impl Streams {
             }
             Frame::StreamsBlocked { .. } => {
                 stats.streams_blocked += 1;
-                // We send an update evry time we retire a stream. There is no need to
+                // We send an update every time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
             _ => unreachable!("This is not a stream Frame"),
@@ -337,7 +337,7 @@ impl Streams {
         let (removed_bidi, removed_uni) = self.recv.clear_terminal(&self.send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
-        // The updates will be send if any steams has been removed.
+        // The updates will be send if any streams has been removed.
         self.remote_stream_limits[StreamType::BiDi].add_retired(removed_bidi);
         self.remote_stream_limits[StreamType::UniDi].add_retired(removed_uni);
     }

@@ -1055,9 +1055,9 @@ mod tests {
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
             tps_b.remove(*i);
-            // A value that is missing from what is rememebered is OK.
+            // A value that is missing from what is remembered is OK.
             assert!(tps_a.ok_for_0rtt(&tps_b));
-            // A value that is rememebered, but not current is not OK.
+            // A value that is remembered, but not current is not OK.
             assert!(!tps_b.ok_for_0rtt(&tps_a));
         }
     }

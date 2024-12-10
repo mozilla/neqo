@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Tracking of received packets and generating acks thereof.
+// Tracking of received packets and generating ACKs thereof.
 
 use std::{
     cmp::min,
@@ -158,7 +158,7 @@ impl PacketRange {
         }
     }
 
-    /// Get the number of acknowleged packets in the range.
+    /// Get the number of acknowledged packets in the range.
     pub const fn len(&self) -> u64 {
         self.largest - self.smallest + 1
     }
