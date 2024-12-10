@@ -352,15 +352,21 @@ pub fn migration_with_modifiers(
 
 #[test]
 fn ecn_migration_zero_burst_all_cases() {
-    for orig_path_mod in &[noop(), bleach(), remark(), ce()] {
-        for new_path_mod in &[noop(), bleach(), remark(), ce(), drop()] {
+    for orig_path_mod in [noop(), bleach(), remark(), ce()] {
+        for (new_path_mod_name, new_path_mod) in [
+            ("noop", noop()),
+            ("bleach", bleach()),
+            ("remark", remark()),
+            ("ce", ce()),
+            ("drop", drop()),
+        ] {
             let (before, after, migrated) =
-                migration_with_modifiers(*orig_path_mod, *new_path_mod, 0);
+                migration_with_modifiers(orig_path_mod, new_path_mod, 0);
             // Too few packets sent before and after migration to conclude ECN validation.
             assert_ecn_enabled(before);
             assert_ecn_enabled(after);
             // Migration succeeds except if the new path drops ECN.
-            assert!(*new_path_mod == drop() || migrated);
+            assert!(new_path_mod_name == "drop" || migrated);
         }
     }
 }
