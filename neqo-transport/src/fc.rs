@@ -8,11 +8,13 @@
 // into flow control frames needing to be sent to the remote.
 
 use std::{
+    cmp::min,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
+    time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qdebug, qtrace, Role};
 
 use crate::{
     frame::{
@@ -26,6 +28,20 @@ use crate::{
     stream_id::{StreamId, StreamType},
     Error, Res,
 };
+
+/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
+/// for the size of the stream receive window.
+//
+// TODO: Find reasonable limit.
+const STREAM_MAX_ACTIVE_LIMIT: u64 = 100 * 1024 * 1024;
+
+enum AutoTuningAlgorithm {
+    Google,
+    Thomson,
+    Bdp,
+}
+
+const AUTO_TUNING_ALGORITHM: AutoTuningAlgorithm = AutoTuningAlgorithm::Thomson;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -66,6 +82,8 @@ where
 
     /// Update the maximum. Returns `Some` with the updated available flow
     /// control if the change was an increase and `None` otherwise.
+    //
+    // TODO: Impose a limit? Otherwise attacker can set large max thus local node allocates large send buffer.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
         debug_assert!(limit < u64::MAX);
         if limit > self.limit {
@@ -206,12 +224,15 @@ where
 {
     /// The thing that we're counting for.
     subject: T,
+    // TODO: Update. The receive buffer is no longer relevant.
     /// The maximum amount of items that can be active (e.g., the size of the receive buffer).
     max_active: u64,
     /// Last max allowed sent.
     max_allowed: u64,
+    // TODO: Not ideal as it adds an Option for all T, even though only needed for T=StreamId.
+    max_allowed_sent_at: Option<Instant>,
     /// Item received, but not retired yet.
-    /// This will be used for byte flow control: each stream will remember is largest byte
+    /// This will be used for byte flow control: each stream will remember its largest byte
     /// offset received and session flow control will remember the sum of all bytes consumed
     /// by all streams.
     consumed: u64,
@@ -230,13 +251,16 @@ where
             subject,
             max_active: max,
             max_allowed: max,
+            // TODO: Starting with None has us loose a round-trip before
+            // increasing stream receive window. Better to start with now.
+            max_allowed_sent_at: None,
             consumed: 0,
             retired: 0,
             frame_pending: false,
         }
     }
 
-    /// Retired some items and maybe send flow control
+    /// Retire some items and maybe send flow control
     /// update.
     pub fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
@@ -244,7 +268,7 @@ where
         }
 
         self.retired = retired;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.should_send_flowc_update() {
             self.frame_pending = true;
         }
     }
@@ -254,6 +278,23 @@ where
     pub fn send_flowc_update(&mut self) {
         if self.retired + self.max_active > self.max_allowed {
             self.frame_pending = true;
+        }
+    }
+
+    fn should_send_flowc_update(&self) -> bool {
+        match AUTO_TUNING_ALGORITHM {
+            AutoTuningAlgorithm::Google => {
+                let window_bytes_unused = self.max_allowed - self.retired;
+                window_bytes_unused < self.max_active - self.max_active / 2
+            }
+            AutoTuningAlgorithm::Thomson => {
+                let window_bytes_unused = self.max_allowed - self.retired;
+                window_bytes_unused < self.max_active - self.max_active / 8
+            }
+            AutoTuningAlgorithm::Bdp => {
+                let window_bytes_unused = self.max_allowed - self.retired;
+                window_bytes_unused < self.max_active - self.max_active / 8
+            }
         }
     }
 
@@ -296,6 +337,7 @@ where
 }
 
 impl ReceiverFlowControl<()> {
+    // TODO: Do we need to auto-tune here?
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -318,7 +360,7 @@ impl ReceiverFlowControl<()> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.should_send_flowc_update() {
             self.frame_pending = true;
         }
     }
@@ -345,15 +387,94 @@ impl Default for ReceiverFlowControl<()> {
 }
 
 impl ReceiverFlowControl<StreamId> {
+    // TODO: Should as well apply to Connection flow control? Currently just using a huge limit.
+    // https://github.com/mozilla/neqo/blob/e44c472487b663ea4892bd2ff2786919d20329a2/neqo-transport/src/connection/params.rs#L21
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         if !self.frame_needed() {
             return;
         }
+
+        // TODO: Remove. Debugging only for now.
+        let previous_retired = self.max_allowed.saturating_sub(self.max_active);
+        if let Some(previous) = self.max_allowed_sent_at {
+            let secs = (now - previous).as_secs_f64();
+            let bits = (self.retired - previous_retired) as f64 * 8.0;
+            let mbits = (bits / secs) / 1024.0 / 1024.0;
+            println!("{mbits} mbit/s {rtt:?} rtt");
+        }
+
+        // Auto-tune max_active.
+        //
+        // TODO: Should one also auto-tune down?
+        match AUTO_TUNING_ALGORITHM {
+            AutoTuningAlgorithm::Google => {
+                if self.should_send_flowc_update()
+                    && self
+                        .max_allowed_sent_at
+                        .is_some_and(|at| now - at < rtt * 2)
+                    && self.max_active < STREAM_MAX_ACTIVE_LIMIT
+                {
+                    let prev_max_active = self.max_active;
+                    self.max_active = min(self.max_active * 2, STREAM_MAX_ACTIVE_LIMIT);
+                    println!(
+                        "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
+                        prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
+                    );
+                }
+            }
+            AutoTuningAlgorithm::Thomson => {
+                if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
+                    let elapsed = now.duration_since(max_allowed_sent_at);
+                    let ratio_time = elapsed.as_secs_f64() / rtt.as_secs_f64();
+
+                    let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
+                    let ratio_bytes = window_bytes_used as f64 / self.max_active as f64;
+
+                    if ratio_time < ratio_bytes {
+                        let prev_max_active = self.max_active;
+                        self.max_active =
+                            min(self.max_active + window_bytes_used, STREAM_MAX_ACTIVE_LIMIT);
+                        println!(
+                            "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
+                            prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
+                        );
+                    }
+                }
+            }
+            AutoTuningAlgorithm::Bdp => {
+                if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
+                    let elapsed = now.duration_since(max_allowed_sent_at);
+                    let ratio_time = elapsed.as_secs_f64() / rtt.as_secs_f64();
+
+                    let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
+                    let ratio_bytes = window_bytes_used as f64 / self.max_active as f64;
+
+                    if ratio_time < ratio_bytes {
+                        let bdp =
+                            (window_bytes_used as f64 / elapsed.as_secs_f64()) * rtt.as_secs_f64();
+                        let prev_max_active = self.max_active;
+                        // TODO
+                        self.max_active = min(bdp as u64, STREAM_MAX_ACTIVE_LIMIT);
+                        println!(
+                            "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
+                            prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
+                        );
+                    }
+                }
+            }
+        }
+
+        if rtt > Duration::from_millis(200) {
+            panic!("{rtt:?}");
+        }
+
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[
             FRAME_TYPE_MAX_STREAM_DATA,
@@ -366,13 +487,17 @@ impl ReceiverFlowControl<StreamId> {
                 max_data: max_allowed,
             }));
             self.frame_sent(max_allowed);
+        } else {
+            panic!("didnt write frame");
         }
+        // TODO: Document why outside of if.
+        self.max_allowed_sent_at = Some(now);
     }
 
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.should_send_flowc_update() {
             self.frame_pending = true;
         }
     }
