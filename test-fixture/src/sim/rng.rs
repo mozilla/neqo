@@ -21,10 +21,10 @@ impl Random {
         let mut dec = Decoder::from(&seed);
         Self {
             state: [
-                dec.decode_uint(8).unwrap(),
-                dec.decode_uint(8).unwrap(),
-                dec.decode_uint(8).unwrap(),
-                dec.decode_uint(8).unwrap(),
+                dec.decode_uint().unwrap(),
+                dec.decode_uint().unwrap(),
+                dec.decode_uint().unwrap(),
+                dec.decode_uint().unwrap(),
             ],
         }
     }

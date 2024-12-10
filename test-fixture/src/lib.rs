@@ -329,8 +329,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
         return (buf, None);
     }
     let mut dec = Decoder::from(buf);
-    let first = dec.decode_byte().unwrap();
-    let v = Version::try_from(WireVersion::try_from(dec.decode_uint(4).unwrap()).unwrap()).unwrap(); // Version.
+    let first: u8 = dec.decode_uint().unwrap();
+    let v = Version::try_from(dec.decode_uint::<WireVersion>().unwrap()).unwrap(); // Version.
     let (initial_type, retry_type) = if v == Version::Version2 {
         (0b1001_0000, 0b1000_0000)
     } else {
