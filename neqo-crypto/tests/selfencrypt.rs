@@ -1,5 +1,10 @@
-#![warn(clippy::pedantic)]
-#![cfg(not(feature = "fuzzing"))]
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![cfg(not(feature = "disable-encryption"))]
 
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -10,7 +15,7 @@ use neqo_crypto::{
 
 #[test]
 fn se_create() {
-    init();
+    init().unwrap();
     SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).expect("constructor works");
 }
 
@@ -18,7 +23,7 @@ const PLAINTEXT: &[u8] = b"PLAINTEXT";
 const AAD: &[u8] = b"AAD";
 
 fn sealed() -> (SelfEncrypt, Vec<u8>) {
-    init();
+    init().unwrap();
     let se = SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256).unwrap();
     let sealed = se.seal(AAD, PLAINTEXT).expect("sealing works");
     (se, sealed)

@@ -30,23 +30,39 @@ pub enum IpTosEcn {
 
 impl From<IpTosEcn> for u8 {
     fn from(v: IpTosEcn) -> Self {
-        v as u8
+        v as Self
     }
 }
 
 impl From<u8> for IpTosEcn {
     fn from(v: u8) -> Self {
-        match v & 0b11 {
-            0b00 => IpTosEcn::NotEct,
-            0b01 => IpTosEcn::Ect1,
-            0b10 => IpTosEcn::Ect0,
-            0b11 => IpTosEcn::Ce,
+        match v & 0b0000_0011 {
+            0b00 => Self::NotEct,
+            0b01 => Self::Ect1,
+            0b10 => Self::Ect0,
+            0b11 => Self::Ce,
             _ => unreachable!(),
         }
     }
 }
 
-/// Diffserv Codepoints, mapped to the upper six bits of the TOS field.
+impl From<IpTos> for IpTosEcn {
+    fn from(v: IpTos) -> Self {
+        Self::from(u8::from(v))
+    }
+}
+
+impl IpTosEcn {
+    #[must_use]
+    pub const fn is_ecn_marked(&self) -> bool {
+        match self {
+            Self::Ect0 | Self::Ect1 | Self::Ce => true,
+            Self::NotEct => false,
+        }
+    }
+}
+
+/// Diffserv codepoints, mapped to the upper six bits of the TOS field.
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
 #[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug)]
 #[repr(u8)]
@@ -124,44 +140,49 @@ pub enum IpTosDscp {
 
 impl From<IpTosDscp> for u8 {
     fn from(v: IpTosDscp) -> Self {
-        v as u8
+        v as Self
     }
 }
 
 impl From<u8> for IpTosDscp {
     fn from(v: u8) -> Self {
         match v & 0b1111_1100 {
-            0b0000_0000 => IpTosDscp::Cs0,
-            0b0010_0000 => IpTosDscp::Cs1,
-            0b0100_0000 => IpTosDscp::Cs2,
-            0b0110_0000 => IpTosDscp::Cs3,
-            0b1000_0000 => IpTosDscp::Cs4,
-            0b1010_0000 => IpTosDscp::Cs5,
-            0b1100_0000 => IpTosDscp::Cs6,
-            0b1110_0000 => IpTosDscp::Cs7,
-            0b0010_1000 => IpTosDscp::Af11,
-            0b0011_0000 => IpTosDscp::Af12,
-            0b0011_1000 => IpTosDscp::Af13,
-            0b0100_1000 => IpTosDscp::Af21,
-            0b0101_0000 => IpTosDscp::Af22,
-            0b0101_1000 => IpTosDscp::Af23,
-            0b0110_1000 => IpTosDscp::Af31,
-            0b0111_0000 => IpTosDscp::Af32,
-            0b0111_1000 => IpTosDscp::Af33,
-            0b1000_1000 => IpTosDscp::Af41,
-            0b1001_0000 => IpTosDscp::Af42,
-            0b1001_1000 => IpTosDscp::Af43,
-            0b1011_1000 => IpTosDscp::Ef,
-            0b1011_0000 => IpTosDscp::VoiceAdmit,
-            0b0000_0100 => IpTosDscp::Le,
+            0b0000_0000 => Self::Cs0,
+            0b0010_0000 => Self::Cs1,
+            0b0100_0000 => Self::Cs2,
+            0b0110_0000 => Self::Cs3,
+            0b1000_0000 => Self::Cs4,
+            0b1010_0000 => Self::Cs5,
+            0b1100_0000 => Self::Cs6,
+            0b1110_0000 => Self::Cs7,
+            0b0010_1000 => Self::Af11,
+            0b0011_0000 => Self::Af12,
+            0b0011_1000 => Self::Af13,
+            0b0100_1000 => Self::Af21,
+            0b0101_0000 => Self::Af22,
+            0b0101_1000 => Self::Af23,
+            0b0110_1000 => Self::Af31,
+            0b0111_0000 => Self::Af32,
+            0b0111_1000 => Self::Af33,
+            0b1000_1000 => Self::Af41,
+            0b1001_0000 => Self::Af42,
+            0b1001_1000 => Self::Af43,
+            0b1011_1000 => Self::Ef,
+            0b1011_0000 => Self::VoiceAdmit,
+            0b0000_0100 => Self::Le,
             _ => unreachable!(),
         }
     }
 }
 
+impl From<IpTos> for IpTosDscp {
+    fn from(v: IpTos) -> Self {
+        Self::from(u8::from(v))
+    }
+}
+
 /// The type-of-service field in an IP packet.
-#[allow(clippy::module_name_repetitions)]
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub struct IpTos(u8);
 
 impl From<IpTosEcn> for IpTos {
@@ -169,40 +190,64 @@ impl From<IpTosEcn> for IpTos {
         Self(u8::from(v))
     }
 }
+
 impl From<IpTosDscp> for IpTos {
     fn from(v: IpTosDscp) -> Self {
         Self(u8::from(v))
     }
 }
+
 impl From<(IpTosDscp, IpTosEcn)> for IpTos {
     fn from(v: (IpTosDscp, IpTosEcn)) -> Self {
         Self(u8::from(v.0) | u8::from(v.1))
     }
 }
+
+impl From<(IpTosEcn, IpTosDscp)> for IpTos {
+    fn from(v: (IpTosEcn, IpTosDscp)) -> Self {
+        Self(u8::from(v.0) | u8::from(v.1))
+    }
+}
+
 impl From<IpTos> for u8 {
     fn from(v: IpTos) -> Self {
         v.0
     }
 }
 
+impl From<u8> for IpTos {
+    fn from(v: u8) -> Self {
+        Self(v)
+    }
+}
+
 impl Debug for IpTos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("IpTos")
-            .field(&IpTosDscp::from(self.0 & 0xfc))
-            .field(&IpTosEcn::from(self.0 & 0x3))
+            .field(&IpTosDscp::from(*self))
+            .field(&IpTosEcn::from(*self))
             .finish()
     }
 }
 
-impl Default for IpTos {
-    fn default() -> Self {
-        (IpTosDscp::default(), IpTosEcn::default()).into()
+impl IpTos {
+    pub fn set_ecn(&mut self, ecn: IpTosEcn) {
+        self.0 = u8::from(IpTosDscp::from(*self)) | u8::from(ecn);
+    }
+
+    pub fn set_dscp(&mut self, dscp: IpTosDscp) {
+        self.0 = u8::from(IpTosEcn::from(*self)) | u8::from(dscp);
+    }
+
+    #[must_use]
+    pub fn is_ecn_marked(&self) -> bool {
+        IpTosEcn::from(*self).is_ecn_marked()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{IpTos, IpTosDscp, IpTosEcn};
 
     #[test]
     fn iptosecn_into_u8() {
@@ -286,5 +331,46 @@ mod tests {
         let dscp = IpTosDscp::default();
         let iptos_dscp: IpTos = dscp.into();
         assert_eq!(u8::from(iptos_dscp), dscp as u8);
+    }
+
+    #[test]
+    fn u8_to_iptos() {
+        let tos = 0x8b;
+        let iptos: IpTos = (IpTosEcn::Ce, IpTosDscp::Af41).into();
+        assert_eq!(tos, u8::from(iptos));
+        assert_eq!(IpTos::from(tos), iptos);
+    }
+
+    #[test]
+    fn iptos_to_iptosdscp() {
+        let tos = IpTos::from((IpTosDscp::Af41, IpTosEcn::NotEct));
+        let dscp = IpTosDscp::from(tos);
+        assert_eq!(dscp, IpTosDscp::Af41);
+    }
+
+    #[test]
+    fn tos_modify_ecn() {
+        let mut iptos: IpTos = (IpTosDscp::Af41, IpTosEcn::NotEct).into();
+        iptos.set_ecn(IpTosEcn::Ce);
+        assert_eq!(u8::from(iptos), 0b1000_1011);
+    }
+
+    #[test]
+    fn tos_modify_dscp() {
+        let mut iptos: IpTos = (IpTosDscp::Af41, IpTosEcn::Ect1).into();
+        iptos.set_dscp(IpTosDscp::Le);
+        assert_eq!(u8::from(iptos), 0b0000_0101);
+    }
+
+    #[test]
+    fn iptos_is_ecn_marked() {
+        let iptos: IpTos = (IpTosDscp::Af41, IpTosEcn::Ce).into();
+        assert!(iptos.is_ecn_marked());
+    }
+
+    #[test]
+    fn iptosecn_is_ecn_marked() {
+        assert!(IpTosEcn::Ce.is_ecn_marked());
+        assert!(!IpTosEcn::NotEct.is_ecn_marked());
     }
 }

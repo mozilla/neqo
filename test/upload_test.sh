@@ -2,6 +2,8 @@
 
 set -e
 
+export RUST_LOG=neqo_transport::cc=debug
+
 server_address=127.0.0.1
 server_port=4433
 upload_size=8388608
@@ -9,9 +11,10 @@ cc=cubic
 client="cargo run --release --bin neqo-client -- http://$server_address:$server_port/ --test upload --upload-size $upload_size --cc $cc"
 server="cargo run --release --bin neqo-server -- --db ../test-fixture/db $server_address:$server_port"
 server_pid=0
-pacing=true
-if [ "$pacing" = true ]; then
-    client="$client --pacing"
+no_pacing=false
+if [ "$no_pacing" = true ]; then
+    client="$client --no-pacing"
+    server="$server --no-pacing"
 fi
 
 # Define two indexed arrays to store network conditions

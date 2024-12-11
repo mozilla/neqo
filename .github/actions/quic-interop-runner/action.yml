@@ -1,0 +1,120 @@
+name: 'QUIC Interop Runner Action'
+description: 'Run the QUIC Interop Runner tests.'
+author: 'mxinden'
+
+inputs:
+  client:
+    description: 'client implementations (comma-separated)'
+    required: false
+    default: ''
+  server:
+    description: 'server implementations (comma-separated)'
+    required: false
+    default: ''
+  test:
+    description: 'test cases (comma-separatated)'
+    required: false
+    default: 'onlyTests'
+  implementations:
+    description: 'Modified "implementations.json" data'
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout quic-interop/quic-interop-runner repository
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        repository: 'quic-interop/quic-interop-runner'
+        path: 'quic-interop-runner'
+
+    - name: Enable IPv6 support
+      run: sudo modprobe ip6table_filter
+      shell: bash
+
+    - name: Install dependencies
+      run: |
+        sudo add-apt-repository ppa:wireshark-dev/stable
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends tshark
+      shell: bash
+
+    - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+      with:
+        python-version: 3.12
+        cache: 'pip'
+        cache-dependency-path: 'quic-interop-runner/requirements.txt'
+
+    - name: Install Python packages
+      run: |
+        cd quic-interop-runner
+        pip install -U pip
+        pip install -r requirements.txt
+      shell: bash
+
+    - name: Run tests
+      run: |
+        cd quic-interop-runner
+        if [ -n "${{ inputs.implementations }}" ]; then
+          echo '${{ inputs.implementations }}' > implementations.json
+        fi
+        ARGS="--log-dir ../logs --json ../result.json"
+        if [ -n "${{ inputs.client }}" ]; then
+          ARGS="$ARGS --client ${{ inputs.client }}"
+        fi
+        if [ -n "${{ inputs.server }}" ]; then
+          ARGS="$ARGS --server ${{ inputs.server }}"
+        fi
+        if [ -n "${{ inputs.test }}" ]; then
+          ARGS="$ARGS --test ${{ inputs.test }}"
+        fi
+        # Don't fail CI if the interop test fails
+        set -o pipefail
+        python -u run.py $ARGS 2>&1 | tee ../summary.txt || true
+        # But do fail if any log contains 'RUST_BACKTRACE=full', which indicates a panic
+        # (that we assume happened in neqo.)
+        for log in ../logs/*/*/output.txt; do
+          if grep -q 'RUST_BACKTRACE=full' "$log"; then
+            echo "Panic detected in $log"
+            tail -n 50 "$log"
+            FAILED=1
+          fi
+        done
+        # Remove all log files > $MAX_SIZE for succeeded tests to make the artifacts smaller.
+        MAX_SIZE=2M
+        echo "Removed log file > $MAX_SIZE during GitHub workflow" > note.txt
+        echo "Removing these log files > $MAX_SIZE:"
+        SUCCEEDED=$(jq < ../result.json '. | .results[][] | select(.result == "succeeded").name' | tr -d '"')
+        for run in ../logs/*; do
+          for test in $SUCCEEDED; do
+            find "$run/$test" -type f -size +$MAX_SIZE -ls -exec cp note.txt {} \;
+          done
+        done
+        exit $FAILED
+      shell: bash
+
+    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      if: always()
+      id: upload-logs
+      with:
+        name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
+        path: logs
+        compression-level: 9
+
+    - name: Store log URL
+      if: always()
+      run: |
+        jq '. + {log_url: "${{ steps.upload-logs.outputs.artifact-url }}"}' \
+          < result.json  > result.json.tmp && \
+          mv result.json.tmp result.json
+      shell: bash
+
+    - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      if: always()
+      with:
+        name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
+        path: |
+          result.json
+          summary.txt
+        retention-days: 1

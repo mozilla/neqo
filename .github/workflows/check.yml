@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: ["main"]
     paths-ignore: ["*.md", "*.png", "*.svg", "LICENSE-*"]
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      run_benchmarks:
+        description: 'Run benchmarks'
+        type: boolean
+        required: false
+        default: false
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -14,16 +22,34 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
+  toolchains:
+    runs-on: ubuntu-latest
+    outputs:
+      toolchains: ${{ steps.toolchains.outputs.toolchains }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: Cargo.toml
+      - id: toolchains
+        run: |
+          msrv="$(grep rust-version Cargo.toml | tr -d '"' | cut -f3 -d\ )"
+          echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
+
   check:
-    name: Build & test
+    needs: toolchains
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
-        # Don't increase beyond what Firefox is currently using:
-        # https://firefox-source-docs.mozilla.org/writing-rust-code/update-policy.html#schedule
-        rust-toolchain: [1.74.0, stable, nightly]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
         type: [debug]
         include:
           - os: ubuntu-latest
@@ -32,142 +58,88 @@ jobs:
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install Rust
-        uses: ./.github/actions/rust
+      - uses: ./.github/actions/rust
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: rustfmt, clippy, llvm-tools-preview
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools-preview' || '' }}
+          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov, ' || '' }} cargo-nextest
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        env:
-          DEBIAN_FRONTEND: noninteractive
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+      - name: Check
         run: |
-          sudo apt-get install -y --no-install-recommends gyp mercurial ninja-build lld
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      # In addition to installing dependencies, first make sure System Integrity Protection (SIP)
-      # is disabled on this MacOS runner. This is needed to allow the NSS libraries to be loaded
-      # from the build directory and avoid various other test failures. This seems to always be
-      # the case on any macos-13 runner, but not consistently on macos-latest (which is currently
-      # macos-12, FWIW).
-      - name: Install dependencies (MacOS)
-        if: runner.os == 'MacOS'
-        run: |
-          csrutil status | grep disabled
-          brew install ninja mercurial cargo-binstall llvm
-          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-          ln -s /opt/homebrew/bin/python3 /opt/homebrew/bin/python
-          # python3 -m pip install gyp-next
-          # Above does not work, since pypi only has gyp 0.15.0, which is too old
-          # for the homebrew python3. Install from source instead.
-          python3 -m pip install git+https://github.com/nodejs/gyp-next
-          python3 -m pip install packaging
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Set-ExecutionPolicy Unrestricted -Scope Process; iex (iwr "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.ps1").Content
-
-      - name: Use MSYS2 environment and install more dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "C:\\msys64\\usr\\bin" >> "$GITHUB_PATH"
-          echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
-          /c/msys64/usr/bin/pacman -S --noconfirm nsinstall lld
-          python3 -m pip install git+https://github.com/nodejs/gyp-next
-          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld.exe" >> "$GITHUB_ENV"
-
-      - name: Set up MSVC build environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install Rust tools
-        run: cargo +${{ matrix.rust-toolchain }} binstall --no-confirm cargo-llvm-cov cargo-nextest
-
-      # This step might be removed if the distro included a recent enough
-      # version of NSS.  Ubuntu 20.04 only has 3.49, which is far too old.
-      # (neqo-crypto/build.rs would also need to query pkg-config to get the
-      # right build flags rather than building NSS.)
-      # Clone from the main hg repo, because the GitHub mirror can be out of date.
-      - name: Fetch NSS and NSPR
-        uses: ./.github/actions/nss
-
-      - name: Set up NSS/NSPR build environment (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR" >> "$GITHUB_ENV"
-          echo "GYP_MSVS_VERSION=2022" >> "$GITHUB_ENV"
-          echo "BASH=$SHELL" >> "$GITHUB_ENV"
-          # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
-          rm /usr/bin/link.exe
-
-      - name: Build
-        run: |
-          cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --all-targets --features ci,bench
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
-          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_ENV"
-          echo "${{ github.workspace }}/dist/$LIB_DIR/lib" >> "$GITHUB_PATH"
-        env:
-          LIB_DIR: ${{ matrix.type == 'release' && 'Release' || 'Debug' }}
+          # shellcheck disable=SC2086
+          cargo +${{ matrix.rust-toolchain }} check $BUILD_TYPE --all-targets --features ci
 
       - name: Run tests and determine coverage
+        env:
+          RUST_LOG: trace
         run: |
-          cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --all-targets --features ci --no-fail-fast --lcov --output-path lcov.info
-          cargo +${{ matrix.rust-toolchain }} bench --features bench --no-run
+          DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
+          export DUMP_SIMULATION_SEEDS
+          # shellcheck disable=SC2086
+          if [ "${{ matrix.rust-toolchain }}" == "stable" ]; then
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --features ci --profile ci --lcov --output-path lcov.info
+          else
+            cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
+          fi
 
       - name: Run client/server transfer
         run: |
+          # shellcheck disable=SC2086
           cargo +${{ matrix.rust-toolchain }} build $BUILD_TYPE --bin neqo-client --bin neqo-server
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-server -- $HOST:4433 &
+          "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
-          cargo +${{ matrix.rust-toolchain }} run $BUILD_TYPE --bin neqo-client -- --output-dir . https://$HOST:4433/$SIZE
+          # Give the server time to start.
+          sleep 1
+          "target/$BUILD_DIR/neqo-client" --output-dir . "https://$HOST:4433/$SIZE"
           kill $PID
           [ "$(wc -c <"$SIZE")" -eq "$SIZE" ] || exit 1
         env:
           HOST: localhost
           SIZE: 54321
           RUST_LOG: warn
+          BUILD_DIR: ${{ matrix.type == 'release' && 'release' || 'debug' }}
 
-      - name: Check formatting
-        run: |
-          if [ "${{ matrix.rust-toolchain }}" != "nightly" ]; then
-            export CONFIG_PATH="--config-path=$(mktemp)"
-          fi
-          cargo +${{ matrix.rust-toolchain }} fmt --all -- --check $CONFIG_PATH
-        if: success() || failure()
-
-      - name: Clippy
-        run: cargo +${{ matrix.rust-toolchain }} clippy --all-targets -- -D warnings || ${{ matrix.rust-toolchain == 'nightly' }}
-        if: success() || failure()
-
-      - name: Check rustdoc links
-        run: cargo +${{ matrix.rust-toolchain }} doc --workspace --no-deps --document-private-items
-        env:
-          RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
-        if: success() || failure()
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@7f8b4b4bde536c465e797be725718b88c5d95e0e # v5.1.1
         with:
-          file: lcov.info
+          files: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
+      - name: Save simulation seeds artifact
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
+          path: simulation-seeds
+          compression-level: 9
+
+  check-cargo-lock:
+    name: Ensure `Cargo.lock` contains all required dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: cargo update -w --locked
+
   bench:
-    name: "Benchmark"
     needs: [check]
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks) ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request')
     uses: ./.github/workflows/bench.yml

@@ -52,7 +52,7 @@ pub enum ConnectionEvent {
         stream_id: StreamId,
         app_error: AppError,
     },
-    /// Peer has sent STOP_SENDING
+    /// Peer has sent `STOP_SENDING`
     SendStreamStopSending {
         stream_id: StreamId,
         app_error: AppError,
@@ -61,7 +61,7 @@ pub enum ConnectionEvent {
     SendStreamComplete {
         stream_id: StreamId,
     },
-    /// Peer increased MAX_STREAMS
+    /// Peer increased `MAX_STREAMS`
     SendStreamCreatable {
         stream_type: StreamType,
     },
@@ -254,8 +254,9 @@ impl EventProvider for ConnectionEvents {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{ConnectionError, Error};
+    use neqo_common::event::Provider;
+
+    use crate::{CloseReason, ConnectionEvent, ConnectionEvents, Error, State, StreamId};
 
     #[test]
     fn event_culling() {
@@ -313,7 +314,7 @@ mod tests {
 
         evts.send_stream_writable(9.into());
         evts.send_stream_stop_sending(10.into(), 55);
-        evts.connection_state_change(State::Closed(ConnectionError::Transport(
+        evts.connection_state_change(State::Closed(CloseReason::Transport(
             Error::StreamStateError,
         )));
         assert_eq!(evts.events().count(), 1);

@@ -64,13 +64,17 @@ impl Http3ServerHandler {
         data: &[u8],
         conn: &mut Connection,
     ) -> Res<usize> {
-        self.base_handler.stream_has_pending_data(stream_id);
-        self.needs_processing = true;
-        self.base_handler
+        let n = self
+            .base_handler
             .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send_data(conn, data)
+            .send_data(conn, data)?;
+        if n > 0 {
+            self.base_handler.stream_has_pending_data(stream_id);
+        }
+        self.needs_processing = true;
+        Ok(n)
     }
 
     /// Supply response heeaders for a request.
@@ -98,9 +102,8 @@ impl Http3ServerHandler {
     ///
     /// An error will be returned if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
-        qinfo!([self], "Close sending side stream={}.", stream_id);
+        qdebug!([self], "Close sending side stream={}.", stream_id);
         self.base_handler.stream_close_send(conn, stream_id)?;
-        self.base_handler.stream_has_pending_data(stream_id);
         self.needs_processing = true;
         Ok(())
     }
@@ -225,7 +228,7 @@ impl Http3ServerHandler {
     }
 
     /// Take the next available event.
-    pub(crate) fn next_event(&mut self) -> Option<Http3ServerConnEvent> {
+    pub(crate) fn next_event(&self) -> Option<Http3ServerConnEvent> {
         self.events.next_event()
     }
 
@@ -252,7 +255,7 @@ impl Http3ServerHandler {
 
     fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
         qinfo!([self], "Connection error: {}.", err);
-        conn.close(now, err.code(), &format!("{err}"));
+        conn.close(now, err.code(), format!("{err}"));
         self.base_handler.close(err.code());
         self.events
             .connection_state_change(self.base_handler.state());
@@ -315,7 +318,7 @@ impl Http3ServerHandler {
     fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         match self.base_handler.handle_stream_readable(conn, stream_id)? {
             ReceiveOutput::NewStream(NewStreamType::Push(_)) => Err(Error::HttpStreamCreation),
-            ReceiveOutput::NewStream(NewStreamType::Http) => {
+            ReceiveOutput::NewStream(NewStreamType::Http(first_frame_type)) => {
                 self.base_handler.add_streams(
                     stream_id,
                     Box::new(SendMessage::new(
@@ -330,7 +333,7 @@ impl Http3ServerHandler {
                             message_type: MessageType::Request,
                             stream_type: Http3StreamType::Http,
                             stream_id,
-                            header_frame_type_read: true,
+                            first_frame_type: Some(first_frame_type),
                         },
                         Rc::clone(&self.base_handler.qpack_decoder),
                         Box::new(self.events.clone()),
@@ -408,7 +411,7 @@ impl Http3ServerHandler {
         stream_id: StreamId,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        qinfo!([self], "read_data from stream {}.", stream_id);
+        qdebug!([self], "read_data from stream {}.", stream_id);
         let res = self.base_handler.read_data(conn, stream_id, buf);
         if let Err(e) = &res {
             if e.connection_error() {

@@ -1,6 +1,5 @@
 [package]
 name = "neqo-crypto"
-build = "build.rs"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -8,23 +7,36 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
-log = { version = "0.4", default-features = false }
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 
 [build-dependencies]
-# Sync with https://searchfox.org/mozilla-central/source/Cargo.lock 2024-02-08
+# Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
-mozbuild = { version = "0.1", optional = true }
-serde = "1.0"
-serde_derive = "1.0"
-toml = "0.5"
+mozbuild = { version = "0.1", default-features = false, optional = true }
+semver = { version = "1.0", default-features = false }
+serde = { version = "1.0", default-features = false }
+serde_derive = { version = "1.0", default-features = false }
+toml = { version = "0.5", default-features = false }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
 [features]
+disable-encryption = []
+disable-random = []
 gecko = ["mozbuild"]
-fuzzing = []
+
+[lib]
+# See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false

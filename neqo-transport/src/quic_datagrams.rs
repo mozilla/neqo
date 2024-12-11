@@ -6,7 +6,7 @@
 
 // https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
 
-use std::{cmp::min, collections::VecDeque, convert::TryFrom};
+use std::{cmp::min, collections::VecDeque};
 
 use neqo_common::Encoder;
 
@@ -28,10 +28,7 @@ pub enum DatagramTracking {
 
 impl From<Option<u64>> for DatagramTracking {
     fn from(v: Option<u64>) -> Self {
-        match v {
-            Some(id) => Self::Id(id),
-            None => Self::None,
-        }
+        v.map_or(Self::None, Self::Id)
     }
 }
 
@@ -50,7 +47,7 @@ struct QuicDatagram {
 }
 
 impl QuicDatagram {
-    fn tracking(&self) -> &DatagramTracking {
+    const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
     }
 }
@@ -93,7 +90,7 @@ impl QuicDatagrams {
         }
     }
 
-    pub fn remote_datagram_size(&self) -> u64 {
+    pub const fn remote_datagram_size(&self) -> u64 {
         self.remote_datagram_size
     }
 
@@ -147,35 +144,35 @@ impl QuicDatagrams {
     /// # Error
     ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The funcion does not check if the
+    /// the allowed remote datagram size. The function does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet.
     pub fn add_datagram(
         &mut self,
-        buf: &[u8],
+        data: Vec<u8>,
         tracking: DatagramTracking,
         stats: &mut Stats,
     ) -> Res<()> {
-        if u64::try_from(buf.len()).unwrap() > self.remote_datagram_size {
+        if u64::try_from(data.len())? > self.remote_datagram_size {
             return Err(Error::TooMuchData);
         }
         if self.datagrams.len() == self.max_queued_outgoing_datagrams {
             self.conn_events.datagram_outcome(
-                self.datagrams.pop_front().unwrap().tracking(),
+                self.datagrams
+                    .pop_front()
+                    .ok_or(Error::InternalError)?
+                    .tracking(),
                 OutgoingDatagramOutcome::DroppedQueueFull,
             );
             stats.datagram_tx.dropped_queue_full += 1;
         }
-        self.datagrams.push_back(QuicDatagram {
-            data: buf.to_vec(),
-            tracking,
-        });
+        self.datagrams.push_back(QuicDatagram { data, tracking });
         Ok(())
     }
 
     pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
-        if self.local_datagram_size < u64::try_from(data.len()).unwrap() {
+        if self.local_datagram_size < u64::try_from(data.len())? {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events

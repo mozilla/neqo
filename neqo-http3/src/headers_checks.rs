@@ -4,12 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unused_unit)] // see https://github.com/Lymia/enumset/issues/44
-
-use std::convert::TryFrom;
-
 use enumset::{enum_set, EnumSet, EnumSetType};
-use neqo_common::Header;
+use neqo_common::{header::HeadersExt, Header};
 
 use crate::{Error, MessageType, Res};
 
@@ -53,10 +49,9 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// Returns an error if response headers do not contain
 /// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
-    let status = headers.iter().take(1).find(|h| h.name() == ":status");
-    if let Some(h) = status {
+    if let Some(h) = headers.iter().take(1).find_header(":status") {
         #[allow(clippy::map_err_ignore)]
-        let status_code = h.value().parse::<i32>().map_err(|_| Error::InvalidHeader)?;
+        let status_code = h.value().parse::<u16>().map_err(|_| Error::InvalidHeader)?;
         if status_code == 101 {
             // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
             Err(Error::InvalidHeader)
@@ -227,5 +222,19 @@ mod tests {
     #[test]
     fn valid_webtransport_connect() {
         assert!(headers_valid(&create_connect_headers(), MessageType::Request).is_ok());
+    }
+
+    #[test]
+    fn invalid_webtransport_connect_with_status() {
+        assert!(headers_valid(
+            [
+                create_connect_headers(),
+                vec![Header::new(":status", "200")]
+            ]
+            .concat()
+            .as_slice(),
+            MessageType::Request
+        )
+        .is_err());
     }
 }

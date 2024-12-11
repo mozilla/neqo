@@ -8,7 +8,6 @@
 
 use std::{
     collections::BTreeMap,
-    convert::TryFrom,
     fmt::{self, Debug},
     ops::Range,
     time::{Duration, Instant},
@@ -45,7 +44,7 @@ impl RandomDelay {
         self.rng = Some(rng);
     }
 
-    pub fn next(&mut self) -> Duration {
+    pub fn next(&self) -> Duration {
         let mut rng = self.rng.as_ref().unwrap().borrow_mut();
         let r = rng.random_from(0..self.max);
         self.start + Duration::from_nanos(r)

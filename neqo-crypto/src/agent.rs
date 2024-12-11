@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     ffi::{CStr, CString},
     mem::{self, MaybeUninit},
     ops::{Deref, DerefMut},
@@ -17,7 +16,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
@@ -61,17 +60,17 @@ pub enum HandshakeState {
 
 impl HandshakeState {
     #[must_use]
-    pub fn is_connected(&self) -> bool {
+    pub const fn is_connected(&self) -> bool {
         matches!(self, Self::Complete(_))
     }
 
     #[must_use]
-    pub fn is_final(&self) -> bool {
+    pub const fn is_final(&self) -> bool {
         matches!(self, Self::Complete(_) | Self::Failed(_))
     }
 
     #[must_use]
-    pub fn authentication_needed(&self) -> bool {
+    pub const fn authentication_needed(&self) -> bool {
         matches!(
             self,
             Self::AuthenticationPending | Self::EchFallbackAuthenticationPending(_)
@@ -118,12 +117,12 @@ pub struct SecretAgentPreInfo {
 }
 
 macro_rules! preinfo_arg {
-    ($v:ident, $m:ident, $f:ident: $t:ident $(,)?) => {
+    ($v:ident, $m:ident, $f:ident: $t:ty $(,)?) => {
         #[must_use]
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some($t::try_from(self.info.$f).unwrap()),
+                _ => Some(<$t>::try_from(self.info.$f).unwrap()),
             }
         }
     };
@@ -155,7 +154,7 @@ impl SecretAgentPreInfo {
     );
 
     #[must_use]
-    pub fn early_data(&self) -> bool {
+    pub const fn early_data(&self) -> bool {
         self.info.canSendEarlyData != 0
     }
 
@@ -169,7 +168,7 @@ impl SecretAgentPreInfo {
 
     /// Was ECH accepted.
     #[must_use]
-    pub fn ech_accepted(&self) -> Option<bool> {
+    pub const fn ech_accepted(&self) -> Option<bool> {
         if self.info.valuesSet & ssl::ssl_preinfo_ech == 0 {
             None
         } else {
@@ -199,7 +198,7 @@ impl SecretAgentPreInfo {
     }
 
     #[must_use]
-    pub fn alpn(&self) -> Option<&String> {
+    pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
 }
@@ -239,35 +238,35 @@ impl SecretAgentInfo {
         })
     }
     #[must_use]
-    pub fn version(&self) -> Version {
+    pub const fn version(&self) -> Version {
         self.version
     }
     #[must_use]
-    pub fn cipher_suite(&self) -> Cipher {
+    pub const fn cipher_suite(&self) -> Cipher {
         self.cipher
     }
     #[must_use]
-    pub fn key_exchange(&self) -> Group {
+    pub const fn key_exchange(&self) -> Group {
         self.group
     }
     #[must_use]
-    pub fn resumed(&self) -> bool {
+    pub const fn resumed(&self) -> bool {
         self.resumed
     }
     #[must_use]
-    pub fn early_data_accepted(&self) -> bool {
+    pub const fn early_data_accepted(&self) -> bool {
         self.early_data
     }
     #[must_use]
-    pub fn ech_accepted(&self) -> bool {
+    pub const fn ech_accepted(&self) -> bool {
         self.ech_accepted
     }
     #[must_use]
-    pub fn alpn(&self) -> Option<&String> {
+    pub const fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
     }
     #[must_use]
-    pub fn signature_scheme(&self) -> SignatureScheme {
+    pub const fn signature_scheme(&self) -> SignatureScheme {
         self.signature_scheme
     }
 }
@@ -344,6 +343,7 @@ impl SecretAgent {
         Ok(fd)
     }
 
+    #[allow(clippy::missing_const_for_fn)]
     unsafe extern "C" fn auth_complete_hook(
         arg: *mut c_void,
         _fd: *mut ssl::PRFileDesc,
@@ -407,10 +407,8 @@ impl SecretAgent {
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         self.set_option(ssl::Opt::OcspStapling, true)?;
-        if let Err(e) = self.set_option(ssl::Opt::Grease, grease) {
-            // Until NSS supports greasing, it's OK to fail here.
-            qinfo!([self], "Failed to enable greasing {:?}", e);
-        }
+        self.set_option(ssl::Opt::Grease, grease)?;
+        self.set_option(ssl::Opt::EnableChExtensionPermutation, true)?;
         Ok(())
     }
 
@@ -486,7 +484,7 @@ impl SecretAgent {
     /// # Errors
     ///
     /// Returns an error if the option or option value is invalid; i.e., never.
-    pub fn set_option(&mut self, opt: ssl::Opt, value: bool) -> Res<()> {
+    pub fn set_option(&self, opt: ssl::Opt, value: bool) -> Res<()> {
         opt.set(self.fd, value)
     }
 
@@ -495,7 +493,7 @@ impl SecretAgent {
     /// # Errors
     ///
     /// See `set_option`.
-    pub fn enable_0rtt(&mut self) -> Res<()> {
+    pub fn enable_0rtt(&self) -> Res<()> {
         self.set_option(ssl::Opt::EarlyData, true)
     }
 
@@ -504,7 +502,7 @@ impl SecretAgent {
     /// # Errors
     ///
     /// See `set_option`.
-    pub fn disable_end_of_early_data(&mut self) -> Res<()> {
+    pub fn disable_end_of_early_data(&self) -> Res<()> {
         self.set_option(ssl::Opt::SuppressEndOfEarlyData, true)
     }
 
@@ -601,7 +599,7 @@ impl SecretAgent {
     ///
     /// Calling this function returns None until the connection is complete.
     #[must_use]
-    pub fn info(&self) -> Option<&SecretAgentInfo> {
+    pub const fn info(&self) -> Option<&SecretAgentInfo> {
         match self.state {
             HandshakeState::Complete(ref info) => Some(info),
             _ => None,
@@ -671,7 +669,7 @@ impl SecretAgent {
             let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
             HandshakeState::Complete(info)
         };
-        qinfo!([self], "state -> {:?}", self.state);
+        qdebug!([self], "state -> {:?}", self.state);
         Ok(())
     }
 
@@ -751,13 +749,13 @@ impl SecretAgent {
     /// # Panics
     ///
     /// If setup fails.
-    #[allow(unknown_lints, clippy::branches_sharing_code)]
+    #[allow(clippy::branches_sharing_code)]
     pub fn close(&mut self) {
         // It should be safe to close multiple times.
         if self.fd.is_null() {
             return;
         }
-        if let Some(true) = self.raw {
+        if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
             let _records = self.setup_raw().expect("Can only close");
             unsafe { prio::PR_Close(self.fd.cast()) };
@@ -772,7 +770,7 @@ impl SecretAgent {
 
     /// State returns the status of the handshake.
     #[must_use]
-    pub fn state(&self) -> &HandshakeState {
+    pub const fn state(&self) -> &HandshakeState {
         &self.state
     }
 
@@ -821,7 +819,7 @@ impl AsRef<[u8]> for ResumptionToken {
 
 impl ResumptionToken {
     #[must_use]
-    pub fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
+    pub const fn new(token: Vec<u8>, expiration_time: Instant) -> Self {
         Self {
             token,
             expiration_time,
@@ -829,19 +827,14 @@ impl ResumptionToken {
     }
 
     #[must_use]
-    pub fn expiration_time(&self) -> Instant {
+    pub const fn expiration_time(&self) -> Instant {
         self.expiration_time
     }
 }
 
 /// A TLS Client.
 #[derive(Debug)]
-#[allow(
-    renamed_and_removed_lints,
-    clippy::box_vec,
-    unknown_lints,
-    clippy::box_collection
-)] // We need the Box.
+#[allow(clippy::box_collection)] // We need the Box.
 pub struct Client {
     agent: SecretAgent,
 
@@ -879,14 +872,13 @@ impl Client {
         arg: *mut c_void,
     ) -> ssl::SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
-        if ssl::SSL_GetResumptionTokenInfo(
+        let info_res = &ssl::SSL_GetResumptionTokenInfo(
             token,
             len,
             info.as_mut_ptr(),
             c_uint::try_from(mem::size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
-        )
-        .is_err()
-        {
+        );
+        if info_res.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
         }
@@ -899,7 +891,7 @@ impl Client {
         let len = usize::try_from(len).unwrap();
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
-        qinfo!(
+        qdebug!(
             [format!("{fd:p}")],
             "Got resumption token {}",
             hex_snip_middle(&v)
@@ -1016,7 +1008,7 @@ pub enum ZeroRttCheckResult {
     Accept,
     /// Reject 0-RTT, but continue the handshake normally.
     Reject,
-    /// Send HelloRetryRequest (probably not needed for QUIC).
+    /// Send `HelloRetryRequest` (probably not needed for QUIC).
     HelloRetryRequest(Vec<u8>),
     /// Fail the handshake.
     Fail,

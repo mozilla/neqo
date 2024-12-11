@@ -1,4 +1,10 @@
-use std::{convert::TryFrom, fmt};
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::fmt;
 
 use neqo_transport::StreamId;
 use sfv::{BareItem, Item, ListEntry, Parser};
@@ -13,7 +19,7 @@ pub struct Priority {
 
 impl Default for Priority {
     fn default() -> Self {
-        Priority {
+        Self {
             urgency: 3,
             incremental: false,
         }
@@ -25,9 +31,9 @@ impl Priority {
     ///
     /// If an invalid urgency (>7 is given)
     #[must_use]
-    pub fn new(urgency: u8, incremental: bool) -> Priority {
+    pub fn new(urgency: u8, incremental: bool) -> Self {
         assert!(urgency < 8);
-        Priority {
+        Self {
             urgency,
             incremental,
         }
@@ -37,7 +43,7 @@ impl Priority {
     #[must_use]
     pub fn header(self) -> Option<Header> {
         match self {
-            Priority {
+            Self {
                 urgency: 3,
                 incremental: false,
             } => None,
@@ -54,7 +60,7 @@ impl Priority {
     /// # Panics
     ///
     /// Never, but the compiler is not smart enough to work that out.
-    pub fn from_bytes(bytes: &[u8]) -> Res<Priority> {
+    pub fn from_bytes(bytes: &[u8]) -> Res<Self> {
         let dict = Parser::parse_dictionary(bytes).map_err(|_| Error::HttpFrame)?;
         let urgency = match dict.get("u") {
             Some(ListEntry::Item(Item {
@@ -70,7 +76,7 @@ impl Priority {
             })) => *i,
             _ => false,
         };
-        Ok(Priority {
+        Ok(Self {
             urgency,
             incremental,
         })
@@ -80,19 +86,19 @@ impl Priority {
 impl fmt::Display for Priority {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Priority {
+            Self {
                 urgency: 3,
                 incremental: false,
             } => Ok(()),
-            Priority {
+            Self {
                 urgency: 3,
                 incremental: true,
             } => write!(f, "i"),
-            Priority {
+            Self {
                 urgency,
                 incremental: false,
             } => write!(f, "u={urgency}"),
-            Priority {
+            Self {
                 urgency,
                 incremental: true,
             } => write!(f, "u={urgency},i"),
@@ -109,8 +115,8 @@ pub struct PriorityHandler {
 }
 
 impl PriorityHandler {
-    pub fn new(push_stream: bool, priority: Priority) -> PriorityHandler {
-        PriorityHandler {
+    pub const fn new(push_stream: bool, priority: Priority) -> Self {
+        Self {
             push_stream,
             priority,
             last_send_priority: priority,

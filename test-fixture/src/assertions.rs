@@ -4,21 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    net::SocketAddr,
-};
+use std::net::SocketAddr;
 
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::{version::WireVersion, Version};
+use neqo_transport::{version::WireVersion, Pmtud, Version, MIN_INITIAL_PACKET_SIZE};
 
 use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
 
 const PACKET_TYPE_MASK: u8 = 0b1011_0000;
 
 fn assert_default_version(dec: &mut Decoder) -> Version {
-    let version =
-        Version::try_from(WireVersion::try_from(dec.decode_uint(4).unwrap()).unwrap()).unwrap();
+    let version = Version::try_from(dec.decode_uint::<WireVersion>().unwrap()).unwrap();
     assert!(version == Version::Version1 || version == Version::Version2);
     version
 }
@@ -41,8 +37,12 @@ fn assert_long_packet_type(b: u8, v1_expected: u8, version: Version) {
 /// If this is not a long header packet with the given version.
 pub fn assert_version(payload: &[u8], v: u32) {
     let mut dec = Decoder::from(payload);
-    assert_eq!(dec.decode_byte().unwrap() & 0x80, 0x80, "is long header");
-    assert_eq!(dec.decode_uint(4).unwrap(), u64::from(v));
+    assert_eq!(
+        dec.decode_uint::<u8>().unwrap() & 0x80,
+        0x80,
+        "is long header"
+    );
+    assert_eq!(dec.decode_uint::<u32>().unwrap(), v);
 }
 
 /// Simple checks for a Version Negotiation packet.
@@ -52,8 +52,12 @@ pub fn assert_version(payload: &[u8], v: u32) {
 /// If this is clearly not a Version Negotiation packet.
 pub fn assert_vn(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
-    assert_eq!(dec.decode_byte().unwrap() & 0x80, 0x80, "is long header");
-    assert_eq!(dec.decode_uint(4).unwrap(), 0);
+    assert_eq!(
+        dec.decode_uint::<u8>().unwrap() & 0x80,
+        0x80,
+        "is long header"
+    );
+    assert_eq!(dec.decode_uint::<u32>().unwrap(), 0);
     dec.skip_vec(1); // DCID
     dec.skip_vec(1); // SCID
     assert_eq!(dec.remaining() % 4, 0);
@@ -65,9 +69,9 @@ pub fn assert_vn(payload: &[u8]) {
 ///
 /// If the tests fail.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
-    assert!(payload.len() >= 1200);
+    assert!(payload.len() >= MIN_INITIAL_PACKET_SIZE);
     let mut dec = Decoder::from(payload);
-    let initial_type = dec.decode_byte().unwrap(); // Initial
+    let initial_type = dec.decode_uint::<u8>().unwrap(); // Initial
     let version = assert_default_version(&mut dec);
     assert_long_packet_type(initial_type, 0b1000_0000, version);
     dec.skip_vec(1); // DCID
@@ -75,7 +79,7 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
     dec.skip_vvec();
     let initial_len = dec.decode_varint().unwrap();
     dec.skip(initial_len.try_into().unwrap());
-    let zrtt_type = dec.decode_byte().unwrap();
+    let zrtt_type = dec.decode_uint::<u8>().unwrap();
     assert_long_packet_type(zrtt_type, 0b1001_0000, version);
 }
 
@@ -84,7 +88,7 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
 /// If the tests fail.
 pub fn assert_retry(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
-    let t = dec.decode_byte().unwrap();
+    let t = dec.decode_uint::<u8>().unwrap();
     let version = assert_default_version(&mut dec);
     assert_long_packet_type(t, 0b1011_0000, version);
 }
@@ -96,7 +100,7 @@ pub fn assert_retry(payload: &[u8]) {
 /// If the tests fail.
 pub fn assert_initial(payload: &[u8], expect_token: bool) {
     let mut dec = Decoder::from(payload);
-    let t = dec.decode_byte().unwrap();
+    let t = dec.decode_uint::<u8>().unwrap();
     let version = assert_default_version(&mut dec);
     assert_long_packet_type(t, 0b1000_0000, version);
     dec.skip_vec(1); // Destination Connection ID.
@@ -112,7 +116,7 @@ pub fn assert_initial(payload: &[u8], expect_token: bool) {
 /// If the tests fail.
 pub fn assert_handshake(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
-    let t = dec.decode_byte().unwrap();
+    let t = dec.decode_uint::<u8>().unwrap();
     let version = assert_default_version(&mut dec);
     assert_long_packet_type(t, 0b1010_0000, version);
 }
@@ -122,7 +126,7 @@ pub fn assert_handshake(payload: &[u8]) {
 /// If the tests fail.
 pub fn assert_no_1rtt(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
-    while let Some(b1) = dec.decode_byte() {
+    while let Some(b1) = dec.decode_uint::<u8>() {
         // If this is just padding, that's OK.  Check.
         if payload.iter().skip(dec.offset()).all(|b| *b == 0) {
             return;
@@ -163,7 +167,7 @@ pub fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
 pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, DEFAULT_ADDR_V4);
     if padded {
-        assert_eq!(dgram.len(), 1357 /* PATH_MTU_V4 */);
+        assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR_V4.ip()));
     }
 }
 
@@ -173,6 +177,6 @@ pub fn assert_v4_path(dgram: &Datagram, padded: bool) {
 pub fn assert_v6_path(dgram: &Datagram, padded: bool) {
     assert_path(dgram, DEFAULT_ADDR);
     if padded {
-        assert_eq!(dgram.len(), 1337 /* PATH_MTU_V6 */);
+        assert_eq!(dgram.len(), Pmtud::default_plpmtu(DEFAULT_ADDR.ip()));
     }
 }

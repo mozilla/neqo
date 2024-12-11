@@ -1,4 +1,8 @@
-#![warn(clippy::pedantic)]
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
 // This uses external interfaces to neqo_crypto rather than being a module
 // inside of lib.rs. Because all other code uses the test_fixture module,
@@ -11,13 +15,7 @@ use neqo_crypto::{assert_initialized, init_db};
 
 // Pull in the NSS internals so that we can ask NSS if it thinks that
 // it is properly initialized.
-#[allow(
-    dead_code,
-    non_upper_case_globals,
-    clippy::redundant_static_lifetimes,
-    clippy::unseparated_literal_suffix,
-    clippy::upper_case_acronyms
-)]
+#[allow(dead_code, non_upper_case_globals)]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
@@ -25,19 +23,19 @@ mod nss {
 #[cfg(nss_nodb)]
 #[test]
 fn init_nodb() {
-    init();
+    neqo_crypto::init().unwrap();
     assert_initialized();
     unsafe {
-        assert!(nss::NSS_IsInitialized() != 0);
+        assert_ne!(nss::NSS_IsInitialized(), 0);
     }
 }
 
 #[cfg(not(nss_nodb))]
 #[test]
 fn init_withdb() {
-    init_db(::test_fixture::NSS_DB_PATH);
+    init_db(::test_fixture::NSS_DB_PATH).unwrap();
     assert_initialized();
     unsafe {
-        assert!(nss::NSS_IsInitialized() != 0);
+        assert_ne!(nss::NSS_IsInitialized(), 0);
     }
 }

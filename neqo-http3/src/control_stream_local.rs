@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    collections::{HashMap, VecDeque},
-    convert::TryFrom,
-};
+use std::collections::{HashMap, VecDeque};
 
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamId, StreamType};
@@ -18,7 +15,7 @@ pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
 /// The local control stream, responsible for encoding frames and sending them
 #[derive(Debug)]
-pub(crate) struct ControlStreamLocal {
+pub struct ControlStreamLocal {
     stream: BufferedStream,
     /// `stream_id`s of outstanding request streams
     outstanding_priority_update: VecDeque<StreamId>,

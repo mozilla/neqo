@@ -1,46 +1,48 @@
-FROM martenseemann/quic-network-simulator-endpoint:latest AS buildimage
+FROM lukemathwalker/cargo-chef@sha256:f1fdce8dbd1a91c2bc2aff69a7f48bd9e859d9781bb35c87d556b3851587364b AS chef
 
+WORKDIR /app
+
+FROM chef AS planner
+
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git mercurial \
-    build-essential libclang-dev lld \
-    gyp ninja-build zlib1g-dev python \
- && apt-get autoremove -y && apt-get clean -y \
- && rm -rf /var/lib/apt/lists/*
+    libclang-dev gyp ninja-build python-is-python3 \
+    && apt-get autoremove -y && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
 
-ARG RUST_VERSION=stable
-
-ENV RUSTUP_HOME=/usr/local/rustup \
-    CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
-
-RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- -y -q --no-modify-path --profile minimal --default-toolchain $RUST_VERSION
-
+# We unfortunately need to build NSS from source, because the Debian package is
+# not compiled with support for SSLKEYLOGFILE.
+# See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
 ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
 RUN set -eux; \
-    hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
-    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+    git clone --depth=1 https://github.com/nss-dev/nspr "$NSPR_DIR"; \
+    git clone --depth=1 https://github.com/nss-dev/nss "$NSS_DIR"
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
 ADD . /neqo
-
 RUN set -eux; \
     cd /neqo; \
-    RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release \
-      --bin neqo-client --bin neqo-server
+    CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --bin neqo-client --bin neqo-server
 
 # Copy only binaries to the final image to keep it small.
 
-FROM martenseemann/quic-network-simulator-endpoint:latest
+FROM martenseemann/quic-network-simulator-endpoint@sha256:42d79cc04b88f2e4b4c8beb418b0843c123f26852ff6bbba4caa6badc0043d23
 
 ENV LD_LIBRARY_PATH=/neqo/lib
-COPY --from=buildimage /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/
-COPY --from=buildimage /dist/Release/lib/*.so /neqo/lib/
-COPY --from=buildimage /dist/Release/bin/certutil /dist/Release/bin/pk12util /neqo/bin/
+COPY --from=builder /neqo/target/release/neqo-client /neqo/target/release/neqo-server /neqo/bin/
+COPY --from=builder /dist/Release/lib/*.so /neqo/lib/
+COPY --from=builder /dist/Release/bin/certutil /dist/Release/bin/pk12util /neqo/bin/
 
 COPY qns/interop.sh /neqo/
 RUN chmod +x /neqo/interop.sh

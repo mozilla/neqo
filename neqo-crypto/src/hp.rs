@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom,
     fmt::{self, Debug},
     os::raw::{c_char, c_int, c_uint},
     ptr::{addr_of_mut, null, null_mut},
@@ -46,7 +45,7 @@ pub enum HpKey {
     /// track references using `Rc`.  `PK11Context` can't be used with `PK11_CloneContext`
     /// as that is not supported for these contexts.
     Aes(Rc<RefCell<Context>>),
-    /// The ChaCha20 mask has to invoke a new PK11_Encrypt every time as it needs to
+    /// The `ChaCha20` mask has to invoke a new `PK11_Encrypt` every time as it needs to
     /// change the counter and nonce on each invocation.
     Chacha(SymKey),
 }
@@ -58,7 +57,7 @@ impl Debug for HpKey {
 }
 
 impl HpKey {
-    const SAMPLE_SIZE: usize = 16;
+    pub const SAMPLE_SIZE: usize = 16;
 
     /// QUIC-specific API for extracting a header-protection key.
     ///
@@ -69,7 +68,6 @@ impl HpKey {
     /// # Panics
     ///
     /// When `cipher` is not known to this code.
-    #[allow(clippy::cast_sign_loss)] // Cast for PK11_GetBlockSize is safe.
     pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
         const ZERO: &[u8] = &[0; 12];
 
@@ -120,19 +118,12 @@ impl HpKey {
 
         debug_assert_eq!(
             res.block_size(),
-            usize::try_from(unsafe { PK11_GetBlockSize(mech, null_mut()) }).unwrap()
+            usize::try_from(unsafe { PK11_GetBlockSize(mech, null_mut()) })?
         );
         Ok(res)
     }
 
-    /// Get the sample size, which is also the output size.
-    #[must_use]
-    #[allow(clippy::unused_self)] // To maintain an API contract.
-    pub fn sample_size(&self) -> usize {
-        Self::SAMPLE_SIZE
-    }
-
-    fn block_size(&self) -> usize {
+    const fn block_size(&self) -> usize {
         match self {
             Self::Aes(_) => 16,
             Self::Chacha(_) => 64,
@@ -149,8 +140,9 @@ impl HpKey {
     /// # Panics
     ///
     /// When the mechanism for our key is not supported.
-    pub fn mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
-        let mut output = vec![0_u8; self.block_size()];
+    /// Or when the sample provided is not at least `self.sample_size()` bytes.
+    pub fn mask(&self, sample: &[u8]) -> Res<[u8; Self::SAMPLE_SIZE]> {
+        let mut output = [0; Self::SAMPLE_SIZE];
 
         match self {
             Self::Aes(context) => {
@@ -162,10 +154,10 @@ impl HpKey {
                         &mut output_len,
                         c_int::try_from(output.len())?,
                         sample[..Self::SAMPLE_SIZE].as_ptr().cast(),
-                        c_int::try_from(Self::SAMPLE_SIZE).unwrap(),
+                        c_int::try_from(Self::SAMPLE_SIZE)?,
                     )
                 })?;
-                assert_eq!(usize::try_from(output_len).unwrap(), output.len());
+                debug_assert_eq!(usize::try_from(output_len)?, output.len());
                 Ok(output)
             }
 
@@ -186,11 +178,11 @@ impl HpKey {
                         output[..].as_mut_ptr(),
                         &mut output_len,
                         c_uint::try_from(output.len())?,
-                        output[..].as_ptr(),
-                        c_uint::try_from(output.len())?,
+                        [0; Self::SAMPLE_SIZE].as_ptr(),
+                        c_uint::try_from(Self::SAMPLE_SIZE)?,
                     )
                 })?;
-                assert_eq!(usize::try_from(output_len).unwrap(), output.len());
+                debug_assert_eq!(usize::try_from(output_len)?, output.len());
                 Ok(output)
             }
         }

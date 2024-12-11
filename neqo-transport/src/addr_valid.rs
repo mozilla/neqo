@@ -7,7 +7,6 @@
 // This file implements functions necessary for address validation.
 
 use std::{
-    convert::TryFrom,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -48,9 +47,9 @@ const MAX_SAVED_TOKENS: usize = 8;
 pub enum ValidateAddress {
     /// Require address validation never.
     Never,
-    /// Require address validation unless a NEW_TOKEN token is provided.
+    /// Require address validation unless a `NEW_TOKEN` token is provided.
     NoToken,
-    /// Require address validation even if a NEW_TOKEN token is provided.
+    /// Require address validation even if a `NEW_TOKEN` token is provided.
     Always,
 }
 
@@ -171,9 +170,9 @@ impl AddressValidation {
         let peer_addr = Self::encode_aad(peer_address, retry);
         let data = self.self_encrypt.open(peer_addr.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);
-        match dec.decode_uint(4) {
+        match dec.decode_uint::<u32>() {
             Some(d) => {
-                let end = self.start_time + Duration::from_millis(d);
+                let end = self.start_time + Duration::from_millis(u64::from(d));
                 if end < now {
                     qtrace!("Expired token: {:?} vs. {:?}", end, now);
                     return None;
@@ -227,6 +226,7 @@ impl AddressValidation {
         let enc = &token[TOKEN_IDENTIFIER_RETRY.len()..];
         // Note that this allows the token identifier part to be corrupted.
         // That's OK here as we don't depend on that being authenticated.
+        #[allow(clippy::option_if_let_else)]
         if let Some(cid) = self.decrypt_token(enc, peer_address, retry, now) {
             if retry {
                 // This is from Retry, so we should have an ODCID >= 8.
@@ -234,7 +234,7 @@ impl AddressValidation {
                     qinfo!("AddressValidation: valid Retry token for {}", cid);
                     AddressValidationResult::ValidRetry(cid)
                 } else {
-                    panic!("AddressValidation: Retry token with small CID {}", cid);
+                    panic!("AddressValidation: Retry token with small CID {cid}");
                 }
             } else if cid.is_empty() {
                 // An empty connection ID means NEW_TOKEN.
@@ -246,7 +246,7 @@ impl AddressValidation {
                     AddressValidationResult::Pass
                 }
             } else {
-                panic!("AddressValidation: NEW_TOKEN token with CID {}", cid);
+                panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
             }
         } else {
             // From here on, we have a token that we couldn't decrypt.
@@ -271,7 +271,7 @@ impl AddressValidation {
 
 // Note: these lint override can be removed in later versions where the lints
 // either don't trip a false positive or don't apply.  rustc 1.46 is fine.
-#[allow(dead_code, clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant)]
 pub enum NewTokenState {
     Client {
         /// Tokens that haven't been taken yet.
@@ -309,15 +309,13 @@ impl NewTokenState {
             ref mut old,
         } = self
         {
-            if let Some(t) = pending.pop() {
+            pending.pop().map(|t| {
                 if old.len() >= MAX_SAVED_TOKENS {
                     old.remove(0);
                 }
                 old.push(t);
-                Some(&old[old.len() - 1])
-            } else {
-                None
-            }
+                old[old.len() - 1].as_slice()
+            })
         } else {
             unreachable!();
         }
@@ -405,7 +403,7 @@ impl NewTokenFrameStatus {
 
 #[derive(Default)]
 pub struct NewTokenSender {
-    /// The unacknowledged NEW_TOKEN frames we are yet to send.
+    /// The unacknowledged `NEW_TOKEN` frames we are yet to send.
     tokens: Vec<NewTokenFrameStatus>,
     /// A sequence number that is used to track individual tokens
     /// by reference (so that recovery tokens can be simple).

@@ -1,10 +1,7 @@
-/target/
-**/*.rs.bk
-Cargo.lock
-/db
+.DS_Store
+*.qlog
 *~
 /.vscode/
-.idea
-*.qlog
-*.swp
-/qns/.last-update-*
+/lcov.info
+/mutants.out*/
+/target/

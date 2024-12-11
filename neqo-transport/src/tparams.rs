@@ -9,7 +9,6 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    convert::TryFrom,
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
@@ -23,6 +22,7 @@ use neqo_crypto::{
 
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
+    packet::MIN_INITIAL_PACKET_SIZE,
     version::{Version, VersionConfig, WireVersion},
     Error, Res,
 };
@@ -111,11 +111,11 @@ impl PreferredAddress {
     }
 
     #[must_use]
-    pub fn ipv4(&self) -> Option<SocketAddrV4> {
+    pub const fn ipv4(&self) -> Option<SocketAddrV4> {
         self.v4
     }
     #[must_use]
-    pub fn ipv6(&self) -> Option<SocketAddrV6> {
+    pub const fn ipv6(&self) -> Option<SocketAddrV6> {
         self.v6
     }
 }
@@ -139,7 +139,7 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
-        qdebug!("TP encoded; type 0x{:02x} val {:?}", tp, self);
+        qtrace!("TP encoded; type 0x{:02x} val {:?}", tp, self);
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -184,9 +184,8 @@ impl TransportParameter {
 
     fn decode_preferred_address(d: &mut Decoder) -> Res<Self> {
         // IPv4 address (maybe)
-        let v4ip =
-            Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?).unwrap());
-        let v4port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?).unwrap();
+        let v4ip = Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?)?);
+        let v4port = d.decode_uint::<u16>().ok_or(Error::NoMoreData)?;
         // Can't have non-zero IP and zero port, or vice versa.
         if v4ip.is_unspecified() ^ (v4port == 0) {
             return Err(Error::TransportParameterError);
@@ -198,9 +197,10 @@ impl TransportParameter {
         };
 
         // IPv6 address (mostly the same as v4)
-        let v6ip =
-            Ipv6Addr::from(<[u8; 16]>::try_from(d.decode(16).ok_or(Error::NoMoreData)?).unwrap());
-        let v6port = u16::try_from(d.decode_uint(2).ok_or(Error::NoMoreData)?).unwrap();
+        let v6ip = Ipv6Addr::from(<[u8; 16]>::try_from(
+            d.decode(16).ok_or(Error::NoMoreData)?,
+        )?);
+        let v6port = d.decode_uint().ok_or(Error::NoMoreData)?;
         if v6ip.is_unspecified() ^ (v6port == 0) {
             return Err(Error::TransportParameterError);
         }
@@ -222,18 +222,18 @@ impl TransportParameter {
 
         // Stateless reset token
         let srtbuf = d.decode(16).ok_or(Error::NoMoreData)?;
-        let srt = <[u8; 16]>::try_from(srtbuf).unwrap();
+        let srt = <[u8; 16]>::try_from(srtbuf)?;
 
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }
 
     fn decode_versions(dec: &mut Decoder) -> Res<Self> {
         fn dv(dec: &mut Decoder) -> Res<WireVersion> {
-            let v = dec.decode_uint(4).ok_or(Error::NoMoreData)?;
+            let v = dec.decode_uint::<WireVersion>().ok_or(Error::NoMoreData)?;
             if v == 0 {
                 Err(Error::TransportParameterError)
             } else {
-                Ok(WireVersion::try_from(v)?)
+                Ok(v)
             }
         }
 
@@ -279,7 +279,7 @@ impl TransportParameter {
             },
 
             MAX_UDP_PAYLOAD_SIZE => match d.decode_varint() {
-                Some(v) if v >= 1200 => Self::Integer(v),
+                Some(v) if v >= MIN_INITIAL_PACKET_SIZE.try_into()? => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
 
@@ -309,7 +309,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        qdebug!("TP decoded; type 0x{:02x} val {:?}", tp, value);
+        qtrace!("TP decoded; type 0x{:02x} val {:?}", tp, value);
         Ok(Some((tp, value)))
     }
 }
@@ -457,8 +457,7 @@ impl TransportParameters {
         let rbuf = random::<4>();
         let mut other = Vec::with_capacity(versions.all().len() + 1);
         let mut dec = Decoder::new(&rbuf);
-        let grease =
-            (u32::try_from(dec.decode_uint(4).unwrap()).unwrap()) & 0xf0f0_f0f0 | 0x0a0a_0a0a;
+        let grease = dec.decode_uint::<u32>().unwrap() & 0xf0f0_f0f0 | 0x0a0a_0a0a;
         other.push(grease);
         for &v in versions.all() {
             if role == Role::Client && !versions.initial().is_compatible(v) {
@@ -516,8 +515,10 @@ impl TransportParameters {
             ) {
                 continue;
             }
-            let ok = if let Some(v_self) = self.params.get(k) {
-                match (v_self, v_rem) {
+            let ok = self
+                .params
+                .get(k)
+                .is_some_and(|v_self| match (v_self, v_rem) {
                     (TransportParameter::Integer(i_self), TransportParameter::Integer(i_rem)) => {
                         if *k == MIN_ACK_DELAY {
                             // MIN_ACK_DELAY is backwards:
@@ -535,10 +536,7 @@ impl TransportParameters {
                         TransportParameter::Versions { current: v_rem, .. },
                     ) => v_self == v_rem,
                     _ => false,
-                }
-            } else {
-                false
-            };
+                });
             if !ok {
                 return false;
             }
@@ -623,7 +621,7 @@ impl TransportParametersHandler {
 
     /// Get the version as set (or as determined by a compatible upgrade).
     #[must_use]
-    pub fn version(&self) -> Version {
+    pub const fn version(&self) -> Version {
         self.versions.initial()
     }
 
@@ -776,7 +774,24 @@ where
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
-    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+
+    use neqo_common::{Decoder, Encoder};
+
+    use super::PreferredAddress;
+    use crate::{
+        tparams::{
+            TransportParameter, TransportParameterId, TransportParameters,
+            ACTIVE_CONNECTION_ID_LIMIT, IDLE_TIMEOUT, INITIAL_MAX_DATA, INITIAL_MAX_STREAMS_BIDI,
+            INITIAL_MAX_STREAMS_UNI, INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, INITIAL_MAX_STREAM_DATA_UNI,
+            INITIAL_SOURCE_CONNECTION_ID, MAX_ACK_DELAY, MAX_DATAGRAM_FRAME_SIZE,
+            MAX_UDP_PAYLOAD_SIZE, MIN_ACK_DELAY, ORIGINAL_DESTINATION_CONNECTION_ID,
+            PREFERRED_ADDRESS, RETRY_SOURCE_CONNECTION_ID, STATELESS_RESET_TOKEN,
+            VERSION_INFORMATION,
+        },
+        ConnectionId, Error, Version,
+    };
 
     #[test]
     fn basic_tps() {
@@ -1040,9 +1055,9 @@ mod tests {
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
             tps_b.remove(*i);
-            // A value that is missing from what is rememebered is OK.
+            // A value that is missing from what is remembered is OK.
             assert!(tps_a.ok_for_0rtt(&tps_b));
-            // A value that is rememebered, but not current is not OK.
+            // A value that is remembered, but not current is not OK.
             assert!(!tps_b.ok_for_0rtt(&tps_a));
         }
     }

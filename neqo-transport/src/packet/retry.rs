@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![deny(clippy::pedantic)]
-
 use std::cell::RefCell;
 
 use neqo_common::qerror;
@@ -20,7 +18,6 @@ fn make_aead(version: Version) -> Aead {
 
     let secret = hkdf::import_key(TLS_VERSION_1_3, version.retry_secret()).unwrap();
     Aead::new(
-        false,
         TLS_VERSION_1_3,
         TLS_AES_128_GCM_SHA256,
         &secret,
@@ -51,9 +48,6 @@ where
 
 /// Determine how large the expansion is for a given key.
 pub fn expansion(version: Version) -> usize {
-    if let Ok(ex) = use_aead(version, |aead| Ok(aead.expansion())) {
-        ex
-    } else {
-        panic!("Unable to access Retry AEAD")
-    }
+    use_aead(version, |aead| Ok(aead.expansion()))
+        .unwrap_or_else(|_| panic!("Unable to access Retry AEAD"))
 }

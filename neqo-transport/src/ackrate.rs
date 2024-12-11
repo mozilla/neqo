@@ -5,9 +5,8 @@
 // except according to those terms.
 
 // Management of the peer's ack rate.
-#![deny(clippy::pedantic)]
 
-use std::{cmp::max, convert::TryFrom, time::Duration};
+use std::{cmp::max, time::Duration};
 
 use neqo_common::qtrace;
 
@@ -150,7 +149,7 @@ pub enum PeerAckDelay {
 }
 
 impl PeerAckDelay {
-    pub fn fixed(max_ack_delay: Duration) -> Self {
+    pub const fn fixed(max_ack_delay: Duration) -> Self {
         Self::Fixed(max_ack_delay)
     }
 

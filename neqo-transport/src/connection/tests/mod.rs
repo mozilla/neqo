@@ -4,13 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![deny(clippy::pedantic)]
-
 use std::{
     cell::RefCell,
     cmp::min,
-    convert::TryFrom,
     mem,
+    net::SocketAddr,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -18,21 +16,22 @@ use std::{
 use enum_map::enum_map;
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{self, fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
+use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
-use super::{Connection, ConnectionError, ConnectionId, Output, State};
+use super::{test_internal, CloseReason, Connection, ConnectionId, Output, State};
 use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
-    cc::{CWND_INITIAL_PKTS, CWND_MIN},
+    cc::CWND_INITIAL_PKTS,
     cid::ConnectionIdRef,
     events::ConnectionEvent,
     frame::FRAME_TYPE_PING,
     packet::PacketBuilder,
-    path::PATH_MTU_V6,
+    pmtud::Pmtud,
     recovery::ACK_ONLY_SIZE_LIMIT,
     stats::{FrameStats, Stats, MAX_PTO_COUNTS},
-    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamId, StreamType,
-    Version,
+    tparams::{DISABLE_MIGRATION, GREASE_QUIC_BIT},
+    ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error, StreamId, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
 };
 
 // All the tests.
@@ -40,11 +39,12 @@ mod ackrate;
 mod cc;
 mod close;
 mod datagram;
-mod fuzzing;
+mod ecn;
 mod handshake;
 mod idle;
 mod keys;
 mod migration;
+mod null;
 mod priority;
 mod recovery;
 mod resumption;
@@ -121,6 +121,19 @@ pub fn default_client() -> Connection {
     new_client(ConnectionParameters::default())
 }
 
+fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Connection {
+    Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        local_addr,
+        remote_addr,
+        ConnectionParameters::default(),
+        now(),
+    )
+    .unwrap()
+}
+
 pub fn new_server(params: ConnectionParameters) -> Connection {
     fixture_init();
     let (log, _contents) = new_neqo_qlog();
@@ -174,11 +187,12 @@ impl crate::connection::test_internal::FrameWriter for PingWriter {
 }
 
 /// Drive the handshake between the client and server.
-fn handshake(
+fn handshake_with_modifier(
     client: &mut Connection,
     server: &mut Connection,
     now: Instant,
     rtt: Duration,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
     let mut a = client;
     let mut b = server;
@@ -195,7 +209,6 @@ fn handshake(
     let mut did_ping = enum_map! {_ => false};
     while !is_done(a) {
         _ = maybe_authenticate(a);
-        let had_input = input.is_some();
         // Insert a PING frame into the first application data packet an endpoint sends,
         // in order to force the peer to ACK it. For the server, this is depending on the
         // client's connection state, which is accessible during the tests.
@@ -209,21 +222,29 @@ fn handshake(
         if should_ping {
             a.test_frame_writer = Some(Box::new(PingWriter {}));
         }
-        let output = a.process(input.as_ref(), now).dgram();
+        let output = a.process(input, now).dgram();
         if should_ping {
             a.test_frame_writer = None;
             did_ping[a.role()] = true;
         }
-        assert!(had_input || output.is_some());
-        input = output;
+        input = output.and_then(modifier);
         qtrace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
         mem::swap(&mut a, &mut b);
     }
     if let Some(d) = input {
-        a.process_input(&d, now);
+        a.process_input(d, now);
     }
     now
+}
+
+fn handshake(
+    client: &mut Connection,
+    server: &mut Connection,
+    now: Instant,
+    rtt: Duration,
+) -> Instant {
+    handshake_with_modifier(client, server, now, rtt, Some)
 }
 
 fn connect_fail(
@@ -233,15 +254,16 @@ fn connect_fail(
     server_error: Error,
 ) {
     handshake(client, server, now(), Duration::new(0, 0));
-    assert_error(client, &ConnectionError::Transport(client_error));
-    assert_error(server, &ConnectionError::Transport(server_error));
+    assert_error(client, &CloseReason::Transport(client_error));
+    assert_error(server, &CloseReason::Transport(server_error));
 }
 
-fn connect_with_rtt(
+fn connect_with_rtt_and_modifier(
     client: &mut Connection,
     server: &mut Connection,
     now: Instant,
     rtt: Duration,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
     fn check_rtt(stats: &Stats, rtt: Duration) {
         assert_eq!(stats.rtt, rtt);
@@ -249,7 +271,7 @@ fn connect_with_rtt(
         let n = stats.frame_rx.ack + usize::from(stats.rtt_init_guess);
         assert_eq!(stats.rttvar, rttvar_after_n_updates(n, rtt));
     }
-    let now = handshake(client, server, now, rtt);
+    let now = handshake_with_modifier(client, server, now, rtt, modifier);
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
 
@@ -258,11 +280,20 @@ fn connect_with_rtt(
     now
 }
 
+fn connect_with_rtt(
+    client: &mut Connection,
+    server: &mut Connection,
+    now: Instant,
+    rtt: Duration,
+) -> Instant {
+    connect_with_rtt_and_modifier(client, server, now, rtt, Some)
+}
+
 fn connect(client: &mut Connection, server: &mut Connection) {
     connect_with_rtt(client, server, now(), Duration::new(0, 0));
 }
 
-fn assert_error(c: &Connection, expected: &ConnectionError) {
+fn assert_error(c: &Connection, expected: &CloseReason) {
     match c.state() {
         State::Closing { error, .. } | State::Draining { error, .. } | State::Closed(error) => {
             assert_eq!(*error, *expected, "{c} error mismatch");
@@ -282,7 +313,7 @@ fn exchange_ticket(
     server.send_ticket(now, &[]).expect("can send ticket");
     let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
-    client.process_input(&ticket.unwrap(), now);
+    client.process_input(ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
     get_tokens(client).pop().expect("should have token")
 }
@@ -304,8 +335,13 @@ fn assert_idle(client: &mut Connection, server: &mut Connection, rtt: Duration, 
 }
 
 /// Connect with an RTT and then force both peers to be idle.
-fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
-    let now = connect_with_rtt(client, server, now(), rtt);
+fn connect_rtt_idle_with_modifier(
+    client: &mut Connection,
+    server: &mut Connection,
+    rtt: Duration,
+    modifier: fn(Datagram) -> Option<Datagram>,
+) -> Instant {
+    let now = connect_with_rtt_and_modifier(client, server, now(), rtt, modifier);
     assert_idle(client, server, rtt, now);
     // Drain events from both as well.
     _ = client.events().count();
@@ -314,8 +350,20 @@ fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Durat
     now
 }
 
+fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
+    connect_rtt_idle_with_modifier(client, server, rtt, Some)
+}
+
+fn connect_force_idle_with_modifier(
+    client: &mut Connection,
+    server: &mut Connection,
+    modifier: fn(Datagram) -> Option<Datagram>,
+) {
+    connect_rtt_idle_with_modifier(client, server, Duration::new(0, 0), modifier);
+}
+
 fn connect_force_idle(client: &mut Connection, server: &mut Connection) {
-    connect_rtt_idle(client, server, Duration::new(0, 0));
+    connect_force_idle_with_modifier(client, server, Some);
 }
 
 fn fill_stream(c: &mut Connection, stream: StreamId) {
@@ -336,24 +384,23 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
 /// pacing, this looks at the congestion window to tell when to stop.
 /// Returns a list of datagrams and the new time.
 fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Datagram>, Instant) {
-    // Train wreck function to get the remaining congestion window on the primary path.
-    fn cwnd(c: &Connection) -> usize {
-        c.paths.primary().borrow().sender().cwnd_avail()
-    }
-
-    qtrace!("fill_cwnd starting cwnd: {}", cwnd(c));
+    qtrace!("fill_cwnd starting cwnd: {}", cwnd_avail(c));
     fill_stream(c, stream);
 
     let mut total_dgrams = Vec::new();
     loop {
         let pkt = c.process_output(now);
-        qtrace!("fill_cwnd cwnd remaining={}, output: {:?}", cwnd(c), pkt);
+        qtrace!(
+            "fill_cwnd cwnd remaining={}, output: {:?}",
+            cwnd_avail(c),
+            pkt
+        );
         match pkt {
             Output::Datagram(dgram) => {
                 total_dgrams.push(dgram);
             }
             Output::Callback(t) => {
-                if cwnd(c) < ACK_ONLY_SIZE_LIMIT {
+                if cwnd_avail(c) < ACK_ONLY_SIZE_LIMIT {
                     break;
                 }
                 now += t;
@@ -364,7 +411,7 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
 
     qtrace!(
         "fill_cwnd sent {} bytes",
-        total_dgrams.iter().map(|d| d.len()).sum::<usize>()
+        total_dgrams.iter().map(Datagram::len).sum::<usize>()
     );
     (total_dgrams, now)
 }
@@ -382,7 +429,7 @@ fn increase_cwnd(
         let pkt = sender.process_output(now);
         match pkt {
             Output::Datagram(dgram) => {
-                receiver.process_input(&dgram, now + DEFAULT_RTT / 2);
+                receiver.process_input(dgram, now + DEFAULT_RTT / 2);
             }
             Output::Callback(t) => {
                 if t < DEFAULT_RTT {
@@ -399,7 +446,7 @@ fn increase_cwnd(
     now += DEFAULT_RTT / 2;
     let ack = receiver.process_output(now).dgram();
     now += DEFAULT_RTT / 2;
-    sender.process_input(&ack.unwrap(), now);
+    sender.process_input(ack.unwrap(), now);
     now
 }
 
@@ -420,7 +467,7 @@ where
     let in_dgrams = in_dgrams.into_iter();
     qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
     for dgram in in_dgrams {
-        dest.process_input(&dgram, now);
+        dest.process_input(dgram, now);
     }
 
     loop {
@@ -436,10 +483,15 @@ where
 
 // Get the current congestion window for the connection.
 fn cwnd(c: &Connection) -> usize {
-    c.paths.primary().borrow().sender().cwnd()
+    c.paths.primary().unwrap().borrow().sender().cwnd()
 }
+
 fn cwnd_avail(c: &Connection) -> usize {
-    c.paths.primary().borrow().sender().cwnd_avail()
+    c.paths.primary().unwrap().borrow().sender().cwnd_avail()
+}
+
+fn cwnd_min(c: &Connection) -> usize {
+    c.paths.primary().unwrap().borrow().sender().cwnd_min()
 }
 
 fn induce_persistent_congestion(
@@ -486,8 +538,8 @@ fn induce_persistent_congestion(
 
     // An ACK for the third PTO causes persistent congestion.
     let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
-    client.process_input(&s_ack, now);
-    assert_eq!(cwnd(client), CWND_MIN);
+    client.process_input(s_ack, now);
+    assert_eq!(cwnd(client), cwnd_min(client));
     now
 }
 
@@ -500,39 +552,41 @@ fn induce_persistent_congestion(
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * CWND_INITIAL_PKTS;
+const POST_HANDSHAKE_CWND: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
-const fn cwnd_packets(data: usize) -> usize {
+const fn cwnd_packets(data: usize, mtu: usize) -> usize {
     // Add one if the last chunk is >= ACK_ONLY_SIZE_LIMIT.
-    (data + PATH_MTU_V6 - ACK_ONLY_SIZE_LIMIT) / PATH_MTU_V6
+    (data + mtu - ACK_ONLY_SIZE_LIMIT) / mtu
 }
 
 /// Determine the size of the last packet.
 /// The minimal size of a packet is `ACK_ONLY_SIZE_LIMIT`.
-fn last_packet(cwnd: usize) -> usize {
-    if (cwnd % PATH_MTU_V6) > ACK_ONLY_SIZE_LIMIT {
-        cwnd % PATH_MTU_V6
+const fn last_packet(cwnd: usize, mtu: usize) -> usize {
+    if (cwnd % mtu) > ACK_ONLY_SIZE_LIMIT {
+        cwnd % mtu
     } else {
-        PATH_MTU_V6
+        mtu
     }
 }
 
 /// Assert that the set of packets fill the CWND.
-fn assert_full_cwnd(packets: &[Datagram], cwnd: usize) {
-    assert_eq!(packets.len(), cwnd_packets(cwnd));
+fn assert_full_cwnd(packets: &[Datagram], cwnd: usize, mtu: usize) {
+    assert_eq!(packets.len(), cwnd_packets(cwnd, mtu));
     let (last, rest) = packets.split_last().unwrap();
-    assert!(rest.iter().all(|d| d.len() == PATH_MTU_V6));
-    assert_eq!(last.len(), last_packet(cwnd));
+    assert!(rest.iter().all(|d| d.len() == mtu));
+    assert_eq!(last.len(), last_packet(cwnd, mtu));
 }
 
 /// Send something on a stream from `sender` to `receiver`, maybe allowing for pacing.
+/// Takes a modifier function that can be used to modify the datagram before it is sent.
 /// Return the resulting datagram and the new time.
 #[must_use]
-fn send_something_paced(
+fn send_something_paced_with_modifier(
     sender: &mut Connection,
     mut now: Instant,
     allow_pacing: bool,
+    modifier: fn(Datagram) -> Option<Datagram>,
 ) -> (Datagram, Instant) {
     let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
     assert!(sender.stream_send(stream_id, DEFAULT_STREAM_DATA).is_ok());
@@ -550,13 +604,52 @@ fn send_something_paced(
         Output::Datagram(d) => d,
         Output::None => panic!("send_something: got Output::None"),
     };
-    (dgram, now)
+    (modifier(dgram).unwrap(), now)
+}
+
+fn send_something_paced(
+    sender: &mut Connection,
+    now: Instant,
+    allow_pacing: bool,
+) -> (Datagram, Instant) {
+    send_something_paced_with_modifier(sender, now, allow_pacing, Some)
+}
+
+fn send_something_with_modifier(
+    sender: &mut Connection,
+    now: Instant,
+    modifier: fn(Datagram) -> Option<Datagram>,
+) -> Datagram {
+    send_something_paced_with_modifier(sender, now, false, modifier).0
 }
 
 /// Send something on a stream from `sender` to `receiver`.
 /// Return the resulting datagram.
 fn send_something(sender: &mut Connection, now: Instant) -> Datagram {
-    send_something_paced(sender, now, false).0
+    send_something_with_modifier(sender, now, Some)
+}
+
+/// Send something, but add a little something extra into the output.
+fn send_with_extra<W>(sender: &mut Connection, writer: W, now: Instant) -> Datagram
+where
+    W: test_internal::FrameWriter + 'static,
+{
+    sender.test_frame_writer = Some(Box::new(writer));
+    let res = send_something_with_modifier(sender, now, Some);
+    sender.test_frame_writer = None;
+    res
+}
+
+/// Send something on a stream from `sender` through a modifier to `receiver`.
+/// Return any ACK that might result.
+fn send_with_modifier_and_receive(
+    sender: &mut Connection,
+    receiver: &mut Connection,
+    now: Instant,
+    modifier: fn(Datagram) -> Option<Datagram>,
+) -> Option<Datagram> {
+    let dgram = send_something_with_modifier(sender, now, modifier);
+    receiver.process(Some(dgram), now).dgram()
 }
 
 /// Send something on a stream from `sender` to `receiver`.
@@ -566,8 +659,7 @@ fn send_and_receive(
     receiver: &mut Connection,
     now: Instant,
 ) -> Option<Datagram> {
-    let dgram = send_something(sender, now);
-    receiver.process(Some(&dgram), now).dgram()
+    send_with_modifier_and_receive(sender, receiver, now, Some)
 }
 
 fn get_tokens(client: &mut Connection) -> Vec<ResumptionToken> {
@@ -591,6 +683,27 @@ fn assert_default_stats(stats: &Stats) {
     assert_eq!(stats.frame_tx, dflt_frames);
 }
 
+fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
+    let path = c.paths.find_path(
+        d.source(),
+        d.destination(),
+        c.conn_params.get_cc_algorithm(),
+        c.conn_params.pacing_enabled(),
+        now,
+    );
+    if path.borrow().amplification_limit() < path.borrow().plpmtu() {
+        // If the amplification limit is less than the PLPMTU, then the path
+        // challenge will not have been padded.
+        return;
+    }
+    assert!(
+        d.len() >= MIN_INITIAL_PACKET_SIZE,
+        "{} < {}",
+        d.len(),
+        MIN_INITIAL_PACKET_SIZE
+    );
+}
+
 #[test]
 fn create_client() {
     let client = default_client();
@@ -611,4 +724,22 @@ fn create_server() {
     assert_default_stats(&stats);
     // Server won't have a default path, so no RTT.
     assert_eq!(stats.rtt, Duration::from_secs(0));
+}
+
+#[test]
+fn tp_grease() {
+    for enable in [true, false] {
+        let client = new_client(ConnectionParameters::default().grease(enable));
+        let grease = client.tps.borrow_mut().local.get_empty(GREASE_QUIC_BIT);
+        assert_eq!(enable, grease);
+    }
+}
+
+#[test]
+fn tp_disable_migration() {
+    for disable in [true, false] {
+        let client = new_client(ConnectionParameters::default().disable_migration(disable));
+        let disable_migration = client.tps.borrow_mut().local.get_empty(DISABLE_MIGRATION);
+        assert_eq!(disable, disable_migration);
+    }
 }

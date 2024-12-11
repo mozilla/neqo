@@ -4,17 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 use std::{
     cell::{OnceCell, RefCell},
     cmp::max,
-    convert::TryFrom,
     fmt::Display,
     io::{Cursor, Result, Write},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -24,7 +23,7 @@ use neqo_common::{
     event::Provider,
     hex,
     qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTos, Role,
+    qtrace, Datagram, Decoder, IpTosEcn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
@@ -35,6 +34,7 @@ use neqo_transport::{
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
+pub mod header_protection;
 pub mod sim;
 
 /// The path for the database used in tests.
@@ -43,13 +43,18 @@ pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
 /// that depend on this setup call the function for you.
+///
+/// # Panics
+///
+/// When the NSS initialization fails.
 pub fn fixture_init() {
-    init_db(NSS_DB_PATH);
+    init_db(NSS_DB_PATH).unwrap();
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+// But make it a second, so that tests with reasonable RTTs don't fail.
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
@@ -93,13 +98,7 @@ pub const DEFAULT_ADDR_V4: SocketAddr = addr_v4();
 // Create a default datagram with the given data.
 #[must_use]
 pub fn datagram(data: Vec<u8>) -> Datagram {
-    Datagram::new(
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
-        IpTos::default(),
-        Some(128),
-        data,
-    )
+    Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, IpTosEcn::Ect0.into(), data)
 }
 
 /// Create a default socket address.
@@ -236,7 +235,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     };
     while !is_done(a) {
         _ = maybe_authenticate(a);
-        let d = a.process(datagram.as_ref(), now());
+        let d = a.process(datagram, now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);
     }
@@ -330,8 +329,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
         return (buf, None);
     }
     let mut dec = Decoder::from(buf);
-    let first = dec.decode_byte().unwrap();
-    let v = Version::try_from(WireVersion::try_from(dec.decode_uint(4).unwrap()).unwrap()).unwrap(); // Version.
+    let first: u8 = dec.decode_uint().unwrap();
+    let v = Version::try_from(dec.decode_uint::<WireVersion>().unwrap()).unwrap(); // Version.
     let (initial_type, retry_type) = if v == Version::Version2 {
         (0b1001_0000, 0b1000_0000)
     } else {
@@ -359,8 +358,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
-        Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), a),
-        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), d.ttl(), b)),
+        Datagram::new(d.source(), d.destination(), d.tos(), a.to_vec()),
+        b.map(|b| Datagram::new(d.source(), d.destination(), d.tos(), b.to_vec())),
     )
 }
 
@@ -413,7 +412,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         EventImportance::Base,
         Box::new(buf),
     );
-    let log = NeqoQlog::enabled(streamer, "");
+    let log = NeqoQlog::enabled(streamer, PathBuf::from(""));
     (log.expect("to be able to write to new log"), contents)
 }
 

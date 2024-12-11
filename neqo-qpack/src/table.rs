@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{collections::VecDeque, convert::TryFrom};
+use std::collections::VecDeque;
 
 use neqo_common::qtrace;
 
@@ -22,7 +22,7 @@ pub struct LookupResult {
 }
 
 #[derive(Debug)]
-pub(crate) struct DynamicTableEntry {
+pub struct DynamicTableEntry {
     base: u64,
     name: Vec<u8>,
     value: Vec<u8>,
@@ -32,7 +32,7 @@ pub(crate) struct DynamicTableEntry {
 }
 
 impl DynamicTableEntry {
-    pub fn can_reduce(&self, first_not_acked: u64) -> bool {
+    pub const fn can_reduce(&self, first_not_acked: u64) -> bool {
         self.refs == 0 && self.base < first_not_acked
     }
 
@@ -57,13 +57,13 @@ impl DynamicTableEntry {
         &self.value
     }
 
-    pub fn index(&self) -> u64 {
+    pub const fn index(&self) -> u64 {
         self.base
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct HeaderTable {
+pub struct HeaderTable {
     dynamic: VecDeque<DynamicTableEntry>,
     /// The total capacity (in QPACK bytes) of the table. This is set by
     /// configuration.
@@ -88,23 +88,23 @@ impl ::std::fmt::Display for HeaderTable {
 }
 
 impl HeaderTable {
-    pub fn new(encoder: bool) -> Self {
+    pub const fn new(encoder: bool) -> Self {
         Self {
             dynamic: VecDeque::new(),
             capacity: 0,
             used: 0,
             base: 0,
-            acked_inserts_cnt: if encoder { 0 } else { u64::max_value() },
+            acked_inserts_cnt: if encoder { 0 } else { u64::MAX },
         }
     }
 
     /// Returns number of inserts.
-    pub fn base(&self) -> u64 {
+    pub const fn base(&self) -> u64 {
         self.base
     }
 
     /// Returns capacity of the dynamic table
-    pub fn capacity(&self) -> u64 {
+    pub const fn capacity(&self) -> u64 {
         self.capacity
     }
 
@@ -340,7 +340,7 @@ impl HeaderTable {
             value
         );
         let name = if name_static_table {
-            HeaderTable::get_static(name_index)?.name().to_vec()
+            Self::get_static(name_index)?.name().to_vec()
         } else {
             self.get_dynamic(name_index, self.base, false)?
                 .name()
@@ -365,7 +365,7 @@ impl HeaderTable {
             let entry = self.get_dynamic(index, self.base, false)?;
             name = entry.name().to_vec();
             value = entry.value().to_vec();
-            qtrace!([self], "dumplicate name={:?} value={:?}", name, value);
+            qtrace!([self], "duplicate name={:?} value={:?}", name, value);
         }
         self.insert(&name, &value)
     }
@@ -385,7 +385,7 @@ impl HeaderTable {
     }
 
     /// Return number of acknowledge inserts.
-    pub fn get_acked_inserts_cnt(&self) -> u64 {
+    pub const fn get_acked_inserts_cnt(&self) -> u64 {
         self.acked_inserts_cnt
     }
 }

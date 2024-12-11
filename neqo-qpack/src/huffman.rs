@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom;
-
 use crate::{
     huffman_decode_helper::{huffman_decoder_root, HuffmanDecoderNode},
     huffman_table::HUFFMAN_TABLE,
@@ -19,7 +17,7 @@ struct BitReader<'a> {
 }
 
 impl<'a> BitReader<'a> {
-    pub fn new(input: &'a [u8]) -> Self {
+    pub const fn new(input: &'a [u8]) -> Self {
         BitReader {
             input,
             offset: 0,
@@ -62,7 +60,7 @@ impl<'a> BitReader<'a> {
         }
     }
 
-    pub fn has_more_data(&self) -> bool {
+    pub const fn has_more_data(&self) -> bool {
         !self.input.is_empty() && (self.offset != self.input.len() || (self.current_bit != 0))
     }
 }
@@ -239,7 +237,7 @@ mod tests {
     const WRONG_END: &[u8] = &[0xa8, 0xeb, 0x10, 0x64, 0x9c, 0xaf];
 
     #[test]
-    fn test_encoder() {
+    fn encoder() {
         for e in TEST_CASES {
             let out = encode_huffman(e.val);
             assert_eq!(out[..], *e.res);
@@ -247,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decoder() {
+    fn decoder() {
         for e in TEST_CASES {
             let res = decode_huffman(e.res);
             assert!(res.is_ok());

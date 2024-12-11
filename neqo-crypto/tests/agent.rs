@@ -1,6 +1,8 @@
-#![warn(clippy::pedantic)]
-
-use std::boxed::Box;
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
 use neqo_crypto::{
     generate_ech_keys, AuthenticationStatus, Client, Error, HandshakeState, SecretAgentPreInfo,
@@ -127,8 +129,8 @@ fn raw() {
     assert!(server.state().is_connected());
 
     // The client should have one certificate for the server.
-    let mut certs = client.peer_certificate().unwrap();
-    assert_eq!(1, certs.count());
+    let certs = client.peer_certificate().unwrap();
+    assert_eq!(1, certs.into_iter().count());
 
     // The server shouldn't have a client certificate.
     assert!(server.peer_certificate().is_none());

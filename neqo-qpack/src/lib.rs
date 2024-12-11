@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 pub mod decoder;
@@ -65,7 +64,7 @@ pub enum Error {
 
 impl Error {
     #[must_use]
-    pub fn code(&self) -> neqo_transport::AppError {
+    pub const fn code(&self) -> neqo_transport::AppError {
         match self {
             Self::DecompressionFailed => 0x200,
             Self::EncoderStream => 0x201,

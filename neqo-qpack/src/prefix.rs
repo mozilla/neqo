@@ -6,7 +6,6 @@
 
 #[derive(Copy, Clone, Debug)]
 pub struct Prefix {
-    #[allow(unknown_lints)] // available with Rust v1.75
     #[allow(clippy::struct_field_names)]
     prefix: u8,
     len: u8,
@@ -16,9 +15,9 @@ pub struct Prefix {
 impl Prefix {
     pub fn new(prefix: u8, len: u8) -> Self {
         // len should never be larger than 7.
-        // Most of Prefixes are instantiated as consts bellow. The only place where this
-        // construcrtor is used is in tests and when literals are encoded and the Huffman
-        // bit is added to one of the consts bellow. create_prefix guaranty that all const
+        // Most of Prefixes are instantiated as consts below. The only place where this
+        // constructor is used is in tests and when literals are encoded and the Huffman
+        // bit is added to one of the consts below. create_prefix guaranty that all const
         // have len < 7 so we can safely assert that len is <=7.
         assert!(len <= 7);
         assert!((len == 0) || (prefix & ((1 << (8 - len)) - 1) == 0));
@@ -33,15 +32,15 @@ impl Prefix {
         }
     }
 
-    pub fn len(self) -> u8 {
+    pub const fn len(self) -> u8 {
         self.len
     }
 
-    pub fn prefix(self) -> u8 {
+    pub const fn prefix(self) -> u8 {
         self.prefix
     }
 
-    pub fn cmp_prefix(self, b: u8) -> bool {
+    pub const fn cmp_prefix(self, b: u8) -> bool {
         (b & self.mask) == self.prefix
     }
 }

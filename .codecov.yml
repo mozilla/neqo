@@ -1,5 +1,19 @@
-# neqo has no test coverage for its example client, server and interop test
+# neqo has no test coverage for its example client and server, and for the fuzzing code.
 ignore:
-  - "neqo-client"
-  - "neqo-interop"
-  - "neqo-server"
+  - "fuzz"
+  - "neqo-bin"
+  - "test-fixture"
+
+# Do not notify until at least three results have been uploaded from the CI pipeline.
+# (This corresponds to the three main platforms we support: Linux, macOS, and Windows.)
+codecov:
+    notify:
+        after_n_builds: 3
+comment:
+    after_n_builds: 3
+
+coverage:
+  status:
+    project:
+      default:
+        threshold: 0.05%

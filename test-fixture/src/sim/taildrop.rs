@@ -4,12 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cmp::max,
     collections::VecDeque,
-    convert::TryFrom,
     fmt::{self, Debug},
     time::{Duration, Instant},
 };
@@ -62,7 +59,7 @@ pub struct TailDrop {
 impl TailDrop {
     /// Make a new taildrop node with the given rate, queue capacity, and link delay.
     #[must_use]
-    pub fn new(rate: usize, capacity: usize, delay: Duration) -> Self {
+    pub const fn new(rate: usize, capacity: usize, delay: Duration) -> Self {
         Self {
             overhead: 64,
             rate,
@@ -83,14 +80,14 @@ impl TailDrop {
     /// A tail drop queue on a 10Mbps link (approximated to 1 million bytes per second)
     /// with a fat 32k buffer (about 30ms), and the default forward delay of 50ms.
     #[must_use]
-    pub fn dsl_downlink() -> Self {
-        TailDrop::new(1_000_000, 32_768, Duration::from_millis(50))
+    pub const fn dsl_downlink() -> Self {
+        Self::new(1_000_000, 32_768, Duration::from_millis(50))
     }
 
     /// Cut uplink to one fifth of the downlink (2Mbps), and reduce the buffer to 1/4.
     #[must_use]
-    pub fn dsl_uplink() -> Self {
-        TailDrop::new(200_000, 8_192, Duration::from_millis(50))
+    pub const fn dsl_uplink() -> Self {
+        Self::new(200_000, 8_192, Duration::from_millis(50))
     }
 
     /// How "big" is this datagram, accounting for overheads.
@@ -144,7 +141,7 @@ impl TailDrop {
     /// If the last packet that was sending has been sent, start sending
     /// the next one.
     fn maybe_send(&mut self, now: Instant) {
-        if self.next_deque.as_ref().map_or(false, |t| *t <= now) {
+        if self.next_deque.as_ref().is_some_and(|t| *t <= now) {
             if let Some(d) = self.queue.pop_front() {
                 self.used -= self.size(&d);
                 self.send(d, now);

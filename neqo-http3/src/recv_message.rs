@@ -4,14 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, collections::VecDeque, convert::TryFrom, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
-use neqo_common::{qdebug, qinfo, qtrace, Header};
+use neqo_common::{header::HeadersExt, qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, H3_FRAME_TYPE_HEADERS},
+    frames::{hframe::HFrameType, FrameReader, HFrame, StreamReaderConnectionWrapper},
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
     push_controller::PushController,
@@ -20,11 +20,11 @@ use crate::{
 };
 
 #[allow(clippy::module_name_repetitions)]
-pub(crate) struct RecvMessageInfo {
+pub struct RecvMessageInfo {
     pub message_type: MessageType,
     pub stream_type: Http3StreamType,
     pub stream_id: StreamId,
-    pub header_frame_type_read: bool,
+    pub first_frame_type: Option<u64>,
 }
 
 /*
@@ -66,7 +66,7 @@ struct PushInfo {
 }
 
 #[derive(Debug)]
-pub(crate) struct RecvMessage {
+pub struct RecvMessage {
     state: RecvMessageState,
     message_type: MessageType,
     stream_type: Http3StreamType,
@@ -94,11 +94,11 @@ impl RecvMessage {
     ) -> Self {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders {
-                frame_reader: if message_info.header_frame_type_read {
-                    FrameReader::new_with_type(H3_FRAME_TYPE_HEADERS)
-                } else {
-                    FrameReader::new()
-                },
+                frame_reader: message_info
+                    .first_frame_type
+                    .map_or_else(FrameReader::new, |frame_type| {
+                        FrameReader::new_with_type(HFrameType(frame_type))
+                    }),
             },
             message_type: message_info.message_type,
             stream_type: message_info.stream_type,
@@ -167,12 +167,8 @@ impl RecvMessage {
         }
 
         let is_web_transport = self.message_type == MessageType::Request
-            && headers
-                .iter()
-                .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-            && headers
-                .iter()
-                .any(|h| h.name() == ":protocol" && h.value() == "webtransport");
+            && headers.contains_header(":method", "CONNECT")
+            && headers.contains_header(":protocol", "webtransport");
         if is_web_transport {
             self.conn_events
                 .extended_connect_new_session(self.stream_id, headers);
@@ -271,7 +267,7 @@ impl RecvMessage {
                         }
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
-                            qinfo!(
+                            qdebug!(
                                 [self],
                                 "A new frame has been received: {:?}; state={:?} fin={}",
                                 frame,
@@ -363,14 +359,14 @@ impl RecvMessage {
             .recv_closed(self.get_stream_info(), CloseType::Done);
     }
 
-    fn closing(&self) -> bool {
+    const fn closing(&self) -> bool {
         matches!(
             self.state,
             RecvMessageState::ClosePending | RecvMessageState::Closed
         )
     }
 
-    fn get_stream_info(&self) -> Http3StreamInfo {
+    const fn get_stream_info(&self) -> Http3StreamInfo {
         Http3StreamInfo::new(self.stream_id, Http3StreamType::Http)
     }
 }
