@@ -88,7 +88,7 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
 ///
 /// If the tests fail.
 pub fn assert_retry(dgram: &Datagram) {
-    assert_eq!(dgram.tos(), IpTos::default());
+    assert_eq!(dgram.tos(), IpTos::default());  // Retry always uses default IP TOS.
     let mut dec = Decoder::from(dgram.as_ref());
     let t = dec.decode_uint::<u8>().unwrap();
     let version = assert_default_version(&mut dec);
