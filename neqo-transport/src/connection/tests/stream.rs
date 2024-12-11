@@ -624,22 +624,30 @@ fn double_reset_stream() {
     let mut server = default_server();
     connect(&mut client, &mut server);
 
-    // create a stream
+    // Client creates a stream and sends some data
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
+    client.stream_close_send(stream_id).unwrap();
     let out = client.process_output(now());
+
+    // Server processes the data and sends an acknowledgment.
     let ack = server.process(out.dgram(), now()).dgram();
 
-    client.stream_reset_send(stream_id, 0).unwrap();
-    let reset_frame1 = client.process(ack, now()).dgram();
+    // Make the server generate two reset frames and hold them.
+    server.stream_reset_send(stream_id, 0).unwrap();
+    let reset_frame = server.process_output(now()).dgram();
+    let delay = server.process_output(now()).callback();
+    let reset_frame2 = server.process_output(now() + delay).dgram();
 
-    let delay = client.process_output(now()).callback();
-    let reset_frame2 = client.process_output(now() + delay).dgram();
+    // Client processes the acknowledgment and cleans up closed streams.
+    _ = client.process(ack, now()).dgram();
+    client.streams.cleanup_closed_streams();
 
-    let ack = server.process(reset_frame1, now()).dgram();
-    assert!(ack.is_some());
-    let ack = server.process(reset_frame2, now()).dgram();
-    assert!(ack.is_some());
+    // Now deliver the reset frames, and again clean up state in between.
+    _ = client.process(reset_frame, now()).dgram();
+    client.streams.cleanup_closed_streams();
+    _ = client.process(reset_frame2, now()).dgram();
+    assert_eq!(*client.state(), State::Connected);
 }
 
 #[test]
