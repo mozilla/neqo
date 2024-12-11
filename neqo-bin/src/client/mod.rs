@@ -510,7 +510,7 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
         Role::Client,
         Some("Neqo client qlog".to_string()),
         Some("Neqo client qlog".to_string()),
-        format!("{hostname}-{cid}"),
+        format!("client-{hostname}-{cid}"),
     )
     .map_err(Error::QlogError)
 }
