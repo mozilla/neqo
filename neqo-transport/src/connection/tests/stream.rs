@@ -18,7 +18,7 @@ use crate::{
     events::ConnectionEvent,
     frame::{
         FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_RESET_STREAM, FRAME_TYPE_STOP_SENDING,
-        FRAME_TYPE_STREAM_DATA_BLOCKED,
+        FRAME_TYPE_STREAM_CLIENT_INI_BIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
     },
     packet::PacketBuilder,
     recv_stream::RECV_BUFFER_SIZE,
@@ -539,38 +539,39 @@ fn do_not_accept_data_after_stop_sending() {
     );
 }
 
-struct IllegalWriter(Vec<u64>);
-
-impl crate::connection::test_internal::FrameWriter for IllegalWriter {
-    fn write_frames(&mut self, builder: &mut PacketBuilder) {
-        builder.write_varint_frame(&self.0);
-    }
-}
-
-// Server sends a stream-related frame for client-initiated stream that is not yet created.
-fn illegal_frame_test(frame: &[u64]) {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect(&mut client, &mut server);
-    let dgram = send_with_extra(&mut server, IllegalWriter(frame.to_vec()), now());
-    client.process_input(dgram, now());
-    assert!(client.state().closed());
-}
-
 #[test]
+/// Server sends a number of stream-related frames for a client-initiated stream that is not yet
+/// created. This should cause the client to close the connection.
 fn illegal_stream_frames() {
+    struct IllegalWriter(Vec<u64>);
+
+    impl crate::connection::test_internal::FrameWriter for IllegalWriter {
+        fn write_frames(&mut self, builder: &mut PacketBuilder) {
+            builder.write_varint_frame(&self.0);
+        }
+    }
+
+    fn test_with_illegal_frame(frame: &[u64]) {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        let dgram = send_with_extra(&mut server, IllegalWriter(frame.to_vec()), now());
+        client.process_input(dgram, now());
+        assert!(client.state().closed());
+    }
+
     // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
     for stream_id in [0, 2] {
         // Illegal RESET_STREAM frame
-        illegal_frame_test(&[FRAME_TYPE_RESET_STREAM, stream_id, 0, 0]);
+        test_with_illegal_frame(&[FRAME_TYPE_RESET_STREAM, stream_id, 0, 0]);
         // Illegal STOP_SENDING frame
-        illegal_frame_test(&[FRAME_TYPE_STOP_SENDING, stream_id, 0]);
+        test_with_illegal_frame(&[FRAME_TYPE_STOP_SENDING, stream_id, 0]);
         // Illegal MAX_STREAM_DATA frame
-        illegal_frame_test(&[FRAME_TYPE_MAX_STREAM_DATA, stream_id, 0]);
+        test_with_illegal_frame(&[FRAME_TYPE_MAX_STREAM_DATA, stream_id, 0]);
         // Illegal STREAM_DATA_BLOCKED frame
-        illegal_frame_test(&[FRAME_TYPE_STREAM_DATA_BLOCKED, stream_id, 0]);
+        test_with_illegal_frame(&[FRAME_TYPE_STREAM_DATA_BLOCKED, stream_id, 0]);
         // Illegal STREAM frame
-        illegal_frame_test(&[0x08, stream_id, 0]);
+        test_with_illegal_frame(&[FRAME_TYPE_STREAM_CLIENT_INI_BIDI, stream_id, 0]);
     }
 }
 
@@ -617,37 +618,79 @@ fn simultaneous_stop_sending_and_reset() {
     );
 }
 
-//The client sends a duplicate stream reset.
 #[test]
-fn double_reset_stream() {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect(&mut client, &mut server);
+/// The client sends a duplicate stream reset after cleaning up closed streams
+fn double_stream_related_frame() {
+    fn test_double_stream_related_frame(frame: u64) {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
 
-    // Client creates a stream and sends some data
-    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
-    client.stream_send(stream_id, &[0x00]).unwrap();
-    client.stream_close_send(stream_id).unwrap();
-    let out = client.process_output(now());
+        // Client creates two streams and sends some data on the second.
+        _ = client.stream_create(StreamType::BiDi).unwrap();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, &[0x00]).unwrap();
+        client.stream_close_send(stream_id).unwrap();
+        let out = client.process_output(now());
 
-    // Server processes the data and sends an acknowledgment.
-    let ack = server.process(out.dgram(), now()).dgram();
+        // Server processes the data and sends an acknowledgment.
+        let ack = server.process(out.dgram(), now()).dgram();
 
-    // Make the server generate two reset frames and hold them.
-    server.stream_reset_send(stream_id, 0).unwrap();
-    let reset_frame = server.process_output(now()).dgram();
-    let delay = server.process_output(now()).callback();
-    let reset_frame2 = server.process_output(now() + delay).dgram();
+        // Make the server generate two packets (and original and an RTX) containing the test frame,
+        // and hold them.
+        match frame {
+            FRAME_TYPE_RESET_STREAM => {
+                server.stream_reset_send(stream_id, 0).unwrap();
+            }
+            FRAME_TYPE_STOP_SENDING => {
+                server.stream_stop_sending(stream_id, 1).unwrap();
+            }
+            FRAME_TYPE_STREAM_CLIENT_INI_BIDI => {
+                server.stream_send(stream_id, &[0x00]).unwrap();
+                server.stream_close_send(stream_id).unwrap();
+            }
+            FRAME_TYPE_MAX_STREAM_DATA => {
+                server
+                    .streams
+                    .get_send_stream_mut(stream_id)
+                    .unwrap()
+                    .set_max_stream_data(u32::MAX.into());
+            }
+            FRAME_TYPE_STREAM_DATA_BLOCKED => {
+                let internal_stream = server.streams.get_send_stream_mut(stream_id).unwrap();
+                if let SendStreamState::Ready { fc, .. } = internal_stream.state() {
+                    fc.blocked();
+                } else {
+                    panic!("unexpected stream state");
+                }
+            }
+            _ => panic!("unexpected frame type"),
+        }
+        let frame1 = server.process_output(now()).dgram();
+        let delay = server.process_output(now()).callback();
+        let frame2 = server.process_output(now() + delay).dgram();
 
-    // Client processes the acknowledgment and cleans up closed streams.
-    _ = client.process(ack, now()).dgram();
-    client.streams.cleanup_closed_streams();
+        // Client processes the acknowledgment and cleans up streams.
+        _ = client.process(ack, now()).dgram();
+        client.streams.cleanup_closed_streams();
 
-    // Now deliver the reset frames, and again clean up state in between.
-    _ = client.process(reset_frame, now()).dgram();
-    client.streams.cleanup_closed_streams();
-    _ = client.process(reset_frame2, now()).dgram();
-    assert_eq!(*client.state(), State::Connected);
+        // Now deliver the held-back test frames, and again clean up in between.
+        _ = client.process(frame1, now()).dgram();
+        client.streams.cleanup_closed_streams();
+        _ = client.process(frame2, now()).dgram();
+        // Make sure this worked.
+        assert_eq!(*client.state(), State::Confirmed);
+    }
+
+    for frame in [
+        FRAME_TYPE_RESET_STREAM,
+        FRAME_TYPE_STOP_SENDING,
+        FRAME_TYPE_STREAM_CLIENT_INI_BIDI,
+        FRAME_TYPE_MAX_STREAM_DATA,
+        FRAME_TYPE_STREAM_DATA_BLOCKED,
+    ] {
+        test_double_stream_related_frame(frame);
+    }
 }
 
 #[test]
