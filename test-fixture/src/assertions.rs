@@ -51,7 +51,7 @@ pub fn assert_version(payload: &[u8], v: u32) {
 ///
 /// If this is clearly not a Version Negotiation packet.
 pub fn assert_vn(dgram: &Datagram) {
-    assert_eq!(dgram.tos(), IpTos::default());
+    assert_eq!(dgram.tos(), IpTos::default());  // VN always uses default IP TOS.
     let mut dec = Decoder::from(dgram.as_ref());
     assert_eq!(
         dec.decode_uint::<u8>().unwrap() & 0x80,
