@@ -271,7 +271,7 @@ impl Server {
                     Role::Server,
                     Some("Neqo server qlog".to_string()),
                     Some("Neqo server qlog".to_string()),
-                    odcid,
+                    format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {
                     qerror!("failed to create NeqoQlog: {}", e);

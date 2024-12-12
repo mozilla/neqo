@@ -508,9 +508,9 @@ fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     NeqoQlog::enabled_with_file(
         qlog_dir,
         Role::Client,
-        Some("Example qlog".to_string()),
-        Some("Example qlog description".to_string()),
-        format!("{hostname}-{cid}"),
+        Some("Neqo client qlog".to_string()),
+        Some("Neqo client qlog".to_string()),
+        format!("client-{hostname}-{cid}"),
     )
     .map_err(Error::QlogError)
 }
