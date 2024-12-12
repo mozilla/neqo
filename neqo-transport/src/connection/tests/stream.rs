@@ -18,7 +18,7 @@ use crate::{
     events::ConnectionEvent,
     frame::{
         FRAME_TYPE_MAX_STREAM_DATA, FRAME_TYPE_RESET_STREAM, FRAME_TYPE_STOP_SENDING,
-        FRAME_TYPE_STREAM_CLIENT_INI_BIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
+        FRAME_TYPE_STREAM_CLIENT_BIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
     },
     packet::PacketBuilder,
     recv_stream::RECV_BUFFER_SIZE,
@@ -563,7 +563,15 @@ fn illegal_stream_frames() {
     // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
     for stream_id in [0, 2] {
         // Illegal RESET_STREAM frame
-        for frame_type in [FRAME_TYPE_RESET_STREAM, ...] {
+        for frame_type in [
+            FRAME_TYPE_RESET_STREAM,
+            FRAME_TYPE_STOP_SENDING,
+            FRAME_TYPE_MAX_STREAM_DATA,
+            FRAME_TYPE_STREAM_DATA_BLOCKED,
+            FRAME_TYPE_STREAM_CLIENT_BIDI,
+        ] {
+            // The slice contains an extra 0 that is only needed for a RESET_STREAM frame.
+            // It's ignored for the other frame types as PADDING.
             test_with_illegal_frame(&[frame_type, stream_id, 0, 0]);
         }
     }
@@ -618,8 +626,7 @@ fn late_stream_related_frame(frame_type: u64) {
     let mut server = default_server();
     connect(&mut client, &mut server);
 
-    // Client creates two streams and sends some data on the second.
-    _ = client.stream_create(StreamType::BiDi).unwrap();
+    // Client creates a stream and sends some data.
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
     client.stream_send(stream_id, &[0x00]).unwrap();
     let out = client.process_output(now());
@@ -634,7 +641,7 @@ fn late_stream_related_frame(frame_type: u64) {
         FRAME_TYPE_STOP_SENDING => {
             server.stream_stop_sending(stream_id, 0).unwrap();
         }
-        FRAME_TYPE_STREAM_CLIENT_INI_BIDI => {
+        FRAME_TYPE_STREAM_CLIENT_BIDI => {
             server.stream_send(stream_id, &[0x00]).unwrap();
             server.stream_close_send(stream_id).unwrap();
         }
@@ -664,7 +671,7 @@ fn late_stream_related_frame(frame_type: u64) {
         FRAME_TYPE_STOP_SENDING => {
             assert_eq!(after.stop_sending, before.stop_sending + 1);
         }
-        FRAME_TYPE_STREAM_CLIENT_INI_BIDI => {
+        FRAME_TYPE_STREAM_CLIENT_BIDI => {
             assert_eq!(after.stream, before.stream + 1);
         }
         FRAME_TYPE_MAX_STREAM_DATA => {
@@ -698,7 +705,7 @@ fn late_stop_sending_frame() {
 
 #[test]
 fn late_stream_frame() {
-    late_stream_related_frame(FRAME_TYPE_STREAM_CLIENT_INI_BIDI);
+    late_stream_related_frame(FRAME_TYPE_STREAM_CLIENT_BIDI);
 }
 
 #[test]

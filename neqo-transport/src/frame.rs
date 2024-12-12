@@ -31,7 +31,7 @@ pub const FRAME_TYPE_CRYPTO: FrameType = 0x6;
 pub const FRAME_TYPE_NEW_TOKEN: FrameType = 0x7;
 const FRAME_TYPE_STREAM: FrameType = 0x8;
 #[cfg(test)]
-pub const FRAME_TYPE_STREAM_CLIENT_INI_BIDI: FrameType = FRAME_TYPE_STREAM;
+pub const FRAME_TYPE_STREAM_CLIENT_BIDI: FrameType = FRAME_TYPE_STREAM;
 const FRAME_TYPE_STREAM_MAX: FrameType = 0xf;
 pub const FRAME_TYPE_MAX_DATA: FrameType = 0x10;
 pub const FRAME_TYPE_MAX_STREAM_DATA: FrameType = 0x11;
