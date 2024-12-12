@@ -15,8 +15,8 @@ use super::{
 };
 use crate::{
     events::ConnectionEvent,
-    recv_stream::RECV_BUFFER_SIZE,
-    send_stream::{OrderGroup, SendStreamState, SEND_BUFFER_SIZE},
+    recv_stream::INITIAL_RECV_BUFFER_SIZE,
+    send_stream::{OrderGroup, SendStreamState, INITIAL_SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
     tparams::{self, TransportParameter},
     CloseReason,
@@ -437,19 +437,17 @@ fn max_data() {
     client.streams.handle_max_data(100_000_000);
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
-        SEND_BUFFER_SIZE - SMALL_MAX_DATA
+        INITIAL_SEND_BUFFER_SIZE - SMALL_MAX_DATA
     );
 
-    // Increase max stream data. Avail space now limited by tx buffer
+    // Increase max stream data. Avail space no longer limited now.
     client
         .streams
         .get_send_stream_mut(stream_id)
         .unwrap()
         .set_max_stream_data(100_000_000);
-    assert_eq!(
-        client.stream_avail_send_space(stream_id).unwrap(),
-        SEND_BUFFER_SIZE - SMALL_MAX_DATA + 4096
-    );
+    // TODO: Improve assert.
+    assert!(client.stream_avail_send_space(stream_id).unwrap() > INITIAL_SEND_BUFFER_SIZE);
 
     let evts = client.events().collect::<Vec<_>>();
     assert_eq!(evts.len(), 1);
@@ -723,7 +721,7 @@ fn stream_data_blocked_generates_max_stream_data() {
         }
         written += amount;
     }
-    assert_eq!(written, RECV_BUFFER_SIZE);
+    assert_eq!(written, INITIAL_RECV_BUFFER_SIZE);
 }
 
 /// See <https://github.com/mozilla/neqo/issues/871>

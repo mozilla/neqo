@@ -5,7 +5,12 @@
 // except according to those terms.
 
 // Stream management for a connection.
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use neqo_common::{qtrace, qwarn, Role};
 
@@ -215,6 +220,8 @@ impl Streams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         // Send `DATA_BLOCKED` as necessary.
         self.sender_fc
@@ -232,7 +239,7 @@ impl Streams {
             return;
         }
 
-        self.recv.write_frames(builder, tokens, stats);
+        self.recv.write_frames(builder, tokens, stats, now, rtt);
 
         self.remote_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats);
         if builder.is_full() {
@@ -257,9 +264,11 @@ impl Streams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         if priority == TransmissionPriority::Important {
-            self.write_maintenance_frames(builder, tokens, stats);
+            self.write_maintenance_frames(builder, tokens, stats, now, rtt);
             if builder.is_full() {
                 return;
             }
