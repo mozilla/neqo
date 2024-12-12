@@ -49,7 +49,7 @@ impl BufferedStream {
 
     /// # Panics
     ///
-    /// This functon cannot be called before the `BufferedStream` is initialized.
+    /// This function cannot be called before the `BufferedStream` is initialized.
     pub fn buffer(&mut self, to_buf: &[u8]) {
         if let Self::Initialized { buf, .. } = self {
             buf.extend_from_slice(to_buf);

@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
-use neqo_common::{qdebug, qinfo, qtrace, Header};
+use neqo_common::{header::HeadersExt, qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -167,12 +167,8 @@ impl RecvMessage {
         }
 
         let is_web_transport = self.message_type == MessageType::Request
-            && headers
-                .iter()
-                .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-            && headers
-                .iter()
-                .any(|h| h.name() == ":protocol" && h.value() == "webtransport");
+            && headers.contains_header(":method", "CONNECT")
+            && headers.contains_header(":protocol", "webtransport");
         if is_web_transport {
             self.conn_events
                 .extended_connect_new_session(self.stream_id, headers);

@@ -31,7 +31,7 @@ impl IncrementalDecoderUint {
             if amount < 8 {
                 self.v <<= amount * 8;
             }
-            self.v |= dv.decode_uint(amount).unwrap();
+            self.v |= dv.decode_n(amount).unwrap();
             *r -= amount;
             if *r == 0 {
                 Some(self.v)
@@ -39,7 +39,7 @@ impl IncrementalDecoderUint {
                 None
             }
         } else {
-            let (v, remaining) = dv.decode_byte().map_or_else(
+            let (v, remaining) = dv.decode_uint::<u8>().map_or_else(
                 || unreachable!(),
                 |b| {
                     (

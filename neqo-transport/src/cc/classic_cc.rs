@@ -88,7 +88,7 @@ pub trait WindowAdjustment: Display + Debug {
         max_datagram_size: usize,
         now: Instant,
     ) -> usize;
-    /// This function is called when a congestion event has beed detected and it
+    /// This function is called when a congestion event has been detected and it
     /// returns new (decreased) values of `curr_cwnd` and `acked_bytes`.
     /// This value can be very small; the calling code is responsible for ensuring that the
     /// congestion window doesn't drop below the minimum of `CWND_MIN`.
