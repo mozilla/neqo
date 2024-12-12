@@ -563,15 +563,9 @@ fn illegal_stream_frames() {
     // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
     for stream_id in [0, 2] {
         // Illegal RESET_STREAM frame
-        test_with_illegal_frame(&[FRAME_TYPE_RESET_STREAM, stream_id, 0, 0]);
-        // Illegal STOP_SENDING frame
-        test_with_illegal_frame(&[FRAME_TYPE_STOP_SENDING, stream_id, 0]);
-        // Illegal MAX_STREAM_DATA frame
-        test_with_illegal_frame(&[FRAME_TYPE_MAX_STREAM_DATA, stream_id, 0]);
-        // Illegal STREAM_DATA_BLOCKED frame
-        test_with_illegal_frame(&[FRAME_TYPE_STREAM_DATA_BLOCKED, stream_id, 0]);
-        // Illegal STREAM frame
-        test_with_illegal_frame(&[FRAME_TYPE_STREAM_CLIENT_INI_BIDI, stream_id, 0]);
+        for frame_type in [FRAME_TYPE_RESET_STREAM, ...] {
+            test_with_illegal_frame(&[frame_type, stream_id, 0, 0]);
+        }
     }
 }
 
