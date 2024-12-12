@@ -684,7 +684,8 @@ fn late_stream_related_frame(frame_type: u64) {
 
     // Now clear the streams on the client, and then deliver the test frame.
     client.streams.clear_streams();
-    assert!(client.obtain_stream(stream_id).unwrap().is_none());
+    let (ss, rs) = client.streams.obtain_stream(stream_id).unwrap();
+    assert!(ss.is_none() && rs.is_none());
     _ = client.process(tester, now()).dgram();
 
     // Make sure this worked, i.e., the connection didn't close.
