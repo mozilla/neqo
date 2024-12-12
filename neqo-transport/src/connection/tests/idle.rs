@@ -20,6 +20,7 @@ use super::{
 };
 use crate::{
     packet::PacketBuilder,
+    recovery::RecoveryTokenVec,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{self, TransportParameter},
@@ -307,7 +308,7 @@ fn idle_caching() {
     // Now let the server process the RTX'ed client Initial.  This causes the server
     // to send CRYPTO frames again, so manually extract and discard those.
     server.process_input(dgram.unwrap(), middle);
-    let mut tokens = Vec::new();
+    let mut tokens = RecoveryTokenVec::new();
     server.crypto.streams.write_frame(
         PacketNumberSpace::Initial,
         &mut builder,

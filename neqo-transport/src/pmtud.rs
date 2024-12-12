@@ -340,7 +340,7 @@ mod tests {
         crypto::CryptoDxState,
         packet::{PacketBuilder, PacketType},
         pmtud::{Probe, PMTU_RAISE_TIMER, SEARCH_TABLE_LEN},
-        recovery::{SendProfile, SentPacket},
+        recovery::{RecoveryTokenVec, SendProfile, SentPacket},
         Pmtud, Stats,
     };
 
@@ -354,7 +354,7 @@ mod tests {
             IpTosEcn::default(),
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             len,
         )
     }
