@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 
-use neqo_common::{Datagram, Decoder};
+use neqo_common::{Datagram, Decoder, IpTos};
 use neqo_transport::{version::WireVersion, Pmtud, Version, MIN_INITIAL_PACKET_SIZE};
 
 use crate::{DEFAULT_ADDR, DEFAULT_ADDR_V4};
@@ -50,8 +50,9 @@ pub fn assert_version(payload: &[u8], v: u32) {
 /// # Panics
 ///
 /// If this is clearly not a Version Negotiation packet.
-pub fn assert_vn(payload: &[u8]) {
-    let mut dec = Decoder::from(payload);
+pub fn assert_vn(dgram: &Datagram) {
+    assert_eq!(dgram.tos(), IpTos::default()); // VN always uses default IP TOS.
+    let mut dec = Decoder::from(dgram.as_ref());
     assert_eq!(
         dec.decode_uint::<u8>().unwrap() & 0x80,
         0x80,
@@ -86,8 +87,9 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
 /// # Panics
 ///
 /// If the tests fail.
-pub fn assert_retry(payload: &[u8]) {
-    let mut dec = Decoder::from(payload);
+pub fn assert_retry(dgram: &Datagram) {
+    assert_eq!(dgram.tos(), IpTos::default()); // Retry always uses default IP TOS.
+    let mut dec = Decoder::from(dgram.as_ref());
     let t = dec.decode_uint::<u8>().unwrap();
     let version = assert_default_version(&mut dec);
     assert_long_packet_type(t, 0b1011_0000, version);
