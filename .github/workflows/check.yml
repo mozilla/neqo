@@ -189,7 +189,6 @@ jobs:
       with:
         minimum-version: ${{ steps.nss-version.outputs.minimum }}
         target: ${{ matrix.target }}
-        ndk: ${{ env.ANDROID_NDK_LATEST_HOME }}
 
     - name: Build unit tests for Android
       run: |
