@@ -131,8 +131,6 @@ impl Streams {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.reset(*application_error_code, *final_size)?;
-                } else if !self.ensure_existed_if_local(*stream_id) {
-                    return Err(Error::StreamStateError);
                 }
             }
             Frame::StopSending {
@@ -144,8 +142,6 @@ impl Streams {
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.reset(*application_error_code);
-                } else if !self.ensure_existed_if_local(*stream_id) {
-                    return Err(Error::StreamStateError);
                 }
             }
             Frame::Stream {
@@ -158,8 +154,6 @@ impl Streams {
                 stats.stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.inbound_stream_frame(*fin, *offset, data)?;
-                } else if !self.ensure_existed_if_local(*stream_id) {
-                    return Err(Error::StreamStateError);
                 }
             }
             Frame::MaxData { maximum_data } => {
@@ -178,8 +172,6 @@ impl Streams {
                 stats.max_stream_data += 1;
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.set_max_stream_data(*maximum_stream_data);
-                } else if !self.ensure_existed_if_local(*stream_id) {
-                    return Err(Error::StreamStateError);
                 }
             }
             Frame::MaxStreams {
@@ -206,8 +198,6 @@ impl Streams {
 
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.send_flowc_update();
-                } else if !self.ensure_existed_if_local(*stream_id) {
-                    return Err(Error::StreamStateError);
                 }
             }
             Frame::StreamsBlocked { .. } => {
@@ -352,10 +342,6 @@ impl Streams {
         self.remote_stream_limits[StreamType::UniDi].add_retired(removed_uni);
     }
 
-    fn ensure_existed_if_local(&self, stream_id: StreamId) -> bool {
-        !stream_id.is_remote_initiated(self.role)
-            && self.local_stream_limits[stream_id.stream_type()].used() > stream_id.index()
-    }
     fn ensure_created_if_remote(&mut self, stream_id: StreamId) -> Res<()> {
         if !stream_id.is_remote_initiated(self.role)
             || !self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id)?
@@ -419,15 +405,22 @@ impl Streams {
     /// indicated by its stream id.
     /// # Errors
     /// When the stream cannot be created due to stream limits.
+    /// When the stream is locally-initiated and has not existed.
     pub fn obtain_stream(
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         self.ensure_created_if_remote(stream_id)?;
-        Ok((
-            self.send.get_mut(stream_id).ok(),
-            self.recv.get_mut(stream_id).ok(),
-        ))
+        // Has this local stream existed in the past, i.e., is its index lower than the number of
+        // used streams?
+        let existed = !stream_id.is_remote_initiated(self.role)
+            && self.local_stream_limits[stream_id.stream_type()].used() > stream_id.index();
+        let ss = self.send.get_mut(stream_id).ok();
+        let rs = self.recv.get_mut(stream_id).ok();
+        if ss.is_none() && rs.is_none() && !existed {
+            return Err(Error::StreamStateError);
+        }
+        Ok((ss, rs))
     }
 
     /// # Errors
