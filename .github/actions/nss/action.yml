@@ -11,6 +11,9 @@ inputs:
   ndk:
     description: "Path to the Android NDK"
     default: ""
+  target:
+    description: "Target for cross-compilation"
+    default: ""
 
 runs:
   using: composite
@@ -208,6 +211,8 @@ runs:
           export BUILD_ANDROID=1
           export ANDROID_NDK="${{ inputs.ndk }}"
         fi
-        env | sort
+        if [ "${{ inputs.target }}" != "" ]; then
+          export TARGET="--target ${{ inputs.target }}"
+        fi
         [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT $TARGET --static
