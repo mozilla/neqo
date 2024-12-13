@@ -207,10 +207,10 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        if [ "${{ inputs.ndk }}" != "" ]; then
-          export BUILD_ANDROID=1
-          export ANDROID_NDK="${{ inputs.ndk }}"
-        fi
+        # if [ "${{ inputs.ndk }}" != "" ]; then
+        #   export BUILD_ANDROID=1
+        #   export ANDROID_NDK="${{ inputs.ndk }}"
+        # fi
         if [ "${{ inputs.target }}" != "" ]; then
           export TARGET="--target ${{ inputs.target }}"
         fi

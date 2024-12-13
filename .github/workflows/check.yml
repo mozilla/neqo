@@ -179,10 +179,8 @@ jobs:
       with:
         version: stable
         targets: ${{ matrix.target }}
+        tools: cargo-ndk
         token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Install cargo-ndk
-      run: cargo install cargo-ndk
 
     - id: nss-version
       run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
