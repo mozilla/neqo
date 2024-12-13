@@ -201,7 +201,7 @@ runs:
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [ "${{ inputs.target }}" ]; then
-          export TARGET="--target ${{ inputs.target }}"
+          export TARGET="--target android"
         fi
         [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         echo "$NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT $TARGET --static"
