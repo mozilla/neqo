@@ -35,14 +35,6 @@ use crate::{
 // TODO: Find reasonable limit.
 const STREAM_MAX_ACTIVE_LIMIT: u64 = 100 * 1024 * 1024;
 
-enum AutoTuningAlgorithm {
-    Google,
-    Thomson,
-    Bdp,
-}
-
-const AUTO_TUNING_ALGORITHM: AutoTuningAlgorithm = AutoTuningAlgorithm::Thomson;
-
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
 where
@@ -282,21 +274,9 @@ where
     }
 
     fn should_send_flowc_update(&self) -> bool {
-        match AUTO_TUNING_ALGORITHM {
-            AutoTuningAlgorithm::Google => {
-                let window_bytes_unused = self.max_allowed - self.retired;
-                window_bytes_unused < self.max_active - self.max_active / 2
-            }
-            AutoTuningAlgorithm::Thomson => {
-                let window_bytes_unused = self.max_allowed - self.retired;
-                // TODO: See DEFAULT_ACK_RATIO.
-                window_bytes_unused < self.max_active - self.max_active / 4
-            }
-            AutoTuningAlgorithm::Bdp => {
-                let window_bytes_unused = self.max_allowed - self.retired;
-                window_bytes_unused < self.max_active - self.max_active / 4
-            }
-        }
+        let window_bytes_unused = self.max_allowed - self.retired;
+        // TODO: See DEFAULT_ACK_RATIO.
+        window_bytes_unused < self.max_active - self.max_active / 4
     }
 
     pub const fn frame_needed(&self) -> bool {
@@ -412,64 +392,21 @@ impl ReceiverFlowControl<StreamId> {
         }
 
         // Auto-tune max_active.
-        //
-        // TODO: Should one also auto-tune down?
-        match AUTO_TUNING_ALGORITHM {
-            AutoTuningAlgorithm::Google => {
-                if self.should_send_flowc_update()
-                    && self
-                        .max_allowed_sent_at
-                        .is_some_and(|at| now - at < rtt * 2)
-                    && self.max_active < STREAM_MAX_ACTIVE_LIMIT
-                {
-                    let prev_max_active = self.max_active;
-                    self.max_active = min(self.max_active * 2, STREAM_MAX_ACTIVE_LIMIT);
-                    println!(
-                        "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
-                        prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
-                    );
-                }
-            }
-            AutoTuningAlgorithm::Thomson => {
-                if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
-                    let elapsed = now.duration_since(max_allowed_sent_at);
-                    let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
+        if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
+            let elapsed = now.duration_since(max_allowed_sent_at);
+            let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
 
-                    // Same as `elapsed / rtt < window_bytes_used / max_active`
-                    // without floating point division.
-                    if elapsed.as_micros() * u128::from(self.max_active)
-                        < rtt.as_micros() * u128::from(window_bytes_used)
-                    {
-                        let prev_max_active = self.max_active;
-                        self.max_active =
-                            min(self.max_active + window_bytes_used, STREAM_MAX_ACTIVE_LIMIT);
-                        println!(
+            // Same as `elapsed / rtt < window_bytes_used / max_active`
+            // without floating point division.
+            if elapsed.as_micros() * u128::from(self.max_active)
+                < rtt.as_micros() * u128::from(window_bytes_used)
+            {
+                let prev_max_active = self.max_active;
+                self.max_active = min(self.max_active + window_bytes_used, STREAM_MAX_ACTIVE_LIMIT);
+                println!(
                             "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
                             prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
                         );
-                    }
-                }
-            }
-            AutoTuningAlgorithm::Bdp => {
-                if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
-                    let elapsed = now.duration_since(max_allowed_sent_at);
-                    let ratio_time = elapsed.as_secs_f64() / rtt.as_secs_f64();
-
-                    let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
-                    let ratio_bytes = window_bytes_used as f64 / self.max_active as f64;
-
-                    if ratio_time < ratio_bytes {
-                        let bdp =
-                            (window_bytes_used as f64 / elapsed.as_secs_f64()) * rtt.as_secs_f64();
-                        let prev_max_active = self.max_active;
-                        // TODO
-                        self.max_active = min(bdp as u64, STREAM_MAX_ACTIVE_LIMIT);
-                        println!(
-                            "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
-                            prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
-                        );
-                    }
-                }
             }
         }
 
