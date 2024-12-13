@@ -196,6 +196,8 @@ jobs:
 
     - name: Build unit tests for Android
       run: cargo ndk -t ${{ matrix.target }} test --no-run
+      env:
+        ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
 
     - name: Enable KVM group perms
       run: |
