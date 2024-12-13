@@ -562,7 +562,6 @@ fn illegal_stream_frames() {
 
     // 0 = Client-Initiated, Bidirectional; 2 = Client-Initiated, Unidirectional
     for stream_id in [0, 2] {
-        // Illegal RESET_STREAM frame
         for frame_type in [
             FRAME_TYPE_RESET_STREAM,
             FRAME_TYPE_STOP_SENDING,
