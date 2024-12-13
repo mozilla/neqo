@@ -135,7 +135,7 @@ impl ActivePushStreams {
 ///
 /// The `PushController` handles:
 ///  `PUSH_PROMISE` frame: frames may change the push state from Init to `PushPromise` and from
-/// `OnlyPushStream` to                        `Active`. Frames for a closed steams are ignored.
+/// `OnlyPushStream` to                        `Active`. Frames for a closed streams are ignored.
 ///  `CANCEL_PUSH` frame: (`handle_cancel_push` will be called). If a push is in state `PushPromise`
 /// or `Active`, any                       posted events will be removed and a `PushCanceled` event
 /// will be posted. If a push is in                       state `OnlyPushStream` or `Active` the
@@ -169,7 +169,7 @@ impl PushController {
 
 impl Display for PushController {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Push controler")
+        write!(f, "Push controller")
     }
 }
 

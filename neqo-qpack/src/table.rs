@@ -365,7 +365,7 @@ impl HeaderTable {
             let entry = self.get_dynamic(index, self.base, false)?;
             name = entry.name().to_vec();
             value = entry.value().to_vec();
-            qtrace!([self], "dumplicate name={:?} value={:?}", name, value);
+            qtrace!([self], "duplicate name={:?} value={:?}", name, value);
         }
         self.insert(&name, &value)
     }

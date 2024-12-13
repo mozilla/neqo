@@ -629,7 +629,7 @@ impl<'a> Frame<'a> {
                     return Err(Error::FrameEncodingError);
                 }
                 let delay = dv(dec)?;
-                let ignore_order = match d(dec.decode_uint(1))? {
+                let ignore_order = match d(dec.decode_uint::<u8>())? {
                     0 => false,
                     1 => true,
                     _ => return Err(Error::FrameEncodingError),

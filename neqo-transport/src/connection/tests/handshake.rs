@@ -1199,7 +1199,7 @@ fn client_initial_retransmits_identical() {
         assert_eq!(
             client.stats().frame_tx,
             FrameStats {
-                crypto: i,
+                crypto: 2 * i,
                 ..Default::default()
             }
         );

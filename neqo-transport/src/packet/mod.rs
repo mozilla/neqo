@@ -610,7 +610,7 @@ impl<'a> PublicPacket<'a> {
     #[allow(clippy::similar_names)]
     pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
         let mut decoder = Decoder::new(data);
-        let first = Self::opt(decoder.decode_byte())?;
+        let first = Self::opt(decoder.decode_uint::<u8>())?;
 
         if first & 0x80 == PACKET_BIT_SHORT {
             // Conveniently, this also guarantees that there is enough space
@@ -638,7 +638,7 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Generic long header.
-        let version = WireVersion::try_from(Self::opt(decoder.decode_uint(4))?)?;
+        let version = Self::opt(decoder.decode_uint())?;
         let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
         let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
 
@@ -764,6 +764,7 @@ impl<'a> PublicPacket<'a> {
         self.version.unwrap_or(0)
     }
 
+    #[allow(clippy::len_without_is_empty)]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.data.len()
@@ -892,7 +893,7 @@ impl<'a> PublicPacket<'a> {
         let mut decoder = Decoder::new(&self.data[self.header_len..]);
         let mut res = Vec::new();
         while decoder.remaining() > 0 {
-            let version = WireVersion::try_from(Self::opt(decoder.decode_uint(4))?)?;
+            let version = Self::opt(decoder.decode_uint::<WireVersion>())?;
             res.push(version);
         }
         Ok(res)

@@ -3,5 +3,5 @@
 *~
 /.vscode/
 /lcov.info
+/mutants.out*/
 /target/
-Cargo.lock

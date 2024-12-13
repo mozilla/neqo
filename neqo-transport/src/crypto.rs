@@ -30,6 +30,7 @@ use crate::{
     recovery::RecoveryToken,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
+    shuffle::find_sni,
     stats::FrameStats,
     tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler},
     tracking::PacketNumberSpace,
@@ -1493,13 +1494,16 @@ impl CryptoStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        let cs = self.get_mut(space).unwrap();
-        if let Some((offset, data)) = cs.tx.next_bytes() {
+        fn write_chunk(
+            offset: u64,
+            data: &[u8],
+            builder: &mut PacketBuilder,
+        ) -> Option<(u64, usize)> {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
             // Don't bother if there isn't room for the header and some data.
             if builder.remaining() < header_len + 1 {
-                return;
+                return None;
             }
             // Calculate length of data based on the minimum of:
             // - available data
@@ -1512,16 +1516,38 @@ impl CryptoStreams {
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
             builder.encode_varint(offset);
             builder.encode_vvec(&data[..length]);
+            Some((offset, length))
+        }
 
-            cs.tx.mark_as_sent(offset, length);
-
-            qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
-            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                space,
-                offset,
-                length,
-            }));
-            stats.crypto += 1;
+        let cs = self.get_mut(space).unwrap();
+        if let Some((offset, data)) = cs.tx.next_bytes() {
+            let written = if offset == 0 {
+                if let Some(sni) = find_sni(data) {
+                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
+                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let (left, right) = data.split_at(mid);
+                    [
+                        write_chunk(offset + mid as u64, right, builder),
+                        write_chunk(offset, left, builder),
+                    ]
+                } else {
+                    // No SNI found, write the entire data.
+                    [write_chunk(offset, data, builder), None]
+                }
+            } else {
+                // Not at the start of the crypto stream, write the entire data.
+                [write_chunk(offset, data, builder), None]
+            };
+            for (offset, length) in written.into_iter().flatten() {
+                cs.tx.mark_as_sent(offset, length);
+                qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
+                tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                    space,
+                    offset,
+                    length,
+                }));
+                stats.crypto += 1;
+            }
         }
     }
 }
