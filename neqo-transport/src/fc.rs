@@ -289,11 +289,12 @@ where
             }
             AutoTuningAlgorithm::Thomson => {
                 let window_bytes_unused = self.max_allowed - self.retired;
-                window_bytes_unused < self.max_active - self.max_active / 8
+                // TODO: See DEFAULT_ACK_RATIO.
+                window_bytes_unused < self.max_active - self.max_active / 4
             }
             AutoTuningAlgorithm::Bdp => {
                 let window_bytes_unused = self.max_allowed - self.retired;
-                window_bytes_unused < self.max_active - self.max_active / 8
+                window_bytes_unused < self.max_active - self.max_active / 4
             }
         }
     }
@@ -432,12 +433,13 @@ impl ReceiverFlowControl<StreamId> {
             AutoTuningAlgorithm::Thomson => {
                 if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
                     let elapsed = now.duration_since(max_allowed_sent_at);
-                    let ratio_time = elapsed.as_secs_f64() / rtt.as_secs_f64();
-
                     let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
-                    let ratio_bytes = window_bytes_used as f64 / self.max_active as f64;
 
-                    if ratio_time < ratio_bytes {
+                    // Same as `elapsed / rtt < window_bytes_used / max_active`
+                    // without floating point division.
+                    if elapsed.as_micros() * u128::from(self.max_active)
+                        < rtt.as_micros() * u128::from(window_bytes_used)
+                    {
                         let prev_max_active = self.max_active;
                         self.max_active =
                             min(self.max_active + window_bytes_used, STREAM_MAX_ACTIVE_LIMIT);
