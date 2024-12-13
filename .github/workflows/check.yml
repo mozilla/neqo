@@ -89,7 +89,7 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "${{ matrix.rust-toolchain }}" == "nightly" ]; then
-            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --mcdc --features ci --profile ci --lcov --output-path lcov.info
+            cargo +${{ matrix.rust-toolchain }} llvm-cov nextest $BUILD_TYPE --mcdc --include-ffi --features ci --profile ci --codecov --output-path codecov.json
           else
             cargo +${{ matrix.rust-toolchain }} nextest run $BUILD_TYPE --features ci --profile ci
           fi
@@ -113,7 +113,7 @@ jobs:
 
       - uses: codecov/codecov-action@7f8b4b4bde536c465e797be725718b88c5d95e0e # v5.1.1
         with:
-          files: lcov.info
+          files: codecov.json
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true

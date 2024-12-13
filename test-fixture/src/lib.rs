@@ -418,6 +418,6 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
 
 pub const EXPECTED_LOG_HEADER: &str = concat!(
     "\u{1e}",
-    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"Example qlog trace description","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"neqo-Client trace","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
     "\n"
 );
