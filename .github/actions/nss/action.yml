@@ -196,13 +196,9 @@ runs:
         ANDROID_TOOLCHAIN='$ANDROID_NDK/toolchains/llvm/prebuilt/linux-'"$(uname -m)"
         ANDROID_SYSROOT="$ANDROID_TOOLCHAIN/sysroot"
         sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_SYSROOT\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
-        for tool in as gcc g++ cpp ld ar ranlib strip; do
-          case "$tool" in
-            "gcc") otool="clang";;
-            "g++") otool="clang++";;
-            *) otool="$tool";;
-          esac
-          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ inputs.target }}30-$otool" "$ANDROID_TOOLCHAIN/bin/${{ inputs.target }}-$tool"
+        ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ inputs.target }}30-clang" "$ANDROID_TOOLCHAIN/bin/${{ inputs.target }}-gcc"
+        ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ inputs.target }}30-clang++" "$ANDROID_TOOLCHAIN/bin/${{ inputs.target }}-g++"
+        ls -l "$ANDROID_TOOLCHAIN/bin"
         done
 
     - name: Build
