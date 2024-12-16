@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       run_benchmarks:
-        description: 'Run benchmarks'
+        description: "Run benchmarks"
         type: boolean
         required: false
         default: false
@@ -160,50 +160,57 @@ jobs:
             api-level: 19
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # - name: Install JDK
-    #   uses: actions/setup-java@v4
-    #   with:
-    #     distribution: 'zulu'
-    #     java-version: '21'
+      # - name: Install JDK
+      #   uses: actions/setup-java@v4
+      #   with:
+      #     distribution: 'zulu'
+      #     java-version: '21'
 
-    # - name: Install Android SDK
-    #   uses: android-actions/setup-android@v3
+      # - name: Install Android SDK
+      #   uses: android-actions/setup-android@v3
 
-    # - name: Install Android NDK
-    #   run: sdkmanager --install "ndk;$NDK_VERSION"
+      # - name: Install Android NDK
+      #   run: sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: ./.github/actions/rust
-      with:
-        version: stable
-        targets: ${{ matrix.target }}
-        tools: cargo-ndk
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/rust
+        with:
+          version: stable
+          targets: ${{ matrix.target }}
+          tools: cargo-ndk
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - id: nss-version
-      run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-    - uses: ./.github/actions/nss
-      with:
-        minimum-version: ${{ steps.nss-version.outputs.minimum }}
-        target: ${{ matrix.target }}
+      - name: Fix Android toolchain for NSPR
+        run: |
+          ls -l "$ANDROID_TOOLCHAIN/bin"
+          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}30-clang" "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}-gcc"
+          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}30-clang++" "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}-g++"
+          ls -l "$ANDROID_TOOLCHAIN/bin"
 
-    - name: Build unit tests for Android
-      run: |
-        env | sort
-        cargo ndk -t ${{ matrix.target }} test --no-run
+      - uses: ./.github/actions/nss
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          target: ${{ matrix.target }}
 
-    - name: Enable KVM group perms
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
+      - name: Build unit tests for Android
+        run: |
+          env | sort
+          cargo ndk -t ${{ matrix.target }} test --no-run
 
-    - name: Set up Android Emulator and run tests
-      uses: reactivecircus/android-emulator-runner@v2
-      with:
-        api-level: ${{ matrix.api-level }}
-        arch: ${{ matrix.emulator-arch }}
-        script: .github/workflows/check-android-run-tests-on-emulator.sh
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Android Emulator and run tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: ${{ matrix.emulator-arch }}
+          script: .github/workflows/check-android-run-tests-on-emulator.sh
