@@ -209,8 +209,10 @@ runs:
           else
             ARCH="$ARCH-android-linux"
           fi
+          cat "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" || true
           ln -svf "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/$ARCH-gcc"
           ln -svf "$(which cpp)" "$ANDROID_TOOLCHAIN/bin/$ARCH-cpp"
+          ln -svf "$ANDROID_TOOLCHAIN/bin/llvm-ar" "$ANDROID_TOOLCHAIN/bin/$ARCH-ar"
           ls -l "$ANDROID_TOOLCHAIN/bin"
           sed -i "s/-mandroid//g" $NSS_DIR/../nspr/configure $NSS_DIR/../nspr/configure.in
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
