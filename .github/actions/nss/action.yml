@@ -189,14 +189,6 @@ runs:
       env:
         NSS_DIR: ${{ github.workspace }}/nss
 
-    - name: Patch nspr.sh for Android
-      shell: bash
-      if: env.BUILD_NSS && endsWith(inputs.target, 'android')
-      run: |
-        ANDROID_TOOLCHAIN='$ANDROID_NDK/toolchains/llvm/prebuilt/linux-'"$(uname -m)"
-        ANDROID_SYSROOT="$ANDROID_TOOLCHAIN/sysroot"
-        sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_SYSROOT\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
-
     - name: Build
       shell: bash
       if: env.BUILD_NSS
@@ -208,9 +200,16 @@ runs:
           OPT="-o"
           [ "${{ runner.os }}" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
-        if [ "${{ inputs.target }}" ]; then
-          export TARGET="--target ${{ inputs.target }}"
+        if [ "${{ endsWith(inputs.target, 'android') }}" ]; then
+          ANDROID_TOOLCHAIN='$ANDROID_NDK/toolchains/llvm/prebuilt/linux-'"$(uname -m)"
+          ANDROID_SYSROOT="$ANDROID_TOOLCHAIN/sysroot"
+          sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_SYSROOT\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
+          export "CC=$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang"
+          export "CXX=$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang++"
+        else [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
+          export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         fi
-        [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT $TARGET --static -v || true
-        cat config.log
+        env | sort
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v || true
+        cat $NSS_DIR/config.log || true
+        cat $NSS_DIR/../nspr/config.log || true

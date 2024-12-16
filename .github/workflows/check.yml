@@ -185,12 +185,6 @@ jobs:
       - id: nss-version
         run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Fix Android toolchain for NSPR
-        run: |
-          ANDROID_TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-$(uname -m)"
-          echo "CC=$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" >> "$GITHUB_ENV"
-          echo "CXX=$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang++" >> "$GITHUB_ENV"
-
       - uses: ./.github/actions/nss
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
