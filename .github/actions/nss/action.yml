@@ -219,4 +219,4 @@ runs:
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         fi
-        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static -v
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT --static --target ${{ inputs.target }} -v
