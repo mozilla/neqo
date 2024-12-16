@@ -157,7 +157,7 @@ jobs:
             api-level: 21
           - target: i686-linux-android
             emulator-arch: x86
-            api-level: 19
+            api-level: 21
 
     steps:
       - name: Checkout code
