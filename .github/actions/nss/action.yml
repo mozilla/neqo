@@ -201,7 +201,7 @@ runs:
           [ "${{ runner.os }}" != "Windows" ] && [ -z "${{ inputs.target }}" ]&& export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
         fi
         if [ "${{ endsWith(inputs.target, 'android') }}" ]; then
-          ANDROID_TOOLCHAIN='$ANDROID_NDK/toolchains/llvm/prebuilt/linux-'"$(uname -m)"
+          ANDROID_TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-$(uname -m)"
           ANDROID_SYSROOT="$ANDROID_TOOLCHAIN/sysroot"
           sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_SYSROOT\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
           ln -svf "$ANDROID_TOOLCHAIN/bin/linux-android-gcc" "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang"
