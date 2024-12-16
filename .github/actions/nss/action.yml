@@ -204,7 +204,7 @@ runs:
           ANDROID_TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-$(uname -m)"
           sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_TOOLCHAIN/sysroot\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
           ln -svf "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/linux-android-gcc"
-          sed -i "s/-mandroid//g" $NSS_DIR/../nss/configure $NSS_DIR/../nss/configure.in
+          sed -i "s/-mandroid//g" $NSS_DIR/../nspr/configure $nspr_DIR/../nss/configure.in
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         fi
