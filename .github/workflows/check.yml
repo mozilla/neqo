@@ -189,8 +189,9 @@ jobs:
         run: |
           env | sort
           ANDROID_TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-$(uname -m)"
-          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}-gcc"
-          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang++" "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}-g++"
+          TARGET=$(echo "${{ matrix.target }}" | sed 's/linux-android/android-linux/')
+          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/$TARGET-gcc"
+          ln -sfv "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang++" "$ANDROID_TOOLCHAIN/bin/$TARGET-g++"
 
       - uses: ./.github/actions/nss
         with:
