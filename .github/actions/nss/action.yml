@@ -203,7 +203,6 @@ runs:
         if [ "${{ endsWith(inputs.target, 'android') }}" ]; then
           ANDROID_TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-$(uname -m)"
           sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_TOOLCHAIN/sysroot\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
-          ln -svf "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang-cpp"
           ARCH=$(echo "${{ inputs.target }}" | cut -d- -f1)
           if [ "$ARCH" == "x86_64" ]; then
             ARCH="linux-android"
@@ -211,7 +210,7 @@ runs:
             ARCH="$ARCH-android-linux"
           fi
           ln -svf "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang" "$ANDROID_TOOLCHAIN/bin/$ARCH-gcc"
-          ln -svf "$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang-cpp" "$ANDROID_TOOLCHAIN/bin/$ARCH-cpp"
+          ln -svf "$(which cpp)" "$ANDROID_TOOLCHAIN/bin/$ARCH-cpp"
           ls -l "$ANDROID_TOOLCHAIN/bin"
           sed -i "s/-mandroid//g" $NSS_DIR/../nspr/configure $NSS_DIR/../nspr/configure.in
         elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
