@@ -194,7 +194,7 @@ runs:
       if: env.BUILD_NSS && endsWith(inputs.target, 'android')
       run: |
         # find $ANDROID_NDK -ls
-        sed -i '|^extra_params+=(--with-android-ndk="$ANDROID_NDK")\nextra_params+=(--with-android-toolchain="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64")\|i echo "NSPR [1/5]' $NSS_DIR/coreconf/nspr.sh
+        sed -i '/NSPR.*configure/i  extra_params+=(--with-android-ndk="$ANDROID_NDK")\nextra_params+=(--with-android-toolchain="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64")' $NSS_DIR/coreconf/nspr.sh
         cat $NSS_DIR/coreconf/nspr.sh
 
     - name: Build
