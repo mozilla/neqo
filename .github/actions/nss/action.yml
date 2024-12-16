@@ -206,7 +206,7 @@ runs:
           sed -i "/NSPR.*configure/i extra_params+=(--with-android-ndk=\"$ANDROID_NDK\")\nextra_params+=(--target=\"${{ inputs.target }}\")\nextra_params+=(--with-android-platform=\"$ANDROID_SYSROOT\")\nextra_params+=(--with-android-toolchain=\"$ANDROID_TOOLCHAIN\")" $NSS_DIR/coreconf/nspr.sh
           export "CC=$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang"
           export "CXX=$ANDROID_TOOLCHAIN/bin/${{ matrix.target }}${{ matrix.api-level }}-clang++"
-        else [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
+        elif [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ]; then
           export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
         fi
         env | sort
