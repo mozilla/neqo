@@ -189,13 +189,13 @@ runs:
       env:
         NSS_DIR: ${{ github.workspace }}/nss
 
-    - name: Patch build.sh for Android
+    - name: Patch nspr.sh for Android
       shell: bash
       if: env.BUILD_NSS && endsWith(inputs.target, 'android')
       run: |
-        find $ANDROID_NDK -ls
-        sed -i 's|nspr_build|extra_params+=(--with-android-ndk="$ANDROID_NDK")\nextra_params+=(--with-android-toolchain="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64")\nnspr_build|' $NSS_DIR/build.sh
-        cat $NSS_DIR/build.sh
+        # find $ANDROID_NDK -ls
+        sed -i '|^extra_params+=(--with-android-ndk="$ANDROID_NDK")\nextra_params+=(--with-android-toolchain="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64")\| echo "NSPR [1/5]' $NSS_DIR/coreconf/nspr.sh
+        cat $NSS_DIR/coreconf/nspr.sh
 
     - name: Build
       shell: bash
