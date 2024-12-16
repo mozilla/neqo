@@ -191,7 +191,7 @@ runs:
 
     - name: Patch build.sh for Android
       shell: bash
-      if: env.BUILD_NSS && inputs.target == 'android'
+      if: env.BUILD_NSS && endsWith(inputs.target, 'android')
       run: |
         find $ANDROID_NDK -ls
         sed -i 's|nspr_build|extra_params+=(--with-android-ndk="$ANDROID_NDK")\nextra_params+=(--with-android-toolchain="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64")\nnspr_build|' $NSS_DIR/build.sh
@@ -212,4 +212,4 @@ runs:
           export TARGET="--target ${{ inputs.target }}"
         fi
         [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
-        bash -x $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT $TARGET --static -v
+        $NSS_DIR/build.sh -g -Ddisable_tests=1 $OPT $TARGET --static -v
