@@ -16,7 +16,7 @@ use crate::{
     priority::PriorityHandler,
     push_controller::PushController,
     qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
+    MessageType, Priority, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -61,7 +61,7 @@ enum RecvMessageState {
 
 #[derive(Debug)]
 struct PushInfo {
-    push_id: u64,
+    push_id: PushId,
     header_block: Vec<u8>,
 }
 
@@ -220,7 +220,7 @@ impl RecvMessage {
         Ok(())
     }
 
-    fn handle_push_promise(&mut self, push_id: u64, header_block: Vec<u8>) -> Res<()> {
+    fn handle_push_promise(&mut self, push_id: PushId, header_block: Vec<u8>) -> Res<()> {
         if self.push_handler.is_none() {
             return Err(Error::HttpFrameUnexpected);
         }
