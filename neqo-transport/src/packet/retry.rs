@@ -37,7 +37,7 @@ where
     match version {
         Version::Version2 => &RETRY_AEAD_V2,
         Version::Version1 => &RETRY_AEAD_V1,
-        Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => &RETRY_AEAD_29,
+        Version::Draft29 => &RETRY_AEAD_29,
     }
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {

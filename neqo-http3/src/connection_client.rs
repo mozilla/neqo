@@ -56,9 +56,6 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
     match version {
         Version::Version2 | Version::Version1 => "h3",
         Version::Draft29 => "h3-29",
-        Version::Draft30 => "h3-30",
-        Version::Draft31 => "h3-31",
-        Version::Draft32 => "h3-32",
     }
 }
 

@@ -110,7 +110,7 @@ impl Crypto {
         agent.disable_end_of_early_data()?;
         let extension = match version {
             Version::Version2 | Version::Version1 => 0x39,
-            Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => 0xffa5,
+            Version::Draft29 => 0xffa5,
         };
         agent.extension_handler(extension, tphandler)?;
         Ok(Self {

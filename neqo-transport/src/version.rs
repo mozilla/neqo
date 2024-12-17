@@ -16,9 +16,6 @@ pub enum Version {
     #[default]
     Version1,
     Draft29,
-    Draft30,
-    Draft31,
-    Draft32,
 }
 
 impl Version {
@@ -28,9 +25,6 @@ impl Version {
             Self::Version2 => 0x6b33_43cf,
             Self::Version1 => 1,
             Self::Draft29 => 0xff00_0000 + 29,
-            Self::Draft30 => 0xff00_0000 + 30,
-            Self::Draft31 => 0xff00_0000 + 31,
-            Self::Draft32 => 0xff00_0000 + 32,
         }
     }
 
@@ -50,16 +44,14 @@ impl Version {
         match self {
             Self::Version2 => INITIAL_SALT_V2,
             Self::Version1 => INITIAL_SALT_V1,
-            Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => INITIAL_SALT_29_32,
+            Self::Draft29 => INITIAL_SALT_29_32,
         }
     }
 
     pub(crate) const fn label_prefix(self) -> &'static str {
         match self {
             Self::Version2 => "quicv2 ",
-            Self::Version1 | Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => {
-                "quic "
-            }
+            Self::Version1 | Self::Draft29 => "quic ",
         }
     }
 
@@ -82,15 +74,12 @@ impl Version {
         match self {
             Self::Version2 => RETRY_SECRET_V2,
             Self::Version1 => RETRY_SECRET_V1,
-            Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32 => RETRY_SECRET_29,
+            Self::Draft29 => RETRY_SECRET_29,
         }
     }
 
     pub(crate) const fn is_draft(self) -> bool {
-        matches!(
-            self,
-            Self::Draft29 | Self::Draft30 | Self::Draft31 | Self::Draft32,
-        )
+        matches!(self, Self::Draft29,)
     }
 
     /// Determine if `self` can be upgraded to `other` compatibly.
@@ -105,14 +94,7 @@ impl Version {
 
     #[must_use]
     pub fn all() -> Vec<Self> {
-        vec![
-            Self::Version2,
-            Self::Version1,
-            Self::Draft32,
-            Self::Draft31,
-            Self::Draft30,
-            Self::Draft29,
-        ]
+        vec![Self::Version2, Self::Version1, Self::Draft29]
     }
 
     pub fn compatible<'a>(
@@ -133,12 +115,6 @@ impl TryFrom<WireVersion> for Version {
             Ok(Self::Version2)
         } else if wire == 0xff00_0000 + 29 {
             Ok(Self::Draft29)
-        } else if wire == 0xff00_0000 + 30 {
-            Ok(Self::Draft30)
-        } else if wire == 0xff00_0000 + 31 {
-            Ok(Self::Draft31)
-        } else if wire == 0xff00_0000 + 32 {
-            Ok(Self::Draft32)
         } else {
             Err(Error::VersionNegotiation)
         }
