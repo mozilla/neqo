@@ -30,9 +30,8 @@ use crate::{
 };
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
-/// for the size of the stream send and receive window.
-// TODO: pub
-pub(crate) const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
+/// for the size of the stream receive window.
+const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>

@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 
 use crate::{
     events::ConnectionEvents,
-    fc::{SenderFlowControl, STREAM_MAX_ACTIVE_LIMIT},
+    fc::SenderFlowControl,
     frame::{Frame, FRAME_TYPE_RESET_STREAM},
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
@@ -36,6 +36,8 @@ use crate::{
 
 // TODO: Still needed?
 pub const INITIAL_SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
+
+const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
 /// The priority that is assigned to sending data for the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -496,15 +498,10 @@ impl TxBuffer {
 
     /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        // TODO: `as` safe?
-        let can_buffer = min(
-            STREAM_MAX_ACTIVE_LIMIT as usize - self.buffered(),
-            buf.len(),
-        );
+        let can_buffer = min(MAX_SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            // TODO: `as` safe?
-            debug_assert!(self.send_buf.len() <= STREAM_MAX_ACTIVE_LIMIT as usize);
+            debug_assert!(self.send_buf.len() <= MAX_SEND_BUFFER_SIZE);
         }
         can_buffer
     }
@@ -577,8 +574,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        // TODO: `as` safe?
-        STREAM_MAX_ACTIVE_LIMIT as usize - self.buffered()
+        MAX_SEND_BUFFER_SIZE - self.buffered()
     }
 
     fn used(&self) -> u64 {
@@ -637,7 +633,7 @@ impl SendStreamState {
         match self {
             // In Ready, TxBuffer not yet allocated but size is known
             // TODO: `as` safe?
-            Self::Ready { .. } => STREAM_MAX_ACTIVE_LIMIT as usize,
+            Self::Ready { .. } => MAX_SEND_BUFFER_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
             Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
         }
