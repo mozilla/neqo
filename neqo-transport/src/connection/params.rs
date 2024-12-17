@@ -91,9 +91,7 @@ impl Default for ConnectionParameters {
             versions: VersionConfig::default(),
             cc_algorithm: CongestionControlAlgorithm::NewReno,
             max_data: LOCAL_MAX_DATA,
-            // TODO: Why start with 1 MiB? Why not start lower?
             max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_BUFFER_SIZE).unwrap(),
-            // TODO: Why start with 1 MiB? Why not start lower?
             max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_BUFFER_SIZE).unwrap(),
             max_stream_data_uni: u64::try_from(INITIAL_RECV_BUFFER_SIZE).unwrap(),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,

@@ -30,10 +30,8 @@ use crate::{
 };
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
-/// for the size of the stream receive window.
-//
-// TODO: Find reasonable limit.
-const STREAM_MAX_ACTIVE_LIMIT: u64 = 100 * 1024 * 1024;
+/// for the size of the stream send and receive window.
+const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -276,7 +274,7 @@ where
     fn should_send_flowc_update(&self) -> bool {
         let window_bytes_unused = self.max_allowed - self.retired;
         // TODO: See DEFAULT_ACK_RATIO.
-        window_bytes_unused < self.max_active - self.max_active / 8
+        window_bytes_unused < self.max_active - self.max_active / 4
     }
 
     pub const fn frame_needed(&self) -> bool {
@@ -402,10 +400,7 @@ impl ReceiverFlowControl<StreamId> {
                 < rtt.as_micros() * u128::from(window_bytes_used)
             {
                 let prev_max_active = self.max_active;
-                self.max_active = min(
-                    2 * self.max_active,
-                    STREAM_MAX_ACTIVE_LIMIT,
-                );
+                self.max_active = min(2 * self.max_active, STREAM_MAX_ACTIVE_LIMIT);
                 println!(
                             "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
                             prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
