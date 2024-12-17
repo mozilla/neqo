@@ -240,6 +240,7 @@ impl QuicParameters {
         } else {
             let version = match alpn {
                 "h3" | "hq-interop" => Version::Version1,
+                #[cfg(feature = "draft-29")]
                 "h3-29" | "hq-29" => Version::Draft29,
                 _ => Version::default(),
             };

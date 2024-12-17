@@ -25,6 +25,7 @@ fn make_aead(version: Version) -> Aead {
     )
     .unwrap()
 }
+#[cfg(feature = "draft-29")]
 thread_local!(static RETRY_AEAD_29: RefCell<Aead> = RefCell::new(make_aead(Version::Draft29)));
 thread_local!(static RETRY_AEAD_V1: RefCell<Aead> = RefCell::new(make_aead(Version::Version1)));
 thread_local!(static RETRY_AEAD_V2: RefCell<Aead> = RefCell::new(make_aead(Version::Version2)));
@@ -37,6 +38,7 @@ where
     match version {
         Version::Version2 => &RETRY_AEAD_V2,
         Version::Version1 => &RETRY_AEAD_V1,
+        #[cfg(feature = "draft-29")]
         Version::Draft29 => &RETRY_AEAD_29,
     }
     .try_with(|aead| f(&aead.borrow()))

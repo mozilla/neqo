@@ -55,6 +55,7 @@ where
 const fn alpn_from_quic_version(version: Version) -> &'static str {
     match version {
         Version::Version2 | Version::Version1 => "h3",
+        #[cfg(feature = "draft-29")]
         Version::Draft29 => "h3-29",
     }
 }
