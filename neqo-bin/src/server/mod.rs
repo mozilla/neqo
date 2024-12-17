@@ -411,11 +411,11 @@ pub async fn server(mut args: Args) -> Res<()> {
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
     let server: Box<dyn HttpServer> = if args.shared.alpn == "h3" {
+        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
+    } else {
         Box::new(
             http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
         )
-    } else {
-        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
     };
 
     ServerRunner::new(Box::new(move || args.now()), server, sockets)
