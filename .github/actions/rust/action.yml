@@ -67,7 +67,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
       # TODO: Unpin cargo-quickinstall once our MSRV is > 1.76
-      run: cargo +${{ inputs.version }} install cargo-quickinstall@0.3.4
+      run: cargo +${{ inputs.version }} install --locked cargo-quickinstall@0.3.5
 
     - name: Install Rust tools
       shell: bash
