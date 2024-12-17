@@ -575,7 +575,7 @@ impl RecvStream {
 
         match new_state {
             // Receiving all data, or receiving or requesting RESET_STREAM
-            // is cause to stop keep-alives.
+            // is cause to stop keepalives.
             RecvStreamState::DataRecvd { .. }
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::ResetRecvd { .. } => {
@@ -1858,7 +1858,7 @@ mod tests {
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
         check_fc(&fc.borrow(), SW / 4 + 1, SW / 4 + 1);
         check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4 + 1);
-        // Data are retired and the sttream fc will send an update.
+        // Data are retired and the stream fc will send an update.
         assert!(!fc.borrow().frame_needed());
         assert!(s.fc().unwrap().frame_needed());
 

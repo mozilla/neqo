@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Tracking of received packets and generating acks thereof.
+// Tracking of received packets and generating ACKs thereof.
 
 use std::{
     cmp::min,
@@ -158,7 +158,7 @@ impl PacketRange {
         }
     }
 
-    /// Get the number of acknowleged packets in the range.
+    /// Get the number of acknowledged packets in the range.
     pub const fn len(&self) -> u64 {
         self.largest - self.smallest + 1
     }
@@ -1062,7 +1062,7 @@ mod tests {
         assert_eq!(stats.ack, 1);
 
         let mut dec = builder.as_decoder();
-        _ = dec.decode_byte().unwrap(); // Skip the short header.
+        dec.skip(1); // Skip the short header.
         let frame = Frame::decode(&mut dec).unwrap();
         if let Frame::Ack { ack_ranges, .. } = frame {
             assert_eq!(ack_ranges.len(), 0);

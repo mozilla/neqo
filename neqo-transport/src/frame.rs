@@ -30,6 +30,8 @@ pub const FRAME_TYPE_STOP_SENDING: FrameType = 0x5;
 pub const FRAME_TYPE_CRYPTO: FrameType = 0x6;
 pub const FRAME_TYPE_NEW_TOKEN: FrameType = 0x7;
 const FRAME_TYPE_STREAM: FrameType = 0x8;
+#[cfg(test)]
+pub const FRAME_TYPE_STREAM_CLIENT_BIDI: FrameType = FRAME_TYPE_STREAM;
 const FRAME_TYPE_STREAM_MAX: FrameType = 0xf;
 pub const FRAME_TYPE_MAX_DATA: FrameType = 0x10;
 pub const FRAME_TYPE_MAX_STREAM_DATA: FrameType = 0x11;
@@ -629,7 +631,7 @@ impl<'a> Frame<'a> {
                     return Err(Error::FrameEncodingError);
                 }
                 let delay = dv(dec)?;
-                let ignore_order = match d(dec.decode_uint(1))? {
+                let ignore_order = match d(dec.decode_uint::<u8>())? {
                     0 => false,
                     1 => true,
                     _ => return Err(Error::FrameEncodingError),

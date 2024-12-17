@@ -86,7 +86,7 @@ const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 pub enum Error {
     NoError,
     // Each time this error is returned a different parameter is supplied.
-    // This will be used to distinguish each occurance of this error.
+    // This will be used to distinguish each occurrence of this error.
     InternalError,
     ConnectionRefused,
     FlowControlError,

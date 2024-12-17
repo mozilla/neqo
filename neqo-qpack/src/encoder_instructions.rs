@@ -18,17 +18,33 @@ use crate::{
     Res,
 };
 
-// The encoder only uses InsertWithNameLiteral, therefore clippy is complaining about dead_code.
-// We may decide to use othe instruction in the future.
-// All instructions are used for testing, therefore they are defined.
-#[allow(dead_code)]
+// The encoder only uses InsertWithNameLiteral.
+// All instructions are used for testing, therefore they are guarded with `#[cfg(test)]`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum EncoderInstruction<'a> {
-    Capacity { value: u64 },
-    InsertWithNameRefStatic { index: u64, value: &'a [u8] },
-    InsertWithNameRefDynamic { index: u64, value: &'a [u8] },
-    InsertWithNameLiteral { name: &'a [u8], value: &'a [u8] },
-    Duplicate { index: u64 },
+    Capacity {
+        value: u64,
+    },
+    #[cfg(test)]
+    InsertWithNameRefStatic {
+        index: u64,
+        value: &'a [u8],
+    },
+    #[cfg(test)]
+    InsertWithNameRefDynamic {
+        index: u64,
+        value: &'a [u8],
+    },
+    InsertWithNameLiteral {
+        name: &'a [u8],
+        value: &'a [u8],
+    },
+    #[cfg(test)]
+    Duplicate {
+        index: u64,
+    },
+    #[cfg(test)]
+    #[allow(dead_code)]
     NoInstruction,
 }
 
@@ -38,10 +54,12 @@ impl EncoderInstruction<'_> {
             Self::Capacity { value } => {
                 enc.encode_prefixed_encoded_int(ENCODER_CAPACITY, *value);
             }
+            #[cfg(test)]
             Self::InsertWithNameRefStatic { index, value } => {
                 enc.encode_prefixed_encoded_int(ENCODER_INSERT_WITH_NAME_REF_STATIC, *index);
                 enc.encode_literal(use_huffman, NO_PREFIX, value);
             }
+            #[cfg(test)]
             Self::InsertWithNameRefDynamic { index, value } => {
                 enc.encode_prefixed_encoded_int(ENCODER_INSERT_WITH_NAME_REF_DYNAMIC, *index);
                 enc.encode_literal(use_huffman, NO_PREFIX, value);
@@ -50,9 +68,11 @@ impl EncoderInstruction<'_> {
                 enc.encode_literal(use_huffman, ENCODER_INSERT_WITH_NAME_LITERAL, name);
                 enc.encode_literal(use_huffman, NO_PREFIX, value);
             }
+            #[cfg(test)]
             Self::Duplicate { index } => {
                 enc.encode_prefixed_encoded_int(ENCODER_DUPLICATE, *index);
             }
+            #[cfg(test)]
             Self::NoInstruction => {}
         }
     }
@@ -81,12 +101,14 @@ impl<'a> From<&'a EncoderInstruction<'a>> for DecodedEncoderInstruction {
     fn from(inst: &'a EncoderInstruction) -> Self {
         match inst {
             EncoderInstruction::Capacity { value } => Self::Capacity { value: *value },
+            #[cfg(test)]
             EncoderInstruction::InsertWithNameRefStatic { index, value } => {
                 Self::InsertWithNameRefStatic {
                     index: *index,
                     value: value.to_vec(),
                 }
             }
+            #[cfg(test)]
             EncoderInstruction::InsertWithNameRefDynamic { index, value } => {
                 Self::InsertWithNameRefDynamic {
                     index: *index,
@@ -99,7 +121,9 @@ impl<'a> From<&'a EncoderInstruction<'a>> for DecodedEncoderInstruction {
                     value: value.to_vec(),
                 }
             }
+            #[cfg(test)]
             EncoderInstruction::Duplicate { index } => Self::Duplicate { index: *index },
+            #[cfg(test)]
             EncoderInstruction::NoInstruction => Self::NoInstruction,
         }
     }
