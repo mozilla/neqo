@@ -805,6 +805,7 @@ dependencies = [
  "futures",
  "hex",
  "log",
+ "neqo-bin",
  "neqo-common",
  "neqo-crypto",
  "neqo-http3",
