@@ -63,10 +63,6 @@ pub struct SharedArgs {
     /// Enable special behavior for use with QUIC Network Simulator
     pub qns_test: Option<String>,
 
-    #[arg(name = "use-old-http", short = 'o', long)]
-    /// Use http 0.9 instead of HTTP/3
-    pub use_old_http: bool,
-
     #[command(flatten)]
     pub quic_parameters: QuicParameters,
 }
@@ -83,7 +79,6 @@ impl Default for SharedArgs {
             max_blocked_streams: 10,
             ciphers: vec![],
             qns_test: None,
-            use_old_http: false,
             quic_parameters: QuicParameters::default(),
         }
     }
