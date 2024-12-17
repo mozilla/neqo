@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qtrace, Role};
+use neqo_common::{qtrace, Role};
 
 use crate::{
     frame::{
@@ -31,7 +31,8 @@ use crate::{
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
 /// for the size of the stream send and receive window.
-const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
+// TODO: pub
+pub(crate) const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>

@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 
 use crate::{
     events::ConnectionEvents,
-    fc::SenderFlowControl,
+    fc::{SenderFlowControl, STREAM_MAX_ACTIVE_LIMIT},
     frame::{Frame, FRAME_TYPE_RESET_STREAM},
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
@@ -495,10 +495,18 @@ impl TxBuffer {
     }
 
     /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
-    // TODO: Return value doesn't make sense anymore.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        self.send_buf.extend(buf);
-        buf.len()
+        // TODO: `as` safe?
+        let can_buffer = min(
+            STREAM_MAX_ACTIVE_LIMIT as usize - self.buffered(),
+            buf.len(),
+        );
+        if can_buffer > 0 {
+            self.send_buf.extend(&buf[..can_buffer]);
+            // TODO: `as` safe?
+            debug_assert!(self.send_buf.len() <= STREAM_MAX_ACTIVE_LIMIT as usize);
+        }
+        can_buffer
     }
 
     #[allow(clippy::missing_panics_doc)] // These are not possible.
@@ -568,6 +576,11 @@ impl TxBuffer {
         self.send_buf.len()
     }
 
+    fn avail(&self) -> usize {
+        // TODO: `as` safe?
+        STREAM_MAX_ACTIVE_LIMIT as usize - self.buffered()
+    }
+
     fn used(&self) -> u64 {
         self.retired() + u64::try_from(self.buffered()).unwrap()
     }
@@ -617,6 +630,16 @@ impl SendStreamState {
             | Self::DataRecvd { .. }
             | Self::ResetSent { .. }
             | Self::ResetRecvd { .. } => None,
+        }
+    }
+
+    fn tx_avail(&self) -> usize {
+        match self {
+            // In Ready, TxBuffer not yet allocated but size is known
+            // TODO: `as` safe?
+            Self::Ready { .. } => STREAM_MAX_ACTIVE_LIMIT as usize,
+            Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
+            Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
         }
     }
 
@@ -1112,12 +1135,13 @@ impl SendStream {
     #[allow(clippy::missing_panics_doc)] // not possible
     pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
         match self.state {
-            SendStreamState::Send { .. } => {
-                // TODO: Double check removing is fine here.
-                // let previous_limit = send_buf.avail();
-                // send_buf.mark_as_acked(offset, len);
-                // let current_limit = send_buf.avail();
-                // self.maybe_emit_writable_event(previous_limit, current_limit);
+            SendStreamState::Send {
+                ref mut send_buf, ..
+            } => {
+                let previous_limit = send_buf.avail();
+                send_buf.mark_as_acked(offset, len);
+                let current_limit = send_buf.avail();
+                self.maybe_emit_writable_event(previous_limit, current_limit);
             }
             SendStreamState::DataSent {
                 ref mut send_buf,
@@ -1180,7 +1204,10 @@ impl SendStream {
         if let SendStreamState::Ready { fc, conn_fc } | SendStreamState::Send { fc, conn_fc, .. } =
             &self.state
         {
-            min(fc.available(), conn_fc.borrow().available())
+            min(
+                min(fc.available(), conn_fc.borrow().available()),
+                self.state.tx_avail(),
+            )
         } else {
             0
         }

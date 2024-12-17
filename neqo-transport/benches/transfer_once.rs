@@ -1,14 +1,13 @@
-use std::{ops::Range, time::Duration};
+use std::time::Duration;
 
-use neqo_transport::{CloseReason, ConnectionParameters, Error, State};
+use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Delay, Drop, NonRandomDelay, TailDrop},
+        network::{NonRandomDelay, TailDrop},
         Simulator,
     },
-    simulate,
 };
 
 #[allow(clippy::cast_precision_loss)]

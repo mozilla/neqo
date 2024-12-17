@@ -11,7 +11,7 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Delay, Drop, NonRandomDelay, TailDrop},
+        network::{Delay, Drop, TailDrop},
         Simulator,
     },
     simulate,
