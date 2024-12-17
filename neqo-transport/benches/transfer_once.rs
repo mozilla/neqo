@@ -39,7 +39,7 @@ pub fn main() {
     let simulated_time = sim.setup().run();
     let bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
 
-    let maximum_bandwidth = 1_000_000_000.0; // bandwidth-delay-product / delay = bandwidth
+    let maximum_bandwidth = 1_000_000_000.0;
     let expected_utilization = 0.5;
 
     println!(
