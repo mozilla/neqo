@@ -12,6 +12,6 @@ use std::{
 mod cubic;
 mod new_reno;
 
-const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-const MTU: usize = 1_500;
-const RTT: Duration = Duration::from_millis(100);
+pub const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+pub const MTU: usize = 1_500;
+pub const RTT: Duration = Duration::from_millis(100);

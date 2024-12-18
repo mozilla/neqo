@@ -604,10 +604,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
 
     use neqo_common::{qinfo, IpTosEcn};
     use test_fixture::now;
@@ -618,6 +615,7 @@ mod tests {
             classic_cc::State,
             cubic::{Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR},
             new_reno::NewReno,
+            tests::{IP_ADDR, MTU, RTT},
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
         packet::{PacketNumber, PacketType},
@@ -626,10 +624,7 @@ mod tests {
         Pmtud,
     };
 
-    const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-    const MTU: usize = 1_500;
-    const PTO: Duration = Duration::from_millis(100);
-    const RTT: Duration = Duration::from_millis(98);
+    const PTO: Duration = RTT;
     const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
     const ZERO: Duration = Duration::from_secs(0);
     const EPSILON: Duration = Duration::from_nanos(1);
