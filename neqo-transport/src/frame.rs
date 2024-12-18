@@ -370,7 +370,7 @@ impl<'a> Frame<'a> {
     pub fn dump(&self) -> String {
         match self {
             Self::Crypto { offset, data } => {
-                format!("Crypto {{ offset: {}, len: {} }}", offset, data.len())
+                format!("Crypto {{ offset: {offset}, len: {} }}", data.len())
             }
             Self::Stream {
                 stream_id,
@@ -379,12 +379,10 @@ impl<'a> Frame<'a> {
                 data,
                 fin,
             } => format!(
-                "Stream {{ stream_id: {}, offset: {}, len: {}{}, fin: {} }}",
+                "Stream {{ stream_id: {}, offset: {offset}, len: {}{}, fin: {fin} }}",
                 stream_id.as_u64(),
-                offset,
                 if *fill { ">>" } else { "" },
                 data.len(),
-                fin,
             ),
             Self::Padding(length) => format!("Padding {{ len: {length} }}"),
             Self::Datagram { data, .. } => format!("Datagram {{ len: {} }}", data.len()),

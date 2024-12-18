@@ -71,9 +71,8 @@ pub fn recv_inner<'a>(
 
         if meta.len == 0 || meta.stride == 0 {
             qdebug!(
-                "ignoring datagram from {} to {} len {} stride {}",
+                "ignoring datagram from {} to {local_address} len {} stride {}",
                 meta.addr,
-                local_address,
                 meta.len,
                 meta.stride
             );
@@ -84,10 +83,9 @@ pub fn recv_inner<'a>(
     };
 
     qtrace!(
-        "received {} bytes from {} to {} in {} segments",
+        "received {} bytes from {} to {local_address} in {} segments",
         data.len(),
         meta.addr,
-        local_address,
         data.len().div_ceil(meta.stride),
     );
 
@@ -269,7 +267,7 @@ mod tests {
                     assert_eq!(
                         SEGMENT_SIZE,
                         d.len(),
-                        "Expect received datagrams to have same length as sent datagrams."
+                        "Expect received datagrams to have same length as sent datagrams"
                     );
                     num_received += 1;
                 });

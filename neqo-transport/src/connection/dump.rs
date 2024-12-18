@@ -42,17 +42,11 @@ pub fn dump_packet(
         };
         let x = f.dump();
         if !x.is_empty() {
-            _ = write!(&mut s, "\n  {} {}", dir, &x);
+            _ = write!(&mut s, "\n  {dir} {}", &x);
         }
     }
     qdebug!(
-        [conn],
-        "pn={} type={:?} {} {:?} len {}{}",
-        pn,
-        pt,
-        path.borrow(),
-        tos,
-        len,
-        s
+        "[{conn}] pn={pn} type={pt:?} {} {tos:?} len {len}{s}",
+        path.borrow()
     );
 }

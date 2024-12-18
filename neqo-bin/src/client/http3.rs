@@ -302,7 +302,7 @@ impl StreamHandler for DownloadStreamHandler {
         } else if let Ok(txt) = std::str::from_utf8(data) {
             qdebug!("READ[{stream_id}]: {txt}");
         } else {
-            qdebug!("READ[{}]: 0x{}", stream_id, hex(data));
+            qdebug!("READ[{stream_id}]: 0x{}", hex(data));
         }
 
         if fin {
@@ -344,7 +344,7 @@ impl StreamHandler for UploadStreamHandler {
                 qinfo!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
             }
         } else {
-            panic!("Unexpected data [{}]: 0x{}", stream_id, hex(data));
+            panic!("Unexpected data [{stream_id}]: 0x{}", hex(data));
         }
         Ok(true)
     }
