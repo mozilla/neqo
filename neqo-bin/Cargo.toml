@@ -54,6 +54,9 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 bench = ["neqo-transport/bench"]
 draft-29 = []
 
+[package.metadata.cargo-machete]
+ignored = ["log"]
+
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
