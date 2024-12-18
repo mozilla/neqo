@@ -1021,7 +1021,7 @@ mod tests {
 
     use super::RecvStream;
     use crate::{
-        fc::ReceiverFlowControl,
+        fc::{ReceiverFlowControl, UPDATE_TRIGGER_FACTOR},
         packet::PacketBuilder,
         recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
         stats::FrameStats,
@@ -1830,6 +1830,7 @@ mod tests {
     }
 
     /// Test that the flow controls will send updates.
+    // TODO: Rework constants
     #[test]
     fn fc_state_recv_7() {
         const SW: u64 = 1024;
@@ -1840,37 +1841,81 @@ mod tests {
         check_fc(&fc.borrow(), 0, 0);
         check_fc(s.fc().unwrap(), 0, 0);
 
-        s.inbound_stream_frame(false, 0, &[0; SW_US / 4]).unwrap();
+        s.inbound_stream_frame(false, 0, &[0; SW_US / 2 / UPDATE_TRIGGER_FACTOR as usize])
+            .unwrap();
         let mut buf = [1; SW_US];
-        assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 4, false));
-        check_fc(&fc.borrow(), SW / 4, SW / 4);
-        check_fc(s.fc().unwrap(), SW / 4, SW / 4);
+        assert_eq!(
+            s.read(&mut buf).unwrap(),
+            (SW_US / 2 / UPDATE_TRIGGER_FACTOR as usize, false)
+        );
+        check_fc(
+            &fc.borrow(),
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+        );
 
         // Still no fc update needed.
         assert!(!fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
 
         // Receive one more byte that will cause a fc update after it is read.
-        s.inbound_stream_frame(false, SW / 4, &[0]).unwrap();
-        check_fc(&fc.borrow(), SW / 4 + 1, SW / 4);
-        check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4);
+        s.inbound_stream_frame(false, SW / 2 / UPDATE_TRIGGER_FACTOR, &[0])
+            .unwrap();
+        check_fc(
+            &fc.borrow(),
+            (SW / 2 / UPDATE_TRIGGER_FACTOR) + 1,
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            SW / 2 / UPDATE_TRIGGER_FACTOR + 1,
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+        );
         // Only consuming data does not cause a fc update to be sent.
         assert!(!fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
 
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
-        check_fc(&fc.borrow(), SW / 4 + 1, SW / 4 + 1);
-        check_fc(s.fc().unwrap(), SW / 4 + 1, SW / 4 + 1);
+        check_fc(
+            &fc.borrow(),
+            (SW / 2 / UPDATE_TRIGGER_FACTOR) + 1,
+            SW / 2 / UPDATE_TRIGGER_FACTOR + 1,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            SW / 2 / UPDATE_TRIGGER_FACTOR + 1,
+            SW / 2 / UPDATE_TRIGGER_FACTOR + 1,
+        );
         // Data are retired and the stream fc will send an update.
         assert!(!fc.borrow().frame_needed());
         assert!(s.fc().unwrap().frame_needed());
 
         // Receive more data to increase fc further.
-        s.inbound_stream_frame(false, SW / 4, &[0; SW_US / 4])
-            .unwrap();
-        assert_eq!(s.read(&mut buf).unwrap(), (SW_US / 4 - 1, false));
-        check_fc(&fc.borrow(), SW / 2, SW / 2);
-        check_fc(s.fc().unwrap(), SW / 2, SW / 2);
+        s.inbound_stream_frame(
+            false,
+            SW / 2 / UPDATE_TRIGGER_FACTOR,
+            &[0; SW_US / 2 / UPDATE_TRIGGER_FACTOR as usize],
+        )
+        .unwrap();
+        assert_eq!(
+            s.read(&mut buf).unwrap(),
+            (SW_US / 2 / UPDATE_TRIGGER_FACTOR as usize - 1, false)
+        );
+        check_fc(
+            &fc.borrow(),
+            SW / UPDATE_TRIGGER_FACTOR,
+            SW / UPDATE_TRIGGER_FACTOR,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            SW / UPDATE_TRIGGER_FACTOR,
+            SW / UPDATE_TRIGGER_FACTOR,
+        );
         assert!(!fc.borrow().frame_needed());
         assert!(s.fc().unwrap().frame_needed());
 
@@ -1890,11 +1935,20 @@ mod tests {
         );
         assert_eq!(stats.max_stream_data, 1);
 
-        // Receive 1 byte that will case a session fc update after it is read.
-        s.inbound_stream_frame(false, SW / 2, &[0]).unwrap();
+        // Receive 1 byte that will cause a session fc update after it is read.
+        s.inbound_stream_frame(false, SW / UPDATE_TRIGGER_FACTOR, &[0])
+            .unwrap();
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
-        check_fc(&fc.borrow(), SW / 2 + 1, SW / 2 + 1);
-        check_fc(s.fc().unwrap(), SW / 2 + 1, SW / 2 + 1);
+        check_fc(
+            &fc.borrow(),
+            SW / UPDATE_TRIGGER_FACTOR + 1,
+            SW / UPDATE_TRIGGER_FACTOR + 1,
+        );
+        check_fc(
+            s.fc().unwrap(),
+            SW / UPDATE_TRIGGER_FACTOR + 1,
+            SW / UPDATE_TRIGGER_FACTOR + 1,
+        );
         assert!(fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
         fc.borrow_mut()

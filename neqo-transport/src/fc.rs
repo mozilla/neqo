@@ -30,6 +30,13 @@ use crate::{
     Error, Res,
 };
 
+// Fraction of a flow control window after which a window update should be sent.
+// TODO: See DEFAULT_ACK_RATIO.
+#[cfg(not(test))]
+const UPDATE_TRIGGER_FACTOR: u64 = 4;
+#[cfg(test)]
+pub const UPDATE_TRIGGER_FACTOR: u64 = 4;
+
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
 where
@@ -269,9 +276,8 @@ where
     }
 
     fn should_send_flowc_update(&self) -> bool {
-        let window_bytes_unused = self.max_allowed - self.retired;
-        // TODO: See DEFAULT_ACK_RATIO.
-        window_bytes_unused < self.max_active - self.max_active / 4
+        let window_bytes_unused = self.max_allowed.saturating_sub(self.retired);
+        dbg!(window_bytes_unused) < dbg!(self.max_active - self.max_active / UPDATE_TRIGGER_FACTOR)
     }
 
     pub const fn frame_needed(&self) -> bool {
@@ -639,6 +645,7 @@ mod test {
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
+        fc::UPDATE_TRIGGER_FACTOR,
         packet::PacketBuilder,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -725,12 +732,14 @@ mod test {
 
     #[test]
     fn max_allowed_after_items_retired() {
-        let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retire(49);
+        let window = 100;
+        let trigger = window / UPDATE_TRIGGER_FACTOR;
+        let mut fc = ReceiverFlowControl::new((), window);
+        fc.retire(trigger);
         assert!(!fc.frame_needed());
-        fc.retire(51);
+        fc.retire(trigger + 1);
         assert!(fc.frame_needed());
-        assert_eq!(fc.next_limit(), 151);
+        assert_eq!(fc.next_limit(), window + trigger + 1);
     }
 
     #[test]
@@ -817,7 +826,7 @@ mod test {
         assert!(!fc.frame_needed());
         // We can still retire more than 50.
         fc.retire(60);
-        // There is no MAX_STREAM_DATA fame needed yet.
+        // There is no MAX_STREAM_DATA frame needed yet.
         assert!(!fc.frame_needed());
         fc.retire(76);
         assert!(fc.frame_needed());
