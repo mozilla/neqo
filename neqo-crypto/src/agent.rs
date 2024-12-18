@@ -108,7 +108,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    trace!("[{}] got ALPN {alpn:?}", format!("{fd:p}"));
+    trace!("[{fd:p}] got ALPN {alpn:?}");
     Ok(alpn)
 }
 
@@ -370,11 +370,7 @@ impl SecretAgent {
             if st.is_none() {
                 *st = Some(alert.description);
             } else {
-                warn!(
-                    "[{}] duplicate alert {}",
-                    format!("{fd:p}"),
-                    alert.description
-                );
+                warn!("[{fd:p}] duplicate alert {}", alert.description);
             }
         }
     }
@@ -896,11 +892,7 @@ impl Client {
         let len = usize::try_from(len).unwrap();
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
-        debug!(
-            "[{}] Got resumption token {}",
-            format!("{fd:p}"),
-            hex_snip_middle(&v)
-        );
+        debug!("[{fd:p}] Got resumption token {}", hex_snip_middle(&v));
 
         if resumption.len() >= MAX_TICKETS {
             resumption.remove(0);
