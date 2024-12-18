@@ -12,7 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo, qtrace};
+use ::qlog::events::{quic::CongestionStateUpdated, EventData};
+use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
 use super::CongestionControl;
 use crate::{
@@ -23,9 +24,6 @@ use crate::{
     sender::PACING_BURST_SIZE,
     Pmtud,
 };
-#[rustfmt::skip] // to keep `::` and thus prevent conflict with `crate::qlog`
-use ::qlog::events::{quic::CongestionStateUpdated, EventData};
-use neqo_common::{const_max, const_min, qlog::NeqoQlog};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
 const PERSISTENT_CONG_THRESH: u32 = 3;

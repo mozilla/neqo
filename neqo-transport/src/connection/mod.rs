@@ -3171,7 +3171,7 @@ impl Connection {
     fn set_connected(&mut self, now: Instant) -> Res<()> {
         qdebug!("[{self}] TLS connection complete");
         if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
-            qwarn!("[{self}] No ALPN. Closing connection");
+            qwarn!("[{self}] No ALPN, closing connection");
             // 120 = no_application_protocol
             return Err(Error::CryptoAlert(120));
         }

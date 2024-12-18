@@ -23,7 +23,7 @@ fn response_header_no_data() -> &'static Vec<Header> {
 
 fn response_header_103() -> &'static Vec<Header> {
     static HEADERS: OnceLock<Vec<Header>> = OnceLock::new();
-    HEADERS.get_or_init(|| vec![Header::new(":status", "103"), Header::new("link", "..")])
+    HEADERS.get_or_init(|| vec![Header::new(":status", "103"), Header::new("link", "...")])
 }
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
