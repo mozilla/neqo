@@ -9,8 +9,7 @@ mod common;
 use std::{cell::RefCell, mem, net::SocketAddr, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use log::trace;
-use neqo_common::{Datagram, Decoder, Encoder, Role};
+use neqo_common::{qtrace, Datagram, Decoder, Encoder, Role};
 use neqo_crypto::{
     generate_ech_keys, AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker,
 };
@@ -738,7 +737,7 @@ fn closed() {
     let res = client.process_output(now());
     assert!(res.callback() > Duration::new(0, 0));
 
-    trace!("60s later");
+    qtrace!("60s later");
     let res = server.process_output(now() + Duration::from_secs(60));
     assert_eq!(res, Output::None);
 }

@@ -9,8 +9,7 @@
 
 use std::fmt::Write;
 
-use log::debug;
-use neqo_common::{Decoder, IpTos};
+use neqo_common::{qdebug, Decoder, IpTos};
 
 use crate::{
     connection::Connection,
@@ -46,7 +45,7 @@ pub fn dump_packet(
             _ = write!(&mut s, "\n  {dir} {}", &x);
         }
     }
-    debug!(
+    qdebug!(
         "[{conn}] pn={pn} type={pt:?} {} {tos:?} len {len}{s}",
         path.borrow()
     );

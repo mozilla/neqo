@@ -12,8 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::debug;
-use neqo_common::{Datagram, Decoder};
+use neqo_common::{qdebug, Datagram, Decoder};
 use test_fixture::{
     assertions::{assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
@@ -103,10 +102,10 @@ fn rebind(
     new_path: fn(&Datagram) -> Datagram,
     mut now: Instant,
 ) -> Instant {
-    debug!("Rebinding");
+    qdebug!("Rebinding");
     let c1 = send_something(client, now);
     let c1_new = new_path(&c1);
-    debug!("Rebinding to {}", c1_new.source());
+    qdebug!("Rebinding to {}", c1_new.source());
 
     // Server will reply to modified datagram with a PATH_CHALLENGE.
     // Due to the amplification limit, this will not be padded to MIN_INITIAL_PACKET_SIZE.
@@ -231,7 +230,7 @@ fn rebind(
         now += server.process_output(now).callback();
     }
 
-    debug!("Rebinding done");
+    qdebug!("Rebinding done");
     now
 }
 

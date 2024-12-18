@@ -8,7 +8,7 @@
 
 use std::{mem, time::Instant};
 
-use log::info;
+use neqo_common::qinfo;
 use neqo_crypto::{
     AntiReplay, AuthenticationStatus, Client, HandshakeState, RecordList, Res, ResumptionToken,
     SecretAgent, Server, ZeroRttCheckResult, ZeroRttChecker,
@@ -68,8 +68,8 @@ fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
 #[allow(clippy::missing_panics_doc)]
 pub fn connect_at(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(now, client, server);
-    info!("client: {:?}", client.state());
-    info!("server: {:?}", server.state());
+    qinfo!("client: {:?}", client.state());
+    qinfo!("server: {:?}", server.state());
     assert!(client.state().is_connected());
     assert!(server.state().is_connected());
 }

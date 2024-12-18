@@ -23,8 +23,7 @@ use futures::{
     future::{select, select_all, Either},
     FutureExt,
 };
-use log::{debug, error, info, warn};
-use neqo_common::Datagram;
+use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init_db, AntiReplay, Cipher,
@@ -32,7 +31,7 @@ use neqo_crypto::{
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
 use tokio::time::Sleep;
 
-use crate::{log_init, SharedArgs};
+use crate::SharedArgs;
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -252,7 +251,7 @@ impl ServerRunner {
                     socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    debug!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -342,7 +341,7 @@ enum Ready {
 }
 
 pub async fn server(mut args: Args) -> Res<()> {
-    log_init(
+    neqo_common::log::init(
         args.shared
             .verbose
             .as_ref()
@@ -361,7 +360,7 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
-            warn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
+            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
         }
 
         // These are the default for all tests except http3.
@@ -375,7 +374,7 @@ pub async fn server(mut args: Args) -> Res<()> {
             "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
             "connectionmigration" => {
                 if args.shared.quic_parameters.preferred_address().is_none() {
-                    error!("No preferred addresses set for connectionmigration test");
+                    qerror!("No preferred addresses set for connectionmigration test");
                     exit(127);
                 }
             }
@@ -392,7 +391,7 @@ pub async fn server(mut args: Args) -> Res<()> {
 
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
-        error!("No valid hosts defined");
+        qerror!("No valid hosts defined");
         Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
     }
     let sockets = hosts
@@ -400,7 +399,7 @@ pub async fn server(mut args: Args) -> Res<()> {
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
             let local_addr = socket.local_addr()?;
-            info!("Server waiting for connection on: {local_addr:?}");
+            qinfo!("Server waiting for connection on: {local_addr:?}");
 
             Ok((host, socket))
         })

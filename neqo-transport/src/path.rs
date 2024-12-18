@@ -15,8 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::{debug, info, trace};
-use neqo_common::{hex, qlog::NeqoQlog, Datagram, Encoder, IpTos, IpTosEcn};
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos, IpTosEcn};
 use neqo_crypto::random;
 
 use crate::{
@@ -114,7 +113,7 @@ impl Paths {
         if let Some(cid) = &retired.borrow().remote_cid {
             let seqno = cid.sequence_number();
             if cid.connection_id().is_empty() {
-                debug!("Connection ID {seqno} is zero-length, not retiring");
+                qdebug!("Connection ID {seqno} is zero-length, not retiring");
             } else {
                 to_retire.push(seqno);
             }
@@ -143,7 +142,7 @@ impl Paths {
                 .as_ref()
                 .is_some_and(|target| Rc::ptr_eq(target, &removed))
             {
-                info!(
+                qinfo!(
                     "[{}] The migration target path had to be removed",
                     path.borrow()
                 );
@@ -152,7 +151,7 @@ impl Paths {
             debug_assert_eq!(Rc::strong_count(&removed), 1);
         }
 
-        debug!("[{}] Make permanent", path.borrow());
+        qdebug!("[{}] Make permanent", path.borrow());
         path.borrow_mut().make_permanent(local_cid, remote_cid);
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
@@ -165,7 +164,7 @@ impl Paths {
     /// to a migration from a peer, in which case the old path needs to be probed.
     #[must_use]
     fn select_primary(&mut self, path: &PathRef, now: Instant) -> Option<PathRef> {
-        debug!("[{}] set as primary path", path.borrow());
+        qdebug!("[{}] set as primary path", path.borrow());
         let old_path = self.primary.replace(Rc::clone(path)).inspect(|old| {
             old.borrow_mut().set_primary(false, now);
         });
@@ -224,7 +223,7 @@ impl Paths {
             if p.borrow_mut().process_timeout(now, pto, stats) {
                 true
             } else {
-                debug!("[{}] Retiring path", p.borrow());
+                qdebug!("[{}] Retiring path", p.borrow());
                 if p.borrow().is_primary() {
                     primary_failed = true;
                 }
@@ -245,7 +244,7 @@ impl Paths {
             {
                 // Need a clone as `fallback` is borrowed from `self`.
                 let path = Rc::clone(fallback);
-                info!("[{}] Failing over after primary path failed", path.borrow());
+                qinfo!("[{}] Failing over after primary path failed", path.borrow());
                 mem::drop(self.select_primary(&path, now));
                 true
             } else {
@@ -364,7 +363,7 @@ impl Paths {
                         .as_ref()
                         .is_some_and(|target| Rc::ptr_eq(target, p))
                 {
-                    info!(
+                    qinfo!(
                         "[{path}] NEW_CONNECTION_ID with Retire Prior To forced migration to fail"
                     );
                     *migration_target = None;
@@ -595,7 +594,7 @@ impl Path {
 
     /// Set whether this path is primary.
     pub(crate) fn set_primary(&mut self, primary: bool, now: Instant) {
-        trace!("[{self}] Make primary {primary}");
+        qtrace!("[{self}] Make primary {primary}");
         debug_assert!(self.remote_cid.is_some());
         self.primary = primary;
         if !primary {
@@ -606,7 +605,7 @@ impl Path {
     /// Set the current path as valid.  This updates the time that the path was
     /// last validated and cancels any path validation.
     pub fn set_valid(&mut self, now: Instant) {
-        debug!("[{self}] Path validated {now:?}");
+        qdebug!("[{self}] Path validated {now:?}");
         self.state = ProbeState::Valid;
         self.validated = Some(now);
     }
@@ -700,7 +699,7 @@ impl Path {
                 let need_full_probe = !*mtu;
                 self.set_valid(now);
                 if need_full_probe {
-                    debug!("[{self}] Sub-MTU probe successful, reset probe count");
+                    qdebug!("[{self}] Sub-MTU probe successful, reset probe count");
                     self.probe(stats);
                 }
                 true
@@ -729,16 +728,16 @@ impl Path {
         self.state = if probe_count >= MAX_PATH_PROBES {
             if self.ecn_info.ecn_mark() == IpTosEcn::Ect0 {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
-                info!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
+                qinfo!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
                 self.ecn_info
                     .disable_ecn(stats, crate::ecn::EcnValidationError::BlackHole);
                 ProbeState::ProbeNeeded { probe_count: 0 }
             } else {
-                info!("[{self}] Probing failed");
+                qinfo!("[{self}] Probing failed");
                 ProbeState::Failed
             }
         } else {
-            debug!("[{self}] Initiating probe");
+            qdebug!("[{self}] Initiating probe");
             ProbeState::ProbeNeeded { probe_count }
         };
     }
@@ -760,7 +759,7 @@ impl Path {
         }
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
-            trace!("[{self}] Responding to path challenge {}", hex(challenge));
+            qtrace!("[{self}] Responding to path challenge {}", hex(challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
 
@@ -777,7 +776,7 @@ impl Path {
 
         // Send PATH_CHALLENGE.
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
-            trace!("[{self}] Initiating path challenge {probe_count}");
+            qtrace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
@@ -928,7 +927,7 @@ impl Path {
             // that there is some RTT information, which is better than nothing.
             // Two cases: 1. at the client when handling a Retry and
             // 2. at the server when disposing the Initial packet number space.
-            info!(
+            qinfo!(
                 "[{self}] discarding a packet without an RTT estimate; guessing RTT={:?}",
                 now - sent.time_sent()
             );

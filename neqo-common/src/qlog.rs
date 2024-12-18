@@ -14,7 +14,6 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use log::error;
 use qlog::{
     streamer::QlogStreamer, CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType,
 };
@@ -150,7 +149,7 @@ impl NeqoQlog {
     {
         if let Some(inner) = self.inner.borrow_mut().as_mut() {
             if let Err(e) = f(&mut inner.streamer) {
-                error!("Qlog event generation failed with error {e}; closing qlog");
+                log::error!("Qlog event generation failed with error {e}; closing qlog.");
                 *self.inner.borrow_mut() = None;
             }
         }
@@ -166,7 +165,7 @@ impl fmt::Debug for NeqoQlogShared {
 impl Drop for NeqoQlogShared {
     fn drop(&mut self) {
         if let Err(e) = self.streamer.finish_log() {
-            error!("Error dropping NeqoQlog: {e}");
+            log::error!("Error dropping NeqoQlog: {e}");
         }
     }
 }

@@ -6,8 +6,7 @@
 
 use std::mem;
 
-use log::debug;
-use neqo_common::Datagram;
+use neqo_common::{qdebug, Datagram};
 use test_fixture::now;
 
 use super::{
@@ -56,18 +55,18 @@ fn overwrite_invocations(n: PacketNumber) {
 
 #[test]
 fn discarded_initial_keys() {
-    debug!("---- client: generate CH");
+    qdebug!("---- client: generate CH");
     let mut client = default_client();
     let init_pkt_c = client.process_output(now()).dgram();
     assert!(init_pkt_c.is_some());
     assert_eq!(init_pkt_c.as_ref().unwrap().len(), client.plpmtu());
 
-    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let init_pkt_s = server.process(init_pkt_c.clone(), now()).dgram();
     assert!(init_pkt_s.is_some());
 
-    debug!("---- client: cert verification");
+    qdebug!("---- client: cert verification");
     let out = client.process(init_pkt_s.clone(), now()).dgram();
     assert!(out.is_some());
 
@@ -86,7 +85,7 @@ fn discarded_initial_keys() {
     // The dropped packet is padding. The Initial packet has been mark dup.
     check_discarded(&mut server, &init_pkt_c.clone().unwrap(), false, 1, 1);
 
-    debug!("---- client: SH..FIN -> FIN");
+    qdebug!("---- client: SH..FIN -> FIN");
     let out = client.process_output(now()).dgram();
     assert!(out.is_some());
 

@@ -16,8 +16,10 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, error, info, trace, warn};
-use neqo_common::{event::Provider, hex, qlog::NeqoQlog, Datagram, IpTos, Role};
+use neqo_common::{
+    event::Provider, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, IpTos,
+    Role,
+};
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
     ZeroRttChecker,
@@ -197,7 +199,7 @@ impl Server {
         dgram: Datagram<impl AsRef<[u8]>>,
         now: Instant,
     ) -> Output {
-        debug!("[{self}] Handle initial");
+        qdebug!("[{self}] Handle initial");
         let res = self
             .address_validation
             .borrow()
@@ -209,7 +211,7 @@ impl Server {
                 self.accept_connection(initial, dgram, Some(orig_dcid), now)
             }
             AddressValidationResult::Validate => {
-                info!("[{self}] Send retry for {:?}", initial.dst_cid);
+                qinfo!("[{self}] Send retry for {:?}", initial.dst_cid);
 
                 let res = self.address_validation.borrow().generate_retry_token(
                     &initial.dst_cid,
@@ -217,7 +219,7 @@ impl Server {
                     now,
                 );
                 let Ok(token) = res else {
-                    error!("[{self}] unable to generate token, dropping packet");
+                    qerror!("[{self}] unable to generate token, dropping packet");
                     return Output::None;
                 };
                 if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
@@ -230,11 +232,11 @@ impl Server {
                     );
                     packet.map_or_else(
                         |_| {
-                            error!("[{self}] unable to encode retry, dropping packet");
+                            qerror!("[{self}] unable to encode retry, dropping packet");
                             Output::None
                         },
                         |p| {
-                            debug!(
+                            qdebug!(
                                 "[{self}] type={:?} path:{} {}->{} {:?} len {}",
                                 PacketType::Retry,
                                 initial.dst_cid,
@@ -252,7 +254,7 @@ impl Server {
                         },
                     )
                 } else {
-                    error!("[{self}] no connection ID for retry, dropping packet");
+                    qerror!("[{self}] no connection ID for retry, dropping packet");
                     Output::None
                 }
             }
@@ -271,7 +273,7 @@ impl Server {
                     format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {
-                    error!("failed to create NeqoQlog: {e}");
+                    qerror!("failed to create NeqoQlog: {e}");
                     NeqoQlog::disabled()
                 })
             })
@@ -285,7 +287,7 @@ impl Server {
     ) {
         let zcheck = self.zero_rtt_checker.clone();
         if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
-            warn!("[{self}] Unable to enable 0-RTT");
+            qwarn!("[{self}] Unable to enable 0-RTT");
         }
         if let Some(odcid) = &orig_dcid {
             // There was a retry, so set the connection IDs for.
@@ -297,7 +299,7 @@ impl Server {
             if c.server_enable_ech(cfg.config, &cfg.public_name, &cfg.sk, &cfg.pk)
                 .is_err()
             {
-                warn!("[{self}] Unable to enable ECH");
+                qwarn!("[{self}] Unable to enable ECH");
             }
         }
     }
@@ -309,7 +311,7 @@ impl Server {
         orig_dcid: Option<ConnectionId>,
         now: Instant,
     ) -> Output {
-        info!(
+        qinfo!(
             "[{self}] Accept connection {:?}",
             orig_dcid.as_ref().unwrap_or(&initial.dst_cid)
         );
@@ -333,7 +335,7 @@ impl Server {
                 out
             }
             Err(e) => {
-                warn!("[{self}] Unable to create connection");
+                qwarn!("[{self}] Unable to create connection");
                 if e == crate::Error::VersionNegotiation {
                     crate::qlog::server_version_information_failed(
                         &self.create_qlog_trace(orig_dcid.unwrap_or(initial.dst_cid).as_cid_ref()),
@@ -348,13 +350,13 @@ impl Server {
     }
 
     fn process_input(&mut self, dgram: Datagram<impl AsRef<[u8]>>, now: Instant) -> Output {
-        trace!("Process datagram: {}", hex(&dgram[..]));
+        qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
         let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
-            trace!("[{self}] Discarding {dgram:?}");
+            qtrace!("[{self}] Discarding {dgram:?}");
             return Output::None;
         };
 
@@ -369,7 +371,7 @@ impl Server {
 
         if packet.packet_type() == PacketType::Short {
             // TODO send a stateless reset here.
-            trace!("[{self}] Short header packet for an unknown connection");
+            qtrace!("[{self}] Short header packet for an unknown connection");
             return Output::None;
         }
 
@@ -382,18 +384,18 @@ impl Server {
                     .contains(&packet.version().unwrap()))
         {
             if dgram.len() < MIN_INITIAL_PACKET_SIZE {
-                debug!("[{self}] Unsupported version: too short");
+                qdebug!("[{self}] Unsupported version: too short");
                 return Output::None;
             }
 
-            debug!("[{self}] Unsupported version: {:x}", packet.wire_version());
+            qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
             let vn = PacketBuilder::version_negotiation(
                 &packet.scid()[..],
                 &packet.dcid()[..],
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
             );
-            debug!(
+            qdebug!(
                 "[{self}] type={:?} path:{} {}->{} {:?} len {}",
                 PacketType::VersionNegotiation,
                 packet.dcid(),
@@ -421,7 +423,7 @@ impl Server {
         match packet.packet_type() {
             PacketType::Initial => {
                 if dgram.len() < MIN_INITIAL_PACKET_SIZE {
-                    debug!("[{self}] Drop initial: too short");
+                    qdebug!("[{self}] Drop initial: too short");
                     return Output::None;
                 }
                 // Copy values from `packet` because they are currently still borrowing from
@@ -431,12 +433,12 @@ impl Server {
             }
             PacketType::ZeroRtt => {
                 let dcid = ConnectionId::from(packet.dcid());
-                debug!("[{self}] Dropping 0-RTT for unknown connection {dcid}");
+                qdebug!("[{self}] Dropping 0-RTT for unknown connection {dcid}");
                 Output::None
             }
             PacketType::OtherVersion => unreachable!(),
             _ => {
-                trace!("[{self}] Not an initial packet");
+                qtrace!("[{self}] Not an initial packet");
                 Output::None
             }
         }

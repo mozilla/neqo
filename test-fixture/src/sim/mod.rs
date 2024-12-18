@@ -22,8 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::{debug, error, info, trace};
-use neqo_common::{Datagram, Encoder};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, Datagram, Encoder};
 use neqo_transport::Output;
 use rng::Random;
 use NodeState::{Active, Idle, Waiting};
@@ -163,12 +162,12 @@ impl Simulator {
         // variable, if set.
         if let Ok(dir) = std::env::var("DUMP_SIMULATION_SEEDS") {
             if create_dir_all(&dir).is_err() {
-                error!("Failed to create directory {dir}");
+                qerror!("Failed to create directory {dir}");
             } else {
                 let seed_str = sim.rng.borrow().seed_str();
                 let path = PathBuf::from(format!("{dir}/{}-{seed_str}", sim.name));
                 if File::create(&path).is_err() {
-                    error!("Failed to write seed to {}", path.to_string_lossy());
+                    qerror!("Failed to write seed to {}", path.to_string_lossy());
                 }
             }
         }
@@ -200,25 +199,25 @@ impl Simulator {
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
-                    debug!("[{}] kipping {:?}", self.name, n.node);
+                    qdebug!("[{}] kipping {:?}", self.name, n.node);
                     continue;
                 }
 
-                debug!("[{}] processing {:?}", self.name, n.node);
+                qdebug!("[{}] processing {:?}", self.name, n.node);
                 let res = n.process(dgram.take(), now);
                 n.state = match res {
                     Output::Datagram(d) => {
-                        trace!("[{}]  => datagram {}", self.name, d.len());
+                        qtrace!("[{}]  => datagram {}", self.name, d.len());
                         dgram = Some(d);
                         Active
                     }
                     Output::Callback(delay) => {
-                        trace!("[{}]  => callback {delay:?}", self.name);
+                        qtrace!("[{}]  => callback {delay:?}", self.name);
                         assert_ne!(delay, Duration::new(0, 0));
                         Waiting(now + delay)
                     }
                     Output::None => {
-                        trace!("[{}]  => nothing", self.name);
+                        qtrace!("[{}]  => nothing", self.name);
                         assert!(n.done(), "nodes should be done when they go idle");
                         Idle
                     }
@@ -232,7 +231,7 @@ impl Simulator {
             if dgram.is_none() {
                 let next = self.next_time(now);
                 if next > now {
-                    info!(
+                    qinfo!(
                         "[{}] advancing time by {:?} to {:?}",
                         self.name,
                         next - now,
@@ -248,7 +247,7 @@ impl Simulator {
     pub fn setup(mut self) -> ReadySimulator {
         let start = now();
 
-        info!("{}: seed {}", self.name, self.rng.borrow().seed_str());
+        qinfo!("{}: seed {}", self.name, self.rng.borrow().seed_str());
         for n in &mut self.nodes {
             n.init(self.rng.clone(), start);
         }
@@ -256,7 +255,7 @@ impl Simulator {
         let setup_start = Instant::now();
         let now = self.process_loop(start, start);
         let setup_time = now - start;
-        info!(
+        qinfo!(
             "{t}: Setup took {wall:?} (wall) {setup_time:?} (simulated)",
             t = self.name,
             wall = setup_start.elapsed(),
@@ -298,7 +297,7 @@ impl ReadySimulator {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;
-        info!(
+        qinfo!(
             "{t}: Simulation took {wall:?} (wall) {sim_time:?} (simulated)",
             t = self.sim.name,
             wall = real_start.elapsed(),

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use log::trace;
+use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{qlog, Res};
@@ -69,7 +69,7 @@ impl BufferedStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        trace!("[{label}] sending data");
+        qtrace!("[{label}] sending data");
         let sent = conn.stream_send(*stream_id, &buf[..])?;
         if sent == 0 {
             return Ok(0);

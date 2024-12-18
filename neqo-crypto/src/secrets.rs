@@ -6,7 +6,7 @@
 
 use std::{os::raw::c_void, pin::Pin};
 
-use log::debug;
+use neqo_common::qdebug;
 
 use crate::{
     agentio::as_c_void,
@@ -88,7 +88,7 @@ impl Secrets {
     }
 
     fn put(&mut self, dir: SecretDirection, epoch: Epoch, key: SymKey) {
-        debug!("{dir:?} secret available for {epoch:?}: {key:?}");
+        qdebug!("{dir:?} secret available for {epoch:?}: {key:?}");
         let keys = match dir {
             SecretDirection::Read => &mut self.r,
             SecretDirection::Write => &mut self.w,

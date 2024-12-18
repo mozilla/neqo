@@ -6,8 +6,7 @@
 
 use std::ops::Range;
 
-use log::trace;
-use neqo_common::Decoder;
+use neqo_common::{qtrace, Decoder};
 
 /// Finds the range where the SNI extension lives, or returns `None`.
 #[must_use]
@@ -55,7 +54,7 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
             if end > dec.offset() + dec.remaining() {
                 return None;
             }
-            trace!(
+            qtrace!(
                 "SNI range {start}..{end}: {:?}",
                 String::from_utf8_lossy(&buf[start..end])
             );

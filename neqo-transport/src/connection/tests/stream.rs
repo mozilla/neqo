@@ -6,8 +6,7 @@
 
 use std::{cmp::max, collections::HashMap, mem};
 
-use log::debug;
-use neqo_common::event::Provider;
+use neqo_common::{event::Provider, qdebug};
 use test_fixture::now;
 
 use super::{
@@ -63,7 +62,7 @@ fn transfer() {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    debug!("---- client sends");
+    qdebug!("---- client sends");
     // Send
     let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream_id, &[6; 100]).unwrap();
@@ -85,12 +84,12 @@ fn transfer() {
     assert_eq!(datagrams.len(), 4);
     assert_eq!(*client.state(), State::Confirmed);
 
-    debug!("---- server receives");
+    qdebug!("---- server receives");
     for d in datagrams {
         let out = server.process(Some(d), now());
         // With an RTT of zero, the server will acknowledge every packet immediately.
         assert!(out.as_dgram_ref().is_some());
-        debug!("Output={:0x?}", out.as_dgram_ref());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
     }
     assert_eq!(*server.state(), State::Confirmed);
 
@@ -123,7 +122,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    debug!("---- client sends");
+    qdebug!("---- client sends");
     // open all streams and set the sendorders
     let mut ordered = Vec::new();
     let mut streams = Vec::<StreamId>::new();
@@ -150,10 +149,10 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     }
     assert_eq!(*client.state(), State::Confirmed);
 
-    debug!("---- server receives");
+    qdebug!("---- server receives");
     for d in datagrams {
         let out = server.process(Some(d), now());
-        debug!("Output={:0x?}", out.as_dgram_ref());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
     }
     assert_eq!(*server.state(), State::Confirmed);
 

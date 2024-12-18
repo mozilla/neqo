@@ -10,7 +10,7 @@ use std::{
     ptr::{addr_of_mut, null_mut},
 };
 
-use log::trace;
+use neqo_common::qtrace;
 
 use crate::{
     err::{ssl::SSL_ERROR_ECH_RETRY_WITH_ECH, Error, Res},
@@ -146,7 +146,7 @@ pub fn generate_keys() -> Res<(PrivateKey, PublicKey)> {
     assert_eq!(secret_ptr.is_null(), public_ptr.is_null());
     let sk = PrivateKey::from_ptr(secret_ptr)?;
     let pk = PublicKey::from_ptr(public_ptr)?;
-    trace!("Generated key pair: sk={sk:?} pk={pk:?}");
+    qtrace!("Generated key pair: sk={sk:?} pk={pk:?}");
     Ok((sk, pk))
 }
 

@@ -13,8 +13,7 @@ use std::{
     rc::Rc,
 };
 
-use log::{debug, info, trace};
-use neqo_common::{hex, Decoder, Encoder, Role};
+use neqo_common::{hex, qdebug, qinfo, qtrace, Decoder, Encoder, Role};
 use neqo_crypto::{
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
@@ -140,7 +139,7 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
-        trace!("TP encoded; type 0x{tp:02x} val {self:?}");
+        qtrace!("TP encoded; type 0x{tp:02x} val {self:?}");
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -251,7 +250,7 @@ impl TransportParameter {
     fn decode(dec: &mut Decoder) -> Res<Option<(TransportParameterId, Self)>> {
         let tp = dec.decode_varint().ok_or(Error::NoMoreData)?;
         let content = dec.decode_vvec().ok_or(Error::NoMoreData)?;
-        trace!("TP {tp:x} length {:x}", content.len());
+        qtrace!("TP {tp:x} length {:x}", content.len());
         let mut d = Decoder::from(content);
         let value = match tp {
             ORIGINAL_DESTINATION_CONNECTION_ID
@@ -310,7 +309,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        trace!("TP decoded; type 0x{tp:02x} val {value:?}");
+        qtrace!("TP decoded; type 0x{tp:02x} val {value:?}");
         Ok(Some((tp, value)))
     }
 }
@@ -335,7 +334,7 @@ impl TransportParameters {
     /// using the provided decoder.
     pub(crate) fn decode(d: &mut Decoder) -> Res<Self> {
         let mut tps = Self::default();
-        trace!("Parsed fixed TP header");
+        qtrace!("Parsed fixed TP header");
 
         while d.remaining() > 0 {
             match TransportParameter::decode(d) {
@@ -628,7 +627,7 @@ impl TransportParametersHandler {
 
     fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) -> Res<()> {
         if let Some((current, other)) = remote_tp.get_versions() {
-            trace!(
+            qtrace!(
                 "Peer versions: {current:x} {other:x?}; config {:?}",
                 self.versions,
             );
@@ -638,7 +637,7 @@ impl TransportParametersHandler {
                 if self.versions.compatible().any(|&v| v == chosen) {
                     Ok(())
                 } else {
-                    info!(
+                    qinfo!(
                         "Chosen version {current:x} is not compatible with initial version {:x}",
                         self.versions.initial().wire_version(),
                     );
@@ -646,7 +645,7 @@ impl TransportParametersHandler {
                 }
             } else {
                 if current != self.versions.initial().wire_version() {
-                    info!(
+                    qinfo!(
                         "Current version {current:x} != own version {:x}",
                         self.versions.initial().wire_version(),
                     );
@@ -655,7 +654,7 @@ impl TransportParametersHandler {
 
                 if let Some(preferred) = self.versions.preferred_compatible(other) {
                     if preferred != self.versions.initial() {
-                        info!(
+                        qinfo!(
                             "Compatible upgrade {:?} ==> {preferred:?}",
                             self.versions.initial()
                         );
@@ -664,7 +663,7 @@ impl TransportParametersHandler {
                     }
                     Ok(())
                 } else {
-                    info!("Unable to find any compatible version");
+                    qinfo!("Unable to find any compatible version");
                     Err(Error::TransportParameterError)
                 }
             }
@@ -680,7 +679,7 @@ impl ExtensionHandler for TransportParametersHandler {
             return ExtensionWriterResult::Skip;
         }
 
-        debug!("Writing transport parameters, msg={msg:?}");
+        qdebug!("Writing transport parameters, msg={msg:?}");
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
         let mut enc = Encoder::default();
@@ -691,7 +690,7 @@ impl ExtensionHandler for TransportParametersHandler {
     }
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
-        trace!(
+        qtrace!(
             "Handling transport parameters, msg={msg:?} value={}",
             hex(d),
         );
@@ -743,24 +742,24 @@ where
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
         // Reject 0-RTT if there is no token.
         if token.is_empty() {
-            debug!("0-RTT: no token, no 0-RTT");
+            qdebug!("0-RTT: no token, no 0-RTT");
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
         let Some(tpslice) = dec.decode_vvec() else {
-            info!("0-RTT: token code error");
+            qinfo!("0-RTT: token code error");
             return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
         let Ok(remembered) = TransportParameters::decode(&mut dec_tp) else {
-            info!("0-RTT: transport parameter decode error");
+            qinfo!("0-RTT: transport parameter decode error");
             return ZeroRttCheckResult::Fail;
         };
         if self.handler.borrow().local.ok_for_0rtt(&remembered) {
-            info!("0-RTT: transport parameters OK, passing to application checker");
+            qinfo!("0-RTT: transport parameters OK, passing to application checker");
             self.app_checker.check(dec.decode_remainder())
         } else {
-            info!("0-RTT: transport parameters bad, rejecting");
+            qinfo!("0-RTT: transport parameters bad, rejecting");
             ZeroRttCheckResult::Reject
         }
     }

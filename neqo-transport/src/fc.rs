@@ -12,8 +12,7 @@ use std::{
     ops::{Deref, DerefMut, Index, IndexMut},
 };
 
-use log::trace;
-use neqo_common::Role;
+use neqo_common::{qtrace, Role};
 
 use crate::{
     frame::{
@@ -326,7 +325,7 @@ impl ReceiverFlowControl<()> {
 
     pub fn consume(&mut self, count: u64) -> Res<()> {
         if self.consumed + count > self.max_allowed {
-            trace!(
+            qtrace!(
                 "Session RX window exceeded: consumed:{} new:{count} limit:{}",
                 self.consumed,
                 self.max_allowed
@@ -383,7 +382,7 @@ impl ReceiverFlowControl<StreamId> {
         }
 
         if consumed > self.max_allowed {
-            trace!("Stream RX window exceeded: {consumed}");
+            qtrace!("Stream RX window exceeded: {consumed}");
             return Err(Error::FlowControlError);
         }
         let new_consumed = consumed - self.consumed;

@@ -9,8 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::trace;
-use neqo_common::{event::Provider, Datagram};
+use neqo_common::{event::Provider, qtrace, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
@@ -175,7 +174,7 @@ fn simple_connect() {
 fn fetch() {
     let (mut hconn_c, mut hconn_s, dgram) = connect();
 
-    trace!("-----client");
+    qtrace!("-----client");
     let req = hconn_c
         .fetch(
             now(),
@@ -188,13 +187,13 @@ fn fetch() {
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
     let out = hconn_c.process(dgram, now());
-    trace!("-----server");
+    qtrace!("-----server");
     let out = hconn_s.process(out.dgram(), now());
     mem::drop(hconn_c.process(out.dgram(), now()));
     process_server_events(&hconn_s);
     let out = hconn_s.process(None::<Datagram>, now());
 
-    trace!("-----client");
+    qtrace!("-----client");
     mem::drop(hconn_c.process(out.dgram(), now()));
     let out = hconn_s.process(None::<Datagram>, now());
     mem::drop(hconn_c.process(out.dgram(), now()));
@@ -502,7 +501,7 @@ fn fetch_noresponse_will_idletimeout() {
     let (dgram, mut now) =
         connect_peers_with_network_propagation_delay(&mut hconn_c, &mut hconn_s, 10);
 
-    trace!("-----client");
+    qtrace!("-----client");
     let req = hconn_c
         .fetch(
             now,
@@ -515,7 +514,7 @@ fn fetch_noresponse_will_idletimeout() {
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();
     let _out = hconn_c.process(dgram, now);
-    trace!("-----server");
+    qtrace!("-----server");
 
     let mut done = false;
     while !done {

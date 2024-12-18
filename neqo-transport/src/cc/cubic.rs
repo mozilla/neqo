@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::trace;
+use neqo_common::qtrace;
 
 use crate::cc::classic_cc::WindowAdjustment;
 
@@ -119,7 +119,7 @@ impl Cubic {
             self.w_max = self.last_max_cwnd;
             self.k = self.calc_k(curr_cwnd_f64, max_datagram_size);
         }
-        trace!("[{self}] New epoch");
+        qtrace!("[{self}] New epoch");
     }
 }
 

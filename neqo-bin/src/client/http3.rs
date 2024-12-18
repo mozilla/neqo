@@ -18,8 +18,7 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, info, warn};
-use neqo_common::{event::Provider, hex, Datagram, Header};
+use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -188,7 +187,7 @@ impl super::Handler for Handler<'_> {
                     if let Some(handler) = self.url_handler.stream_handler(stream_id) {
                         handler.process_header_ready(stream_id, fin, headers);
                     } else {
-                        warn!("Data on unexpected stream: {stream_id}");
+                        qwarn!("Data on unexpected stream: {stream_id}");
                     }
                     if fin {
                         self.url_handler.on_stream_fin(client, stream_id);
@@ -198,7 +197,7 @@ impl super::Handler for Handler<'_> {
                     let mut stream_done = false;
                     match self.url_handler.stream_handler(stream_id) {
                         None => {
-                            warn!("Data on unexpected stream: {stream_id}");
+                            qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => loop {
                             let (sz, fin) = client
@@ -230,7 +229,7 @@ impl super::Handler for Handler<'_> {
                 Http3ClientEvent::DataWritable { stream_id } => {
                     match self.url_handler.stream_handler(stream_id) {
                         None => {
-                            warn!("Data on unexpected stream: {stream_id}");
+                            qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => {
                             handler.process_data_writable(client, stream_id);
@@ -239,18 +238,18 @@ impl super::Handler for Handler<'_> {
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
-                    info!("{event:?}");
+                    qinfo!("{event:?}");
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ZeroRttRejected => {
-                    info!("{event:?}");
+                    qinfo!("{event:?}");
                     // All 0-RTT data was rejected. We need to retransmit it.
                     self.reinit();
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
                 _ => {
-                    warn!("Unhandled event {event:?}");
+                    qwarn!("Unhandled event {event:?}");
                 }
             }
         }
@@ -282,7 +281,7 @@ struct DownloadStreamHandler {
 impl StreamHandler for DownloadStreamHandler {
     fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
         if self.out_file.is_none() {
-            debug!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
+            qdebug!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
         }
     }
 
@@ -299,18 +298,18 @@ impl StreamHandler for DownloadStreamHandler {
             }
             return Ok(true);
         } else if !output_read_data {
-            debug!("READ[{stream_id}]: {} bytes", data.len());
+            qdebug!("READ[{stream_id}]: {} bytes", data.len());
         } else if let Ok(txt) = std::str::from_utf8(data) {
-            debug!("READ[{stream_id}]: {txt}");
+            qdebug!("READ[{stream_id}]: {txt}");
         } else {
-            debug!("READ[{stream_id}]: 0x{}", hex(data));
+            qdebug!("READ[{stream_id}]: 0x{}", hex(data));
         }
 
         if fin {
             if let Some(mut out_file) = self.out_file.take() {
                 out_file.flush()?;
             } else {
-                debug!("<FIN[{stream_id}]>");
+                qdebug!("<FIN[{stream_id}]>");
             }
         }
 
@@ -327,7 +326,7 @@ struct UploadStreamHandler {
 
 impl StreamHandler for UploadStreamHandler {
     fn process_header_ready(&mut self, stream_id: StreamId, fin: bool, headers: Vec<Header>) {
-        debug!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
+        qdebug!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
     }
 
     fn process_data_readable(
@@ -342,7 +341,7 @@ impl StreamHandler for UploadStreamHandler {
             let parsed: usize = trimmed_txt.parse().unwrap();
             if parsed == self.data.len() {
                 let upload_time = Instant::now().duration_since(self.start);
-                info!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
+                qinfo!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
             }
         } else {
             panic!("Unexpected data [{stream_id}]: 0x{}", hex(data));
@@ -400,7 +399,7 @@ impl UrlHandler<'_> {
             Priority::default(),
         ) {
             Ok(client_stream_id) => {
-                debug!("Successfully created stream id {client_stream_id} for {url}");
+                qdebug!("Successfully created stream id {client_stream_id} for {url}");
 
                 let handler: Box<dyn StreamHandler> = match self.args.method.as_str() {
                     "GET" => {

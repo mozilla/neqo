@@ -805,7 +805,6 @@ dependencies = [
  "clap",
  "clap-verbosity-flag",
  "criterion",
- "env_logger",
  "futures",
  "hex",
  "log",
@@ -828,6 +827,7 @@ version = "0.11.0"
 dependencies = [
  "criterion",
  "enum-map",
+ "env_logger",
  "hex",
  "log",
  "neqo-crypto",

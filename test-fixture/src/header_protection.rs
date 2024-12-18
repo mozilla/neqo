@@ -8,8 +8,7 @@
 
 use std::{cell::RefCell, mem, ops::Range, rc::Rc};
 
-use log::trace;
-use neqo_common::{event::Provider, hex_with_len, Datagram, Decoder, Role};
+use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
@@ -132,7 +131,7 @@ pub fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<us
     let sample_start = pn_bytes.start + 4;
     let sample_end = sample_start + 16;
     let mask = hp.mask(&packet[sample_start..sample_end]).unwrap();
-    trace!(
+    qtrace!(
         "sample={} mask={}",
         hex_with_len(&packet[sample_start..sample_end]),
         hex_with_len(mask)

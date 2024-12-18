@@ -6,8 +6,7 @@
 
 use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
-use log::{debug, info, trace};
-use neqo_common::{header::HeadersExt, Header};
+use neqo_common::{header::HeadersExt, qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -153,7 +152,7 @@ impl RecvMessage {
     }
 
     fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
-        trace!("[{self}] Add new headers fin={fin}");
+        qtrace!("[{self}] Add new headers fin={fin}");
         let interim = match self.message_type {
             MessageType::Request => false,
             MessageType::Response => is_interim(&headers)?,
@@ -200,7 +199,7 @@ impl RecvMessage {
     fn set_state_to_close_pending(&mut self, post_readable_event: bool) -> Res<()> {
         // Stream has received fin. Depending on headers state set header_ready
         // or data_readable event so that app can pick up the fin.
-        trace!(
+        qtrace!(
             "[{self}] set_state_to_close_pending: state={:?}",
             self.state
         );
@@ -255,7 +254,7 @@ impl RecvMessage {
 
     fn receive_internal(&mut self, conn: &mut Connection, post_readable_event: bool) -> Res<()> {
         loop {
-            debug!("[{self}] state={:?}", self.state);
+            qdebug!("[{self}] state={:?}", self.state);
             match &mut self.state {
                 // In the following 3 states we need to read frames.
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
@@ -270,7 +269,7 @@ impl RecvMessage {
                         }
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
-                            debug!(
+                            qdebug!(
                                 "[{self}] A new frame has been received: {frame:?}; state={:?} fin={fin}", self.state,
                             );
                             match frame {
@@ -305,7 +304,7 @@ impl RecvMessage {
                         .refers_dynamic_table(header_block)?
                         && !self.blocked_push_promise.is_empty()
                     {
-                        info!(
+                        qinfo!(
                             "[{self}] decoding header is blocked waiting for a push_promise header block"
                         );
                         break Ok(());
@@ -324,7 +323,7 @@ impl RecvMessage {
                             break Ok(());
                         }
                     } else {
-                        info!("[{self}] decoding header is blocked");
+                        qinfo!("[{self}] decoding header is blocked");
                         break Ok(());
                     }
                 }

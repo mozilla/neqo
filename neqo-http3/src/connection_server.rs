@@ -6,8 +6,7 @@
 
 use std::{rc::Rc, time::Instant};
 
-use log::{debug, info, trace};
-use neqo_common::{event::Provider, Header, MessageType, Role};
+use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Header, MessageType, Role};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
 };
@@ -103,7 +102,7 @@ impl Http3ServerHandler {
     ///
     /// An error will be returned if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
-        debug!("[{self}] Close sending side stream={stream_id}");
+        qdebug!("[{self}] Close sending side stream={stream_id}");
         self.base_handler.stream_close_send(conn, stream_id)?;
         self.needs_processing = true;
         Ok(())
@@ -121,7 +120,7 @@ impl Http3ServerHandler {
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
-        info!("[{self}] cancel_fetch {stream_id} error={error}");
+        qinfo!("[{self}] cancel_fetch {stream_id} error={error}");
         self.needs_processing = true;
         self.base_handler.cancel_fetch(stream_id, error, conn)
     }
@@ -132,7 +131,7 @@ impl Http3ServerHandler {
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
-        info!("[{self}] stream_stop_sending {stream_id} error={error}");
+        qinfo!("[{self}] stream_stop_sending {stream_id} error={error}");
         self.needs_processing = true;
         self.base_handler
             .stream_stop_sending(conn, stream_id, error)
@@ -144,7 +143,7 @@ impl Http3ServerHandler {
         error: AppError,
         conn: &mut Connection,
     ) -> Res<()> {
-        info!("[{self}] stream_reset_send {stream_id} error={error}");
+        qinfo!("[{self}] stream_reset_send {stream_id} error={error}");
         self.needs_processing = true;
         self.base_handler.stream_reset_send(conn, stream_id, error)
     }
@@ -216,7 +215,7 @@ impl Http3ServerHandler {
 
     /// Process HTTTP3 layer.
     pub fn process_http3(&mut self, conn: &mut Connection, now: Instant) {
-        trace!("[{self}] Process http3 internal");
+        qtrace!("[{self}] Process http3 internal");
         if matches!(self.base_handler.state(), Http3State::Closed(..)) {
             return;
         }
@@ -255,7 +254,7 @@ impl Http3ServerHandler {
     }
 
     fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
-        info!("[{self}] Connection error: {err}");
+        qinfo!("[{self}] Connection error: {err}");
         conn.close(now, err.code(), format!("{err}"));
         self.base_handler.close(err.code());
         self.events
@@ -264,9 +263,9 @@ impl Http3ServerHandler {
 
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
-        trace!("[{self}] Check connection events");
+        qtrace!("[{self}] Check connection events");
         while let Some(e) = conn.next_event() {
-            debug!("[{self}] check_connection_events - event {e:?}");
+            qdebug!("[{self}] check_connection_events - event {e:?}");
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
                     self.base_handler.add_new_stream(stream_id);
@@ -412,7 +411,7 @@ impl Http3ServerHandler {
         stream_id: StreamId,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        debug!("[{self}] read_data from stream {stream_id}");
+        qdebug!("[{self}] read_data from stream {stream_id}");
         let res = self.base_handler.read_data(conn, stream_id, buf);
         if let Err(e) = &res {
             if e.connection_error() {

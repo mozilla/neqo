@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use log::debug;
+use neqo_common::qdebug;
 
 use crate::{Error, Res};
 
@@ -188,7 +188,7 @@ impl VersionConfig {
     /// Overwrite the initial value; used by the `Server` when handling new connections
     /// and by the client on resumption.
     pub(crate) fn set_initial(&mut self, initial: Version) {
-        debug!(
+        qdebug!(
             "Overwrite initial version {:?} ==> {initial:?}",
             self.initial
         );

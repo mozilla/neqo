@@ -7,8 +7,7 @@
 // Stream management for a connection.
 use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
-use log::{trace, warn};
-use neqo_common::Role;
+use neqo_common::{qtrace, qwarn, Role};
 
 use crate::{
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
@@ -165,7 +164,7 @@ impl Streams {
                 stream_id,
                 maximum_stream_data,
             } => {
-                trace!(
+                qtrace!(
                     "Stream {} Received MaxStreamData {}",
                     *stream_id,
                     *maximum_stream_data
@@ -184,12 +183,12 @@ impl Streams {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to max
-                warn!("Received DataBlocked with data limit {data_limit}");
+                qwarn!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
-                trace!("Received StreamDataBlocked");
+                qtrace!("Received StreamDataBlocked");
                 stats.stream_data_blocked += 1;
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)

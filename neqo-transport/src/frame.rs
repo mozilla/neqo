@@ -8,8 +8,7 @@
 
 use std::ops::RangeInclusive;
 
-use log::trace;
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{qtrace, Decoder, Encoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
@@ -528,10 +527,10 @@ impl<'a> Frame<'a> {
                 };
                 let fill = (t & STREAM_FRAME_BIT_LEN) == 0;
                 let data = if fill {
-                    trace!("STREAM frame, extends to the end of the packet");
+                    qtrace!("STREAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    trace!("STREAM frame, with length");
+                    qtrace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
                 if o + u64::try_from(data.len())? > ((1 << 62) - 1) {
@@ -645,10 +644,10 @@ impl<'a> Frame<'a> {
             FRAME_TYPE_DATAGRAM | FRAME_TYPE_DATAGRAM_WITH_LEN => {
                 let fill = (t & DATAGRAM_FRAME_BIT_LEN) == 0;
                 let data = if fill {
-                    trace!("DATAGRAM frame, extends to the end of the packet");
+                    qtrace!("DATAGRAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    trace!("DATAGRAM frame, with length");
+                    qtrace!("DATAGRAM frame, with length");
                     d(dec.decode_vvec())?
                 };
                 Ok(Self::Datagram { data, fill })

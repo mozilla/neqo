@@ -6,7 +6,7 @@
 
 use std::ptr::NonNull;
 
-use log::error;
+use neqo_common::qerror;
 
 use crate::{
     experimental_api, null_safe_slice,
@@ -46,7 +46,7 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
         Some(ocsp_ptr) => {
             let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
             let Ok(len) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) else {
-                error!("[{fd:p}] Received illegal OSCP length");
+                qerror!("[{fd:p}] Received illegal OSCP length");
                 return None;
             };
             for idx in 0..len {

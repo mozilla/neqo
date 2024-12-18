@@ -12,8 +12,7 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, info, trace};
-use neqo_common::{event::Provider, Datagram};
+use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
@@ -146,7 +145,7 @@ impl Node for ConnectionNode {
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
-                trace!("[{}] received event {e:?}", self.c);
+                qtrace!("[{}] received event {e:?}", self.c);
 
                 // Perform authentication automatically.
                 if matches!(e, ConnectionEvent::AuthenticationNeeded) {
@@ -161,7 +160,7 @@ impl Node for ConnectionNode {
             if matches!(res, Output::Datagram(_)) || !active {
                 return res;
             }
-            debug!("[{}] no datagram and goal activity, looping", self.c);
+            qdebug!("[{}] no datagram and goal activity, looping", self.c);
         }
     }
 
@@ -176,7 +175,7 @@ impl Node for ConnectionNode {
     }
 
     fn print_summary(&self, test_name: &str) {
-        info!("{test_name}: {:?}", self.c.stats());
+        qinfo!("{test_name}: {:?}", self.c.stats());
     }
 }
 
@@ -234,7 +233,7 @@ impl SendData {
     fn make_stream(&mut self, c: &mut Connection) {
         if self.stream_id.is_none() {
             if let Ok(stream_id) = c.stream_create(StreamType::UniDi) {
-                debug!("[{c}] made stream {stream_id} for sending");
+                qdebug!("[{c}] made stream {stream_id} for sending");
                 self.stream_id = Some(stream_id);
             }
         }
@@ -250,7 +249,7 @@ impl SendData {
                 return status;
             }
             self.remaining -= sent;
-            trace!("sent {sent} remaining {}", self.remaining);
+            qtrace!("sent {sent} remaining {}", self.remaining);
             if self.remaining == 0 {
                 c.stream_close_send(stream_id).unwrap();
                 return GoalStatus::Done;
@@ -316,7 +315,7 @@ impl ReceiveData {
         loop {
             let end = min(self.remaining, buf.len());
             let (recvd, _) = c.stream_recv(stream_id, &mut buf[..end]).unwrap();
-            trace!("received {recvd} remaining {}", self.remaining);
+            qtrace!("received {recvd} remaining {}", self.remaining);
             if recvd == 0 {
                 return status;
             }

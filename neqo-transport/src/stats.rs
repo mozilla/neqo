@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use log::warn;
+use neqo_common::qwarn;
 
 use crate::{
     ecn::{EcnCount, EcnValidationCount},
@@ -222,7 +222,7 @@ impl Stats {
 
     pub fn pkt_dropped(&mut self, reason: impl AsRef<str>) {
         self.dropped_rx += 1;
-        warn!(
+        qwarn!(
             "[{}] Dropped received packet: {}; Total: {}",
             self.info,
             reason.as_ref(),
