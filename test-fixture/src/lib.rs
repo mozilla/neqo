@@ -166,16 +166,23 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
         now(),
     )
     .expect("create a client");
-    client.set_qlog(
-        NeqoQlog::enabled_with_file(
-            "/tmp/qlog/".parse().unwrap(),
-            Role::Client,
-            Some("Example qlog".to_string()),
-            Some("description".to_string()),
-            "client",
-        )
-        .unwrap(),
-    );
+
+    if let Ok(dir) = std::env::var("QLOGDIR") {
+        let cid = client.odcid().unwrap();
+        client.set_qlog(
+            NeqoQlog::enabled_with_file(
+                dir.parse().unwrap(),
+                Role::Client,
+                Some("Neqo client qlog".to_string()),
+                Some("Neqo client qlog".to_string()),
+                format!("client-{cid}"),
+            )
+            .unwrap(),
+        );
+    } else {
+        let (log, _contents) = new_neqo_qlog();
+        client.set_qlog(log);
+    }
     client
 }
 
@@ -215,16 +222,21 @@ pub fn new_server(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Con
         params.ack_ratio(255),
     )
     .expect("create a server");
-    c.set_qlog(
-        NeqoQlog::enabled_with_file(
-            "/tmp/qlog/".parse().unwrap(),
-            Role::Server,
-            Some("Example qlog".to_string()),
-            Some("description".to_string()),
-            "server",
-        )
-        .unwrap(),
-    );
+    if let Ok(dir) = std::env::var("QLOGDIR") {
+        c.set_qlog(
+            NeqoQlog::enabled_with_file(
+                dir.parse().unwrap(),
+                Role::Server,
+                Some("Neqo server qlog".to_string()),
+                Some("Neqo server qlog".to_string()),
+                "server".to_string(),
+            )
+            .unwrap(),
+        );
+    } else {
+        let (log, _contents) = new_neqo_qlog();
+        c.set_qlog(log);
+    }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
@@ -402,6 +414,7 @@ impl Display for SharedVec {
     }
 }
 
+// TODO: Consider renaming? new_neqo_qlog_stub
 /// Returns a pair of new enabled `NeqoQlog` that is backed by a [`Vec<u8>`]
 /// together with a [`Cursor<Vec<u8>>`] that can be used to read the contents of
 /// the log.
