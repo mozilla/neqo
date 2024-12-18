@@ -69,7 +69,7 @@ impl BufferedStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        trace!("[{label}] sending data.");
+        trace!("[{label}] sending data");
         let sent = conn.stream_send(*stream_id, &buf[..])?;
         if sent == 0 {
             return Ok(0);

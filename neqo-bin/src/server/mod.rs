@@ -361,7 +361,7 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
-            warn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
+            warn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
         }
 
         // These are the default for all tests except http3.

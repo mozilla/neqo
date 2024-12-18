@@ -108,7 +108,7 @@ impl Pacer {
             return;
         }
 
-        trace!("[{self}] spend {} over {}, {:?}", count, cwnd, rtt);
+        trace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
         // Increase the capacity by:
         //    `(now - self.t) * PACER_SPEEDUP * cwnd / rtt`
         // That is, the elapsed fraction of the RTT times rate that data is added.
@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(
             p.next(SHORT_RTT, CWND),
             n,
-            "Expect packet to be sent immediately, instead of being paced below timer granularity."
+            "Expect packet to be sent immediately, instead of being paced below timer granularity"
         );
     }
 }

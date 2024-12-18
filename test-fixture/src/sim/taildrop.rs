@@ -177,8 +177,8 @@ impl Node for TailDrop {
 
     fn print_summary(&self, test_name: &str) {
         info!(
-            "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name, self.received, self.dropped, self.delivered, self.maxq,
+            "{test_name}: taildrop: rx {} drop {} tx {} maxq {}",
+            self.received, self.dropped, self.delivered, self.maxq,
         );
     }
 }

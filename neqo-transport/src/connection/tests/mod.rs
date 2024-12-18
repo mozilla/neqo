@@ -347,7 +347,7 @@ fn connect_rtt_idle_with_modifier(
     // Drain events from both as well.
     _ = client.events().count();
     _ = server.events().count();
-    trace!("----- connected and idle with RTT {:?}", rtt);
+    trace!("----- connected and idle with RTT {rtt:?}");
     now
 }
 
@@ -371,7 +371,7 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
     const BLOCK_SIZE: usize = 4_096;
     loop {
         let bytes_sent = c.stream_send(stream, &[0x42; BLOCK_SIZE]).unwrap();
-        trace!("fill_cwnd wrote {} bytes", bytes_sent);
+        trace!("fill_cwnd wrote {bytes_sent} bytes");
         if bytes_sent < BLOCK_SIZE {
             break;
         }
@@ -392,9 +392,8 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
     loop {
         let pkt = c.process_output(now);
         trace!(
-            "fill_cwnd cwnd remaining={}, output: {:?}",
-            cwnd_avail(c),
-            pkt
+            "fill_cwnd cwnd remaining={}, output: {pkt:?}",
+            cwnd_avail(c)
         );
         match pkt {
             Output::Datagram(dgram) => {
@@ -473,7 +472,7 @@ where
 
     loop {
         let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
-        trace!("[{dest}] ack_bytes read {} bytes", bytes_read);
+        trace!("[{dest}] ack_bytes read {bytes_read} bytes");
         if bytes_read == 0 {
             break;
         }
@@ -592,7 +591,7 @@ fn send_something_paced_with_modifier(
     let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
     assert!(sender.stream_send(stream_id, DEFAULT_STREAM_DATA).is_ok());
     assert!(sender.stream_close_send(stream_id).is_ok());
-    debug!("[{sender}] send_something on {}", stream_id);
+    debug!("[{sender}] send_something on {stream_id}");
     let dgram = match sender.process_output(now) {
         Output::Callback(t) => {
             assert!(allow_pacing, "send_something: unexpected delay");
@@ -699,9 +698,8 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
     }
     assert!(
         d.len() >= MIN_INITIAL_PACKET_SIZE,
-        "{} < {}",
-        d.len(),
-        MIN_INITIAL_PACKET_SIZE
+        "{} < {MIN_INITIAL_PACKET_SIZE}",
+        d.len()
     );
 }
 

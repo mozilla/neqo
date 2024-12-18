@@ -193,13 +193,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let mut new_acked = 0;
         for pkt in acked_pkts {
             trace!(
-                "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}, rtt_est={:?}",
-                self,
+                "packet_acked this={self:p}, pn={}, ps={}, ignored={}, lost={}, rtt_est={rtt_est:?}",
                 pkt.pn(),
                 pkt.len(),
                 i32::from(!pkt.cc_outstanding()),
                 i32::from(pkt.lost()),
-                rtt_est,
             );
             if !pkt.cc_outstanding() {
                 continue;
@@ -227,7 +225,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
-            debug!("on_packets_acked this={:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
+            debug!("on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={new_acked}", self.bytes_in_flight, self.congestion_window, self.state);
             return;
         }
 
@@ -237,7 +235,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             let increase = min(self.ssthresh - self.congestion_window, self.acked_bytes);
             self.congestion_window += increase;
             self.acked_bytes -= increase;
-            debug!("[{self}] slow start += {}", increase);
+            debug!("[{self}] slow start += {increase}");
             if self.congestion_window == self.ssthresh {
                 // This doesn't look like it is necessary, but it can happen
                 // after persistent congestion.
@@ -280,7 +278,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             ],
             now,
         );
-        debug!("[{self}] on_packets_acked this={:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
+        debug!("[{self}] on_packets_acked this={self:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={new_acked}", self.bytes_in_flight, self.congestion_window, self.state);
     }
 
     /// Update congestion controller state based on lost packets.
@@ -298,8 +296,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         for pkt in lost_packets.iter().filter(|pkt| pkt.cc_in_flight()) {
             debug!(
-                "packet_lost this={:p}, pn={}, ps={}",
-                self,
+                "packet_lost this={self:p}, pn={}, ps={}",
                 pkt.pn(),
                 pkt.len()
             );
@@ -334,8 +331,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             now,
         );
         debug!(
-            "on_packets_lost this={:p}, bytes_in_flight={}, cwnd={}, state={:?}",
-            self, self.bytes_in_flight, self.congestion_window, self.state
+            "on_packets_lost this={self:p}, bytes_in_flight={}, cwnd={}, state={:?}",
+            self.bytes_in_flight, self.congestion_window, self.state
         );
         congestion || persistent_congestion
     }
@@ -390,8 +387,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         self.bytes_in_flight += pkt.len();
         debug!(
-            "packet_sent this={:p}, pn={}, ps={}",
-            self,
+            "packet_sent this={self:p}, pn={}, ps={}",
             pkt.pn(),
             pkt.len()
         );
@@ -456,7 +452,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     fn set_state(&mut self, state: State, now: Instant) {
         if self.state != state {
-            debug!("[{self}] state -> {:?}", state);
+            debug!("[{self}] state -> {state:?}");
             let old_state = self.state;
             self.qlog.add_event_data_with_instant(
                 || {

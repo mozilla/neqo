@@ -43,7 +43,7 @@ where
     }
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {
-        error!("Unable to access Retry AEAD: {:?}", e);
+        error!("Unable to access Retry AEAD: {e:?}");
         Error::InternalError
     })?
 }

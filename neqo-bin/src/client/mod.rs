@@ -554,7 +554,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
-            error!("Resumption to {host} cannot work without at least 2 URLs.");
+            error!("Resumption to {host} cannot work without at least 2 URLs");
             exit(127);
         }
 
@@ -571,8 +571,8 @@ pub async fn client(mut args: Args) -> Res<()> {
         let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
         let real_local = socket.local_addr().unwrap();
         info!(
-            "{} Client connecting: {:?} -> {:?}",
-            args.shared.alpn, real_local, remote_addr,
+            "{} Client connecting: {real_local:?} -> {remote_addr:?}",
+            args.shared.alpn
         );
 
         let hostname = format!("{host}");

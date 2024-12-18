@@ -188,9 +188,9 @@ impl EcnInfo {
     pub fn on_packet_sent(&mut self, stats: &mut Stats) {
         if let EcnValidationState::Testing { probes_sent, .. } = &mut self.state {
             *probes_sent += 1;
-            debug!("ECN probing: sent {} probes", probes_sent);
+            debug!("ECN probing: sent {probes_sent} probes");
             if *probes_sent == ECN_TEST_COUNT {
-                debug!("ECN probing concluded with {} probes sent", probes_sent);
+                debug!("ECN probing concluded with {probes_sent} probes sent");
                 self.state.set(EcnValidationState::Unknown, stats);
             }
         }
@@ -231,10 +231,7 @@ impl EcnInfo {
             // If we have lost all initial probes a bunch of times, we can conclude that the path
             // is not ECN capable and likely drops all ECN marked packets.
             if probes_sent == probes_lost && *probes_lost == ECN_TEST_COUNT_INITIAL_PHASE {
-                debug!(
-                    "ECN validation failed, all {} initial marked packets were lost",
-                    probes_lost
-                );
+                debug!("ECN validation failed, all {probes_lost} initial marked packets were lost");
                 self.disable_ecn(stats, EcnValidationError::BlackHole);
             }
         }
@@ -302,9 +299,7 @@ impl EcnInfo {
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
             warn!(
-                "ECN validation failed, ACK counted {} new marks, but {} of newly acked packets were sent with ECT(0)",
-                sum_inc,
-                newly_acked_sent_with_ect0
+                "ECN validation failed, ACK counted {sum_inc} new marks, but {newly_acked_sent_with_ect0} of newly acked packets were sent with ECT(0)"
             );
             self.disable_ecn(stats, EcnValidationError::Bleaching);
         } else if ecn_diff[IpTosEcn::Ect1] > 0 {

@@ -63,8 +63,7 @@ impl NegotiationState {
         } = self
         {
             trace!(
-                "set_negotiated {:?} to {}",
-                feature_type,
+                "set_negotiated {feature_type:?} to {}",
                 settings.get(*feature_type)
             );
             let cb = mem::take(listener);

@@ -83,17 +83,17 @@ impl HttpServer {
         let url_dbg = String::from_utf8(partial.clone())
             .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)));
         if partial.len() < 4096 {
-            debug!("Saving partial URL: {}", url_dbg);
+            debug!("Saving partial URL: {url_dbg}");
             self.read_state.insert(stream_id, partial);
         } else {
-            debug!("Giving up on partial URL {}", url_dbg);
+            debug!("Giving up on partial URL {url_dbg}");
             conn.borrow_mut().stream_stop_sending(stream_id, 0).unwrap();
         }
     }
 
     fn stream_readable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         if !stream_id.is_client_initiated() || !stream_id.is_bidi() {
-            debug!("Stream {} not client-initiated bidi, ignoring", stream_id);
+            debug!("Stream {stream_id} not client-initiated bidi, ignoring");
             return;
         }
         let (sz, fin) = conn

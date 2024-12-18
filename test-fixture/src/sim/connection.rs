@@ -146,7 +146,7 @@ impl Node for ConnectionNode {
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
-                trace!("[{}] received event {:?}", self.c, e);
+                trace!("[{}] received event {e:?}", self.c);
 
                 // Perform authentication automatically.
                 if matches!(e, ConnectionEvent::AuthenticationNeeded) {
@@ -176,7 +176,7 @@ impl Node for ConnectionNode {
     }
 
     fn print_summary(&self, test_name: &str) {
-        info!("{}: {:?}", test_name, self.c.stats());
+        info!("{test_name}: {:?}", self.c.stats());
     }
 }
 
@@ -234,7 +234,7 @@ impl SendData {
     fn make_stream(&mut self, c: &mut Connection) {
         if self.stream_id.is_none() {
             if let Ok(stream_id) = c.stream_create(StreamType::UniDi) {
-                debug!("[{c}] made stream {} for sending", stream_id);
+                debug!("[{c}] made stream {stream_id} for sending");
                 self.stream_id = Some(stream_id);
             }
         }
@@ -250,7 +250,7 @@ impl SendData {
                 return status;
             }
             self.remaining -= sent;
-            trace!("sent {} remaining {}", sent, self.remaining);
+            trace!("sent {sent} remaining {}", self.remaining);
             if self.remaining == 0 {
                 c.stream_close_send(stream_id).unwrap();
                 return GoalStatus::Done;
@@ -316,7 +316,7 @@ impl ReceiveData {
         loop {
             let end = min(self.remaining, buf.len());
             let (recvd, _) = c.stream_recv(stream_id, &mut buf[..end]).unwrap();
-            trace!("received {} remaining {}", recvd, self.remaining);
+            trace!("received {recvd} remaining {}", self.remaining);
             if recvd == 0 {
                 return status;
             }

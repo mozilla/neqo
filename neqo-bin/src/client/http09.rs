@@ -302,8 +302,7 @@ impl<'b> Handler<'b> {
                 debug!("READ[{stream_id}]: {} bytes", read_buffer.len());
             } else {
                 debug!(
-                    "READ[{}]: {}",
-                    stream_id,
+                    "READ[{stream_id}]: {}",
                     std::str::from_utf8(read_buffer).unwrap()
                 );
             }

@@ -5,7 +5,7 @@
 // except according to those terms.
 
 // Enable just this file for logging to just see packets.
-// e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
+// e.g. "RUST_LOG=neqo_transport::dump neqo-client .."
 
 use std::fmt::Write;
 
@@ -38,21 +38,16 @@ pub fn dump_packet(
     let mut d = Decoder::from(payload);
     while d.remaining() > 0 {
         let Ok(f) = Frame::decode(&mut d) else {
-            s.push_str(" [broken]...");
+            s.push_str(" [broken]..");
             break;
         };
         let x = f.dump();
         if !x.is_empty() {
-            _ = write!(&mut s, "\n  {} {}", dir, &x);
+            _ = write!(&mut s, "\n  {dir} {}", &x);
         }
     }
     debug!(
-        "[{conn}] pn={} type={:?} {} {:?} len {}{}",
-        pn,
-        pt,
-        path.borrow(),
-        tos,
-        len,
-        s
+        "[{conn}] pn={pn} type={pt:?} {} {tos:?} len {len}{s}",
+        path.borrow()
     );
 }

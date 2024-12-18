@@ -127,7 +127,7 @@ impl RecvMessage {
             RecvMessageState::WaitingForFinAfterTrailers {..} => {
                 return Err(Error::HttpFrameUnexpected);
             }
-            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state.")
+            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state")
          }
         Ok(())
     }
@@ -147,13 +147,13 @@ impl RecvMessage {
                     };
                 }
             }
-            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state.")
+            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state")
         }
         Ok(())
     }
 
     fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
-        trace!("[{self}] Add new headers fin={}", fin);
+        trace!("[{self}] Add new headers fin={fin}");
         let interim = match self.message_type {
             MessageType::Request => false,
             MessageType::Response => is_interim(&headers)?,
@@ -216,7 +216,7 @@ impl RecvMessage {
                     self.conn_events.data_readable(self.get_stream_info());
                 }
             }
-            _ => unreachable!("Closing an already closed transaction."),
+            _ => unreachable!("Closing an already closed transaction"),
         }
         if !matches!(self.state, RecvMessageState::Closed) {
             self.state = RecvMessageState::ClosePending;
@@ -255,7 +255,7 @@ impl RecvMessage {
 
     fn receive_internal(&mut self, conn: &mut Connection, post_readable_event: bool) -> Res<()> {
         loop {
-            debug!("[{self}] state={:?}.", self.state);
+            debug!("[{self}] state={:?}", self.state);
             match &mut self.state {
                 // In the following 3 states we need to read frames.
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
@@ -271,8 +271,7 @@ impl RecvMessage {
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
                             debug!(
-                                "[{self}] A new frame has been received: {:?}; state={:?} fin={}",
-                                frame, self.state, fin,
+                                "[{self}] A new frame has been received: {frame:?}; state={:?} fin={fin}", self.state,
                             );
                             match frame {
                                 HFrame::Headers { header_block } => {
@@ -307,7 +306,7 @@ impl RecvMessage {
                         && !self.blocked_push_promise.is_empty()
                     {
                         info!(
-                            "[{self}] decoding header is blocked waiting for a push_promise header block."
+                            "[{self}] decoding header is blocked waiting for a push_promise header block"
                         );
                         break Ok(());
                     }
@@ -325,7 +324,7 @@ impl RecvMessage {
                             break Ok(());
                         }
                     } else {
-                        info!("[{self}] decoding header is blocked.");
+                        info!("[{self}] decoding header is blocked");
                         break Ok(());
                     }
                 }

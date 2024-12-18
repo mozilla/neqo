@@ -53,7 +53,7 @@ impl Record {
 
     // Shoves this record into the socket, returns true if blocked.
     pub(crate) fn write(self, fd: *mut ssl::PRFileDesc) -> Res<()> {
-        trace!("write {:?}", self);
+        trace!("write {self:?}");
         unsafe {
             ssl::SSL_RecordLayerData(
                 fd,

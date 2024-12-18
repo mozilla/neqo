@@ -120,7 +120,7 @@ impl SendMessage {
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
-        debug!("Create a request stream_id={}", stream_id);
+        debug!("Create a request stream_id={stream_id}");
         Self {
             state: MessageState::WaitingForHeaders,
             message_type,
@@ -201,10 +201,7 @@ impl SendStream for SendMessage {
             min(buf.len(), available - 9)
         };
 
-        debug!(
-            "[{self}] send_request_body: available={} to_send={}.",
-            available, to_send
-        );
+        debug!("[{self}] send_request_body: available={available} to_send={to_send}");
 
         let data_frame = HFrame::Data {
             len: to_send as u64,
@@ -249,7 +246,7 @@ impl SendStream for SendMessage {
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let sent = Error::map_error(self.stream.send_buffer(conn), Error::HttpInternal(5))?;
 
-        trace!("[{self}] {} bytes sent", sent);
+        trace!("[{self}] {sent} bytes sent");
         if !self.stream.has_buffered_data() {
             if self.state.done() {
                 Error::map_error(

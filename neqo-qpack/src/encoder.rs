@@ -94,8 +94,7 @@ impl QPackEncoder {
         }
 
         debug!(
-            "[{self}] Set max capacity to new capacity:{} old:{} max_table_size={}.",
-            cap,
+            "[{self}] Set max capacity to new capacity:{cap} old:{} max_table_size={}",
             self.table.capacity(),
             self.max_table_size,
         );
@@ -172,7 +171,7 @@ impl QPackEncoder {
                     }
                 }
             } else {
-                debug_assert!(false, "We should have at least one header block.");
+                debug_assert!(false, "We should have at least one header block");
             }
             if hb_list.is_empty() {
                 self.unacked_header_blocks.remove(&stream_id);
@@ -203,7 +202,7 @@ impl QPackEncoder {
     }
 
     fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
-        debug!("[{self}] call instruction {:?}", instruction);
+        debug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
                 qlog::qpack_read_insert_count_increment_instruction(
@@ -247,7 +246,7 @@ impl QPackEncoder {
         name: &[u8],
         value: &[u8],
     ) -> Res<u64> {
-        debug!("[{self}] insert {:?} {:?}.", name, value);
+        debug!("[{self}] insert {name:?} {value:?}");
 
         let entry_size = name.len() + value.len() + ADDITIONAL_TABLE_ENTRY_SIZE;
 
@@ -280,7 +279,7 @@ impl QPackEncoder {
     }
 
     fn change_capacity(&mut self, value: u64) {
-        debug!("[{self}] change capacity: {}", value);
+        debug!("[{self}] change capacity: {value}");
         self.next_capacity = Some(value);
     }
 
@@ -321,7 +320,7 @@ impl QPackEncoder {
     pub fn send_encoder_updates(&mut self, conn: &mut Connection) -> Res<()> {
         match self.local_stream {
             LocalStreamState::NoStream => {
-                error!("Send call but there is no stream yet.");
+                error!("Send call but there is no stream yet");
                 Ok(())
             }
             LocalStreamState::Uninitialized(stream_id) => {
@@ -368,7 +367,7 @@ impl QPackEncoder {
         h: &[Header],
         stream_id: StreamId,
     ) -> HeaderEncoder {
-        debug!("[{self}] encoding headers.");
+        debug!("[{self}] encoding headers");
 
         // Try to send capacity instructions if present.
         // This code doesn't try to deal with errors, it just tries
@@ -393,7 +392,7 @@ impl QPackEncoder {
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
             let value = iter.value().as_bytes().to_vec();
-            trace!("encoding {:x?} {:x?}.", name, value);
+            trace!("encoding {name:x?} {value:x?}");
 
             if let Some(LookupResult {
                 index,
@@ -402,9 +401,8 @@ impl QPackEncoder {
             }) = self.table.lookup(&name, &value, can_block)
             {
                 trace!(
-                    "[{self}] found a {} entry, value-match={}",
-                    if static_table { "static" } else { "dynamic" },
-                    value_matches
+                    "[{self}] found a {} entry, value-match={value_matches}",
+                    if static_table { "static" } else { "dynamic" }
                 );
                 if value_matches {
                     if static_table {

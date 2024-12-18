@@ -327,9 +327,8 @@ impl ReceiverFlowControl<()> {
     pub fn consume(&mut self, count: u64) -> Res<()> {
         if self.consumed + count > self.max_allowed {
             trace!(
-                "Session RX window exceeded: consumed:{} new:{} limit:{}",
+                "Session RX window exceeded: consumed:{} new:{count} limit:{}",
                 self.consumed,
-                count,
                 self.max_allowed
             );
             return Err(Error::FlowControlError);
@@ -384,7 +383,7 @@ impl ReceiverFlowControl<StreamId> {
         }
 
         if consumed > self.max_allowed {
-            trace!("Stream RX window exceeded: {}", consumed);
+            trace!("Stream RX window exceeded: {consumed}");
             return Err(Error::FlowControlError);
         }
         let new_consumed = consumed - self.consumed;

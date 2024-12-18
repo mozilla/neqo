@@ -184,7 +184,7 @@ impl Streams {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to max
-                warn!("Received DataBlocked with data limit {}", data_limit);
+                warn!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }

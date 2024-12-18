@@ -646,7 +646,7 @@ fn trickle(sender: &mut Connection, receiver: &mut Connection, mut count: usize,
     let id = sender.stream_create(StreamType::UniDi).unwrap();
     let mut maybe_ack = None;
     while count > 0 {
-        debug!("trickle: remaining={}", count);
+        debug!("trickle: remaining={count}");
         assert_eq!(sender.stream_send(id, &[9]).unwrap(), 1);
         let dgram = sender.process(maybe_ack, now).dgram();
 

@@ -150,10 +150,7 @@ impl NeqoQlog {
     {
         if let Some(inner) = self.inner.borrow_mut().as_mut() {
             if let Err(e) = f(&mut inner.streamer) {
-                error!(
-                    "Qlog event generation failed with error {}; closing qlog.",
-                    e
-                );
+                error!("Qlog event generation failed with error {e}; closing qlog");
                 *self.inner.borrow_mut() = None;
             }
         }
@@ -169,7 +166,7 @@ impl fmt::Debug for NeqoQlogShared {
 impl Drop for NeqoQlogShared {
     fn drop(&mut self) {
         if let Err(e) = self.streamer.finish_log() {
-            error!("Error dropping NeqoQlog: {}", e);
+            error!("Error dropping NeqoQlog: {e}");
         }
     }
 }

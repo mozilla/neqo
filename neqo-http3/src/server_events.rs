@@ -36,7 +36,7 @@ pub struct StreamHandler {
 impl ::std::fmt::Display for StreamHandler {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         let conn: &Connection = &self.conn.borrow();
-        write!(f, "conn={} stream_info={:?}", conn, self.stream_info)
+        write!(f, "conn={conn} stream_info={:?}", self.stream_info)
     }
 }
 
@@ -116,9 +116,8 @@ impl StreamHandler {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_stop_sending(&self, app_error: AppError) -> Res<()> {
         debug!(
-            "[{self}] stop sending stream_id:{} error:{}.",
-            self.stream_info.stream_id(),
-            app_error
+            "[{self}] stop sending stream_id:{} error:{app_error}",
+            self.stream_info.stream_id()
         );
         self.handler.borrow_mut().stream_stop_sending(
             self.stream_info.stream_id(),
@@ -134,9 +133,8 @@ impl StreamHandler {
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_reset_send(&self, app_error: AppError) -> Res<()> {
         debug!(
-            "[{self}] reset send stream_id:{} error:{}.",
-            self.stream_info.stream_id(),
-            app_error
+            "[{self}] reset send stream_id:{} error:{app_error}",
+            self.stream_info.stream_id()
         );
         self.handler.borrow_mut().stream_reset_send(
             self.stream_info.stream_id(),
@@ -151,7 +149,7 @@ impl StreamHandler {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore
     pub fn cancel_fetch(&self, app_error: AppError) -> Res<()> {
-        debug!("[{self}] reset error:{}.", app_error);
+        debug!("[{self}] reset error:{app_error}");
         self.handler.borrow_mut().cancel_fetch(
             self.stream_info.stream_id(),
             app_error,
@@ -201,7 +199,7 @@ impl Http3OrWebTransportStream {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn send_data(&self, data: &[u8]) -> Res<usize> {
-        debug!("[{self}] Set new response.");
+        debug!("[{self}] Set new response");
         self.stream_handler.send_data(data)
     }
 
@@ -211,7 +209,7 @@ impl Http3OrWebTransportStream {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_close_send(&self) -> Res<()> {
-        debug!("[{self}] Set new response.");
+        debug!("[{self}] Set new response");
         self.stream_handler.stream_close_send()
     }
 }
@@ -282,7 +280,7 @@ impl WebTransportRequest {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn response(&self, accept: &WebTransportSessionAcceptAction) -> Res<()> {
-        debug!("[{self}] Set a response for a WebTransport session.");
+        debug!("[{self}] Set a response for a WebTransport session");
         self.stream_handler
             .handler
             .borrow_mut()

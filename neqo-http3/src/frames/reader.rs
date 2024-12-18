@@ -174,7 +174,7 @@ impl FrameReader {
             {
                 (0, f) => (None, false, f),
                 (amount, f) => {
-                    trace!("FrameReader::receive: reading {} byte, fin={}", amount, f);
+                    trace!("FrameReader::receive: reading {amount} byte, fin={f}");
                     (self.consume::<T>(Decoder::from(&buf[..amount]))?, true, f)
                 }
             };
@@ -204,16 +204,15 @@ impl FrameReader {
         match &mut self.state {
             FrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {
-                    trace!("FrameReader::receive: read frame type {}", v);
+                    trace!("FrameReader::receive: read frame type {v}");
                     self.frame_type_decoded::<T>(HFrameType(v))?;
                 }
             }
             FrameReaderState::GetLength { decoder } => {
                 if let Some(len) = decoder.consume(&mut input) {
                     trace!(
-                        "FrameReader::receive: frame type {:?} length {}",
-                        self.frame_type,
-                        len
+                        "FrameReader::receive: frame type {:?} length {len}",
+                        self.frame_type
                     );
                     return self.frame_length_decoded::<T>(len);
                 }

@@ -88,7 +88,7 @@ impl Secrets {
     }
 
     fn put(&mut self, dir: SecretDirection, epoch: Epoch, key: SymKey) {
-        debug!("{:?} secret available for {:?}: {:?}", dir, epoch, key);
+        debug!("{dir:?} secret available for {epoch:?}: {key:?}");
         let keys = match dir {
             SecretDirection::Read => &mut self.r,
             SecretDirection::Write => &mut self.w,

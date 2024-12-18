@@ -37,7 +37,7 @@ impl AckRate {
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         let delay = delay.clamp(minimum, MAX_DELAY);
-        trace!("AckRate inputs: {}/{}/{}, {:?}", cwnd, mtu, ratio, rtt);
+        trace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
         Self { packets, delay }
     }
 
@@ -82,12 +82,7 @@ impl FlexibleAckRate {
         mtu: usize,
         rtt: Duration,
     ) -> Self {
-        trace!(
-            "FlexibleAckRate: {:?} {:?} {}",
-            max_ack_delay,
-            min_ack_delay,
-            ratio
-        );
+        trace!("FlexibleAckRate: {max_ack_delay:?} {min_ack_delay:?} {ratio}");
         let ratio = max(ACK_RATIO_SCALE, ratio); // clamp it
         Self {
             current: AckRate {

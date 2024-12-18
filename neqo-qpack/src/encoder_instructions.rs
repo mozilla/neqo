@@ -174,7 +174,7 @@ impl EncoderInstructionReader {
         } else if ENCODER_DUPLICATE.cmp_prefix(b) {
             DecodedEncoderInstruction::Duplicate { index: 0 }
         } else {
-            unreachable!("The above patterns match everything.");
+            unreachable!("The above patterns match everything");
         };
         debug!("[{self}] instruction decoded");
     }
@@ -205,7 +205,7 @@ impl EncoderInstructionReader {
                 }
             }
             DecodedEncoderInstruction::NoInstruction => {
-                unreachable!("We must have instruction at this point.");
+                unreachable!("We must have instruction at this point");
             }
         }
         Ok(())
@@ -229,7 +229,7 @@ impl EncoderInstructionReader {
                 EncoderInstructionReaderState::ReadFirstInt { reader } => {
                     let val = reader.read(recv)?;
 
-                    trace!("[{self}] First varint read {}", val);
+                    trace!("[{self}] First varint read {val}");
                     match &mut self.instruction {
                         DecodedEncoderInstruction::Capacity { value: v, .. }
                         | DecodedEncoderInstruction::Duplicate { index: v } => {
@@ -243,13 +243,13 @@ impl EncoderInstructionReader {
                                 reader: LiteralReader::default(),
                             };
                         }
-                        _ => unreachable!("This instruction cannot be in this state."),
+                        _ => unreachable!("This instruction cannot be in this state"),
                     }
                 }
                 EncoderInstructionReaderState::ReadFirstLiteral { reader } => {
                     let val = reader.read(recv)?;
 
-                    trace!("[{self}] first literal read {:?}", val);
+                    trace!("[{self}] first literal read {val:?}");
                     match &mut self.instruction {
                         DecodedEncoderInstruction::InsertWithNameRefStatic { value, .. }
                         | DecodedEncoderInstruction::InsertWithNameRefDynamic { value, .. } => {
@@ -262,19 +262,19 @@ impl EncoderInstructionReader {
                                 reader: LiteralReader::default(),
                             };
                         }
-                        _ => unreachable!("This instruction cannot be in this state."),
+                        _ => unreachable!("This instruction cannot be in this state"),
                     }
                 }
                 EncoderInstructionReaderState::ReadSecondLiteral { reader } => {
                     let val = reader.read(recv)?;
 
-                    trace!("[{self}] second literal read {:?}", val);
+                    trace!("[{self}] second literal read {val:?}");
                     match &mut self.instruction {
                         DecodedEncoderInstruction::InsertWithNameLiteral { value, .. } => {
                             *value = val;
                             self.state = EncoderInstructionReaderState::Done;
                         }
-                        _ => unreachable!("This instruction cannot be in this state."),
+                        _ => unreachable!("This instruction cannot be in this state"),
                     }
                 }
                 EncoderInstructionReaderState::Done => {}

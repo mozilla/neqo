@@ -140,7 +140,7 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
-        trace!("TP encoded; type 0x{:02x} val {:?}", tp, self);
+        trace!("TP encoded; type 0x{tp:02x} val {self:?}");
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -251,7 +251,7 @@ impl TransportParameter {
     fn decode(dec: &mut Decoder) -> Res<Option<(TransportParameterId, Self)>> {
         let tp = dec.decode_varint().ok_or(Error::NoMoreData)?;
         let content = dec.decode_vvec().ok_or(Error::NoMoreData)?;
-        trace!("TP {:x} length {:x}", tp, content.len());
+        trace!("TP {tp:x} length {:x}", content.len());
         let mut d = Decoder::from(content);
         let value = match tp {
             ORIGINAL_DESTINATION_CONNECTION_ID
@@ -310,7 +310,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        trace!("TP decoded; type 0x{:02x} val {:?}", tp, value);
+        trace!("TP decoded; type 0x{tp:02x} val {value:?}");
         Ok(Some((tp, value)))
     }
 }
@@ -629,9 +629,7 @@ impl TransportParametersHandler {
     fn compatible_upgrade(&mut self, remote_tp: &TransportParameters) -> Res<()> {
         if let Some((current, other)) = remote_tp.get_versions() {
             trace!(
-                "Peer versions: {:x} {:x?}; config {:?}",
-                current,
-                other,
+                "Peer versions: {current:x} {other:x?}; config {:?}",
                 self.versions,
             );
 
@@ -641,8 +639,7 @@ impl TransportParametersHandler {
                     Ok(())
                 } else {
                     info!(
-                        "Chosen version {:x} is not compatible with initial version {:x}",
-                        current,
+                        "Chosen version {current:x} is not compatible with initial version {:x}",
                         self.versions.initial().wire_version(),
                     );
                     Err(Error::TransportParameterError)
@@ -650,8 +647,7 @@ impl TransportParametersHandler {
             } else {
                 if current != self.versions.initial().wire_version() {
                     info!(
-                        "Current version {:x} != own version {:x}",
-                        current,
+                        "Current version {current:x} != own version {:x}",
                         self.versions.initial().wire_version(),
                     );
                     return Err(Error::TransportParameterError);
@@ -660,9 +656,8 @@ impl TransportParametersHandler {
                 if let Some(preferred) = self.versions.preferred_compatible(other) {
                     if preferred != self.versions.initial() {
                         info!(
-                            "Compatible upgrade {:?} ==> {:?}",
-                            self.versions.initial(),
-                            preferred
+                            "Compatible upgrade {:?} ==> {preferred:?}",
+                            self.versions.initial()
                         );
                         self.versions.set_initial(preferred);
                         self.local.compatible_upgrade(preferred);
@@ -685,7 +680,7 @@ impl ExtensionHandler for TransportParametersHandler {
             return ExtensionWriterResult::Skip;
         }
 
-        debug!("Writing transport parameters, msg={:?}", msg);
+        debug!("Writing transport parameters, msg={msg:?}");
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
         let mut enc = Encoder::default();
@@ -697,8 +692,7 @@ impl ExtensionHandler for TransportParametersHandler {
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         trace!(
-            "Handling transport parameters, msg={:?} value={}",
-            msg,
+            "Handling transport parameters, msg={msg:?} value={}",
             hex(d),
         );
 

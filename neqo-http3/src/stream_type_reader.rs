@@ -137,7 +137,7 @@ impl NewStreamHeadReader {
                 return Ok(None);
             };
 
-            trace!("Decoded uint {}", output);
+            trace!("Decoded uint {output}");
             match self {
                 Self::ReadType {
                     role, stream_id, ..
@@ -178,7 +178,7 @@ impl NewStreamHeadReader {
                 Self::ReadId { stream_type, .. } => {
                     let is_push = *stream_type == HTTP3_UNI_STREAM_TYPE_PUSH;
                     *self = Self::Done;
-                    trace!("New Stream stream push_id={}", output);
+                    trace!("New Stream stream push_id={output}");
                     if fin {
                         return Err(Error::HttpGeneralProtocol);
                     }
@@ -204,7 +204,7 @@ impl NewStreamHeadReader {
             Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
             Some(NewStreamType::Push(_) | NewStreamType::WebTransportStream(_)) => {
-                unreachable!("PushStream and WebTransport are mapped to None at this stage.")
+                unreachable!("PushStream and WebTransport are mapped to None at this stage")
             }
         }
     }

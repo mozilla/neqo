@@ -230,11 +230,7 @@ impl WebTransportSession {
 
         if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
         {
-            trace!(
-                "ExtendedConnect response headers {:?}, fin={}",
-                headers,
-                fin
-            );
+            trace!("ExtendedConnect response headers {headers:?}, fin={fin}");
 
             if interim {
                 if fin {
@@ -347,7 +343,7 @@ impl WebTransportSession {
                 &mut self.control_stream_recv,
             ))
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
-        trace!("[{self}] Received frame: {:?} fin={}", f, fin);
+        trace!("[{self}] Received frame: {f:?} fin={fin}");
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
             self.events.session_end(
                 ExtendedConnectType::WebTransport,

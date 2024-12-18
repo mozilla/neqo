@@ -271,7 +271,7 @@ impl Server {
                     format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {
-                    error!("failed to create NeqoQlog: {}", e);
+                    error!("failed to create NeqoQlog: {e}");
                     NeqoQlog::disabled()
                 })
             })
@@ -354,7 +354,7 @@ impl Server {
         // All packets in the datagram are routed to the same connection.
         let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
-            trace!("[{self}] Discarding {:?}", dgram);
+            trace!("[{self}] Discarding {dgram:?}");
             return Output::None;
         };
 
@@ -431,7 +431,7 @@ impl Server {
             }
             PacketType::ZeroRtt => {
                 let dcid = ConnectionId::from(packet.dcid());
-                debug!("[{self}] Dropping 0-RTT for unknown connection {}", dcid);
+                debug!("[{self}] Dropping 0-RTT for unknown connection {dcid}");
                 Output::None
             }
             PacketType::OtherVersion => unreachable!(),

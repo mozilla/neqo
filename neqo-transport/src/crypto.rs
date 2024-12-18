@@ -191,7 +191,7 @@ impl Crypto {
         data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
-            trace!("Handshake record received {:0x?} ", d);
+            trace!("Handshake record received {d:0x?} ");
             let epoch = match space {
                 PacketNumberSpace::Initial => TLS_EPOCH_INITIAL,
                 PacketNumberSpace::Handshake => TLS_EPOCH_HANDSHAKE,
@@ -212,7 +212,7 @@ impl Crypto {
             }
             Err(CryptoError::EchRetry(v)) => Err(Error::EchRetry(v)),
             Err(e) => {
-                info!("Handshake failed {:?}", e);
+                info!("Handshake failed {e:?}");
                 Err(self
                     .tls
                     .alert()
@@ -316,7 +316,7 @@ impl Crypto {
             if r.ct != TLS_CT_HANDSHAKE {
                 return Err(Error::ProtocolViolation);
             }
-            trace!("[{self}] Adding CRYPTO data {:?}", r);
+            trace!("[{self}] Adding CRYPTO data {r:?}");
             self.streams
                 .send(PacketNumberSpace::from(r.epoch), &r.data)?;
         }
@@ -384,7 +384,7 @@ impl Crypto {
                 ResumptionToken::new(enc.into(), t.expiration_time())
             })
         } else {
-            unreachable!("It is a server.");
+            unreachable!("It is a server");
         }
     }
 
@@ -392,7 +392,7 @@ impl Crypto {
         if let Agent::Client(c) = &self.tls {
             c.has_resumption_token()
         } else {
-            unreachable!("It is a server.");
+            unreachable!("It is a server");
         }
     }
 }
@@ -445,10 +445,7 @@ impl CryptoDxState {
         secret: &SymKey,
         cipher: Cipher,
     ) -> Res<Self> {
-        debug!(
-            "Making {:?} {} CryptoDxState, v={:?} cipher={}",
-            direction, epoch, version, cipher,
-        );
+        debug!("Making {direction:?} {epoch} CryptoDxState, v={version:?} cipher={cipher}",);
         let hplabel = String::from(version.label_prefix()) + "hp";
         Ok(Self {
             version,
@@ -469,7 +466,7 @@ impl CryptoDxState {
         label: &str,
         dcid: &[u8],
     ) -> Res<Self> {
-        trace!("new_initial {:?} {}", version, ConnectionIdRef::from(dcid));
+        trace!("new_initial {version:?} {}", ConnectionIdRef::from(dcid));
         let salt = version.initial_salt();
         let cipher = TLS_AES_128_GCM_SHA256;
         let initial_secret = hkdf::extract(
@@ -576,8 +573,8 @@ impl CryptoDxState {
             Ok(())
         } else if prev.used_pn.end > self.used_pn.start {
             debug!(
-                "[{self}] Found packet with too new packet number {} > {}, compared to {}",
-                self.used_pn.start, prev.used_pn.end, prev,
+                "[{self}] Found packet with too new packet number {} > {}, compared to {prev}",
+                self.used_pn.start, prev.used_pn.end,
             );
             Err(Error::PacketNumberOverlap)
         } else {
@@ -592,8 +589,8 @@ impl CryptoDxState {
     pub fn used(&mut self, pn: PacketNumber) -> Res<()> {
         if pn < self.min_pn {
             debug!(
-                "[{self}] Found packet with too old packet number: {} < {}",
-                pn, self.min_pn
+                "[{self}] Found packet with too old packet number: {pn} < {}",
+                self.min_pn
             );
             return Err(Error::PacketNumberOverlap);
         }
@@ -634,8 +631,7 @@ impl CryptoDxState {
     pub fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         trace!(
-            "[{self}] encrypt pn={} hdr={} body={}",
-            pn,
+            "[{self}] encrypt pn={pn} hdr={} body={}",
             hex(hdr),
             hex(body)
         );
@@ -669,8 +665,7 @@ impl CryptoDxState {
     pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         trace!(
-            "[{self}] decrypt pn={} hdr={} body={}",
-            pn,
+            "[{self}] decrypt pn={pn} hdr={} body={}",
             hex(hdr),
             hex(body)
         );
@@ -949,9 +944,7 @@ impl CryptoStates {
 
         for v in versions {
             debug!(
-                "[{self}] Creating initial cipher state v={:?}, role={:?} dcid={}",
-                v,
-                role,
+                "[{self}] Creating initial cipher state v={v:?}, role={role:?} dcid={}",
                 hex(dcid)
             );
 
@@ -1526,7 +1519,7 @@ impl CryptoStreams {
             };
             for (offset, length) in written.into_iter().flatten() {
                 cs.tx.mark_as_sent(offset, length);
-                debug!("CRYPTO for {} offset={}, len={}", space, offset, length);
+                debug!("CRYPTO for {space} offset={offset}, len={length}");
                 tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
                     space,
                     offset,

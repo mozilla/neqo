@@ -108,7 +108,7 @@ impl DecoderInstructionReader {
                 }
                 DecoderInstructionReaderState::ReadInt { reader } => {
                     let val = reader.read(recv)?;
-                    trace!("[{self}] varint read {}", val);
+                    trace!("[{self}] varint read {val}");
                     match &mut self.instruction {
                         DecoderInstruction::InsertCountIncrement { increment: v } => {
                             *v = val;
@@ -128,7 +128,7 @@ impl DecoderInstructionReader {
                             ));
                         }
                         DecoderInstruction::NoInstruction => {
-                            unreachable!("This instruction cannot be in this state.");
+                            unreachable!("This instruction cannot be in this state");
                         }
                     }
                 }

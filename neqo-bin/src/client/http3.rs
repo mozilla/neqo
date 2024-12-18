@@ -303,7 +303,7 @@ impl StreamHandler for DownloadStreamHandler {
         } else if let Ok(txt) = std::str::from_utf8(data) {
             debug!("READ[{stream_id}]: {txt}");
         } else {
-            debug!("READ[{}]: 0x{}", stream_id, hex(data));
+            debug!("READ[{stream_id}]: 0x{}", hex(data));
         }
 
         if fin {
@@ -345,7 +345,7 @@ impl StreamHandler for UploadStreamHandler {
                 info!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
             }
         } else {
-            panic!("Unexpected data [{}]: 0x{}", stream_id, hex(data));
+            panic!("Unexpected data [{stream_id}]: 0x{}", hex(data));
         }
         Ok(true)
     }

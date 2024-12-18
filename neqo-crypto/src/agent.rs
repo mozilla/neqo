@@ -108,7 +108,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    trace!("[{}] got ALPN {:?}", format!("{fd:p}"), alpn);
+    trace!("[{}] got ALPN {alpn:?}", format!("{fd:p}"));
     Ok(alpn)
 }
 
@@ -434,7 +434,7 @@ impl SecretAgent {
     /// If NSS can't enable or disable ciphers.
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != HandshakeState::New {
-            warn!("[{}] Cannot enable ciphers in state {:?}", self, self.state);
+            warn!("[{self}] Cannot enable ciphers in state {:?}", self.state);
             return Err(Error::InternalError);
         }
 
@@ -649,7 +649,7 @@ impl SecretAgent {
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
         if let Err(e) = res {
             let e = ech::convert_ech_error(self.fd, e);
-            warn!("[{self}] error: {:?}", e);
+            warn!("[{self}] error: {e:?}");
             self.state = HandshakeState::Failed(e.clone());
             Err(e)
         } else {
@@ -734,7 +734,7 @@ impl SecretAgent {
         if let HandshakeState::Authenticated(ref err) = self.state {
             let result =
                 secstatus_to_res(unsafe { ssl::SSL_AuthCertificateComplete(self.fd, *err) });
-            debug!("[{self}] SSL_AuthCertificateComplete: {:?}", result);
+            debug!("[{self}] SSL_AuthCertificateComplete: {result:?}");
             // This should return SECSuccess, so don't use update_state().
             self.capture_error(result)?;
         }

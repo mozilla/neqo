@@ -213,7 +213,7 @@ impl Simulator {
                         Active
                     }
                     Output::Callback(delay) => {
-                        trace!("[{}]  => callback {:?}", self.name, delay);
+                        trace!("[{}]  => callback {delay:?}", self.name);
                         assert_ne!(delay, Duration::new(0, 0));
                         Waiting(now + delay)
                     }

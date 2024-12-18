@@ -250,12 +250,11 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
     let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, stream_id, now);
     now = next_now;
     for i in 0..5 {
-        info!("iteration {}", i);
+        info!("iteration {i}");
 
         let c_tx_size: usize = c_tx_dgrams.iter().map(Datagram::len).sum();
         info!(
-            "client sending {} bytes into cwnd of {}",
-            c_tx_size,
+            "client sending {c_tx_size} bytes into cwnd of {}",
             cwnd(&client)
         );
         assert_eq!(c_tx_size, expected_cwnd);

@@ -149,7 +149,7 @@ impl AddressValidation {
     }
 
     pub fn set_validation(&mut self, validation: ValidateAddress) {
-        trace!("AddressValidation {:p}: set to {:?}", self, validation);
+        trace!("AddressValidation {self:p}: set to {validation:?}");
         self.validation = validation;
     }
 
@@ -171,7 +171,7 @@ impl AddressValidation {
             Some(d) => {
                 let end = self.start_time + Duration::from_millis(u64::from(d));
                 if end < now {
-                    trace!("Expired token: {:?} vs. {:?}", end, now);
+                    trace!("Expired token: {end:?} vs. {now:?}");
                     return None;
                 }
             }
@@ -200,11 +200,7 @@ impl AddressValidation {
         peer_address: SocketAddr,
         now: Instant,
     ) -> AddressValidationResult {
-        trace!(
-            "AddressValidation {:p}: validate {:?}",
-            self,
-            self.validation
-        );
+        trace!("AddressValidation {self:p}: validate {:?}", self.validation);
 
         if token.is_empty() {
             if self.validation == ValidateAddress::Never {
@@ -228,7 +224,7 @@ impl AddressValidation {
             if retry {
                 // This is from Retry, so we should have an ODCID >= 8.
                 if cid.len() >= 8 {
-                    info!("AddressValidation: valid Retry token for {}", cid);
+                    info!("AddressValidation: valid Retry token for {cid}");
                     AddressValidationResult::ValidRetry(cid)
                 } else {
                     panic!("AddressValidation: Retry token with small CID {cid}");

@@ -75,7 +75,7 @@ impl RttEstimate {
     }
 
     pub fn set_initial(&mut self, rtt: Duration) {
-        trace!("initial RTT={:?}", rtt);
+        trace!("initial RTT={rtt:?}");
         if rtt >= GRANULARITY {
             // Ignore if the value is too small.
             self.init(rtt);

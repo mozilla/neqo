@@ -406,7 +406,7 @@ impl RangeTracker {
 
     fn unmark_range(&mut self, off: u64, len: usize) {
         if len == 0 {
-            debug!("unmark 0-length range at {}", off);
+            debug!("unmark 0-length range at {off}");
             return;
         }
 
@@ -425,10 +425,7 @@ impl RangeTracker {
                 if *cur_off + *cur_len > off {
                     if *cur_state == RangeState::Acked {
                         debug!(
-                            "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
-                            cur_off,
-                            cur_len,
-                            off,
+                            "Attempted to unmark Acked range {cur_off}-{cur_len} with unmark_range {off}-{}",
                             off + len
                         );
                     } else {
@@ -440,10 +437,7 @@ impl RangeTracker {
 
             if *cur_state == RangeState::Acked {
                 debug!(
-                    "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
-                    cur_off,
-                    cur_len,
-                    off,
+                    "Attempted to unmark Acked range {cur_off}-{cur_len} with unmark_range {off}-{}",
                     off + len
                 );
                 continue;
@@ -761,7 +755,7 @@ impl SendStream {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        trace!("write STREAM frames at priority {:?}", priority);
+        trace!("write STREAM frames at priority {priority:?}");
         if !self.write_reset_frame(priority, builder, tokens, stats) {
             self.write_blocked_frame(priority, builder, tokens, stats);
             self.write_stream_frame(priority, builder, tokens, stats);
@@ -927,7 +921,7 @@ impl SendStream {
     fn length_and_fill(data_len: usize, space: usize) -> (usize, bool) {
         if data_len >= space {
             // More data than space allows, or an exact fit => fast path.
-            trace!("SendStream::length_and_fill fill {}", space);
+            trace!("SendStream::length_and_fill fill {space}");
             return (space, true);
         }
 
@@ -940,7 +934,7 @@ impl SendStream {
         // From here we can always fit `data_len`, but we might as well fill
         // if there is no space for the length field plus another frame.
         let fill = data_len + length_len + PacketBuilder::MINIMUM_FRAME_SIZE > space;
-        trace!("SendStream::length_and_fill {} fill {}", data_len, fill);
+        trace!("SendStream::length_and_fill {data_len} fill {fill}");
         (data_len, fill)
     }
 
@@ -1086,7 +1080,7 @@ impl SendStream {
         {
             fc.frame_lost(limit);
         } else {
-            trace!("[{self}] Ignoring lost STREAM_DATA_BLOCKED({})", limit);
+            trace!("[{self}] Ignoring lost STREAM_DATA_BLOCKED({limit})");
         }
     }
 
@@ -1693,7 +1687,7 @@ impl SendStreams {
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) {
-        trace!("write STREAM frames at priority {:?}", priority);
+        trace!("write STREAM frames at priority {priority:?}");
         // WebTransport data (which is Normal) may have a SendOrder
         // priority attached.  The spec states (6.3 write-chunk 6.1):
 
@@ -1730,7 +1724,7 @@ impl SendStreams {
         trace!("processing streams...  unfair:");
         for stream in self.map.values_mut() {
             if !stream.is_fair() {
-                trace!("   {}", stream);
+                trace!("   {stream}");
                 if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
                     break;
                 }
@@ -1746,7 +1740,7 @@ impl SendStreams {
         for stream_id in stream_ids {
             let stream = self.map.get_mut(&stream_id).unwrap();
             if let Some(order) = stream.sendorder() {
-                trace!("   {} ({})", stream_id, order);
+                trace!("   {stream_id} ({order})");
             } else {
                 trace!("   None");
             }
@@ -2943,14 +2937,7 @@ mod tests {
     fn frame_sent_sid(stream: u64, offset: usize, len: usize, fin: bool, space: usize) -> bool {
         const BUF: &[u8] = &[0x42; 128];
 
-        trace!(
-            "frame_sent stream={} offset={} len={} fin={}, space={}",
-            stream,
-            offset,
-            len,
-            fin,
-            space
-        );
+        trace!("frame_sent stream={stream} offset={offset} len={len} fin={fin}, space={space}");
 
         let mut s = stream_with_sent(stream, offset);
 
@@ -3058,7 +3045,7 @@ mod tests {
 
     fn stream_frame_at_boundary(data: &[u8]) {
         fn send_with_extra_capacity(data: &[u8], extra: usize, expect_full: bool) -> Vec<u8> {
-            trace!("send_with_extra_capacity {} + {}", data.len(), extra);
+            trace!("send_with_extra_capacity {} + {extra}", data.len());
             let mut s = stream_with_sent(0, 0);
             s.send(data).unwrap();
             s.close();

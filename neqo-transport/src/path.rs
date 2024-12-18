@@ -365,8 +365,7 @@ impl Paths {
                         .is_some_and(|target| Rc::ptr_eq(target, p))
                 {
                     info!(
-                        "[{}] NEW_CONNECTION_ID with Retire Prior To forced migration to fail",
-                        path
+                        "[{path}] NEW_CONNECTION_ID with Retire Prior To forced migration to fail"
                     );
                     *migration_target = None;
                 }
@@ -596,7 +595,7 @@ impl Path {
 
     /// Set whether this path is primary.
     pub(crate) fn set_primary(&mut self, primary: bool, now: Instant) {
-        trace!("[{self}] Make primary {}", primary);
+        trace!("[{self}] Make primary {primary}");
         debug_assert!(self.remote_cid.is_some());
         self.primary = primary;
         if !primary {
@@ -607,7 +606,7 @@ impl Path {
     /// Set the current path as valid.  This updates the time that the path was
     /// last validated and cancels any path validation.
     pub fn set_valid(&mut self, now: Instant) {
-        debug!("[{self}] Path validated {:?}", now);
+        debug!("[{self}] Path validated {now:?}");
         self.state = ProbeState::Valid;
         self.validated = Some(now);
     }
@@ -778,7 +777,7 @@ impl Path {
 
         // Send PATH_CHALLENGE.
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
-            trace!("[{self}] Initiating path challenge {}", probe_count);
+            trace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<8>();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
