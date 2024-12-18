@@ -598,10 +598,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
 
     use neqo_common::{qinfo, IpTosEcn};
     use test_fixture::now;
@@ -612,6 +609,7 @@ mod tests {
             classic_cc::State,
             cubic::{Cubic, CUBIC_BETA_USIZE_DIVIDEND, CUBIC_BETA_USIZE_DIVISOR},
             new_reno::NewReno,
+            tests::{IP_ADDR, MTU, RTT},
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
         packet::{PacketNumber, PacketType},
@@ -620,10 +618,8 @@ mod tests {
         Pmtud,
     };
 
-    const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-    const PTO: Duration = Duration::from_millis(100);
-    const RTT: Duration = Duration::from_millis(98);
-    const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(Duration::from_millis(98));
+    const PTO: Duration = RTT;
+    const RTT_ESTIMATE: RttEstimate = RttEstimate::from_duration(RTT);
     const ZERO: Duration = Duration::from_secs(0);
     const EPSILON: Duration = Duration::from_nanos(1);
     const GAP: Duration = Duration::from_secs(1);
@@ -659,11 +655,11 @@ mod tests {
         match cc {
             CongestionControlAlgorithm::NewReno => Box::new(ClassicCongestionControl::new(
                 NewReno::default(),
-                Pmtud::new(IP_ADDR),
+                Pmtud::new(IP_ADDR, MTU),
             )),
             CongestionControlAlgorithm::Cubic => Box::new(ClassicCongestionControl::new(
                 Cubic::default(),
-                Pmtud::new(IP_ADDR),
+                Pmtud::new(IP_ADDR, MTU),
             )),
         }
     }
@@ -902,13 +898,13 @@ mod tests {
     fn persistent_congestion_no_lost() {
         let lost = make_lost(&[]);
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
@@ -920,13 +916,13 @@ mod tests {
     fn persistent_congestion_one_lost() {
         let lost = make_lost(&[1]);
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
@@ -940,37 +936,37 @@ mod tests {
         // sample are not considered.  So 0 is ignored.
         let lost = make_lost(&[0, PERSISTENT_CONG_THRESH + 1, PERSISTENT_CONG_THRESH + 2]);
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             1,
             1,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             1,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             1,
             0,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             1,
             1,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             1,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             1,
             0,
             &lost
@@ -991,13 +987,13 @@ mod tests {
             lost[0].len(),
         );
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
         ));
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
@@ -1011,13 +1007,13 @@ mod tests {
     fn persistent_congestion_min() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         assert!(persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
         ));
         assert!(persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
@@ -1030,7 +1026,7 @@ mod tests {
     #[test]
     fn persistent_congestion_no_prev_ack_newreno() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
         cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), Instant::now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
@@ -1038,7 +1034,7 @@ mod tests {
     #[test]
     fn persistent_congestion_no_prev_ack_cubic() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+        let mut cc = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
         cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), Instant::now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
@@ -1049,7 +1045,7 @@ mod tests {
     fn persistent_congestion_unsorted_newreno() {
         let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
@@ -1062,7 +1058,7 @@ mod tests {
     fn persistent_congestion_unsorted_cubic() {
         let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
         assert!(!persistent_congestion_by_pto(
-            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR)),
+            ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU)),
             0,
             0,
             &lost
@@ -1073,7 +1069,7 @@ mod tests {
     fn app_limited_slow_start() {
         const BELOW_APP_LIMIT_PKTS: usize = 5;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
         let cwnd = cc.congestion_window;
         let mut now = now();
         let mut next_pn = 0;
@@ -1157,7 +1153,7 @@ mod tests {
         const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - 2;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
 
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
         let mut now = now();
 
         // Change state to congestion avoidance by introducing loss.
@@ -1273,7 +1269,7 @@ mod tests {
     #[test]
     fn ecn_ce() {
         let now = now();
-        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR));
+        let mut cc = ClassicCongestionControl::new(NewReno::default(), Pmtud::new(IP_ADDR, MTU));
         let p_ce = SentPacket::new(
             PacketType::Short,
             1,

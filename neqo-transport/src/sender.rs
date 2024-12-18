@@ -108,7 +108,7 @@ impl PacketSender {
         stats: &mut Stats,
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
-        self.pmtud_mut().on_packets_acked(acked_pkts, stats);
+        self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
     }
 

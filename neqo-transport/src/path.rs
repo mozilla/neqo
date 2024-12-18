@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder, IpTos, IpTosEcn};
+use neqo_common::{
+    hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Encoder, IpTos, IpTosEcn,
+};
 use neqo_crypto::random;
 
 use crate::{
@@ -79,6 +81,7 @@ impl Paths {
         cc: CongestionControlAlgorithm,
         pacing: bool,
         now: Instant,
+        stats: &mut Stats,
     ) -> PathRef {
         self.paths
             .iter()
@@ -90,7 +93,8 @@ impl Paths {
                 }
             })
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now);
+                let mut p =
+                    Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                 }
@@ -253,7 +257,9 @@ impl Paths {
         } else {
             // See if the PMTUD raise timer wants to fire.
             if let Some(path) = self.primary() {
-                path.borrow_mut().pmtud_mut().maybe_fire_raise_timer(now);
+                path.borrow_mut()
+                    .pmtud_mut()
+                    .maybe_fire_raise_timer(now, stats);
             }
             true
         }
@@ -527,8 +533,20 @@ impl Path {
         pacing: bool,
         qlog: NeqoQlog,
         now: Instant,
+        stats: &mut Stats,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip()), now);
+        let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
+            Ok((name, mtu)) => {
+                qdebug!("Outbound interface {name} has MTU {mtu}");
+                stats.pmtud_iface_mtu = mtu;
+                Some(mtu)
+            }
+            Err(e) => {
+                qwarn!("Failed to determine outbound interface: {e}");
+                None
+            }
+        };
+        let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
