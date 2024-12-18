@@ -6,7 +6,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace, Header};
+use log::{debug, error, trace};
+use neqo_common::{qlog::NeqoQlog, Header};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 
 use crate::{
@@ -92,9 +93,8 @@ impl QPackEncoder {
             return Ok(());
         }
 
-        qdebug!(
-            [self],
-            "Set max capacity to new capacity:{} old:{} max_table_size={}.",
+        debug!(
+            "[{self}] Set max capacity to new capacity:{} old:{} max_table_size={}.",
             cap,
             self.table.capacity(),
             self.max_table_size,
@@ -129,7 +129,7 @@ impl QPackEncoder {
     }
 
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
-        qdebug!([self], "read a new instruction");
+        debug!("[{self}] read a new instruction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
@@ -203,7 +203,7 @@ impl QPackEncoder {
     }
 
     fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
-        qdebug!([self], "call instruction {:?}", instruction);
+        debug!("[{self}] call instruction {:?}", instruction);
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
                 qlog::qpack_read_insert_count_increment_instruction(
@@ -247,7 +247,7 @@ impl QPackEncoder {
         name: &[u8],
         value: &[u8],
     ) -> Res<u64> {
-        qdebug!([self], "insert {:?} {:?}.", name, value);
+        debug!("[{self}] insert {:?} {:?}.", name, value);
 
         let entry_size = name.len() + value.len() + ADDITIONAL_TABLE_ENTRY_SIZE;
 
@@ -280,7 +280,7 @@ impl QPackEncoder {
     }
 
     fn change_capacity(&mut self, value: u64) {
-        qdebug!([self], "change capacity: {}", value);
+        debug!("[{self}] change capacity: {}", value);
         self.next_capacity = Some(value);
     }
 
@@ -321,7 +321,7 @@ impl QPackEncoder {
     pub fn send_encoder_updates(&mut self, conn: &mut Connection) -> Res<()> {
         match self.local_stream {
             LocalStreamState::NoStream => {
-                qerror!("Send call but there is no stream yet.");
+                error!("Send call but there is no stream yet.");
                 Ok(())
             }
             LocalStreamState::Uninitialized(stream_id) => {
@@ -368,7 +368,7 @@ impl QPackEncoder {
         h: &[Header],
         stream_id: StreamId,
     ) -> HeaderEncoder {
-        qdebug!([self], "encoding headers.");
+        debug!("[{self}] encoding headers.");
 
         // Try to send capacity instructions if present.
         // This code doesn't try to deal with errors, it just tries
@@ -393,7 +393,7 @@ impl QPackEncoder {
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
             let value = iter.value().as_bytes().to_vec();
-            qtrace!("encoding {:x?} {:x?}.", name, value);
+            trace!("encoding {:x?} {:x?}.", name, value);
 
             if let Some(LookupResult {
                 index,
@@ -401,9 +401,8 @@ impl QPackEncoder {
                 value_matches,
             }) = self.table.lookup(&name, &value, can_block)
             {
-                qtrace!(
-                    [self],
-                    "found a {} entry, value-match={}",
+                trace!(
+                    "[{self}] found a {} entry, value-match={}",
                     if static_table { "static" } else { "dynamic" },
                     value_matches
                 );

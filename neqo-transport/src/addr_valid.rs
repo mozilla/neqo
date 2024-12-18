@@ -11,7 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Decoder, Encoder, Role};
+use log::{info, trace};
+use neqo_common::{Decoder, Encoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
@@ -148,7 +149,7 @@ impl AddressValidation {
     }
 
     pub fn set_validation(&mut self, validation: ValidateAddress) {
-        qtrace!("AddressValidation {:p}: set to {:?}", self, validation);
+        trace!("AddressValidation {:p}: set to {:?}", self, validation);
         self.validation = validation;
     }
 
@@ -170,7 +171,7 @@ impl AddressValidation {
             Some(d) => {
                 let end = self.start_time + Duration::from_millis(u64::from(d));
                 if end < now {
-                    qtrace!("Expired token: {:?} vs. {:?}", end, now);
+                    trace!("Expired token: {:?} vs. {:?}", end, now);
                     return None;
                 }
             }
@@ -199,7 +200,7 @@ impl AddressValidation {
         peer_address: SocketAddr,
         now: Instant,
     ) -> AddressValidationResult {
-        qtrace!(
+        trace!(
             "AddressValidation {:p}: validate {:?}",
             self,
             self.validation
@@ -207,15 +208,15 @@ impl AddressValidation {
 
         if token.is_empty() {
             if self.validation == ValidateAddress::Never {
-                qinfo!("AddressValidation: no token; accepting");
+                info!("AddressValidation: no token; accepting");
                 return AddressValidationResult::Pass;
             }
-            qinfo!("AddressValidation: no token; validating");
+            info!("AddressValidation: no token; validating");
             return AddressValidationResult::Validate;
         }
         if token.len() <= TOKEN_IDENTIFIER_RETRY.len() {
             // Treat bad tokens strictly.
-            qinfo!("AddressValidation: too short token");
+            info!("AddressValidation: too short token");
             return AddressValidationResult::Invalid;
         }
         let retry = Self::is_likely_retry(token);
@@ -227,7 +228,7 @@ impl AddressValidation {
             if retry {
                 // This is from Retry, so we should have an ODCID >= 8.
                 if cid.len() >= 8 {
-                    qinfo!("AddressValidation: valid Retry token for {}", cid);
+                    info!("AddressValidation: valid Retry token for {}", cid);
                     AddressValidationResult::ValidRetry(cid)
                 } else {
                     panic!("AddressValidation: Retry token with small CID {cid}");
@@ -235,10 +236,10 @@ impl AddressValidation {
             } else if cid.is_empty() {
                 // An empty connection ID means NEW_TOKEN.
                 if self.validation == ValidateAddress::Always {
-                    qinfo!("AddressValidation: valid NEW_TOKEN token; validating again");
+                    info!("AddressValidation: valid NEW_TOKEN token; validating again");
                     AddressValidationResult::Validate
                 } else {
-                    qinfo!("AddressValidation: valid NEW_TOKEN token; accepting");
+                    info!("AddressValidation: valid NEW_TOKEN token; accepting");
                     AddressValidationResult::Pass
                 }
             } else {
@@ -249,16 +250,16 @@ impl AddressValidation {
             // We've either lost the keys or we've received junk.
             if retry {
                 // If this looked like a Retry, treat it as being bad.
-                qinfo!("AddressValidation: invalid Retry token; rejecting");
+                info!("AddressValidation: invalid Retry token; rejecting");
                 AddressValidationResult::Invalid
             } else if self.validation == ValidateAddress::Never {
                 // We don't require validation, so OK.
-                qinfo!("AddressValidation: invalid NEW_TOKEN token; accepting");
+                info!("AddressValidation: invalid NEW_TOKEN token; accepting");
                 AddressValidationResult::Pass
             } else {
                 // This might be an invalid NEW_TOKEN token, or a valid one
                 // for which we have since lost the keys.  Check again.
-                qinfo!("AddressValidation: invalid NEW_TOKEN token; validating again");
+                info!("AddressValidation: invalid NEW_TOKEN token; validating again");
                 AddressValidationResult::Validate
             }
         }
@@ -327,7 +328,7 @@ impl NewTokenState {
         {
             for t in old.iter().rev().chain(pending.iter().rev()) {
                 if t == &token {
-                    qinfo!("NewTokenState discarding duplicate NEW_TOKEN");
+                    info!("NewTokenState discarding duplicate NEW_TOKEN");
                     return;
                 }
             }

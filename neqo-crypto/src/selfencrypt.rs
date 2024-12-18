@@ -6,7 +6,8 @@
 
 use std::mem;
 
-use neqo_common::{hex, qinfo, qtrace, Encoder};
+use log::{info, trace};
+use neqo_common::{hex, Encoder};
 
 use crate::{
     constants::{Cipher, Version},
@@ -61,7 +62,7 @@ impl SelfEncrypt {
         self.old_key = Some(mem::replace(&mut self.key, new_key));
         let (kid, _) = self.key_id.overflowing_add(1);
         self.key_id = kid;
-        qinfo!(["SelfEncrypt"], "Rotated keys to {}", self.key_id);
+        info!("[SelfEncrypt] Rotated keys to {}", self.key_id);
         Ok(())
     }
 
@@ -98,9 +99,8 @@ impl SelfEncrypt {
         let mut output: Vec<u8> = enc.into();
         output.resize(encoded_len, 0);
         cipher.encrypt(0, extended_aad.as_ref(), plaintext, &mut output[offset..])?;
-        qtrace!(
-            ["SelfEncrypt"],
-            "seal {} {} -> {}",
+        trace!(
+            "[SelfEncrypt] seal {} {} -> {}",
             hex(aad),
             hex(plaintext),
             hex(&output)
@@ -149,9 +149,8 @@ impl SelfEncrypt {
             aead.decrypt(0, extended_aad.as_ref(), &ciphertext[offset..], &mut output)?;
         let final_len = decrypted.len();
         output.truncate(final_len);
-        qtrace!(
-            ["SelfEncrypt"],
-            "open {} {} -> {}",
+        trace!(
+            "[SelfEncrypt] open {} {} -> {}",
             hex(aad),
             hex(ciphertext),
             hex(&output)

@@ -3,8 +3,8 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-
-use neqo_common::{qtrace, Decoder, IncrementalDecoderUint, Role};
+use log::trace;
+use neqo_common::{Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{Connection, StreamId, StreamType};
 
@@ -137,7 +137,7 @@ impl NewStreamHeadReader {
                 return Ok(None);
             };
 
-            qtrace!("Decoded uint {}", output);
+            trace!("Decoded uint {}", output);
             match self {
                 Self::ReadType {
                     role, stream_id, ..
@@ -161,7 +161,7 @@ impl NewStreamHeadReader {
                             return Self::map_stream_fin(*t);
                         }
                         (Ok(Some(t)), false) => {
-                            qtrace!("Decoded stream type {:?}", *t);
+                            trace!("Decoded stream type {:?}", *t);
                             *self = Self::Done;
                             return final_type;
                         }
@@ -178,7 +178,7 @@ impl NewStreamHeadReader {
                 Self::ReadId { stream_type, .. } => {
                     let is_push = *stream_type == HTTP3_UNI_STREAM_TYPE_PUSH;
                     *self = Self::Done;
-                    qtrace!("New Stream stream push_id={}", output);
+                    trace!("New Stream stream push_id={}", output);
                     if fin {
                         return Err(Error::HttpGeneralProtocol);
                     }

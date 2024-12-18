@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 
-use neqo_common::qtrace;
+use log::trace;
 
 use crate::{
     static_table::{StaticTableEntry, HEADER_STATIC_TABLE},
@@ -116,7 +116,7 @@ impl HeaderTable {
     /// The table cannot be reduce if there are entries that are referred at the moment or their
     /// inserts are unacked.
     pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
-        qtrace!([self], "set capacity to {}", cap);
+        trace!("[{self}] set capacity to {}", cap);
         if !self.evict_to(cap) {
             return Err(Error::ChangeCapacity);
         }
@@ -181,7 +181,7 @@ impl HeaderTable {
 
     /// Remove a reference to a dynamic table entry.
     pub fn remove_ref(&mut self, index: u64) {
-        qtrace!([self], "remove reference to entry {}", index);
+        trace!("[{self}] remove reference to entry {}", index);
         self.get_dynamic_with_abs_index(index)
             .expect("we should have the entry")
             .remove_ref();
@@ -189,7 +189,7 @@ impl HeaderTable {
 
     /// Add a reference to a dynamic table entry.
     pub fn add_ref(&mut self, index: u64) {
-        qtrace!([self], "add reference to entry {}", index);
+        trace!("[{self}] add reference to entry {}", index);
         self.get_dynamic_with_abs_index(index)
             .expect("we should have the entry")
             .add_ref();
@@ -199,9 +199,8 @@ impl HeaderTable {
     /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
     /// and `value_matches` (if the header value matches as well not only header name)
     pub fn lookup(&mut self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
-        qtrace!(
-            [self],
-            "lookup name:{:?} value {:?} can_block={}",
+        trace!(
+            "[{self}] lookup name:{:?} value {:?} can_block={}",
             name,
             value,
             can_block
@@ -261,9 +260,8 @@ impl HeaderTable {
     }
 
     pub fn evict_to_internal(&mut self, reduce: u64, only_check: bool) -> bool {
-        qtrace!(
-            [self],
-            "reduce table to {}, currently used:{} only_check:{}",
+        trace!(
+            "[{self}] reduce table to {}, currently used:{} only_check:{}",
             reduce,
             self.used,
             only_check
@@ -296,7 +294,7 @@ impl HeaderTable {
     /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough
     /// space and/or other entry cannot be evicted.
     pub fn insert(&mut self, name: &[u8], value: &[u8]) -> Res<u64> {
-        qtrace!([self], "insert name={:?} value={:?}", name, value);
+        trace!("[{self}] insert name={:?} value={:?}", name, value);
         let entry = DynamicTableEntry {
             name: name.to_vec(),
             value: value.to_vec(),
@@ -328,9 +326,8 @@ impl HeaderTable {
         name_index: u64,
         value: &[u8],
     ) -> Res<u64> {
-        qtrace!(
-            [self],
-            "insert with ref to index={} in {} value={:?}",
+        trace!(
+            "[{self}] insert with ref to index={} in {} value={:?}",
             name_index,
             if name_static_table {
                 "static"
@@ -357,7 +354,7 @@ impl HeaderTable {
     /// space and/or other entry cannot be evicted.
     /// `HeaderLookup` if the index dos not exits in the static/dynamic table.
     pub fn duplicate(&mut self, index: u64) -> Res<u64> {
-        qtrace!([self], "duplicate entry={}", index);
+        trace!("[{self}] duplicate entry={}", index);
         // need to remember name and value because insert may delete the entry.
         let name: Vec<u8>;
         let value: Vec<u8>;
@@ -365,7 +362,7 @@ impl HeaderTable {
             let entry = self.get_dynamic(index, self.base, false)?;
             name = entry.name().to_vec();
             value = entry.value().to_vec();
-            qtrace!([self], "duplicate name={:?} value={:?}", name, value);
+            trace!("[{self}] duplicate name={:?} value={:?}", name, value);
         }
         self.insert(&name, &value)
     }
@@ -376,7 +373,7 @@ impl HeaderTable {
     ///
     /// `IncrementAck` if ack is greater than actual number of inserts.
     pub fn increment_acked(&mut self, increment: u64) -> Res<()> {
-        qtrace!([self], "increment acked by {}", increment);
+        trace!("[{self}] increment acked by {}", increment);
         self.acked_inserts_cnt += increment;
         if self.base < self.acked_inserts_cnt {
             return Err(Error::IncrementAck);

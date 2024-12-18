@@ -15,7 +15,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use neqo_common::{qtrace, Role};
+use log::trace;
+use neqo_common::Role;
 use smallvec::SmallVec;
 
 use crate::{
@@ -132,7 +133,7 @@ impl RxStreamOrderer {
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
-        qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
+        trace!("Inbound data offset={} len={}", new_start, new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
         // have the new bytes.
@@ -165,7 +166,7 @@ impl RxStreamOrderer {
                 // Add a range containing only new data
                 // (In-order frames will take this path, with no overlap)
                 let overlap = prev_end.saturating_sub(new_start);
-                qtrace!(
+                trace!(
                     "New frame {}-{} received, overlap: {}",
                     new_start,
                     new_end,
@@ -182,7 +183,7 @@ impl RxStreamOrderer {
                 //   NNNN
                 // NNNN
                 // Do nothing
-                qtrace!(
+                trace!(
                     "Dropping frame with already-received range {}-{}",
                     new_start,
                     new_end
@@ -190,7 +191,7 @@ impl RxStreamOrderer {
                 return;
             }
         } else {
-            qtrace!("New frame {}-{} received", new_start, new_end);
+            trace!("New frame {}-{} received", new_start, new_end);
             false
         };
 
@@ -227,7 +228,7 @@ impl RxStreamOrderer {
                     // Fills in the hole, exactly (probably common)
                     break;
                 } else if next_end >= new_end {
-                    qtrace!(
+                    trace!(
                         "New frame {}-{} overlaps with next frame by {}, truncating",
                         new_start,
                         new_end,
@@ -237,7 +238,7 @@ impl RxStreamOrderer {
                     to_add = &new_data[..truncate_to];
                     break;
                 }
-                qtrace!(
+                trace!(
                     "New frame {}-{} spans entire next frame {}-{}, replacing",
                     new_start,
                     new_end,
@@ -324,7 +325,7 @@ impl RxStreamOrderer {
 
     /// Copy received data (if any) into the buffer. Returns bytes copied.
     fn read(&mut self, buf: &mut [u8]) -> usize {
-        qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
+        trace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
 
         for (&range_start, range_data) in &mut self.data_ranges {
@@ -561,7 +562,7 @@ impl RecvStream {
             mem::discriminant(&self.state),
             mem::discriminant(&new_state)
         );
-        qtrace!(
+        trace!(
             "RecvStream {} state {} -> {}",
             self.stream_id.as_u64(),
             self.state.name(),
@@ -684,7 +685,7 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state.name());
+                trace!("data received when we are in state {}", self.state.name());
             }
         }
 
@@ -847,7 +848,7 @@ impl RecvStream {
     }
 
     pub fn stop_sending(&mut self, err: AppError) {
-        qtrace!("stop_sending called when in state {}", self.state.name());
+        trace!("stop_sending called when in state {}", self.state.name());
         match &mut self.state {
             RecvStreamState::Recv {
                 fc,
@@ -1001,7 +1002,8 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, ops::Range, rc::Rc};
 
-    use neqo_common::{qtrace, Encoder};
+    use log::trace;
+    use neqo_common::Encoder;
 
     use super::RecvStream;
     use crate::{
@@ -1016,7 +1018,7 @@ mod tests {
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
         const ZEROES: &[u8] = &[0; 100];
-        qtrace!("recv_ranges {:?}", ranges);
+        trace!("recv_ranges {:?}", ranges);
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
@@ -1028,7 +1030,7 @@ mod tests {
         let mut total_recvd = 0;
         loop {
             let recvd = s.read(&mut buf[..]);
-            qtrace!("recv_ranges read {}", recvd);
+            trace!("recv_ranges read {}", recvd);
             total_recvd += recvd;
             if recvd == 0 {
                 assert_eq!(total_recvd, available);

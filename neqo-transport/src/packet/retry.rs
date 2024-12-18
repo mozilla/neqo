@@ -6,7 +6,7 @@
 
 use std::cell::RefCell;
 
-use neqo_common::qerror;
+use log::error;
 use neqo_crypto::{hkdf, Aead, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use crate::{version::Version, Error, Res};
@@ -43,7 +43,7 @@ where
     }
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {
-        qerror!("Unable to access Retry AEAD: {:?}", e);
+        error!("Unable to access Retry AEAD: {:?}", e);
         Error::InternalError
     })?
 }

@@ -15,7 +15,8 @@ use std::{
 };
 
 use common::{connected_server, default_server, generate_ticket};
-use neqo_common::{hex_with_len, qdebug, qtrace, Datagram, Encoder, Role};
+use log::{debug, trace};
+use neqo_common::{hex_with_len, Datagram, Encoder, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     server::ValidateAddress, CloseReason, Error, State, StreamType, MIN_INITIAL_PACKET_SIZE,
@@ -398,7 +399,7 @@ fn mitm_retry() {
         .encode_varint(u64::try_from(payload.len()).unwrap());
     let pn_offset = enc.len();
     let notoken_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
-    qtrace!("notoken_header={}", hex_with_len(&notoken_header));
+    trace!("notoken_header={}", hex_with_len(&notoken_header));
 
     // Encrypt.
     let mut notoken_packet = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE)
@@ -417,7 +418,7 @@ fn mitm_retry() {
     // All MIN_INITIAL_PACKET_SIZE bytes are needed to reach the minimum datagram size.
 
     apply_header_protection(&hp, &mut notoken_packet, pn_offset..(pn_offset + pn_len));
-    qtrace!("packet={}", hex_with_len(&notoken_packet));
+    trace!("packet={}", hex_with_len(&notoken_packet));
 
     let new_datagram = Datagram::new(
         client_initial2.source(),
@@ -425,7 +426,7 @@ fn mitm_retry() {
         client_initial2.tos(),
         notoken_packet,
     );
-    qdebug!("passing modified Initial to the main server");
+    debug!("passing modified Initial to the main server");
     let dgram = server.process(Some(new_datagram), now()).dgram();
     assert!(dgram.is_some());
 

@@ -23,7 +23,8 @@ use futures::{
     future::{select, Either},
     FutureExt, TryFutureExt,
 };
-use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
+use log::{debug, error, info, warn};
+use neqo_common::{qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, Cipher, ResumptionToken,
@@ -33,7 +34,7 @@ use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
-use crate::SharedArgs;
+use crate::{log_init, SharedArgs};
 
 mod http09;
 mod http3;
@@ -226,12 +227,12 @@ impl Args {
         };
 
         if self.key_update {
-            qerror!("internal option key_update set by user");
+            error!("internal option key_update set by user");
             exit(127)
         }
 
         if self.resume {
-            qerror!("internal option resume set by user");
+            error!("internal option resume set by user");
             exit(127)
         }
 
@@ -244,7 +245,7 @@ impl Args {
                 self.shared.alpn = String::from("h3");
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
-                        qerror!("Unsupported test case: {testcase}");
+                        error!("Unsupported test case: {testcase}");
                         exit(127)
                     }
 
@@ -254,14 +255,14 @@ impl Args {
             "handshake" | "transfer" | "retry" | "ecn" => {}
             "resumption" => {
                 if self.urls.len() < 2 {
-                    qerror!("Warning: resumption test won't work without >1 URL");
+                    error!("Warning: resumption test won't work without >1 URL");
                     exit(127);
                 }
                 self.resume = true;
             }
             "zerortt" => {
                 if self.urls.len() < 2 {
-                    qerror!("Warning: zerortt test won't work without >1 URL");
+                    error!("Warning: zerortt test won't work without >1 URL");
                     exit(127);
                 }
                 self.resume = true;
@@ -315,11 +316,11 @@ fn get_output_file(
         out_path.push(url_path);
 
         if all_paths.contains(&out_path) {
-            qerror!("duplicate path {}", out_path.display());
+            error!("duplicate path {}", out_path.display());
             return None;
         }
 
-        qinfo!("Saving {url} to {out_path:?}");
+        info!("Saving {url} to {out_path:?}");
 
         if let Some(parent) = out_path.parent() {
             create_dir_all(parent).ok()?;
@@ -448,7 +449,7 @@ impl<'a, H: Handler> Runner<'a, H> {
         }
 
         if self.args.stats {
-            qinfo!("{:?}", self.client.stats());
+            info!("{:?}", self.client.stats());
         }
 
         Ok(self.handler.take_token())
@@ -462,12 +463,12 @@ impl<'a, H: Handler> Runner<'a, H> {
                     self.socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
+                    debug!("Setting timeout of {:?}", new_timeout);
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
                 Output::None => {
-                    qdebug!("Output::None");
+                    debug!("Output::None");
                     break;
                 }
             }
@@ -532,14 +533,14 @@ fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((Host, u16), VecDeque<U
         .filter_map(|(origin, urls)| match origin {
             Origin::Tuple(_scheme, h, p) => Some(((h, p), urls)),
             Origin::Opaque(x) => {
-                qwarn!("Opaque origin {x:?}");
+                warn!("Opaque origin {x:?}");
                 None
             }
         })
 }
 
 pub async fn client(mut args: Args) -> Res<()> {
-    neqo_common::log::init(
+    log_init(
         args.shared
             .verbose
             .as_ref()
@@ -553,7 +554,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
-            qerror!("Resumption to {host} cannot work without at least 2 URLs.");
+            error!("Resumption to {host} cannot work without at least 2 URLs.");
             exit(127);
         }
 
@@ -564,16 +565,14 @@ pub async fn client(mut args: Args) -> Res<()> {
             )
         });
         let Some(remote_addr) = remote_addr else {
-            qerror!("No compatible address found for: {host}");
+            error!("No compatible address found for: {host}");
             exit(1);
         };
         let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
         let real_local = socket.local_addr().unwrap();
-        qinfo!(
+        info!(
             "{} Client connecting: {:?} -> {:?}",
-            args.shared.alpn,
-            real_local,
-            remote_addr,
+            args.shared.alpn, real_local, remote_addr,
         );
 
         let hostname = format!("{host}");

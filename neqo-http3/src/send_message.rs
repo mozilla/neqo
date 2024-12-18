@@ -6,7 +6,8 @@
 
 use std::{cell::RefCell, cmp::min, fmt::Debug, num::NonZeroUsize, rc::Rc};
 
-use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
+use log::{debug, trace};
+use neqo_common::{Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -119,7 +120,7 @@ impl SendMessage {
         encoder: Rc<RefCell<QPackEncoder>>,
         conn_events: Box<dyn SendStreamEvents>,
     ) -> Self {
-        qdebug!("Create a request stream_id={}", stream_id);
+        debug!("Create a request stream_id={}", stream_id);
         Self {
             state: MessageState::WaitingForHeaders,
             message_type,
@@ -140,7 +141,7 @@ impl SendMessage {
         conn: &mut Connection,
         stream_id: StreamId,
     ) -> Vec<u8> {
-        qdebug!("Encoding headers");
+        debug!("Encoding headers");
         let header_block = encoder.encode_header_block(conn, headers, stream_id);
         let hframe = HFrame::Headers {
             header_block: header_block.to_vec(),
@@ -166,7 +167,7 @@ impl Stream for SendMessage {
 }
 impl SendStream for SendMessage {
     fn send_data(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        qtrace!([self], "send_body: len={}", buf.len());
+        trace!("[{self}] send_body: len={}", buf.len());
 
         self.state.new_data()?;
 
@@ -200,11 +201,9 @@ impl SendStream for SendMessage {
             min(buf.len(), available - 9)
         };
 
-        qdebug!(
-            [self],
-            "send_request_body: available={} to_send={}.",
-            available,
-            to_send
+        debug!(
+            "[{self}] send_request_body: available={} to_send={}.",
+            available, to_send
         );
 
         let data_frame = HFrame::Data {
@@ -250,14 +249,14 @@ impl SendStream for SendMessage {
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let sent = Error::map_error(self.stream.send_buffer(conn), Error::HttpInternal(5))?;
 
-        qtrace!([self], "{} bytes sent", sent);
+        trace!("[{self}] {} bytes sent", sent);
         if !self.stream.has_buffered_data() {
             if self.state.done() {
                 Error::map_error(
                     conn.stream_close_send(self.stream_id()),
                     Error::HttpInternal(6),
                 )?;
-                qtrace!([self], "done sending request");
+                trace!("[{self}] done sending request");
             } else {
                 // DataWritable is just a signal for an application to try to write more data,
                 // if writing fails it is fine. Therefore we do not need to properly check

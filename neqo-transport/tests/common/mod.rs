@@ -8,7 +8,8 @@
 
 use std::{cell::RefCell, mem, ops::Range, rc::Rc};
 
-use neqo_common::{event::Provider, hex_with_len, qtrace, Datagram, Decoder, Role};
+use log::trace;
+use neqo_common::{event::Provider, hex_with_len, Datagram, Decoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,

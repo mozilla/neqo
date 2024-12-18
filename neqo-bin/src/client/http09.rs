@@ -17,7 +17,8 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
+use log::{debug, info, warn};
+use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
@@ -57,7 +58,7 @@ impl super::Handler for Handler<'_> {
             if self.needs_key_update {
                 match client.initiate_key_update() {
                     Ok(()) => {
-                        qdebug!("Keys updated");
+                        debug!("Keys updated");
                         self.needs_key_update = false;
                         self.download_urls(client);
                     }
@@ -74,13 +75,13 @@ impl super::Handler for Handler<'_> {
                     self.read(client, stream_id)?;
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    qdebug!("stream {stream_id} writable");
+                    debug!("stream {stream_id} writable");
                 }
                 ConnectionEvent::SendStreamComplete { stream_id } => {
-                    qdebug!("stream {stream_id} complete");
+                    debug!("stream {stream_id} complete");
                 }
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
-                    qdebug!("stream {stream_type:?} creatable");
+                    debug!("stream {stream_type:?} creatable");
                     if stream_type == StreamType::BiDi {
                         self.download_urls(client);
                     }
@@ -88,11 +89,11 @@ impl super::Handler for Handler<'_> {
                 ConnectionEvent::StateChange(
                     State::WaitInitial | State::Handshaking | State::Connected,
                 ) => {
-                    qdebug!("{event:?}");
+                    debug!("{event:?}");
                     self.download_urls(client);
                 }
                 ConnectionEvent::ZeroRttRejected => {
-                    qdebug!("{event:?}");
+                    debug!("{event:?}");
                     // All 0-RTT data was rejected. We need to retransmit it.
                     self.reinit();
                     self.download_urls(client);
@@ -101,7 +102,7 @@ impl super::Handler for Handler<'_> {
                     self.token = Some(token);
                 }
                 _ => {
-                    qwarn!("Unhandled event {event:?}");
+                    warn!("Unhandled event {event:?}");
                 }
             }
         }
@@ -247,7 +248,7 @@ impl<'b> Handler<'b> {
 
     fn download_next(&mut self, client: &mut Connection) -> bool {
         if self.needs_key_update {
-            qdebug!("Deferring requests until after first key update");
+            debug!("Deferring requests until after first key update");
             return false;
         }
         let url = self
@@ -256,7 +257,7 @@ impl<'b> Handler<'b> {
             .expect("download_next called with empty queue");
         match client.stream_create(StreamType::BiDi) {
             Ok(client_stream_id) => {
-                qinfo!("Created stream {client_stream_id} for {url}");
+                info!("Created stream {client_stream_id} for {url}");
                 let req = format!("GET {}\r\n", url.path());
                 _ = client
                     .stream_send(client_stream_id, req.as_bytes())
@@ -269,7 +270,7 @@ impl<'b> Handler<'b> {
                 true
             }
             Err(e @ (Error::StreamLimitError | Error::ConnectionState)) => {
-                qwarn!("Cannot create stream {e:?}");
+                warn!("Cannot create stream {e:?}");
                 self.url_queue.push_front(url);
                 false
             }
@@ -298,9 +299,9 @@ impl<'b> Handler<'b> {
             if let Some(out_file) = maybe_out_file {
                 out_file.write_all(read_buffer)?;
             } else if !output_read_data {
-                qdebug!("READ[{stream_id}]: {} bytes", read_buffer.len());
+                debug!("READ[{stream_id}]: {} bytes", read_buffer.len());
             } else {
-                qdebug!(
+                debug!(
                     "READ[{}]: {}",
                     stream_id,
                     std::str::from_utf8(read_buffer).unwrap()
@@ -315,7 +316,7 @@ impl<'b> Handler<'b> {
     fn read(&mut self, client: &mut Connection, stream_id: StreamId) -> Res<()> {
         match self.streams.get_mut(&stream_id) {
             None => {
-                qwarn!("Data on unexpected stream: {stream_id}");
+                warn!("Data on unexpected stream: {stream_id}");
                 return Ok(());
             }
             Some(maybe_out_file) => {
@@ -331,7 +332,7 @@ impl<'b> Handler<'b> {
                     if let Some(mut out_file) = maybe_out_file.take() {
                         out_file.flush()?;
                     } else {
-                        qinfo!("<FIN[{stream_id}]>");
+                        info!("<FIN[{stream_id}]>");
                     }
                     self.streams.remove(&stream_id);
                     self.download_urls(client);

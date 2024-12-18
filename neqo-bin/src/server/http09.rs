@@ -6,7 +6,8 @@
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
 
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
+use log::{debug, error, info, warn};
+use neqo_common::{event::Provider, hex, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{
@@ -60,7 +61,7 @@ impl HttpServer {
                 .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
                 .expect("enable ECH");
             let cfg = server.ech_config();
-            qinfo!("ECHConfigList: {}", hex(cfg));
+            info!("ECHConfigList: {}", hex(cfg));
         }
 
         let is_qns_test = args.shared.qns_test.is_some();
@@ -82,17 +83,17 @@ impl HttpServer {
         let url_dbg = String::from_utf8(partial.clone())
             .unwrap_or_else(|_| format!("<invalid UTF-8: {}>", hex(&partial)));
         if partial.len() < 4096 {
-            qdebug!("Saving partial URL: {}", url_dbg);
+            debug!("Saving partial URL: {}", url_dbg);
             self.read_state.insert(stream_id, partial);
         } else {
-            qdebug!("Giving up on partial URL {}", url_dbg);
+            debug!("Giving up on partial URL {}", url_dbg);
             conn.borrow_mut().stream_stop_sending(stream_id, 0).unwrap();
         }
     }
 
     fn stream_readable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         if !stream_id.is_client_initiated() || !stream_id.is_bidi() {
-            qdebug!("Stream {} not client-initiated bidi, ignoring", stream_id);
+            debug!("Stream {} not client-initiated bidi, ignoring", stream_id);
             return;
         }
         let (sz, fin) = conn
@@ -102,7 +103,7 @@ impl HttpServer {
 
         if sz == 0 {
             if !fin {
-                qdebug!("size 0 but !fin");
+                debug!("size 0 but !fin");
             }
             return;
         }
@@ -129,12 +130,12 @@ impl HttpServer {
 
         let resp: SendData = {
             let path = path.as_str();
-            qdebug!("Path = '{path}'");
+            debug!("Path = '{path}'");
             if self.is_qns_test {
                 match qns_read_response(path) {
                     Ok(data) => data.into(),
                     Err(e) => {
-                        qerror!("Failed to read {path}: {e}");
+                        error!("Failed to read {path}: {e}");
                         b"404".to_vec().into()
                     }
                 }
@@ -148,7 +149,7 @@ impl HttpServer {
             match stream_state.data_to_send {
                 None => stream_state.data_to_send = Some(resp),
                 Some(_) => {
-                    qdebug!("Data already set, doing nothing");
+                    debug!("Data already set, doing nothing");
                 }
             }
             if stream_state.writable {
@@ -167,7 +168,7 @@ impl HttpServer {
 
     fn stream_writable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         let Some(stream_state) = self.write_state.get_mut(&stream_id) else {
-            qwarn!("Unknown stream {stream_id}, ignoring event");
+            warn!("Unknown stream {stream_id}, ignoring event");
             return;
         };
 
@@ -220,7 +221,7 @@ impl super::HttpServer for HttpServer {
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamCreatable { .. }
                     | ConnectionEvent::SendStreamComplete { .. } => (),
-                    e => qwarn!("unhandled event {e:?}"),
+                    e => warn!("unhandled event {e:?}"),
                 }
             }
         }

@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qtrace;
+use log::trace;
 
 use crate::rtt::GRANULARITY;
 
@@ -76,7 +76,7 @@ impl Pacer {
     /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
         if self.c >= self.p {
-            qtrace!([self], "next {cwnd}/{rtt:?} no wait = {:?}", self.t);
+            trace!("[{self}] next {cwnd}/{rtt:?} no wait = {:?}", self.t);
             return self.t;
         }
 
@@ -89,12 +89,12 @@ impl Pacer {
 
         // If the increment is below the timer granularity, send immediately.
         if w < GRANULARITY {
-            qtrace!([self], "next {cwnd}/{rtt:?} below granularity ({w:?})",);
+            trace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w:?})",);
             return self.t;
         }
 
         let nxt = self.t + w;
-        qtrace!([self], "next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
+        trace!("[{self}] next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
         nxt
     }
 
@@ -108,7 +108,7 @@ impl Pacer {
             return;
         }
 
-        qtrace!([self], "spend {} over {}, {:?}", count, cwnd, rtt);
+        trace!("[{self}] spend {} over {}, {:?}", count, cwnd, rtt);
         // Increase the capacity by:
         //    `(now - self.t) * PACER_SPEEDUP * cwnd / rtt`
         // That is, the elapsed fraction of the RTT times rate that data is added.

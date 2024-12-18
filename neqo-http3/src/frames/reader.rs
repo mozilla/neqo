@@ -8,8 +8,9 @@
 
 use std::fmt::Debug;
 
+use log::trace;
 use neqo_common::{
-    hex_with_len, qtrace, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
+    hex_with_len, Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
     IncrementalDecoderUint,
 };
 use neqo_transport::{Connection, StreamId};
@@ -173,7 +174,7 @@ impl FrameReader {
             {
                 (0, f) => (None, false, f),
                 (amount, f) => {
-                    qtrace!("FrameReader::receive: reading {} byte, fin={}", amount, f);
+                    trace!("FrameReader::receive: reading {} byte, fin={}", amount, f);
                     (self.consume::<T>(Decoder::from(&buf[..amount]))?, true, f)
                 }
             };
@@ -203,13 +204,13 @@ impl FrameReader {
         match &mut self.state {
             FrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {
-                    qtrace!("FrameReader::receive: read frame type {}", v);
+                    trace!("FrameReader::receive: read frame type {}", v);
                     self.frame_type_decoded::<T>(HFrameType(v))?;
                 }
             }
             FrameReaderState::GetLength { decoder } => {
                 if let Some(len) = decoder.consume(&mut input) {
-                    qtrace!(
+                    trace!(
                         "FrameReader::receive: frame type {:?} length {}",
                         self.frame_type,
                         len
@@ -219,7 +220,7 @@ impl FrameReader {
             }
             FrameReaderState::GetData { decoder } => {
                 if let Some(data) = decoder.consume(&mut input) {
-                    qtrace!(
+                    trace!(
                         "received frame {:?}: {}",
                         self.frame_type,
                         hex_with_len(&data[..])

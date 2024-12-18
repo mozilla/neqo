@@ -12,7 +12,8 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
+use log::{trace, warn};
+use neqo_common::{hex, hex_with_len, Decoder, Encoder};
 use neqo_crypto::random;
 
 use crate::{
@@ -397,7 +398,7 @@ impl PacketBuilder {
     /// This will return an error if the packet is too large.
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
         if self.len() > self.limit {
-            qwarn!("Packet contents are more than the limit");
+            warn!("Packet contents are more than the limit");
             debug_assert!(false);
             return Err(Error::InternalError);
         }
@@ -409,7 +410,7 @@ impl PacketBuilder {
 
         let hdr = &self.encoder.as_ref()[self.header.clone()];
         let body = &self.encoder.as_ref()[self.header.end..];
-        qtrace!(
+        trace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
             hex(hdr),
@@ -434,7 +435,7 @@ impl PacketBuilder {
         // Finally, cut off the plaintext and add back the ciphertext.
         self.encoder.truncate(self.header.end);
         self.encoder.encode(&ciphertext);
-        qtrace!("Packet built {}", hex(&self.encoder));
+        trace!("Packet built {}", hex(&self.encoder));
         Ok(self.encoder)
     }
 
@@ -798,7 +799,7 @@ impl<'a> PublicPacket<'a> {
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
             .map_or(Err(Error::NoMoreData), |sample| {
-                qtrace!("unmask hdr={}", hex(&self.data[..sample_offset]));
+                trace!("unmask hdr={}", hex(&self.data[..sample_offset]));
                 crypto.compute_mask(sample)
             })?;
 
@@ -827,7 +828,7 @@ impl<'a> PublicPacket<'a> {
         hdrbytes.truncate(self.header_len + pn_len);
         pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
 
-        qtrace!("unmasked hdr={}", hex(&hdrbytes));
+        trace!("unmasked hdr={}", hex(&hdrbytes));
 
         let key_phase = self.packet_type == PacketType::Short
             && (first_byte & PACKET_BIT_KEY_PHASE) == PACKET_BIT_KEY_PHASE;
@@ -856,7 +857,7 @@ impl<'a> PublicPacket<'a> {
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
-            qtrace!([rx], "decoded header: {:?}", header);
+            trace!("[{rx}] decoded header: {:?}", header);
             let Some(rx) = crypto.rx(version, cspace, key_phase) else {
                 return Err(Error::DecryptError);
             };
@@ -877,7 +878,7 @@ impl<'a> PublicPacket<'a> {
         } else if crypto.rx_pending(cspace) {
             Err(Error::KeysPending(cspace))
         } else {
-            qtrace!("keys for {:?} already discarded", cspace);
+            trace!("keys for {:?} already discarded", cspace);
             Err(Error::KeysDiscarded(cspace))
         }
     }

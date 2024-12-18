@@ -6,7 +6,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use neqo_common::{qtrace, Encoder};
+use log::trace;
+use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{frames::HFrame, BufferedStream, Http3StreamType, RecvStream, Res};
@@ -92,7 +93,7 @@ impl ControlStreamLocal {
 
     /// Create a control stream.
     pub fn create(&mut self, conn: &mut Connection) -> Res<()> {
-        qtrace!([self], "Create a control stream.");
+        trace!("[{self}] Create a control stream.");
         self.stream.init(conn.stream_create(StreamType::UniDi)?);
         self.stream
             .buffer(&[u8::try_from(HTTP3_UNI_STREAM_TYPE_CONTROL).unwrap()]);

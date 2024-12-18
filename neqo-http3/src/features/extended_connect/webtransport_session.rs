@@ -6,7 +6,8 @@
 
 use std::{cell::RefCell, collections::BTreeSet, mem, rc::Rc};
 
-use neqo_common::{qtrace, Encoder, Header, MessageType, Role};
+use log::trace;
+use neqo_common::{Encoder, Header, MessageType, Role};
 use neqo_qpack::{QPackDecoder, QPackEncoder};
 use neqo_transport::{Connection, DatagramTracking, StreamId};
 
@@ -146,7 +147,7 @@ impl WebTransportSession {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        qtrace!([self], "receive control data");
+        trace!("[{self}] receive control data");
         let (out, _) = self.control_stream_recv.receive(conn)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers();
@@ -207,7 +208,7 @@ impl WebTransportSession {
         if self.state.closing_state() {
             return;
         }
-        qtrace!("ExtendedConnect close the session");
+        trace!("ExtendedConnect close the session");
         self.state = SessionState::Done;
         if !close_type.locally_initiated() {
             self.events.session_end(
@@ -229,7 +230,7 @@ impl WebTransportSession {
 
         if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
         {
-            qtrace!(
+            trace!(
                 "ExtendedConnect response headers {:?}, fin={}",
                 headers,
                 fin
@@ -346,7 +347,7 @@ impl WebTransportSession {
                 &mut self.control_stream_recv,
             ))
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
-        qtrace!([self], "Received frame: {:?} fin={}", f, fin);
+        trace!("[{self}] Received frame: {:?} fin={}", f, fin);
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
             self.events.session_end(
                 ExtendedConnectType::WebTransport,
@@ -410,7 +411,7 @@ impl WebTransportSession {
         buf: &[u8],
         id: impl Into<DatagramTracking>,
     ) -> Res<()> {
-        qtrace!([self], "send_datagram state={:?}", self.state);
+        trace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.session_id.as_u64() / 4);

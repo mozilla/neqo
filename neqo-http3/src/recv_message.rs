@@ -6,7 +6,8 @@
 
 use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
-use neqo_common::{header::HeadersExt, qdebug, qinfo, qtrace, Header};
+use log::{debug, info, trace};
+use neqo_common::{header::HeadersExt, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -152,7 +153,7 @@ impl RecvMessage {
     }
 
     fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
-        qtrace!([self], "Add new headers fin={}", fin);
+        trace!("[{self}] Add new headers fin={}", fin);
         let interim = match self.message_type {
             MessageType::Request => false,
             MessageType::Response => is_interim(&headers)?,
@@ -199,7 +200,10 @@ impl RecvMessage {
     fn set_state_to_close_pending(&mut self, post_readable_event: bool) -> Res<()> {
         // Stream has received fin. Depending on headers state set header_ready
         // or data_readable event so that app can pick up the fin.
-        qtrace!([self], "set_state_to_close_pending: state={:?}", self.state);
+        trace!(
+            "[{self}] set_state_to_close_pending: state={:?}",
+            self.state
+        );
 
         match self.state {
             RecvMessageState::WaitingForResponseHeaders { .. } => {
@@ -250,9 +254,8 @@ impl RecvMessage {
     }
 
     fn receive_internal(&mut self, conn: &mut Connection, post_readable_event: bool) -> Res<()> {
-        let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
         loop {
-            qdebug!([label], "state={:?}.", self.state);
+            debug!("[{self}] state={:?}.", self.state);
             match &mut self.state {
                 // In the following 3 states we need to read frames.
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
@@ -267,12 +270,9 @@ impl RecvMessage {
                         }
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
-                            qdebug!(
-                                [self],
-                                "A new frame has been received: {:?}; state={:?} fin={}",
-                                frame,
-                                self.state,
-                                fin,
+                            debug!(
+                                "[{self}] A new frame has been received: {:?}; state={:?} fin={}",
+                                frame, self.state, fin,
                             );
                             match frame {
                                 HFrame::Headers { header_block } => {
@@ -306,9 +306,8 @@ impl RecvMessage {
                         .refers_dynamic_table(header_block)?
                         && !self.blocked_push_promise.is_empty()
                     {
-                        qinfo!(
-                            [self],
-                            "decoding header is blocked waiting for a push_promise header block."
+                        info!(
+                            "[{self}] decoding header is blocked waiting for a push_promise header block."
                         );
                         break Ok(());
                     }
@@ -326,7 +325,7 @@ impl RecvMessage {
                             break Ok(());
                         }
                     } else {
-                        qinfo!([self], "decoding header is blocked.");
+                        info!("[{self}] decoding header is blocked.");
                         break Ok(());
                     }
                 }

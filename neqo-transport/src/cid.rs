@@ -14,7 +14,8 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{hex, hex_with_len, qdebug, qinfo, Decoder, Encoder};
+use log::{debug, info};
+use neqo_common::{hex, hex_with_len, Decoder, Encoder};
 use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
@@ -392,7 +393,7 @@ impl ConnectionIdStore<[u8; 16]> {
         }
         // It's not OK if any individual piece matches though.
         if self.cids.iter().any(|c| c.any_part_equal(&entry)) {
-            qinfo!("ConnectionIdStore found reused part in NEW_CONNECTION_ID");
+            info!("ConnectionIdStore found reused part in NEW_CONNECTION_ID");
             return Err(Error::ProtocolViolation);
         }
 
@@ -521,7 +522,7 @@ impl ConnectionIdManager {
                 .iter()
                 .any(|c| c.seqno == seqno && c.cid.is_empty());
         if empty_cid {
-            qdebug!("Connection ID {seqno} is zero-length, not retiring");
+            debug!("Connection ID {seqno} is zero-length, not retiring");
         } else {
             self.connection_ids.retire(seqno);
             self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);

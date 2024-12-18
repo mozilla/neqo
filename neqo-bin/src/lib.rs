@@ -9,9 +9,11 @@
 
 use std::{
     fmt::{self, Display},
+    io::Write,
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    time::Duration,
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 use clap::Parser;
@@ -241,6 +243,33 @@ impl QuicParameters {
             };
             params.versions(version, Version::all())
         }
+    }
+}
+
+fn since_start() -> Duration {
+    static START_TIME: OnceLock<Instant> = OnceLock::new();
+    START_TIME.get_or_init(Instant::now).elapsed()
+}
+pub fn log_init(level_filter: Option<log::LevelFilter>) {
+    let mut builder = env_logger::Builder::from_default_env();
+    if let Some(filter) = level_filter {
+        builder.filter_level(filter);
+    }
+    builder.format(|buf, record| {
+        let elapsed = since_start();
+        writeln!(
+            buf,
+            "{}s{:3}ms {} {}",
+            elapsed.as_secs(),
+            elapsed.as_millis() % 1000,
+            record.level(),
+            record.args()
+        )
+    });
+    if let Err(e) = builder.try_init() {
+        eprintln!("Logging initialization error {e:?}");
+    } else {
+        log::debug!("Logging initialized");
     }
 }
 

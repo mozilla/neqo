@@ -12,7 +12,8 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{header::HeadersExt, hex, qdebug, qerror, qinfo, Datagram, Header};
+use log::{debug, error, info};
+use neqo_common::{header::HeadersExt, hex, Datagram, Header};
 use neqo_crypto::{generate_ech_keys, random, AntiReplay};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
@@ -62,7 +63,7 @@ impl HttpServer {
                 .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
                 .unwrap();
             let cfg = server.ech_config();
-            qinfo!("ECHConfigList: {}", hex(cfg));
+            info!("ECHConfigList: {}", hex(cfg));
         }
         Self {
             server,
@@ -92,7 +93,7 @@ impl super::HttpServer for HttpServer {
                     headers,
                     fin,
                 } => {
-                    qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
+                    debug!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     if headers.contains_header(":method", "POST") {
                         self.posts.insert(stream, 0);
@@ -110,7 +111,7 @@ impl super::HttpServer for HttpServer {
                         match qns_read_response(path.value()) {
                             Ok(data) => SendData::from(data),
                             Err(e) => {
-                                qerror!("Failed to read {}: {e}", path.value());
+                                error!("Failed to read {}: {e}", path.value());
                                 stream
                                     .send_headers(&[Header::new(":status", "404")])
                                     .unwrap();

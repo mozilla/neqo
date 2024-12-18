@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::qdebug;
+use log::debug;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -36,7 +36,7 @@ impl ControlStreamRemote {
 
     /// Check if a stream is the control stream and read received data.
     pub fn receive_single(&mut self, conn: &mut Connection) -> Res<Option<HFrame>> {
-        qdebug!([self], "Receiving data.");
+        debug!("[{self}] Receiving data.");
         match self
             .frame_reader
             .receive(&mut StreamReaderConnectionWrapper::new(
@@ -45,7 +45,7 @@ impl ControlStreamRemote {
             ))? {
             (_, true) => Err(Error::HttpClosedCriticalStream),
             (s, false) => {
-                qdebug!([self], "received {:?}", s);
+                debug!("[{self}] received {:?}", s);
                 Ok(s)
             }
         }

@@ -6,7 +6,8 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider, qdebug};
+use log::debug;
+use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -291,7 +292,7 @@ fn zero_rtt_loss_accepted() {
         assertions::assert_coalesced_0rtt(&ci.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
-        qdebug!("Drop CI/0-RTT {i} extra times");
+        debug!("Drop CI/0-RTT {i} extra times");
         for _ in 0..i {
             now += client.process_output(now).callback();
             ci = client.process_output(now);

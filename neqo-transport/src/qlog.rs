@@ -11,7 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder, IpTosEcn};
+use log::info;
+use neqo_common::{hex, qlog::NeqoQlog, Decoder, IpTosEcn};
 use qlog::events::{
     connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
     quic::{
@@ -231,7 +232,7 @@ pub fn packet_sent(
                 if let Ok(f) = Frame::decode(&mut d) {
                     frames.push(QuicFrame::from(f));
                 } else {
-                    qinfo!("qlog: invalid frame");
+                    info!("qlog: invalid frame");
                     break;
                 }
             }
@@ -325,7 +326,7 @@ pub fn packet_received(
                 if let Ok(f) = Frame::decode(&mut d) {
                     frames.push(QuicFrame::from(f));
                 } else {
-                    qinfo!("qlog: invalid frame");
+                    info!("qlog: invalid frame");
                     break;
                 }
             }

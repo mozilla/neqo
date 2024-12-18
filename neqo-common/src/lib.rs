@@ -14,7 +14,6 @@ mod fuzz;
 pub mod header;
 pub mod hrtime;
 mod incrdecoder;
-pub mod log;
 pub mod qlog;
 pub mod tos;
 

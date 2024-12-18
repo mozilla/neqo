@@ -14,7 +14,8 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qtrace, Datagram};
+use log::trace;
+use neqo_common::Datagram;
 use neqo_crypto::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
@@ -119,13 +120,13 @@ impl Http3Server {
     }
 
     pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
-        qtrace!([self], "Process.");
+        trace!("[{self}] Process.");
         let out = self.server.process(dgram, now);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
         match out {
             Output::Datagram(d) => {
-                qtrace!([self], "Send packet: {:?}", d);
+                trace!("[{self}] Send packet: {:?}", d);
                 Output::Datagram(d)
             }
             _ => self.server.process(Option::<Datagram>::None, now),
@@ -134,7 +135,7 @@ impl Http3Server {
 
     /// Process HTTP3 layer.
     fn process_http3(&mut self, now: Instant) {
-        qtrace!([self], "Process http3 internal.");
+        trace!("[{self}] Process http3 internal.");
         // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable
         // types.
         #[allow(clippy::mutable_key_type)]

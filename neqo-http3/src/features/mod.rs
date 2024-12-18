@@ -6,7 +6,7 @@
 
 use std::{fmt::Debug, mem};
 
-use neqo_common::qtrace;
+use log::trace;
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -62,7 +62,7 @@ impl NegotiationState {
             listener,
         } = self
         {
-            qtrace!(
+            trace!(
                 "set_negotiated {:?} to {}",
                 feature_type,
                 settings.get(*feature_type)

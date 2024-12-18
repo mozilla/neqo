@@ -6,7 +6,7 @@
 
 use std::mem;
 
-use neqo_common::{qdebug, qtrace};
+use log::{debug, trace};
 
 use crate::{
     prefix::{
@@ -176,7 +176,7 @@ impl EncoderInstructionReader {
         } else {
             unreachable!("The above patterns match everything.");
         };
-        qdebug!([self], "instruction decoded");
+        debug!("[{self}] instruction decoded");
     }
 
     fn decode_instruction_type<T: ReadByte + Reader>(&mut self, recv: &mut T) -> Res<()> {
@@ -220,7 +220,7 @@ impl EncoderInstructionReader {
         &mut self,
         recv: &mut T,
     ) -> Res<DecodedEncoderInstruction> {
-        qdebug!([self], "reading instructions");
+        debug!("[{self}] reading instructions");
         loop {
             match &mut self.state {
                 EncoderInstructionReaderState::ReadInstruction => {
@@ -229,7 +229,7 @@ impl EncoderInstructionReader {
                 EncoderInstructionReaderState::ReadFirstInt { reader } => {
                     let val = reader.read(recv)?;
 
-                    qtrace!([self], "First varint read {}", val);
+                    trace!("[{self}] First varint read {}", val);
                     match &mut self.instruction {
                         DecodedEncoderInstruction::Capacity { value: v, .. }
                         | DecodedEncoderInstruction::Duplicate { index: v } => {
@@ -249,7 +249,7 @@ impl EncoderInstructionReader {
                 EncoderInstructionReaderState::ReadFirstLiteral { reader } => {
                     let val = reader.read(recv)?;
 
-                    qtrace!([self], "first literal read {:?}", val);
+                    trace!("[{self}] first literal read {:?}", val);
                     match &mut self.instruction {
                         DecodedEncoderInstruction::InsertWithNameRefStatic { value, .. }
                         | DecodedEncoderInstruction::InsertWithNameRefDynamic { value, .. } => {
@@ -268,7 +268,7 @@ impl EncoderInstructionReader {
                 EncoderInstructionReaderState::ReadSecondLiteral { reader } => {
                     let val = reader.read(recv)?;
 
-                    qtrace!([self], "second literal read {:?}", val);
+                    trace!("[{self}] second literal read {:?}", val);
                     match &mut self.instruction {
                         DecodedEncoderInstruction::InsertWithNameLiteral { value, .. } => {
                             *value = val;

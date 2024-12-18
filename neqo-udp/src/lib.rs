@@ -12,7 +12,8 @@ use std::{
     slice::{self, Chunks},
 };
 
-use neqo_common::{qdebug, qtrace, Datagram, IpTos};
+use log::{debug, trace};
+use neqo_common::{Datagram, IpTos};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Socket receive buffer size.
@@ -37,7 +38,7 @@ pub fn send_inner(
 
     state.try_send(socket, &transmit)?;
 
-    qtrace!(
+    trace!(
         "sent {} bytes from {} to {}",
         d.len(),
         d.source(),
@@ -70,12 +71,9 @@ pub fn recv_inner<'a>(
         )?;
 
         if meta.len == 0 || meta.stride == 0 {
-            qdebug!(
+            debug!(
                 "ignoring datagram from {} to {} len {} stride {}",
-                meta.addr,
-                local_address,
-                meta.len,
-                meta.stride
+                meta.addr, local_address, meta.len, meta.stride
             );
             continue;
         }
@@ -83,7 +81,7 @@ pub fn recv_inner<'a>(
         break &recv_buf[..meta.len];
     };
 
-    qtrace!(
+    trace!(
         "received {} bytes from {} to {} in {} segments",
         data.len(),
         meta.addr,

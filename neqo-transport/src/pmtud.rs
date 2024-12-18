@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo};
+use log::{debug, info};
 use static_assertions::const_assert;
 
 use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, Stats};
@@ -89,7 +89,7 @@ impl Pmtud {
     /// Checks whether the PMTUD raise timer should be fired, and does so if needed.
     pub fn maybe_fire_raise_timer(&mut self, now: Instant) {
         if self.probe_state == Probe::NotNeeded && self.raise_timer.is_some_and(|t| now >= t) {
-            qdebug!("PMTUD raise timer fired");
+            debug!("PMTUD raise timer fired");
             self.raise_timer = None;
             self.start();
         }
@@ -129,10 +129,9 @@ impl Pmtud {
         stats.pmtud_tx += 1;
         self.probe_count += 1;
         self.probe_state = Probe::Sent;
-        qdebug!(
+        debug!(
             "Sending PMTUD probe of size {}, count {}",
-            self.search_table[self.probe_index],
-            self.probe_count
+            self.search_table[self.probe_index], self.probe_count
         );
     }
 
@@ -186,7 +185,7 @@ impl Pmtud {
         // total number of successful probes.
         stats.pmtud_ack += acked;
         self.mtu = self.search_table[self.probe_index];
-        qdebug!("PMTUD probe of size {} succeeded", self.mtu);
+        debug!("PMTUD probe of size {} succeeded", self.mtu);
         self.start();
     }
 
@@ -198,7 +197,7 @@ impl Pmtud {
         self.probe_count = 0; // Reset the count
         self.loss_counts.fill(0); // Reset the loss counts
         self.raise_timer = Some(now + PMTU_RAISE_TIMER);
-        qinfo!(
+        info!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
             self.mtu,
             self.raise_timer.unwrap()
@@ -270,10 +269,9 @@ impl Pmtud {
         };
 
         let last_ok = first_failed - 1;
-        qdebug!(
+        debug!(
             "Packet of size > {} lost >= {} times",
-            self.search_table[last_ok],
-            MAX_PROBES
+            self.search_table[last_ok], MAX_PROBES
         );
         if self.probe_state == Probe::NotNeeded {
             // We saw multiple losses of packets <= the current MTU outside of PMTU discovery,
@@ -297,7 +295,7 @@ impl Pmtud {
         self.loss_counts.fill(0);
         self.raise_timer = None;
         stats.pmtud_change += 1;
-        qdebug!("PMTUD restarted, PLPMTU is now {}", self.mtu);
+        debug!("PMTUD restarted, PLPMTU is now {}", self.mtu);
         self.start();
     }
 
@@ -307,7 +305,7 @@ impl Pmtud {
             self.probe_state = Probe::Needed; // We need to send a probe
             self.probe_count = 0; // For the first time
             self.probe_index += 1; // At this size
-            qdebug!(
+            debug!(
                 "PMTUD started with probe size {}",
                 self.search_table[self.probe_index],
             );
@@ -333,7 +331,8 @@ mod tests {
         time::Instant,
     };
 
-    use neqo_common::{qdebug, Encoder, IpTosEcn};
+    use log::debug;
+    use neqo_common::{Encoder, IpTosEcn};
     use test_fixture::{fixture_init, now};
 
     use crate::{
@@ -458,7 +457,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Reducing MTU to {}", smaller_mtu);
+        debug!("Reducing MTU to {}", smaller_mtu);
         // Drop packets > smaller_mtu until we need a probe again.
         while !pmtud.needs_probe() {
             let pn = prot.next_pn();
@@ -511,7 +510,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Increasing MTU to {}", larger_mtu);
+        debug!("Increasing MTU to {}", larger_mtu);
         let now = now + PMTU_RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now);
         while pmtud.needs_probe() {

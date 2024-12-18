@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qdebug;
+use log::debug;
 use neqo_crypto::AuthenticationStatus;
 use test_fixture::{
     assertions::{assert_handshake, assert_initial},
@@ -166,7 +166,7 @@ fn pto_initial() {
     const INITIAL_PTO: Duration = Duration::from_millis(300);
     let mut now = now();
 
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let pkt1 = client.process_output(now).dgram();
     assert!(pkt1.is_some());
@@ -240,7 +240,7 @@ fn pto_handshake_complete() {
     now += HALF_RTT;
     client.authenticated(AuthenticationStatus::Ok, now);
 
-    qdebug!("---- client: SH..FIN -> FIN");
+    debug!("---- client: SH..FIN -> FIN");
     let pkt1 = client.process_output(now).dgram();
     assert_handshake(pkt1.as_ref().unwrap());
     assert_eq!(*client.state(), State::Connected);
@@ -253,7 +253,7 @@ fn pto_handshake_complete() {
 
     // Wait for PTO to expire and resend a handshake packet.
     // Wait long enough that the 1-RTT PTO also fires.
-    qdebug!("---- client: PTO");
+    debug!("---- client: PTO");
     now += HALF_RTT * 6;
     let pkt2 = client.process_output(now).dgram();
     assert_handshake(pkt2.as_ref().unwrap());
@@ -280,7 +280,7 @@ fn pto_handshake_complete() {
     // We still have only a single PTO
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qdebug!("---- server: receive FIN and send ACK");
+    debug!("---- server: receive FIN and send ACK");
     now += HALF_RTT;
     // Now let the server have pkt1 and expect an immediate Handshake ACK.
     // The output will be a Handshake packet with ACK and 1-RTT packet with
@@ -332,17 +332,17 @@ fn pto_handshake_complete() {
 #[test]
 fn pto_handshake_frames() {
     let mut now = now();
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let pkt = client.process_output(now);
 
     now += Duration::from_millis(10);
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let pkt = server.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let pkt = client.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
@@ -354,7 +354,7 @@ fn pto_handshake_frames() {
     let stream = client.stream_create(StreamType::UniDi).unwrap();
     assert_eq!(stream, 2);
     assert_eq!(client.stream_send(stream, b"zero").unwrap(), 4);
-    qdebug!("---- client: SH..FIN -> FIN and 1RTT packet");
+    debug!("---- client: SH..FIN -> FIN and 1RTT packet");
     let pkt1 = client.process_output(now).dgram();
     assert!(pkt1.is_some());
 
@@ -646,7 +646,7 @@ fn trickle(sender: &mut Connection, receiver: &mut Connection, mut count: usize,
     let id = sender.stream_create(StreamType::UniDi).unwrap();
     let mut maybe_ack = None;
     while count > 0 {
-        qdebug!("trickle: remaining={}", count);
+        debug!("trickle: remaining={}", count);
         assert_eq!(sender.stream_send(id, &[9]).unwrap(), 1);
         let dgram = sender.process(maybe_ack, now).dgram();
 

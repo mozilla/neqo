@@ -60,8 +60,8 @@ pub use self::{
 };
 
 mod min_version;
+use log::error;
 use min_version::MINIMUM_NSS_VERSION;
-use neqo_common::qerror;
 
 #[allow(non_upper_case_globals)]
 mod nss {
@@ -94,7 +94,7 @@ static INITIALIZED: OnceLock<Res<NssLoaded>> = OnceLock::new();
 fn version_check() -> Res<()> {
     let min_ver = CString::new(MINIMUM_NSS_VERSION)?;
     if unsafe { nss::NSS_VersionCheck(min_ver.as_ptr()) } == 0 {
-        qerror!("Minimum NSS version of {MINIMUM_NSS_VERSION} not supported");
+        error!("Minimum NSS version of {MINIMUM_NSS_VERSION} not supported");
         return Err(Error::UnsupportedVersion);
     }
     Ok(())

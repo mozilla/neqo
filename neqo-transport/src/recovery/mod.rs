@@ -20,7 +20,8 @@ use std::{
 };
 
 use enum_map::{enum_map, EnumMap};
-use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
+use log::{debug, info, trace, warn};
+use neqo_common::qlog::NeqoQlog;
 pub use sent::SentPacket;
 use sent::SentPackets;
 pub use token::{RecoveryToken, StreamRecoveryToken};
@@ -182,7 +183,7 @@ impl LossRecoverySpace {
             .iter_mut()
             .filter_map(|sent| {
                 if sent.pto() {
-                    qtrace!("PTO: marking packet {} lost ", sent.pn());
+                    trace!("PTO: marking packet {} lost ", sent.pn());
                     Some(&*sent)
                 } else {
                     None
@@ -250,7 +251,7 @@ impl LossRecoverySpace {
         debug_assert!(self.in_flight_outstanding >= count);
         self.in_flight_outstanding -= count;
         if self.in_flight_outstanding == 0 {
-            qtrace!("remove_packet outstanding == 0 for space {}", self.space);
+            trace!("remove_packet outstanding == 0 for space {}", self.space);
         }
     }
 
@@ -322,7 +323,7 @@ impl LossRecoverySpace {
         // Housekeeping.
         self.remove_old_lost(now, cleanup_delay);
 
-        qtrace!(
+        trace!(
             "detect lost {}: now={:?} delay={:?}",
             self.space,
             now,
@@ -340,14 +341,14 @@ impl LossRecoverySpace {
         {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent() + loss_delay <= now {
-                qtrace!(
+                trace!(
                     "lost={}, time sent {:?} is before lost_delay {:?}",
                     packet.pn(),
                     packet.time_sent(),
                     loss_delay
                 );
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
-                qtrace!(
+                trace!(
                     "lost={}, is >= {} from largest acked {:?}",
                     packet.pn(),
                     PACKET_THRESHOLD,
@@ -551,14 +552,13 @@ impl LossRecovery {
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket, now: Instant) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
-        qtrace!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
+        trace!("[{self}] packet {}-{} sent", pn_space, sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
             path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
-            qwarn!(
-                [self],
-                "ignoring {}-{} from dropped space",
+            warn!(
+                "[{self}] ignoring {}-{} from dropped space",
                 pn_space,
                 sent_packet.pn()
             );
@@ -617,7 +617,7 @@ impl LossRecovery {
         R::IntoIter: ExactSizeIterator,
     {
         let Some(space) = self.spaces.get_mut(pn_space) else {
-            qinfo!("ACK on discarded space");
+            info!("ACK on discarded space");
             return (Vec::new(), Vec::new());
         };
 
@@ -646,9 +646,8 @@ impl LossRecovery {
             }
         }
 
-        qdebug!(
-            [self],
-            "ACK for {} - largest_acked={}",
+        debug!(
+            "[{self}] ACK for {} - largest_acked={}",
             pn_space,
             largest_acked_pkt.pn()
         );
@@ -736,7 +735,7 @@ impl LossRecovery {
 
     /// Discard state for a given packet number space.
     pub fn discard(&mut self, primary_path: &PathRef, space: PacketNumberSpace, now: Instant) {
-        qdebug!([self], "Reset loss recovery state for {}", space);
+        debug!("[{self}] Reset loss recovery state for {}", space);
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
             path.discard_packet(&p, now, &mut self.stats.borrow_mut());
@@ -763,9 +762,8 @@ impl LossRecovery {
         } else {
             None
         };
-        qtrace!(
-            [self],
-            "next_timeout loss={:?} pto={:?}",
+        trace!(
+            "[{self}] next_timeout loss={:?} pto={:?}",
             loss_time,
             pto_time
         );
@@ -872,7 +870,7 @@ impl LossRecovery {
             if let Some(t) = self.pto_time(rtt, *pn_space) {
                 allow_probes[*pn_space] = true;
                 if t <= now {
-                    qdebug!([self], "PTO timer fired for {}", pn_space);
+                    debug!("[{self}] PTO timer fired for {}", pn_space);
                     let space = self.spaces.get_mut(*pn_space).unwrap();
                     lost.extend(
                         space
@@ -888,13 +886,13 @@ impl LossRecovery {
         // This has to happen outside the loop. Increasing the PTO count here causes the
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
-            qtrace!([self], "PTO {}, probing {:?}", pn_space, allow_probes);
+            trace!("[{self}] PTO {}, probing {:?}", pn_space, allow_probes);
             self.fire_pto(pn_space, allow_probes, now);
         }
     }
 
     pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
-        qtrace!([self], "timeout {:?}", now);
+        trace!("[{self}] timeout {:?}", now);
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
@@ -928,7 +926,7 @@ impl LossRecovery {
     /// what the current congestion window is, and what the pacer says.
     #[allow(clippy::option_if_let_else)]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
-        qtrace!([self], "get send profile {:?}", now);
+        trace!("[{self}] get send profile {:?}", now);
         let sender = path.sender();
         let mtu = path.plpmtu();
         if let Some(profile) = self

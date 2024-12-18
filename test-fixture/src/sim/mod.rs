@@ -22,7 +22,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace, Datagram, Encoder};
+use log::{debug, error, info, trace};
+use neqo_common::{Datagram, Encoder};
 use neqo_transport::Output;
 use rng::Random;
 use NodeState::{Active, Idle, Waiting};
@@ -162,12 +163,12 @@ impl Simulator {
         // variable, if set.
         if let Ok(dir) = std::env::var("DUMP_SIMULATION_SEEDS") {
             if create_dir_all(&dir).is_err() {
-                qerror!("Failed to create directory {dir}");
+                error!("Failed to create directory {dir}");
             } else {
                 let seed_str = sim.rng.borrow().seed_str();
                 let path = PathBuf::from(format!("{dir}/{}-{seed_str}", sim.name));
                 if File::create(&path).is_err() {
-                    qerror!("Failed to write seed to {}", path.to_string_lossy());
+                    error!("Failed to write seed to {}", path.to_string_lossy());
                 }
             }
         }
@@ -199,25 +200,25 @@ impl Simulator {
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
-                    qdebug!([self.name], "skipping {:?}", n.node);
+                    debug!("[{}] kipping {:?}", self.name, n.node);
                     continue;
                 }
 
-                qdebug!([self.name], "processing {:?}", n.node);
+                debug!("[{}] processing {:?}", self.name, n.node);
                 let res = n.process(dgram.take(), now);
                 n.state = match res {
                     Output::Datagram(d) => {
-                        qtrace!([self.name], " => datagram {}", d.len());
+                        trace!("[{}]  => datagram {}", self.name, d.len());
                         dgram = Some(d);
                         Active
                     }
                     Output::Callback(delay) => {
-                        qtrace!([self.name], " => callback {:?}", delay);
+                        trace!("[{}]  => callback {:?}", self.name, delay);
                         assert_ne!(delay, Duration::new(0, 0));
                         Waiting(now + delay)
                     }
                     Output::None => {
-                        qtrace!([self.name], " => nothing");
+                        trace!("[{}]  => nothing", self.name);
                         assert!(n.done(), "nodes should be done when they go idle");
                         Idle
                     }
@@ -231,9 +232,9 @@ impl Simulator {
             if dgram.is_none() {
                 let next = self.next_time(now);
                 if next > now {
-                    qinfo!(
-                        [self.name],
-                        "advancing time by {:?} to {:?}",
+                    info!(
+                        "[{}] advancing time by {:?} to {:?}",
+                        self.name,
                         next - now,
                         next - start
                     );
@@ -247,7 +248,7 @@ impl Simulator {
     pub fn setup(mut self) -> ReadySimulator {
         let start = now();
 
-        qinfo!("{}: seed {}", self.name, self.rng.borrow().seed_str());
+        info!("{}: seed {}", self.name, self.rng.borrow().seed_str());
         for n in &mut self.nodes {
             n.init(self.rng.clone(), start);
         }
@@ -255,7 +256,7 @@ impl Simulator {
         let setup_start = Instant::now();
         let now = self.process_loop(start, start);
         let setup_time = now - start;
-        qinfo!(
+        info!(
             "{t}: Setup took {wall:?} (wall) {setup_time:?} (simulated)",
             t = self.name,
             wall = setup_start.elapsed(),
@@ -297,7 +298,7 @@ impl ReadySimulator {
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);
         let sim_time = end - self.now;
-        qinfo!(
+        info!(
             "{t}: Simulation took {wall:?} (wall) {sim_time:?} (simulated)",
             t = self.sim.name,
             wall = real_start.elapsed(),

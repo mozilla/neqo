@@ -13,7 +13,8 @@ use std::{
     ptr::{null, null_mut},
 };
 
-use neqo_common::{hex, hex_with_len, qtrace};
+use log::trace;
+use neqo_common::{hex, hex_with_len};
 
 use crate::{
     constants::{ContentType, Epoch},
@@ -52,7 +53,7 @@ impl Record {
 
     // Shoves this record into the socket, returns true if blocked.
     pub(crate) fn write(self, fd: *mut ssl::PRFileDesc) -> Res<()> {
-        qtrace!("write {:?}", self);
+        trace!("write {:?}", self);
         unsafe {
             ssl::SSL_RecordLayerData(
                 fd,
@@ -161,7 +162,7 @@ impl AgentIoInput {
         assert!(self.input.is_null());
         self.input = input.as_ptr();
         self.available = input.len();
-        qtrace!("AgentIoInput wrap {:p}", self.input);
+        trace!("AgentIoInput wrap {:p}", self.input);
         AgentIoInputContext { input: self }
     }
 
@@ -177,7 +178,7 @@ impl AgentIoInput {
 
         #[allow(clippy::disallowed_methods)] // We just checked if this was empty.
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
-        qtrace!([self], "read {}", hex(src));
+        trace!("[{self}] read {}", hex(src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
         dst.copy_from_slice(src);
         self.input = self.input.wrapping_add(amount);
@@ -186,7 +187,7 @@ impl AgentIoInput {
     }
 
     fn reset(&mut self) {
-        qtrace!([self], "reset");
+        trace!("[{self}] reset");
         self.input = null();
         self.available = 0;
     }
@@ -230,12 +231,12 @@ impl AgentIo {
     // Stage output from TLS into the output buffer.
     fn save_output(&mut self, buf: *const u8, count: usize) {
         let slice = unsafe { null_safe_slice(buf, count) };
-        qtrace!([self], "save output {}", hex(slice));
+        trace!("[{self}] save output {}", hex(slice));
         self.output.extend_from_slice(slice);
     }
 
     pub fn take_output(&mut self) -> Vec<u8> {
-        qtrace!([self], "take output");
+        trace!("[{self}] take output");
         mem::take(&mut self.output)
     }
 }

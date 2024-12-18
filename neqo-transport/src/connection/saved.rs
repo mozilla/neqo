@@ -6,7 +6,8 @@
 
 use std::{mem, time::Instant};
 
-use neqo_common::{qdebug, qinfo, Datagram};
+use log::{debug, info};
+use neqo_common::Datagram;
 
 use crate::crypto::CryptoSpace;
 
@@ -41,10 +42,10 @@ impl SavedDatagrams {
         let store = self.store(cspace);
 
         if store.len() < MAX_SAVED_DATAGRAMS {
-            qdebug!("saving datagram of {} bytes", d.len());
+            debug!("saving datagram of {} bytes", d.len());
             store.push(SavedDatagram { d, t });
         } else {
-            qinfo!("not saving datagram of {} bytes", d.len());
+            info!("not saving datagram of {} bytes", d.len());
         }
     }
 

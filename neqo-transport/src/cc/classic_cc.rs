@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use log::{debug, info, trace};
+
 use super::CongestionControl;
 use crate::{
     packet::PacketNumber,
@@ -23,7 +25,7 @@ use crate::{
 };
 #[rustfmt::skip] // to keep `::` and thus prevent conflict with `crate::qlog`
 use ::qlog::events::{quic::CongestionStateUpdated, EventData};
-use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
+use neqo_common::{const_max, const_min, qlog::NeqoQlog};
 
 pub const CWND_INITIAL_PKTS: usize = 10;
 const PERSISTENT_CONG_THRESH: u32 = 3;
@@ -190,7 +192,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let mut is_app_limited = true;
         let mut new_acked = 0;
         for pkt in acked_pkts {
-            qtrace!(
+            trace!(
                 "packet_acked this={:p}, pn={}, ps={}, ignored={}, lost={}, rtt_est={:?}",
                 self,
                 pkt.pn(),
@@ -225,7 +227,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
         if is_app_limited {
             self.cc_algorithm.on_app_limited();
-            qdebug!("on_packets_acked this={:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
+            debug!("on_packets_acked this={:p}, limited=1, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
             return;
         }
 
@@ -235,7 +237,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             let increase = min(self.ssthresh - self.congestion_window, self.acked_bytes);
             self.congestion_window += increase;
             self.acked_bytes -= increase;
-            qdebug!([self], "slow start += {}", increase);
+            debug!("[{self}] slow start += {}", increase);
             if self.congestion_window == self.ssthresh {
                 // This doesn't look like it is necessary, but it can happen
                 // after persistent congestion.
@@ -278,7 +280,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             ],
             now,
         );
-        qdebug!([self], "on_packets_acked this={:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
+        debug!("[{self}] on_packets_acked this={:p}, limited=0, bytes_in_flight={}, cwnd={}, state={:?}, new_acked={}", self, self.bytes_in_flight, self.congestion_window, self.state, new_acked);
     }
 
     /// Update congestion controller state based on lost packets.
@@ -295,7 +297,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         for pkt in lost_packets.iter().filter(|pkt| pkt.cc_in_flight()) {
-            qdebug!(
+            debug!(
                 "packet_lost this={:p}, pn={}, ps={}",
                 self,
                 pkt.pn(),
@@ -331,12 +333,9 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             lost_packets.rev(),
             now,
         );
-        qdebug!(
+        debug!(
             "on_packets_lost this={:p}, bytes_in_flight={}, cwnd={}, state={:?}",
-            self,
-            self.bytes_in_flight,
-            self.congestion_window,
-            self.state
+            self, self.bytes_in_flight, self.congestion_window, self.state
         );
         congestion || persistent_congestion
     }
@@ -358,7 +357,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
                 now,
             );
-            qtrace!([self], "Ignore pkt with size {}", pkt.len());
+            trace!("[{self}] Ignore pkt with size {}", pkt.len());
         }
     }
 
@@ -390,7 +389,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         self.bytes_in_flight += pkt.len();
-        qdebug!(
+        debug!(
             "packet_sent this={:p}, pn={}, ps={}",
             self,
             pkt.pn(),
@@ -457,7 +456,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     fn set_state(&mut self, state: State, now: Instant) {
         if self.state != state {
-            qdebug!([self], "state -> {:?}", state);
+            debug!("[{self}] state -> {:?}", state);
             let old_state = self.state;
             self.qlog.add_event_data_with_instant(
                 || {
@@ -520,7 +519,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
                     .checked_duration_since(t)
                     .expect("time is monotonic");
                 if elapsed > pc_period {
-                    qinfo!([self], "persistent congestion");
+                    info!("[{self}] persistent congestion");
                     self.congestion_window = self.cwnd_min();
                     self.acked_bytes = 0;
                     self.set_state(State::PersistentCongestion, now);
@@ -566,11 +565,9 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         self.congestion_window = max(cwnd, self.cwnd_min());
         self.acked_bytes = acked_bytes;
         self.ssthresh = self.congestion_window;
-        qdebug!(
-            [self],
-            "Cong event -> recovery; cwnd {}, ssthresh {}",
-            self.congestion_window,
-            self.ssthresh
+        debug!(
+            "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
+            self.congestion_window, self.ssthresh
         );
         qlog::metrics_updated(
             &self.qlog,
@@ -609,7 +606,8 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qinfo, IpTosEcn};
+    use log::info;
+    use neqo_common::IpTosEcn;
     use test_fixture::now;
 
     use super::{ClassicCongestionControl, WindowAdjustment, PERSISTENT_CONG_THRESH};
@@ -1144,7 +1142,7 @@ mod tests {
                 (ABOVE_APP_LIMIT_PKTS - i - 1) * cc.max_datagram_size()
             );
             // increase acked_bytes with each packet
-            qinfo!(
+            info!(
                 "{} {}",
                 cc.congestion_window,
                 cwnd + i * cc.max_datagram_size()

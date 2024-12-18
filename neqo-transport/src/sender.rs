@@ -13,7 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qlog::NeqoQlog};
+use log::debug;
+use neqo_common::qlog::NeqoQlog;
 
 use crate::{
     cc::{ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno},
@@ -92,7 +93,7 @@ impl PacketSender {
     fn maybe_update_pacer_mtu(&mut self) {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
-            qdebug!(
+            debug!(
                 "PLPMTU changed from {} to {}, updating pacer",
                 self.pacer.mtu(),
                 current_mtu

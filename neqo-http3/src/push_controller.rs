@@ -13,7 +13,8 @@ use std::{
     slice::SliceIndex,
 };
 
-use neqo_common::{qerror, qinfo, qtrace, Header};
+use log::{error, info, trace};
+use neqo_common::Header;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -185,9 +186,8 @@ impl PushController {
         ref_stream_id: StreamId,
         new_headers: Vec<Header>,
     ) -> Res<()> {
-        qtrace!(
-            [self],
-            "New push promise push_id={} headers={:?} max_push={}",
+        trace!(
+            "[{self}] New push promise push_id={} headers={:?} max_push={}",
             push_id,
             new_headers,
             self.max_concurent_push
@@ -197,7 +197,7 @@ impl PushController {
 
         match self.push_streams.get_mut(push_id) {
             None => {
-                qtrace!("Push has been closed already {}.", push_id);
+                trace!("Push has been closed already {}.", push_id);
                 Ok(())
             }
             Some(push_state) => match push_state {
@@ -237,7 +237,7 @@ impl PushController {
     }
 
     pub fn add_new_push_stream(&mut self, push_id: u64, stream_id: StreamId) -> Res<bool> {
-        qtrace!(
+        trace!(
             "A new push stream with push_id={} stream_id={}",
             push_id,
             stream_id
@@ -247,7 +247,7 @@ impl PushController {
 
         self.push_streams.get_mut(push_id).map_or_else(
             || {
-                qinfo!("Push has been closed already.");
+                info!("Push has been closed already.");
                 Ok(false)
             },
             |push_state| match push_state {
@@ -269,7 +269,7 @@ impl PushController {
                 // The following state have already have a push stream:
                 // PushState::OnlyPushStream | PushState::Active
                 _ => {
-                    qerror!("Duplicate push stream.");
+                    error!("Duplicate push stream.");
                     Err(Error::HttpId)
                 }
             },
@@ -279,7 +279,7 @@ impl PushController {
     fn check_push_id(&self, push_id: u64) -> Res<()> {
         // Check if push id is greater than what we allow.
         if push_id > self.current_max_push_id {
-            qerror!("Push id is greater than current_max_push_id.");
+            error!("Push id is greater than current_max_push_id.");
             Err(Error::HttpId)
         } else {
             Ok(())
@@ -292,13 +292,13 @@ impl PushController {
         conn: &mut Connection,
         base_handler: &mut Http3Connection,
     ) -> Res<()> {
-        qtrace!("CANCEL_PUSH frame has been received, push_id={}", push_id);
+        trace!("CANCEL_PUSH frame has been received, push_id={}", push_id);
 
         self.check_push_id(push_id)?;
 
         match self.push_streams.close(push_id) {
             None => {
-                qtrace!("Push has already been closed (push_id={}).", push_id);
+                trace!("Push has already been closed (push_id={}).", push_id);
                 Ok(())
             }
             Some(ps) => match ps {
@@ -325,7 +325,7 @@ impl PushController {
     }
 
     pub fn close(&mut self, push_id: u64) {
-        qtrace!("Push stream has been closed.");
+        trace!("Push stream has been closed.");
         if let Some(push_state) = self.push_streams.close(push_id) {
             debug_assert!(matches!(push_state, PushState::Active { .. }));
         } else {
@@ -339,13 +339,13 @@ impl PushController {
         conn: &mut Connection,
         base_handler: &mut Http3Connection,
     ) -> Res<()> {
-        qtrace!("Cancel push_id={}", push_id);
+        trace!("Cancel push_id={}", push_id);
 
         self.check_push_id(push_id)?;
 
         match self.push_streams.get(push_id) {
             None => {
-                qtrace!("Push has already been closed.");
+                trace!("Push has already been closed.");
                 // If we have some events for the push_id in the event queue, the caller still does
                 // not not know that the push has been closed. Otherwise return
                 // InvalidStreamId.
@@ -378,7 +378,7 @@ impl PushController {
     }
 
     pub fn push_stream_reset(&mut self, push_id: u64, close_type: CloseType) {
-        qtrace!("Push stream has been reset, push_id={}", push_id);
+        trace!("Push stream has been reset, push_id={}", push_id);
 
         if let Some(push_state) = self.push_streams.get(push_id) {
             match push_state {

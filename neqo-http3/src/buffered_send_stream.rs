@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::qtrace;
+use log::trace;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{qlog, Res};
@@ -62,14 +62,14 @@ impl BufferedStream {
     ///
     /// Returns `neqo_transport` errors.
     pub fn send_buffer(&mut self, conn: &mut Connection) -> Res<usize> {
-        let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
+        let label = format!("{self}");
         let Self::Initialized { stream_id, buf } = self else {
             return Ok(0);
         };
         if buf.is_empty() {
             return Ok(0);
         }
-        qtrace!([label], "sending data.");
+        trace!("[{label}] sending data.");
         let sent = conn.stream_send(*stream_id, &buf[..])?;
         if sent == 0 {
             return Ok(0);

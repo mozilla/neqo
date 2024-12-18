@@ -11,7 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qlog::NeqoQlog, qtrace};
+use log::trace;
+use neqo_common::qlog::NeqoQlog;
 
 use crate::{
     ackrate::{AckRate, PeerAckDelay},
@@ -74,7 +75,7 @@ impl RttEstimate {
     }
 
     pub fn set_initial(&mut self, rtt: Duration) {
-        qtrace!("initial RTT={:?}", rtt);
+        trace!("initial RTT={:?}", rtt);
         if rtt >= GRANULARITY {
             // Ignore if the value is too small.
             self.init(rtt);
@@ -140,7 +141,7 @@ impl RttEstimate {
             self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
             self.smoothed_rtt = (self.smoothed_rtt * 7 + rtt_sample) / 8;
         }
-        qtrace!(
+        trace!(
             "RTT latest={:?} -> estimate={:?}~{:?}",
             self.latest_rtt,
             self.smoothed_rtt,

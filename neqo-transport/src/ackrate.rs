@@ -8,7 +8,7 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::qtrace;
+use log::trace;
 
 use crate::{
     connection::params::ACK_RATIO_SCALE, frame::FRAME_TYPE_ACK_FREQUENCY, packet::PacketBuilder,
@@ -37,7 +37,7 @@ impl AckRate {
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         let delay = delay.clamp(minimum, MAX_DELAY);
-        qtrace!("AckRate inputs: {}/{}/{}, {:?}", cwnd, mtu, ratio, rtt);
+        trace!("AckRate inputs: {}/{}/{}, {:?}", cwnd, mtu, ratio, rtt);
         Self { packets, delay }
     }
 
@@ -82,7 +82,7 @@ impl FlexibleAckRate {
         mtu: usize,
         rtt: Duration,
     ) -> Self {
-        qtrace!(
+        trace!(
             "FlexibleAckRate: {:?} {:?} {}",
             max_ack_delay,
             min_ack_delay,
@@ -112,7 +112,7 @@ impl FlexibleAckRate {
             && self.current.needs_update(&self.target)
             && self.target.write_frame(builder, self.next_frame_seqno)
         {
-            qtrace!("FlexibleAckRate: write frame {:?}", self.target);
+            trace!("FlexibleAckRate: write frame {:?}", self.target);
             self.frame_outstanding = true;
             self.next_frame_seqno += 1;
             tokens.push(RecoveryToken::AckFrequency(self.target.clone()));
@@ -131,7 +131,7 @@ impl FlexibleAckRate {
 
     fn update(&mut self, cwnd: usize, mtu: usize, rtt: Duration) {
         self.target = AckRate::new(self.min_ack_delay, self.ratio, cwnd, mtu, rtt);
-        qtrace!("FlexibleAckRate: {:?} -> {:?}", self.current, self.target);
+        trace!("FlexibleAckRate: {:?} -> {:?}", self.current, self.target);
     }
 
     fn peer_ack_delay(&self) -> Duration {

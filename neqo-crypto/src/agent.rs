@@ -16,7 +16,8 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{hex_snip_middle, hex_with_len, qdebug, qtrace, qwarn};
+use log::{debug, trace, warn};
+use neqo_common::{hex_snip_middle, hex_with_len};
 
 pub use crate::{
     agentio::{as_c_void, Record, RecordList},
@@ -107,7 +108,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    qtrace!([format!("{fd:p}")], "got ALPN {:?}", alpn);
+    trace!("[{}] got ALPN {:?}", format!("{fd:p}"), alpn);
     Ok(alpn)
 }
 
@@ -369,7 +370,11 @@ impl SecretAgent {
             if st.is_none() {
                 *st = Some(alert.description);
             } else {
-                qwarn!([format!("{fd:p}")], "duplicate alert {}", alert.description);
+                warn!(
+                    "[{}] duplicate alert {}",
+                    format!("{fd:p}"),
+                    alert.description
+                );
             }
         }
     }
@@ -429,7 +434,7 @@ impl SecretAgent {
     /// If NSS can't enable or disable ciphers.
     pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != HandshakeState::New {
-            qwarn!([self], "Cannot enable ciphers in state {:?}", self.state);
+            warn!("[{}] Cannot enable ciphers in state {:?}", self, self.state);
             return Err(Error::InternalError);
         }
 
@@ -644,7 +649,7 @@ impl SecretAgent {
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
         if let Err(e) = res {
             let e = ech::convert_ech_error(self.fd, e);
-            qwarn!([self], "error: {:?}", e);
+            warn!("[{self}] error: {:?}", e);
             self.state = HandshakeState::Failed(e.clone());
             Err(e)
         } else {
@@ -669,7 +674,7 @@ impl SecretAgent {
             let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
             HandshakeState::Complete(info)
         };
-        qdebug!([self], "state -> {:?}", self.state);
+        debug!("[{self}] state -> {:?}", self.state);
         Ok(())
     }
 
@@ -729,7 +734,7 @@ impl SecretAgent {
         if let HandshakeState::Authenticated(ref err) = self.state {
             let result =
                 secstatus_to_res(unsafe { ssl::SSL_AuthCertificateComplete(self.fd, *err) });
-            qdebug!([self], "SSL_AuthCertificateComplete: {:?}", result);
+            debug!("[{self}] SSL_AuthCertificateComplete: {:?}", result);
             // This should return SECSuccess, so don't use update_state().
             self.capture_error(result)?;
         }
@@ -891,9 +896,9 @@ impl Client {
         let len = usize::try_from(len).unwrap();
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
-        qdebug!(
-            [format!("{fd:p}")],
-            "Got resumption token {}",
+        debug!(
+            "[{}] Got resumption token {}",
+            format!("{fd:p}"),
             hex_snip_middle(&v)
         );
 
@@ -965,7 +970,7 @@ impl Client {
     /// Error returned when the configuration is invalid.
     pub fn enable_ech(&mut self, ech_config_list: impl AsRef<[u8]>) -> Res<()> {
         let config = ech_config_list.as_ref();
-        qdebug!([self], "Enable ECH for a server: {}", hex_with_len(config));
+        debug!("[{self}] Enable ECH for a server: {}", hex_with_len(config));
         self.ech_config = Vec::from(config);
         if config.is_empty() {
             unsafe { ech::SSL_EnableTls13GreaseEch(self.agent.fd, PRBool::from(true)) }
@@ -1027,7 +1032,7 @@ pub trait ZeroRttChecker: std::fmt::Debug + std::marker::Unpin {
 pub struct AllowZeroRtt {}
 impl ZeroRttChecker for AllowZeroRtt {
     fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
-        qwarn!("AllowZeroRtt accepting 0-RTT");
+        warn!("AllowZeroRtt accepting 0-RTT");
         ZeroRttCheckResult::Accept
     }
 }
@@ -1175,7 +1180,7 @@ impl Server {
         pk: &PublicKey,
     ) -> Res<()> {
         let cfg = ech::encode_config(config, public_name, pk)?;
-        qdebug!([self], "Enable ECH for a server: {}", hex_with_len(&cfg));
+        debug!("[{self}] Enable ECH for a server: {}", hex_with_len(&cfg));
         unsafe {
             ech::SSL_SetServerEchConfigs(
                 self.agent.fd,

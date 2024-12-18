@@ -19,11 +19,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use log::trace;
 use neqo_common::{
     event::Provider,
     hex,
     qlog::{new_trace, NeqoQlog},
-    qtrace, Datagram, Decoder, IpTosEcn, Role,
+    Datagram, Decoder, IpTosEcn, Role,
 };
 use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
@@ -349,7 +350,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     } else {
         None
     };
-    qtrace!("split packet: {} {:?}", hex(p1), p2.map(hex));
+    trace!("split packet: {} {:?}", hex(p1), p2.map(hex));
     (p1, p2)
 }
 

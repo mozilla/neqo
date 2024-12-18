@@ -7,7 +7,8 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{qdebug, qinfo, qwarn, IpTosEcn};
+use log::{debug, info, warn};
+use neqo_common::IpTosEcn;
 
 use crate::{
     packet::{PacketNumber, PacketType},
@@ -187,9 +188,9 @@ impl EcnInfo {
     pub fn on_packet_sent(&mut self, stats: &mut Stats) {
         if let EcnValidationState::Testing { probes_sent, .. } = &mut self.state {
             *probes_sent += 1;
-            qdebug!("ECN probing: sent {} probes", probes_sent);
+            debug!("ECN probing: sent {} probes", probes_sent);
             if *probes_sent == ECN_TEST_COUNT {
-                qdebug!("ECN probing concluded with {} probes sent", probes_sent);
+                debug!("ECN probing concluded with {} probes sent", probes_sent);
                 self.state.set(EcnValidationState::Unknown, stats);
             }
         }
@@ -230,7 +231,7 @@ impl EcnInfo {
             // If we have lost all initial probes a bunch of times, we can conclude that the path
             // is not ECN capable and likely drops all ECN marked packets.
             if probes_sent == probes_lost && *probes_lost == ECN_TEST_COUNT_INITIAL_PHASE {
-                qdebug!(
+                debug!(
                     "ECN validation failed, all {} initial marked packets were lost",
                     probes_lost
                 );
@@ -276,7 +277,7 @@ impl EcnInfo {
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
         // > corresponding ECN counts are not present in the ACK frame.
         let Some(ack_ecn) = ack_ecn else {
-            qwarn!("ECN validation failed, no ECN counts in ACK frame");
+            warn!("ECN validation failed, no ECN counts in ACK frame");
             self.disable_ecn(stats, EcnValidationError::Bleaching);
             return;
         };
@@ -293,24 +294,24 @@ impl EcnInfo {
             .try_into()
             .unwrap();
         if newly_acked_sent_with_ect0 == 0 {
-            qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
+            warn!("ECN validation failed, no ECT(0) packets were newly acked");
             self.disable_ecn(stats, EcnValidationError::Bleaching);
             return;
         }
         let ecn_diff = ack_ecn - self.baseline;
         let sum_inc = ecn_diff[IpTosEcn::Ect0] + ecn_diff[IpTosEcn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
-            qwarn!(
+            warn!(
                 "ECN validation failed, ACK counted {} new marks, but {} of newly acked packets were sent with ECT(0)",
                 sum_inc,
                 newly_acked_sent_with_ect0
             );
             self.disable_ecn(stats, EcnValidationError::Bleaching);
         } else if ecn_diff[IpTosEcn::Ect1] > 0 {
-            qwarn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
+            warn!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, EcnValidationError::ReceivedUnsentECT1);
         } else if self.state != EcnValidationState::Capable {
-            qinfo!("ECN validation succeeded, path is capable");
+            info!("ECN validation succeeded, path is capable");
             self.state.set(EcnValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;

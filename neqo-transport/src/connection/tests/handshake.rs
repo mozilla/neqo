@@ -12,7 +12,8 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{event::Provider, qdebug, Datagram};
+use log::debug;
+use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };
@@ -45,19 +46,19 @@ const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";
 
 fn full_handshake(pmtud: bool) {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = new_client(ConnectionParameters::default().pmtud(pmtud));
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = new_server(ConnectionParameters::default().pmtud(pmtud));
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
@@ -66,17 +67,17 @@ fn full_handshake(pmtud: bool) {
 
     assert!(maybe_authenticate(&mut client));
 
-    qdebug!("---- client: SH..FIN -> FIN");
+    debug!("---- client: SH..FIN -> FIN");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*client.state(), State::Connected);
 
-    qdebug!("---- server: FIN -> ACKS");
+    debug!("---- server: FIN -> ACKS");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*server.state(), State::Confirmed);
 
-    qdebug!("---- client: ACKS -> 0");
+    debug!("---- client: ACKS -> 0");
     let out = client.process(out.dgram(), now());
     if pmtud {
         // PMTUD causes a PING probe to be sent here
@@ -100,17 +101,17 @@ fn handshake_pmtud() {
 
 #[test]
 fn handshake_failed_authentication() {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
@@ -119,14 +120,14 @@ fn handshake_failed_authentication() {
 
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
-    qdebug!("---- client: Alert(certificate_revoked)");
+    debug!("---- client: Alert(certificate_revoked)");
     client.authenticated(AuthenticationStatus::CertRevoked, now());
 
-    qdebug!("---- client: -> Alert(certificate_revoked)");
+    debug!("---- client: -> Alert(certificate_revoked)");
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- server: Alert(certificate_revoked)");
+    debug!("---- server: Alert(certificate_revoked)");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(44)));
@@ -157,42 +158,42 @@ fn no_alpn() {
 
 #[test]
 fn dup_server_flight1() {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
+    debug!("Output={:0x?}", out.as_dgram_ref());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let out_to_rep = server.process(out.dgram(), now());
     assert!(out_to_rep.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out_to_rep.as_dgram_ref());
+    debug!("Output={:0x?}", out_to_rep.as_dgram_ref());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(Some(out_to_rep.as_dgram_ref().cloned().unwrap()), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
+    debug!("Output={:0x?}", out.as_dgram_ref());
 
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
 
     assert!(maybe_authenticate(&mut client));
 
-    qdebug!("---- client: SH..FIN -> FIN");
+    debug!("---- client: SH..FIN -> FIN");
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
+    debug!("Output={:0x?}", out.as_dgram_ref());
 
     assert_eq!(3, client.stats().packets_rx);
     assert_eq!(0, client.stats().dups_rx);
     assert_eq!(1, client.stats().dropped_rx);
 
-    qdebug!("---- Dup, ignored");
+    debug!("---- Dup, ignored");
     let out = client.process(out_to_rep.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
+    debug!("Output={:0x?}", out.as_dgram_ref());
 
     // Four packets total received, 1 of them is a dup and one has been dropped because Initial keys
     // are dropped.  Add 2 counts of the padding that the server adds to Initial packets.
