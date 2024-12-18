@@ -540,11 +540,11 @@ impl Path {
             Ok((name, mtu)) => {
                 qdebug!("Outbound interface {name} has MTU {mtu}");
                 stats.pmtud_iface_mtu = mtu;
-                mtu
+                Some(mtu)
             }
             Err(e) => {
                 qwarn!("Failed to determine outbound interface: {e}");
-                usize::MAX
+                None
             }
         };
         let mut sender = PacketSender::new(cc, pacing, Pmtud::new(remote.ip(), iface_mtu), now);

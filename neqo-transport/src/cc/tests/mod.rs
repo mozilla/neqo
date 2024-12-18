@@ -13,5 +13,5 @@ mod cubic;
 mod new_reno;
 
 pub const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-pub const MTU: usize = 1_500;
+pub const MTU: Option<usize> = Some(1_500);
 pub const RTT: Duration = Duration::from_millis(100);

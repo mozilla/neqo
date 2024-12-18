@@ -72,14 +72,14 @@ impl Pmtud {
     }
 
     #[must_use]
-    pub const fn new(remote_ip: IpAddr, iface_mtu: usize) -> Self {
+    pub fn new(remote_ip: IpAddr, iface_mtu: Option<usize>) -> Self {
         let search_table = Self::search_table(remote_ip);
         let probe_index = 0;
         Self {
             search_table,
             header_size: Self::header_size(remote_ip),
             mtu: search_table[probe_index],
-            iface_mtu,
+            iface_mtu: iface_mtu.unwrap_or(usize::MAX),
             probe_index,
             probe_count: 0,
             probe_state: Probe::NotNeeded,
@@ -410,7 +410,7 @@ mod tests {
     fn find_pmtu(addr: IpAddr, mtu: usize) {
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr, mtu);
+        let mut pmtud = Pmtud::new(addr, Some(mtu));
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
@@ -448,7 +448,7 @@ mod tests {
 
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr, mtu);
+        let mut pmtud = Pmtud::new(addr, Some(mtu));
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
@@ -501,7 +501,7 @@ mod tests {
 
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr, larger_mtu);
+        let mut pmtud = Pmtud::new(addr, Some(larger_mtu));
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default();
 
@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn pmtud_on_packets_lost() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4, 1500);
+        let mut pmtud = Pmtud::new(V4, Some(1500));
         let mut stats = Stats::default();
 
         // No packets lost, nothing should change.
@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn pmtud_on_packets_lost_and_acked() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4, 1500);
+        let mut pmtud = Pmtud::new(V4, Some(1500));
         let mut stats = Stats::default();
 
         // A packet of size 100 was ACKed, which is smaller than all probe sizes.
