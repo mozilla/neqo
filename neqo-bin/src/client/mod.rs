@@ -238,10 +238,10 @@ impl Args {
         // Only use v1 for most QNS tests.
         self.shared.quic_parameters.quic_version = vec![Version::Version1];
         // This is the default for all tests except http3.
-        self.shared.use_old_http = true;
+        self.shared.alpn = String::from("hq-interop");
         match testcase.as_str() {
             "http3" => {
-                self.shared.use_old_http = false;
+                self.shared.alpn = String::from("h3");
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
                         qerror!("Unsupported test case: {testcase}");
@@ -571,7 +571,7 @@ pub async fn client(mut args: Args) -> Res<()> {
         let real_local = socket.local_addr().unwrap();
         qinfo!(
             "{} Client connecting: {:?} -> {:?}",
-            if args.shared.use_old_http { "H9" } else { "H3" },
+            args.shared.alpn,
             real_local,
             remote_addr,
         );
@@ -588,21 +588,21 @@ pub async fn client(mut args: Args) -> Res<()> {
 
             first = false;
 
-            token = if args.shared.use_old_http {
-                let client =
-                    http09::create_client(&args, real_local, remote_addr, &hostname, token)
-                        .expect("failed to create client");
+            token = if args.shared.alpn == "h3" {
+                let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
+                    .expect("failed to create client");
 
-                let handler = http09::Handler::new(to_request, &args);
+                let handler = http3::Handler::new(to_request, &args);
 
                 Runner::new(real_local, &mut socket, client, handler, &args)
                     .run()
                     .await?
             } else {
-                let client = http3::create_client(&args, real_local, remote_addr, &hostname, token)
-                    .expect("failed to create client");
+                let client =
+                    http09::create_client(&args, real_local, remote_addr, &hostname, token)
+                        .expect("failed to create client");
 
-                let handler = http3::Handler::new(to_request, &args);
+                let handler = http09::Handler::new(to_request, &args);
 
                 Runner::new(real_local, &mut socket, client, handler, &args)
                     .run()
