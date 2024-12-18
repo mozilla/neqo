@@ -257,12 +257,14 @@ pub fn log_init(level_filter: Option<log::LevelFilter>) {
     }
     builder.format(|buf, record| {
         let elapsed = since_start();
+        let level_style = buf.default_level_style(record.level());
+        let mut bold = buf.style();
+        bold.set_bold(true);
         writeln!(
             buf,
-            "{}s{:3}ms {} {}",
-            elapsed.as_secs(),
-            elapsed.as_millis() % 1000,
-            record.level(),
+            "{:.3} {} {}",
+            bold.value(elapsed.as_secs_f32()),
+            level_style.value(record.level()),
             record.args()
         )
     });
