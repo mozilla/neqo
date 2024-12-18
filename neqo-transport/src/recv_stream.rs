@@ -32,11 +32,14 @@ use crate::{
 };
 
 // TODO: Remove. Should no longer be needed.
+#[cfg(test)]
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
-// Export as usize for consistency with SEND_BUFFER_SIZE
-#[allow(clippy::cast_possible_truncation)] // Yeah, nope.
-pub const INITIAL_RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
+pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
+
+/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
+/// for the size of the stream receive window.
+pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct RecvStreams {
@@ -1022,7 +1025,7 @@ mod tests {
         packet::PacketBuilder,
         recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
         stats::FrameStats,
-        ConnectionEvents, Error, StreamId, INITIAL_RECV_BUFFER_SIZE,
+        ConnectionEvents, Error, StreamId, INITIAL_RECV_WINDOW_SIZE,
     };
 
     const SESSION_WINDOW: usize = 1024;
@@ -1470,13 +1473,13 @@ mod tests {
     #[test]
     fn stream_flowc_update() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        let mut buf = vec![0u8; INITIAL_RECV_BUFFER_SIZE + 100]; // Make it overlarge
+        let mut buf = vec![0u8; INITIAL_RECV_WINDOW_SIZE + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; INITIAL_RECV_BUFFER_SIZE];
+        let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         assert!(!s.has_frames_to_write());
-        assert_eq!(s.read(&mut buf).unwrap(), (INITIAL_RECV_BUFFER_SIZE, false));
+        assert_eq!(s.read(&mut buf).unwrap(), (INITIAL_RECV_WINDOW_SIZE, false));
         assert!(!s.data_ready());
 
         // flow msg generated!
@@ -1511,7 +1514,7 @@ mod tests {
     fn stream_max_stream_data() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
         assert!(!s.has_frames_to_write());
-        let big_buf = vec![0; INITIAL_RECV_BUFFER_SIZE];
+        let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
             .unwrap_err();
@@ -1555,7 +1558,7 @@ mod tests {
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
         let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
-        let mut buf = vec![0; INITIAL_RECV_BUFFER_SIZE];
+        let mut buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         // Write from buf at first.
         s.inbound_stream_frame(false, 0, &buf).unwrap();
         // Then read into it.

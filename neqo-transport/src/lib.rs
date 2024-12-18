@@ -69,13 +69,16 @@ pub use self::{
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
-    recv_stream::{RecvStreamStats, INITIAL_RECV_BUFFER_SIZE},
-    send_stream::{SendStreamStats, INITIAL_SEND_BUFFER_SIZE},
+    recv_stream::{RecvStreamStats, INITIAL_RECV_WINDOW_SIZE},
+    send_stream::SendStreamStats,
     shuffle::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
 };
+
+#[cfg(test)]
+pub use self::send_stream::INITIAL_SEND_BUFFER_SIZE;
 
 pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;

@@ -1293,7 +1293,7 @@ mod tests {
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
-        Version, INITIAL_RECV_BUFFER_SIZE, INITIAL_SEND_BUFFER_SIZE, MIN_INITIAL_PACKET_SIZE,
+        Version, INITIAL_RECV_WINDOW_SIZE, INITIAL_SEND_BUFFER_SIZE, MIN_INITIAL_PACKET_SIZE,
     };
     use test_fixture::{
         anti_replay, default_server_h3, fixture_init, new_server, now,
@@ -2742,7 +2742,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read the DATA frame.
-                    let mut buf = vec![1_u8; INITIAL_RECV_BUFFER_SIZE];
+                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(
@@ -2834,7 +2834,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read DATA frames.
-                    let mut buf = vec![1_u8; INITIAL_RECV_BUFFER_SIZE];
+                    let mut buf = vec![1_u8; INITIAL_RECV_WINDOW_SIZE];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert!(fin);
                     assert_eq!(

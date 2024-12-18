@@ -24,14 +24,11 @@ use crate::{
     },
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
+    recv_stream::MAX_RECV_WINDOW_SIZE,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     Error, Res,
 };
-
-/// Limit for the maximum amount of bytes active on a single stream, i.e. limit
-/// for the size of the stream receive window.
-const STREAM_MAX_ACTIVE_LIMIT: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -400,7 +397,7 @@ impl ReceiverFlowControl<StreamId> {
                 < rtt.as_micros() * u128::from(window_bytes_used)
             {
                 let prev_max_active = self.max_active;
-                self.max_active = min(2 * self.max_active, STREAM_MAX_ACTIVE_LIMIT);
+                self.max_active = min(2 * self.max_active, MAX_RECV_WINDOW_SIZE);
                 println!(
                             "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
                             prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,

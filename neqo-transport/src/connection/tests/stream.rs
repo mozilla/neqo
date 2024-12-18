@@ -21,7 +21,7 @@ use crate::{
         FRAME_TYPE_STREAM_CLIENT_BIDI, FRAME_TYPE_STREAM_DATA_BLOCKED,
     },
     packet::PacketBuilder,
-    recv_stream::INITIAL_RECV_BUFFER_SIZE,
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
     send_stream::{OrderGroup, SendStreamState, INITIAL_SEND_BUFFER_SIZE},
     streams::{SendOrder, StreamOrder},
     tparams::{self, TransportParameter},
@@ -844,7 +844,7 @@ fn stream_data_blocked_generates_max_stream_data() {
         }
         written += amount;
     }
-    assert_eq!(written, INITIAL_RECV_BUFFER_SIZE);
+    assert_eq!(written, INITIAL_RECV_WINDOW_SIZE);
 }
 
 /// See <https://github.com/mozilla/neqo/issues/871>

@@ -35,6 +35,7 @@ use crate::{
 };
 
 // TODO: Still needed?
+#[cfg(test)]
 pub const INITIAL_SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
 
 const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
@@ -1795,6 +1796,7 @@ pub struct SendStreamRecoveryToken {
     fin: bool,
 }
 
+// TODO: Test that MAX_SEND_BUFFER_SIZE is not exceeded.
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};

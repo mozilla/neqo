@@ -41,12 +41,6 @@ pub fn main() {
     let maximum_bandwidth = 1_000_000_000.0;
     let expected_utilization = 0.5;
 
-    println!(
-        "expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
-        maximum_bandwidth / MIB as f64,
-        bandwidth  / MIB as f64,
-    );
-
     assert!(
         maximum_bandwidth * expected_utilization < bandwidth,
         "expected to reach {expected_utilization} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",

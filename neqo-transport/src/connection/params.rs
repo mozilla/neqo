@@ -9,7 +9,7 @@ use std::{cmp::max, time::Duration};
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
-    recv_stream::INITIAL_RECV_BUFFER_SIZE,
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
@@ -91,9 +91,9 @@ impl Default for ConnectionParameters {
             versions: VersionConfig::default(),
             cc_algorithm: CongestionControlAlgorithm::NewReno,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_BUFFER_SIZE).unwrap(),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_BUFFER_SIZE).unwrap(),
-            max_stream_data_uni: u64::try_from(INITIAL_RECV_BUFFER_SIZE).unwrap(),
+            max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE).unwrap(),
+            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE).unwrap(),
+            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE).unwrap(),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,
