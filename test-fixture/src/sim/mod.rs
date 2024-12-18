@@ -8,6 +8,7 @@
 pub mod connection;
 mod delay;
 mod drop;
+mod mtu;
 pub mod rng;
 mod taildrop;
 
@@ -33,6 +34,7 @@ pub mod network {
     pub use super::{
         delay::{Delay, NonRandomDelay},
         drop::Drop,
+        mtu::Mtu,
         taildrop::TailDrop,
     };
 }

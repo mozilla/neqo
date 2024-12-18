@@ -5,7 +5,7 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{NonRandomDelay, TailDrop},
+        network::{Mtu, NonRandomDelay, TailDrop},
         Simulator,
     },
 };
@@ -19,17 +19,19 @@ pub fn main() {
         "gbit-bandwidth",
         boxed![
             ConnectionNode::new_client(
-                ConnectionParameters::default().pmtud(false).pacing(true),
+                ConnectionParameters::default(),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![ReceiveData::new(TRANSFER_AMOUNT)]
             ),
+            Mtu::new(1500),
             TailDrop::gbit_link(),
             NonRandomDelay::new(Duration::from_millis(20)),
             ConnectionNode::new_server(
-                ConnectionParameters::default().pmtud(false).pacing(true),
+                ConnectionParameters::default(),
                 boxed![ReachState::new(State::Confirmed)],
                 boxed![SendData::new(TRANSFER_AMOUNT)]
             ),
+            Mtu::new(1500),
             TailDrop::gbit_link(),
             NonRandomDelay::new(Duration::from_millis(20)),
         ],
