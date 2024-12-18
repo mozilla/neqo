@@ -171,7 +171,7 @@ pub struct Stats {
     pub pmtud_lost: usize,
     /// Number of times a path MTU changed unexpectedly.
     pub pmtud_change: usize,
-    /// MTU of the local interface used for the current path.
+    /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
