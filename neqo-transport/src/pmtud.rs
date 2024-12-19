@@ -709,24 +709,24 @@ mod tests {
         assert_eq!([0; SEARCH_TABLE_LEN], pmtud.loss_counts);
 
         // One packet of size 4000 was lost, which should increase loss counts >= 4000 by one.
-        let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 4000);
+        let mut expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 4000);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 4000)], &mut stats, now);
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // Now a packet of size 5000 is ACKed, which should reset all loss counts <= 5000.
         pmtud.on_packets_acked(&[make_sentpacket(0, now, 5000)], now, &mut stats);
-        let expected_lc = search_table_zero(&pmtud, &pmtud.loss_counts, 5000);
+        expected_lc = search_table_zero(&pmtud, &pmtud.loss_counts, 5000);
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // Now, one more packets of size 4000 was lost, which should increase loss counts >= 4000
         // by one.
-        let expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
+        expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 4000)], &mut stats, now);
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // Now a packet of size 8000 is ACKed, which should reset all loss counts <= 8000.
         pmtud.on_packets_acked(&[make_sentpacket(0, now, 8000)], now, &mut stats);
-        let expected_lc = search_table_zero(&pmtud, &pmtud.loss_counts, 8000);
+        expected_lc = search_table_zero(&pmtud, &pmtud.loss_counts, 8000);
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // Now, one more packets of size 9000 was lost, which should increase loss counts >= 9000
@@ -735,12 +735,12 @@ mod tests {
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 9000)], &mut stats, now);
 
         // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
-        let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
+        expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
-        let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
+        expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
         assert_eq!(expected_lc, pmtud.loss_counts);
 
