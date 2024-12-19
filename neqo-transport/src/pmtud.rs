@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, qtrace};
 use static_assertions::const_assert;
 
 use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, Stats};
@@ -98,7 +98,7 @@ impl Pmtud {
     }
 
     /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
-    /// sent. During probing, this may be smaller than the actual path MTU.
+    /// sent. During probing, this may be larger than the actual path MTU.
     #[must_use]
     pub const fn plpmtu(&self) -> usize {
         self.mtu - self.header_size
@@ -158,16 +158,15 @@ impl Pmtud {
     /// May also initiate a new probe process for a larger MTU.
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant, stats: &mut Stats) {
         // Reset the loss counts for all packets sizes <= the size of the largest ACKed packet.
-        let max_len = acked_pkts.iter().map(SentPacket::len).max().unwrap_or(0);
-        if max_len == 0 {
+        let Some(max_len) = acked_pkts.iter().map(SentPacket::len).max() else {
             // No packets were ACKed, nothing to do.
             return;
-        }
+        };
 
         let idx = self
             .search_table
             .iter()
-            .position(|&sz| sz > max_len + self.header_size)
+            .position(|&mtu| mtu > max_len + self.header_size)
             .unwrap_or(SEARCH_TABLE_LEN);
         self.loss_counts.iter_mut().take(idx).for_each(|c| *c = 0);
 
@@ -221,7 +220,7 @@ impl Pmtud {
             let Some(idx) = self
                 .search_table
                 .iter()
-                .position(|&sz| p.len() <= sz - self.header_size)
+                .position(|&mtu| p.len() + self.header_size <= mtu)
             else {
                 continue;
             };
@@ -267,27 +266,33 @@ impl Pmtud {
             return;
         };
 
-        let last_ok = first_failed - 1;
-        qdebug!(
-            "Packet of size > {} lost >= {} times",
-            self.search_table[last_ok],
-            MAX_PROBES
-        );
-        if self.probe_state == Probe::NotNeeded {
-            // We saw multiple losses of packets <= the current MTU outside of PMTU discovery,
-            // so we need to probe again. To limit connectivity disruptions, we start the PMTU
-            // discovery from the smallest packet up, rather than the failed packet size down.
-            //
-            // TODO: If we are declaring losses, that means that we're getting packets through.
-            // The size of those will put a floor on the MTU. We're currently conservative and
-            // start from scratch, but we don't strictly need to do that.
-            self.reset(stats);
-            qdebug!("PMTUD reset and restarting, PLPMTU is now {}", self.mtu);
-            self.start(now, stats);
-        } else {
-            // We saw multiple losses of packets > the current MTU during PMTU discovery, so
-            // we're done.
-            self.stop(last_ok, now, stats);
+        let largest_ok_idx = first_failed - 1;
+        let largest_ok_mtu = self.search_table[largest_ok_idx];
+        qtrace!("PMTUD Packet of size > {largest_ok_mtu} lost >= {MAX_PROBES} times");
+
+        match self.probe_state {
+            Probe::NotNeeded => {
+                if largest_ok_mtu < self.mtu {
+                    // We saw multiple losses of packets <= the current MTU outside of PMTU
+                    // discovery, so we need to probe again. To limit connectivity disruptions, we
+                    // start the PMTU discovery from the smallest packet up, rather than the failed
+                    // packet size down.
+                    //
+                    // TODO: If we are declaring losses, that means that we're getting packets
+                    // through. The size of those will put a floor on the MTU. We're currently
+                    // conservative and start from scratch, but we don't strictly need to do that.
+                    self.reset(stats);
+                    qdebug!("PMTUD reset and restarting, PLPMTU is now {}", self.mtu);
+                    self.start(now, stats);
+                }
+            }
+            Probe::Needed | Probe::Sent => {
+                // We saw multiple losses of packets > the current MTU during PMTU discovery, so
+                // we're done.
+                if largest_ok_mtu >= self.mtu {
+                    self.stop(largest_ok_idx, now, stats);
+                }
+            }
         }
     }
 
@@ -366,7 +371,7 @@ mod tests {
         let idx = pmtud
             .search_table
             .iter()
-            .position(|x| *x == pmtud.mtu)
+            .position(|mtu| *mtu == pmtud.mtu)
             .unwrap();
         assert!(mtu >= pmtud.search_table[idx]);
         if idx < SEARCH_TABLE_LEN - 1 {
@@ -544,13 +549,13 @@ mod tests {
     }
 
     /// Increments the loss counts for the given search table, based on the given packet size.
-    fn search_table_inc(pmtud: &Pmtud, loss_counts: &[usize], sz: usize) -> Vec<usize> {
+    fn search_table_inc(pmtud: &Pmtud, loss_counts: &[usize], lost_size: usize) -> Vec<usize> {
         zip(pmtud.search_table, loss_counts.iter())
-            .map(|(&s, &c)| {
-                if s >= sz + pmtud.header_size {
-                    c + 1
+            .map(|(&size, &count)| {
+                if size >= lost_size + pmtud.header_size {
+                    count + 1
                 } else {
-                    c
+                    count
                 }
             })
             .collect()
@@ -572,9 +577,21 @@ mod tests {
 
     #[test]
     fn pmtud_on_packets_lost() {
+        const MTU: usize = 1500;
         let now = now();
-        let mut pmtud = Pmtud::new(V4, Some(1500));
+        let mut pmtud = Pmtud::new(V4, Some(MTU));
         let mut stats = Stats::default();
+        // Start with completed PMTUD with MTU MTU.
+        pmtud.stop(
+            pmtud
+                .search_table
+                .iter()
+                .position(|&mtu| mtu == MTU)
+                .unwrap(),
+            now,
+            &mut stats,
+        );
+        assert_pmtud_stopped(&pmtud, MTU);
 
         // No packets lost, nothing should change.
         pmtud.on_packets_lost(&[], &mut stats, now);
@@ -593,7 +610,7 @@ mod tests {
         pmtud.loss_counts.fill(0); // Reset the loss counts.
 
         // A packet of size 1500 was lost, which should increase loss counts >= 1500 by one.
-        let plen = 1500 - pmtud.header_size;
+        let plen = MTU - pmtud.header_size;
         let mut expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, plen);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, plen)], &mut stats, now);
         assert_eq!(expected_lc, pmtud.loss_counts);
@@ -604,15 +621,15 @@ mod tests {
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // A packet of size 5000 was lost, which should increase loss counts >= 5000 by one. There
-        // have now been MAX_PROBES losses of packets >= 5000, so the PMTUD process should have
-        // restarted.
+        // have now been MAX_PROBES losses of packets >= 5000. That is larger than the current
+        // MTU, so nothing will happen.
+        expected_lc = search_table_inc(&pmtud, &expected_lc, 5000);
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 5000)], &mut stats, now);
-        assert_pmtud_restarted(&pmtud);
-        expected_lc.fill(0); // Reset the expected loss counts.
+        assert_eq!(expected_lc, pmtud.loss_counts);
 
-        // Two packets of size 4000 were lost, which should increase loss counts >= 4000 by two.
-        let expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
-        let expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
+        // Two packets of size 4000 were lost, which should increase loss counts >= 4000 by one.
+        expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
+        expected_lc = search_table_inc(&pmtud, &expected_lc, 4000);
         pmtud.on_packets_lost(
             &[make_sentpacket(0, now, 4000), make_sentpacket(0, now, 4000)],
             &mut stats,
@@ -620,15 +637,34 @@ mod tests {
         );
         assert_eq!(expected_lc, pmtud.loss_counts);
 
-        // A packet of size 2000 was lost, which should increase loss counts >= 2000 by one. There
-        // have now been MAX_PROBES losses of packets >= 4000, so the PMTUD process should have
-        // stopped.
+        // Two packets of size 2000 were lost, which should increase loss counts >= 2000 by two.
+        expected_lc = search_table_inc(&pmtud, &expected_lc, 2000);
+        expected_lc = search_table_inc(&pmtud, &expected_lc, 2000);
         pmtud.on_packets_lost(
             &[make_sentpacket(0, now, 2000), make_sentpacket(0, now, 2000)],
             &mut stats,
             now,
         );
-        assert_pmtud_stopped(&pmtud, 2047);
+        assert_eq!(expected_lc, pmtud.loss_counts);
+
+        // Two more packet of size 1500 were lost. These are <= the current MTU, so the loss counts
+        // only increase by one.
+        let plen = MTU - pmtud.header_size;
+        expected_lc = search_table_inc(&pmtud, &expected_lc, plen);
+        pmtud.on_packets_lost(
+            &[make_sentpacket(0, now, plen), make_sentpacket(0, now, plen)],
+            &mut stats,
+            now,
+        );
+        assert_eq!(expected_lc, pmtud.loss_counts);
+
+        // Now lose another 1500-byte packet. This should trigger a PMTUD restart.
+        pmtud.on_packets_lost(
+            &[make_sentpacket(0, now, plen), make_sentpacket(0, now, plen)],
+            &mut stats,
+            now,
+        );
+        assert_pmtud_restarted(&pmtud);
     }
 
     /// Zeros the loss counts for the given search table, below the given packet size.
@@ -640,9 +676,21 @@ mod tests {
 
     #[test]
     fn pmtud_on_packets_lost_and_acked() {
+        const MTU: usize = 1500;
         let now = now();
-        let mut pmtud = Pmtud::new(V4, Some(1500));
+        let mut pmtud = Pmtud::new(V4, Some(MTU));
         let mut stats = Stats::default();
+        // Start with completed PMTUD with MTU MTU.
+        pmtud.stop(
+            pmtud
+                .search_table
+                .iter()
+                .position(|&mtu| mtu == MTU)
+                .unwrap(),
+            now,
+            &mut stats,
+        );
+        assert_pmtud_stopped(&pmtud, MTU);
 
         // A packet of size 100 was ACKed, which is smaller than all probe sizes.
         // Loss counts should be unchanged.
@@ -682,9 +730,25 @@ mod tests {
         assert_eq!(expected_lc, pmtud.loss_counts);
 
         // Now, one more packets of size 9000 was lost, which should increase loss counts >= 9000
-        // by one. There have now been MAX_PROBES losses of packets >= 8191, so the PMTUD process
-        // should have restarted.
+        // by one. There have now been MAX_PROBES losses of packets >= 8191, but that is larger than
+        // the current MTU, so nothing will happen.
         pmtud.on_packets_lost(&[make_sentpacket(0, now, 9000)], &mut stats, now);
+
+        // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
+        let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
+        pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
+        assert_eq!(expected_lc, pmtud.loss_counts);
+
+        // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
+        let expected_lc = search_table_inc(&pmtud, &pmtud.loss_counts, 1400);
+        pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
+        assert_eq!(expected_lc, pmtud.loss_counts);
+
+        // One packet of size 1400 was lost, which should increase loss counts >= 1400 by one.
+        pmtud.on_packets_lost(&[make_sentpacket(0, now, 1400)], &mut stats, now);
+
+        // This was the third loss of a packet <= the current MTU, which should trigger a PMTUD
+        // restart.
         assert_pmtud_restarted(&pmtud);
     }
 }
