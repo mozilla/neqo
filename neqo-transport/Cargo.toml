@@ -65,6 +65,6 @@ harness = false
 required-features = ["bench"]
 
 [[bench]]
-name = "transfer_once"
+name = "min_bandwidth"
 harness = false
 required-features = ["bench"]
