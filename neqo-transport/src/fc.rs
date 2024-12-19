@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qdebug, qtrace, Role};
 
 use crate::{
     frame::{
@@ -35,7 +35,7 @@ use crate::{
 #[cfg(not(test))]
 const UPDATE_TRIGGER_FACTOR: u64 = 4;
 #[cfg(test)]
-pub const UPDATE_TRIGGER_FACTOR: u64 = 4;
+pub use UPDATE_TRIGGER_FACTOR;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -76,8 +76,6 @@ where
 
     /// Update the maximum. Returns `Some` with the updated available flow
     /// control if the change was an increase and `None` otherwise.
-    //
-    // TODO: Impose a limit? Otherwise attacker can set large max thus local node allocates large send buffer.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
         debug_assert!(limit < u64::MAX);
         if limit > self.limit {
@@ -218,7 +216,6 @@ where
 {
     /// The thing that we're counting for.
     subject: T,
-    // TODO: Update. The receive buffer is no longer relevant.
     /// The maximum amount of items that can be active (e.g., the size of the receive buffer).
     max_active: u64,
     /// Last max allowed sent.
@@ -277,7 +274,7 @@ where
 
     fn should_send_flowc_update(&self) -> bool {
         let window_bytes_unused = self.max_allowed.saturating_sub(self.retired);
-        dbg!(window_bytes_unused) < dbg!(self.max_active - self.max_active / UPDATE_TRIGGER_FACTOR)
+        window_bytes_unused < self.max_active - self.max_active / UPDATE_TRIGGER_FACTOR
     }
 
     pub const fn frame_needed(&self) -> bool {
@@ -389,7 +386,7 @@ impl ReceiverFlowControl<StreamId> {
             let secs = (now - previous).as_secs_f64();
             let bits = (self.retired - previous_retired) as f64 * 8.0;
             let mbits = (bits / secs) / 1024.0 / 1024.0;
-            println!("{mbits} mbit/s {rtt:?} rtt");
+            qdebug!("{mbits} mbit/s {rtt:?} rtt");
         }
 
         // Auto-tune max_active.
@@ -404,15 +401,12 @@ impl ReceiverFlowControl<StreamId> {
             {
                 let prev_max_active = self.max_active;
                 self.max_active = min(2 * self.max_active, MAX_RECV_WINDOW_SIZE);
-                println!(
+                // TODO
+                qdebug!(
                             "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
                             prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
                         );
             }
-        }
-
-        if rtt > Duration::from_millis(200) {
-            panic!("{rtt:?}");
         }
 
         let max_allowed = self.next_limit();
@@ -427,11 +421,8 @@ impl ReceiverFlowControl<StreamId> {
                 max_data: max_allowed,
             }));
             self.frame_sent(max_allowed);
-        } else {
-            panic!("didnt write frame");
+            self.max_allowed_sent_at = Some(now);
         }
-        // TODO: Document why outside of if.
-        self.max_allowed_sent_at = Some(now);
     }
 
     pub fn add_retired(&mut self, count: u64) {
