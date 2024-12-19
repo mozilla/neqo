@@ -22,7 +22,7 @@ use crate::{
     },
     packet::PacketBuilder,
     recv_stream::INITIAL_RECV_WINDOW_SIZE,
-    send_stream::{OrderGroup, SendStreamState, INITIAL_SEND_BUFFER_SIZE},
+    send_stream::{OrderGroup, SendStreamState},
     streams::{SendOrder, StreamOrder},
     tparams::{self, TransportParameter},
     CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
@@ -437,7 +437,7 @@ fn max_data() {
     client.streams.handle_max_data(100_000_000);
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
-        INITIAL_SEND_BUFFER_SIZE - SMALL_MAX_DATA
+        INITIAL_RECV_WINDOW_SIZE - SMALL_MAX_DATA
     );
 
     // Increase max stream data. Avail space no longer limited now.
@@ -447,7 +447,7 @@ fn max_data() {
         .unwrap()
         .set_max_stream_data(100_000_000);
     // TODO: Improve assert.
-    assert!(client.stream_avail_send_space(stream_id).unwrap() > INITIAL_SEND_BUFFER_SIZE);
+    assert!(client.stream_avail_send_space(stream_id).unwrap() > INITIAL_RECV_WINDOW_SIZE);
 
     let evts = client.events().collect::<Vec<_>>();
     assert_eq!(evts.len(), 1);

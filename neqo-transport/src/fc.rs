@@ -32,10 +32,7 @@ use crate::{
 
 // Fraction of a flow control window after which a window update should be sent.
 // TODO: See DEFAULT_ACK_RATIO.
-#[cfg(not(test))]
-const UPDATE_TRIGGER_FACTOR: u64 = 4;
-#[cfg(test)]
-pub use UPDATE_TRIGGER_FACTOR;
+pub(crate) const UPDATE_TRIGGER_FACTOR: u64 = 4;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>

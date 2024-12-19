@@ -77,9 +77,6 @@ pub use self::{
     version::Version,
 };
 
-#[cfg(test)]
-pub use self::send_stream::INITIAL_SEND_BUFFER_SIZE;
-
 pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;
 const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError = 13;
