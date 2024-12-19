@@ -1293,7 +1293,7 @@ mod tests {
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,
-        Version, INITIAL_RECV_WINDOW_SIZE, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
+        Version, INITIAL_RECV_WINDOW_SIZE, MIN_INITIAL_PACKET_SIZE,
     };
     use test_fixture::{
         anti_replay, default_server_h3, fixture_init, new_server, now,
@@ -2824,7 +2824,7 @@ mod tests {
         let mut out = client.process_output(now());
         // We need to loop a bit until all data has been sent. Once for every 1K
         // of data.
-        for _i in 0..SEND_BUFFER_SIZE / 1000 {
+        for _i in 0..INITIAL_RECV_WINDOW_SIZE / 1000 {
             out = server.conn.process(out.dgram(), now());
             out = client.process(out.dgram(), now());
         }
