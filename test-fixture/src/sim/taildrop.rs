@@ -90,16 +90,6 @@ impl TailDrop {
         Self::new(200_000, 8_192, Duration::from_millis(50))
     }
 
-    /// A tail drop queue on a 1 Gbps link with the default forward delay of
-    /// 50ms and a buffer equal to the bandwidth-delay-product.
-    #[must_use]
-    pub const fn gbit_link() -> Self {
-        let rate = 1_000_000_000 / 8;
-        let delay = Duration::from_micros(1);
-        let capacity = 5 * 1024 * 1024; // TODO: BDP 5 MiB
-        Self::new(rate, capacity, delay)
-    }
-
     /// How "big" is this datagram, accounting for overheads.
     /// This approximates by using the same overhead for storing in the queue
     /// and for sending on the wire.
