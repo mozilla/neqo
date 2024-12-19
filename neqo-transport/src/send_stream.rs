@@ -506,13 +506,13 @@ impl TxBuffer {
     pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
-        if start == self.retired() + u64::try_from(self.buffered()).unwrap() {
+        if start == self.retired() + u64::try_from(self.buffered()).ok()? {
             return None;
         }
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = usize::try_from(start - self.retired()).unwrap();
+        let buff_off = usize::try_from(start - self.retired()).ok()?;
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.

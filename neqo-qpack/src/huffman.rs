@@ -83,7 +83,7 @@ pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
             if c == 256 {
                 return Err(Error::HuffmanDecompressionFailed);
             }
-            output.push(u8::try_from(c).unwrap());
+            output.push(u8::try_from(c).map_err(|_| Error::InternalError)?);
         }
     }
 

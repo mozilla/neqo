@@ -821,7 +821,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 let bytes_read = recv_buf.read(buf);
-                Self::flow_control_retire_data(u64::try_from(bytes_read).unwrap(), fc, session_fc);
+                Self::flow_control_retire_data(u64::try_from(bytes_read)?, fc, session_fc);
                 let fin_read = if data_recvd_state {
                     if recv_buf.buffered() == 0 {
                         let received = recv_buf.received();

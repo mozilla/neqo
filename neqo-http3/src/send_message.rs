@@ -183,7 +183,7 @@ impl SendStream for SendMessage {
             // cheap, thus not worth optimizing.
             conn.stream_set_writable_event_low_watermark(
                 self.stream_id(),
-                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).unwrap(),
+                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).ok_or(Error::Internal)?,
             )?;
             return Ok(0);
         }

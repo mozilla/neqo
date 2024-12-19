@@ -184,7 +184,10 @@ impl QPackDecoder {
         }
         if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
             let r = conn
-                .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
+                .stream_send(
+                    self.local_stream_id.ok_or(Error::Internal)?,
+                    &self.send_buf[..],
+                )
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!([self], "{} bytes sent.", r);
             self.send_buf.read(r);

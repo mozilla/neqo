@@ -248,25 +248,27 @@ impl Item {
     /// Creating this object is technically safe, but using it is extremely dangerous.
     /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
     /// or those that treat their argument as `const`.
-    pub fn wrap(buf: &[u8]) -> SECItem {
-        SECItem {
+    pub fn wrap(buf: &[u8]) -> Res<SECItem> {
+        let len = c_uint::try_from(buf.len())?;
+        Ok(SECItem {
             type_: SECItemType::siBuffer,
             data: buf.as_ptr().cast_mut(),
-            len: c_uint::try_from(buf.len()).unwrap(),
-        }
+            len,
+        })
     }
 
     /// Create a wrapper for a struct.
     /// Creating this object is technically safe, but using it is extremely dangerous.
     /// Minimally, it can only be passed as a `const SECItem*` argument to functions,
     /// or those that treat their argument as `const`.
-    pub fn wrap_struct<T>(v: &T) -> SECItem {
+    pub fn wrap_struct<T>(v: &T) -> Res<SECItem> {
         let data: *const T = v;
-        SECItem {
+        let len = c_uint::try_from(mem::size_of::<T>())?;
+        Ok(SECItem {
             type_: SECItemType::siBuffer,
             data: data.cast_mut().cast(),
-            len: c_uint::try_from(mem::size_of::<T>()).unwrap(),
-        }
+            len,
+        })
     }
 
     /// Make an empty `SECItem` for passing as a mutable `SECItem*` argument.
@@ -276,20 +278,6 @@ impl Item {
             data: null_mut(),
             len: 0,
         }
-    }
-
-    /// This dereferences the pointer held by the item and makes a copy of the
-    /// content that is referenced there.
-    ///
-    /// # Safety
-    ///
-    /// This dereferences two pointers.  It doesn't get much less safe.
-    pub unsafe fn into_vec(self) -> Vec<u8> {
-        let b = self.ptr.as_ref().unwrap();
-        // Sanity check the type, as some types don't count bytes in `Item::len`.
-        assert_eq!(b.type_, SECItemType::siBuffer);
-        let slc = null_safe_slice(b.data, b.len);
-        Vec::from(slc)
     }
 }
 
