@@ -8,11 +8,13 @@
 // into flow control frames needing to be sent to the remote.
 
 use std::{
+    cmp::min,
     fmt::Debug,
     ops::{Deref, DerefMut, Index, IndexMut},
+    time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Role};
+use neqo_common::{qdebug, qtrace, Role};
 
 use crate::{
     frame::{
@@ -22,10 +24,15 @@ use crate::{
     },
     packet::PacketBuilder,
     recovery::{RecoveryToken, StreamRecoveryToken},
+    recv_stream::MAX_RECV_WINDOW_SIZE,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     Error, Res,
 };
+
+// Fraction of a flow control window after which a window update should be sent.
+// TODO: See DEFAULT_ACK_RATIO.
+pub(crate) const UPDATE_TRIGGER_FACTOR: u64 = 4;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -210,8 +217,10 @@ where
     max_active: u64,
     /// Last max allowed sent.
     max_allowed: u64,
+    // TODO: Not ideal as it adds an Option for all T, even though only needed for T=StreamId.
+    max_allowed_sent_at: Option<Instant>,
     /// Item received, but not retired yet.
-    /// This will be used for byte flow control: each stream will remember is largest byte
+    /// This will be used for byte flow control: each stream will remember its largest byte
     /// offset received and session flow control will remember the sum of all bytes consumed
     /// by all streams.
     consumed: u64,
@@ -230,13 +239,16 @@ where
             subject,
             max_active: max,
             max_allowed: max,
+            // TODO: Starting with None has us loose a round-trip before
+            // increasing stream receive window. Better to start with now.
+            max_allowed_sent_at: None,
             consumed: 0,
             retired: 0,
             frame_pending: false,
         }
     }
 
-    /// Retired some items and maybe send flow control
+    /// Retire some items and maybe send flow control
     /// update.
     pub fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
@@ -244,7 +256,7 @@ where
         }
 
         self.retired = retired;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.should_send_flowc_update() {
             self.frame_pending = true;
         }
     }
@@ -255,6 +267,11 @@ where
         if self.retired + self.max_active > self.max_allowed {
             self.frame_pending = true;
         }
+    }
+
+    fn should_send_flowc_update(&self) -> bool {
+        let window_bytes_unused = self.max_allowed.saturating_sub(self.retired);
+        window_bytes_unused < self.max_active - self.max_active / UPDATE_TRIGGER_FACTOR
     }
 
     pub const fn frame_needed(&self) -> bool {
@@ -296,6 +313,7 @@ where
 }
 
 impl ReceiverFlowControl<()> {
+    // TODO: Do we need to auto-tune here?
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -318,7 +336,7 @@ impl ReceiverFlowControl<()> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.should_send_flowc_update() {
             self.frame_pending = true;
         }
     }
@@ -345,15 +363,49 @@ impl Default for ReceiverFlowControl<()> {
 }
 
 impl ReceiverFlowControl<StreamId> {
+    // TODO: Should as well apply to Connection flow control? Currently just using a huge limit.
+    // https://github.com/mozilla/neqo/blob/e44c472487b663ea4892bd2ff2786919d20329a2/neqo-transport/src/connection/params.rs#L21
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
+        now: Instant,
+        rtt: Duration,
     ) {
         if !self.frame_needed() {
             return;
         }
+
+        // TODO: Remove. Debugging only for now.
+        let previous_retired = self.max_allowed.saturating_sub(self.max_active);
+        if let Some(previous) = self.max_allowed_sent_at {
+            let secs = (now - previous).as_secs_f64();
+            let bits = (self.retired - previous_retired) as f64 * 8.0;
+            let mbits = (bits / secs) / 1024.0 / 1024.0;
+            qdebug!("{mbits} mbit/s {rtt:?} rtt");
+        }
+
+        // Auto-tune max_active.
+        if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
+            let elapsed = now.duration_since(max_allowed_sent_at);
+            let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
+
+            // Same as `elapsed / rtt < window_bytes_used / max_active`
+            // without floating point division.
+            if elapsed.as_micros() * u128::from(self.max_active)
+                < rtt.as_micros() * u128::from(window_bytes_used)
+            {
+                let prev_max_active = self.max_active;
+                self.max_active = min(2 * self.max_active, MAX_RECV_WINDOW_SIZE);
+                // TODO
+                qdebug!(
+                            "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
+                            prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
+                        );
+            }
+        }
+
         let max_allowed = self.next_limit();
         if builder.write_varint_frame(&[
             FRAME_TYPE_MAX_STREAM_DATA,
@@ -366,13 +418,14 @@ impl ReceiverFlowControl<StreamId> {
                 max_data: max_allowed,
             }));
             self.frame_sent(max_allowed);
+            self.max_allowed_sent_at = Some(now);
         }
     }
 
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.should_send_flowc_update() {
             self.frame_pending = true;
         }
     }
@@ -580,6 +633,7 @@ mod test {
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
+        fc::UPDATE_TRIGGER_FACTOR,
         packet::PacketBuilder,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -666,12 +720,14 @@ mod test {
 
     #[test]
     fn max_allowed_after_items_retired() {
-        let mut fc = ReceiverFlowControl::new((), 100);
-        fc.retire(49);
+        let window = 100;
+        let trigger = window / UPDATE_TRIGGER_FACTOR;
+        let mut fc = ReceiverFlowControl::new((), window);
+        fc.retire(trigger);
         assert!(!fc.frame_needed());
-        fc.retire(51);
+        fc.retire(trigger + 1);
         assert!(fc.frame_needed());
-        assert_eq!(fc.next_limit(), 151);
+        assert_eq!(fc.next_limit(), window + trigger + 1);
     }
 
     #[test]
@@ -758,7 +814,7 @@ mod test {
         assert!(!fc.frame_needed());
         // We can still retire more than 50.
         fc.retire(60);
-        // There is no MAX_STREAM_DATA fame needed yet.
+        // There is no MAX_STREAM_DATA frame needed yet.
         assert!(!fc.frame_needed());
         fc.retire(76);
         assert!(fc.frame_needed());
