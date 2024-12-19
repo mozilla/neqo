@@ -22,7 +22,7 @@ use crate::{
     connection::{Http3State, WebTransportSessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect::SessionCloseReason,
-    Http3StreamInfo, Http3StreamType, Priority, Res,
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -382,7 +382,7 @@ impl WebTransportRequest {
             - u64::try_from(Encoder::varint_len(
                 self.stream_handler.stream_id().as_u64(),
             ))
-            .unwrap())
+            .map_err(|_| Error::Internal)?)
     }
 }
 

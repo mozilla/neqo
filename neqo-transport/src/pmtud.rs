@@ -199,7 +199,7 @@ impl Pmtud {
         qinfo!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
             self.mtu,
-            self.raise_timer.unwrap()
+            self.raise_timer
         );
     }
 

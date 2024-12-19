@@ -587,7 +587,7 @@ impl SecretAgent {
             self.secrets.register(self.fd)?;
             self.raw = Some(r);
             Ok(())
-        } else if self.raw.unwrap() == r {
+        } else if self.raw.ok_or(Error::InternalError)? == r {
             Ok(())
         } else {
             Err(Error::MixedHandshakeMethod)

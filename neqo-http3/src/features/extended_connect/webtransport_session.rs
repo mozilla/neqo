@@ -141,7 +141,7 @@ impl WebTransportSession {
     pub fn send_request(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()> {
         self.control_stream_send
             .http_stream()
-            .unwrap()
+            .ok_or(Error::Internal)?
             .send_headers(headers, conn)
     }
 
@@ -158,7 +158,7 @@ impl WebTransportSession {
         let (out, _) = self
             .control_stream_recv
             .http_stream()
-            .unwrap()
+            .ok_or(Error::Internal)?
             .header_unblocked(conn)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers();
@@ -175,8 +175,7 @@ impl WebTransportSession {
 
     fn priority_update_frame(&mut self) -> Option<HFrame> {
         self.control_stream_recv
-            .http_stream()
-            .unwrap()
+            .http_stream()?
             .priority_update_frame()
     }
 
