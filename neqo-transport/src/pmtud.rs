@@ -362,6 +362,7 @@ mod tests {
         )
     }
 
+    #[cfg(test)]
     fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
         let idx = pmtud
             .search_table
@@ -374,6 +375,7 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     fn pmtud_step(
         pmtud: &mut Pmtud,
         stats: &mut Stats,

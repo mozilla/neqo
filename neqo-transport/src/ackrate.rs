@@ -45,8 +45,8 @@ impl AckRate {
         builder.write_varint_frame(&[
             FRAME_TYPE_ACK_FREQUENCY,
             seqno,
-            u64::try_from(self.packets + 1).unwrap(),
-            u64::try_from(self.delay.as_micros()).unwrap(),
+            u64::try_from(self.packets + 1).expect("usize fits in u64"),
+            u64::try_from(self.delay.as_micros()).expect("delay as usec fits in u64"),
             0,
         ])
     }

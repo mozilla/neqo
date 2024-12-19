@@ -67,12 +67,9 @@ impl QPackDecoder {
         self.max_table_size
     }
 
-    /// # Panics
-    ///
-    /// If the number of blocked streams is too large.
     #[must_use]
-    pub fn get_blocked_streams(&self) -> u16 {
-        u16::try_from(self.max_blocked_streams).unwrap()
+    pub const fn get_blocked_streams(&self) -> usize {
+        self.max_blocked_streams
     }
 
     /// returns a list of unblocked streams

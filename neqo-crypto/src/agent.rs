@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
@@ -122,7 +124,7 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(<$t>::try_from(self.info.$f).unwrap()),
+                _ => Some(<$t>::try_from(self.info.$f).ok()?),
             }
         }
     };
@@ -158,12 +160,11 @@ impl SecretAgentPreInfo {
         self.info.canSendEarlyData != 0
     }
 
-    /// # Panics
+    /// # Errors
     ///
     /// If `usize` is less than 32 bits and the value is too large.
-    #[must_use]
-    pub fn max_early_data(&self) -> usize {
-        usize::try_from(self.info.maxEarlyDataSize).unwrap()
+    pub fn max_early_data(&self) -> Res<usize> {
+        usize::try_from(self.info.maxEarlyDataSize).map_err(|_| Error::InternalError)
     }
 
     /// Was ECH accepted.
@@ -542,9 +543,7 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols
-            .split_first()
-            .expect("at least one ALPN value needed");
+        let (first, rest) = protocols.split_first().ok_or(Error::InternalError)?;
         for v in rest {
             add(v.as_ref());
         }
@@ -872,12 +871,10 @@ impl Client {
         arg: *mut c_void,
     ) -> ssl::SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
-        let info_res = &ssl::SSL_GetResumptionTokenInfo(
-            token,
-            len,
-            info.as_mut_ptr(),
-            c_uint::try_from(mem::size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
-        );
+        let Ok(info_len) = c_uint::try_from(mem::size_of::<ssl::SSLResumptionTokenInfo>()) else {
+            return ssl::SECFailure;
+        };
+        let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
         if info_res.is_err() {
             // Ignore the token.
             return ssl::SECSuccess;
@@ -887,8 +884,12 @@ impl Client {
             // Ignore the token.
             return ssl::SECSuccess;
         }
-        let resumption = arg.cast::<Vec<ResumptionToken>>().as_mut().unwrap();
-        let len = usize::try_from(len).unwrap();
+        let Some(resumption) = arg.cast::<Vec<ResumptionToken>>().as_mut() else {
+            return ssl::SECFailure;
+        };
+        let Ok(len) = usize::try_from(len) else {
+            return ssl::SECFailure;
+        };
         let mut v = Vec::with_capacity(len);
         v.extend_from_slice(null_safe_slice(token, len));
         qdebug!(

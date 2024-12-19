@@ -291,7 +291,7 @@ impl EcnInfo {
             .filter(|p| p.ecn_mark() == IpTosEcn::Ect0)
             .count()
             .try_into()
-            .unwrap();
+            .expect("usize fits into u64");
         if newly_acked_sent_with_ect0 == 0 {
             qwarn!("ECN validation failed, no ECT(0) packets were newly acked");
             self.disable_ecn(stats, EcnValidationError::Bleaching);

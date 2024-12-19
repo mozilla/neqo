@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // This is example code.
+
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
 
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
@@ -55,10 +57,10 @@ impl HttpServer {
             server.set_validation(ValidateAddress::Always);
         }
         if args.ech {
-            let (sk, pk) = generate_ech_keys().expect("generate ECH keys");
+            let (sk, pk) = generate_ech_keys().map_err(|_| Error::Internal)?;
             server
                 .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
-                .expect("enable ECH");
+                .map_err(|_| Error::Internal)?;
             let cfg = server.ech_config();
             qinfo!("ECHConfigList: {}", hex(cfg));
         }
@@ -70,9 +72,9 @@ impl HttpServer {
             read_state: HashMap::new(),
             is_qns_test,
             regex: if is_qns_test {
-                Regex::new(r"GET +/(\S+)(?:\r)?\n").unwrap()
+                Regex::new(r"GET +/(\S+)(?:\r)?\n").map_err(|_| Error::Internal)?
             } else {
-                Regex::new(r"GET +/(\d+)(?:\r)?\n").unwrap()
+                Regex::new(r"GET +/(\d+)(?:\r)?\n").map_err(|_| Error::Internal)?
             },
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         })

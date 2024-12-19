@@ -221,12 +221,14 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     }
 
     fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) {
-        self.insert(Http3ClientEvent::WebTransport(
-            WebTransportEvent::NewStream {
-                stream_id: stream_info.stream_id(),
-                session_id: stream_info.session_id().unwrap(),
-            },
-        ));
+        if let Some(session_id) = stream_info.session_id() {
+            self.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::NewStream {
+                    stream_id: stream_info.stream_id(),
+                    session_id,
+                },
+            ));
+        }
     }
 
     fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>) {

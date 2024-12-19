@@ -190,7 +190,7 @@ impl AddressValidation {
         for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
             difference += (token[i] ^ TOKEN_IDENTIFIER_RETRY[i]).count_ones();
         }
-        usize::try_from(difference).unwrap() < TOKEN_IDENTIFIER_RETRY.len()
+        usize::try_from(difference).expect("u32 fits in usize") < TOKEN_IDENTIFIER_RETRY.len()
     }
 
     pub fn validate(

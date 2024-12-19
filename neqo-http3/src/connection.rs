@@ -1218,7 +1218,7 @@ impl Http3Connection {
                             self.send_streams
                                 .remove(&stream_id)
                                 .ok_or(Error::Internal)?,
-                        )));
+                        )?));
                     self.add_streams(
                         stream_id,
                         Box::new(extended_conn.clone()),

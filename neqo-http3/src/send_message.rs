@@ -151,7 +151,7 @@ impl SendMessage {
     }
 
     fn stream_id(&self) -> StreamId {
-        Option::<StreamId>::from(&self.stream).unwrap()
+        Option::<StreamId>::from(&self.stream).expect("stream has ID")
     }
 
     fn get_stream_info(&self) -> Http3StreamInfo {

@@ -45,6 +45,7 @@ fn receive_request(server: &Http3Server) -> Option<Http3OrWebTransportStream> {
     None
 }
 
+#[cfg(test)]
 fn set_response(request: &Http3OrWebTransportStream) {
     request
         .send_headers(&[
@@ -56,11 +57,13 @@ fn set_response(request: &Http3OrWebTransportStream) {
     request.stream_close_send().unwrap();
 }
 
+#[cfg(test)]
 fn process_server_events(server: &Http3Server) {
     let request = receive_request(server).unwrap();
     set_response(&request);
 }
 
+#[cfg(test)]
 fn process_client_events(conn: &mut Http3Client) {
     let mut response_header_found = false;
     let mut response_data_found = false;
@@ -410,6 +413,7 @@ fn data_writable_events() {
     assert_eq!(&recv_buf, buf);
 }
 
+#[cfg(test)]
 fn get_token(client: &mut Http3Client) -> ResumptionToken {
     assert_eq!(client.state(), Http3State::Connected);
     client

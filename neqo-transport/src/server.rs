@@ -70,7 +70,7 @@ impl InitialDetails {
             src_cid: ConnectionId::from(packet.scid()),
             dst_cid: ConnectionId::from(packet.dcid()),
             token: packet.token().to_vec(),
-            version: packet.version().unwrap(),
+            version: packet.version().expect("packet has version"),
         }
     }
 }
@@ -383,7 +383,7 @@ impl Server {
                     .conn_params
                     .get_versions()
                     .all()
-                    .contains(&packet.version().unwrap()))
+                    .contains(&packet.version().expect("packet has version")))
         {
             if dgram.len() < MIN_INITIAL_PACKET_SIZE {
                 qdebug!([self], "Unsupported version: too short");

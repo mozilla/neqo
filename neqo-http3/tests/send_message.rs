@@ -79,6 +79,7 @@ fn send_headers(request: &Http3OrWebTransportStream) -> Result<(), Error> {
     ])
 }
 
+#[cfg(test)]
 fn process_client_events(conn: &mut Http3Client) {
     let mut response_header_found = false;
     let mut response_data_found = false;
@@ -111,6 +112,7 @@ fn process_client_events(conn: &mut Http3Client) {
     assert!(response_data_found);
 }
 
+#[cfg(test)]
 fn process_client_events_no_data(conn: &mut Http3Client) {
     let mut response_header_found = false;
     let mut fin_received = false;
@@ -135,6 +137,7 @@ fn process_client_events_no_data(conn: &mut Http3Client) {
     assert!(fin_received);
 }
 
+#[cfg(test)]
 fn connect_send_and_receive_request() -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();

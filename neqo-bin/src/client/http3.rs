@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // This is example code.
+
 //! An HTTP 3 client implementation.
 
 use std::{
@@ -18,7 +20,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
+use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -200,9 +202,11 @@ impl super::Handler for Handler<'_> {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => loop {
-                            let (sz, fin) = client
-                                .read_data(Instant::now(), stream_id, &mut self.read_buffer)
-                                .expect("Read should succeed");
+                            let (sz, fin) = client.read_data(
+                                Instant::now(),
+                                stream_id,
+                                &mut self.read_buffer,
+                            )?;
 
                             handler.process_data_readable(
                                 stream_id,
@@ -270,7 +274,7 @@ trait StreamHandler {
         fin: bool,
         data: &[u8],
         output_read_data: bool,
-    ) -> Res<bool>;
+    ) -> Res<()>;
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId);
 }
 
@@ -291,12 +295,12 @@ impl StreamHandler for DownloadStreamHandler {
         fin: bool,
         data: &[u8],
         output_read_data: bool,
-    ) -> Res<bool> {
+    ) -> Res<()> {
         if let Some(out_file) = &mut self.out_file {
             if !data.is_empty() {
                 out_file.write_all(data)?;
             }
-            return Ok(true);
+            return Ok(());
         } else if !output_read_data {
             qdebug!("READ[{stream_id}]: {} bytes", data.len());
         } else if let Ok(txt) = std::str::from_utf8(data) {
@@ -313,7 +317,7 @@ impl StreamHandler for DownloadStreamHandler {
             }
         }
 
-        Ok(true)
+        Ok(())
     }
 
     fn process_data_writable(&mut self, _client: &mut Http3Client, _stream_id: StreamId) {}
@@ -335,18 +339,19 @@ impl StreamHandler for UploadStreamHandler {
         _fin: bool,
         data: &[u8],
         _output_read_data: bool,
-    ) -> Res<bool> {
+    ) -> Res<()> {
         if let Ok(txt) = std::str::from_utf8(data) {
             let trimmed_txt = txt.trim_end_matches(char::from(0));
-            let parsed: usize = trimmed_txt.parse().unwrap();
+            let parsed: usize = trimmed_txt.parse().map_err(|_| Error::InvalidInput)?;
             if parsed == self.data.len() {
                 let upload_time = Instant::now().duration_since(self.start);
                 qinfo!("Stream ID: {stream_id:?}, Upload time: {upload_time:?}");
             }
+            Ok(())
         } else {
-            panic!("Unexpected data [{}]: 0x{}", stream_id, hex(data));
+            qerror!("Unexpected data [{}]: 0x{}", stream_id, hex(data));
+            Err(crate::client::Error::Http3Error(Error::InvalidInput))
         }
-        Ok(true)
     }
 
     fn process_data_writable(&mut self, client: &mut Http3Client, stream_id: StreamId) {

@@ -627,7 +627,7 @@ impl Connection {
                 self.version,
                 u64::try_from(rtt.as_millis()).unwrap_or(0),
             )
-            .unwrap()
+            .expect("can create resumption token")
     }
 
     fn confirmed(&self) -> bool {
@@ -1112,7 +1112,7 @@ impl Connection {
         // timeout for it  It is expected that other activities will
         // drive it.
 
-        let earliest = delays.into_iter().min().unwrap();
+        let earliest = delays.into_iter().min().expect("at least one delay");
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
         debug_assert!(earliest > now);
@@ -1738,7 +1738,7 @@ impl Connection {
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
         {
-            space.set_received(now, packet.pn(), ack_eliciting)
+            space.set_received(now, packet.pn(), ack_eliciting)?
         } else {
             qdebug!(
                 [self],
@@ -1770,7 +1770,7 @@ impl Connection {
                 self.remote_initial_source_cid
                     .as_ref()
                     .or(self.original_destination_cid.as_ref())
-                    .unwrap()
+                    .expect("have either remote_initial_source_cid or original_destination_cid")
                     .clone(),
             ),
             now,
@@ -1834,21 +1834,26 @@ impl Connection {
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
         let got_version = if self.role == Role::Server {
-            self.cid_manager
-                .add_odcid(self.original_destination_cid.as_ref().unwrap().clone());
-            // Make a path on which to run the handshake.
-            self.setup_handshake_path(path, now);
+            if let Some(original_destination_cid) = self.original_destination_cid.as_ref() {
+                self.cid_manager.add_odcid(original_destination_cid.clone());
+                // Make a path on which to run the handshake.
+                self.setup_handshake_path(path, now);
 
-            self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
-                qdebug!([self], "Accepted 0-RTT");
-                ZeroRttState::AcceptedServer
+                self.zero_rtt_state =
+                    if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
+                        qdebug!([self], "Accepted 0-RTT");
+                        ZeroRttState::AcceptedServer
+                    } else {
+                        qtrace!([self], "Rejected 0-RTT");
+                        ZeroRttState::Rejected
+                    };
+
+                // The server knows the final version if it has remote transport parameters.
+                self.tps.borrow().remote.is_some()
             } else {
-                qtrace!([self], "Rejected 0-RTT");
-                ZeroRttState::Rejected
-            };
-
-            // The server knows the final version if it has remote transport parameters.
-            self.tps.borrow().remote.is_some()
+                qdebug!([self], "No original destination DCID");
+                false
+            }
         } else {
             qdebug!([self], "Changing to use Server CID={}", packet.scid());
             debug_assert!(path.borrow().is_primary());
@@ -2101,7 +2106,7 @@ impl Connection {
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
         let pn_len = mem::size_of::<PacketNumber>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
+            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -2655,7 +2660,7 @@ impl Connection {
             let reset_token = remote
                 .get_bytes(tparams::STATELESS_RESET_TOKEN)
                 .map_or_else(ConnectionIdEntry::random_srt, |token| {
-                    <[u8; 16]>::try_from(token).unwrap()
+                    <[u8; 16]>::try_from(token).unwrap_or_else(|_| ConnectionIdEntry::random_srt())
                 });
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
@@ -3124,7 +3129,8 @@ impl Connection {
         self.tps.borrow().remote.as_ref().map_or_else(
             || Duration::new(0, 0),
             |r| {
-                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT)).unwrap();
+                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))
+                    .expect("ACK_DELAY_EXPONENT > 20 is invalid per RFC9000");
                 Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
             },
         )

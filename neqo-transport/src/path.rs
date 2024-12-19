@@ -174,12 +174,13 @@ impl Paths {
         });
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
-        let idx = self
-            .paths
-            .iter()
-            .enumerate()
-            .find_map(|(i, p)| if Rc::ptr_eq(p, path) { Some(i) } else { None })
-            .expect("migration target should be permanent");
+        let idx = self.paths.iter().enumerate().find_map(|(i, p)| {
+            if Rc::ptr_eq(p, path) {
+                Some(i)
+            } else {
+                None
+            }
+        })?;
         self.paths.swap(0, idx);
 
         path.borrow_mut().set_primary(true, now);
@@ -331,8 +332,10 @@ impl Paths {
                     .as_ref()
                     .is_some_and(|target| Rc::ptr_eq(target, p))
                 {
-                    let primary = self.migration_target.take();
-                    mem::drop(self.select_primary(&primary.unwrap(), now));
+                    let Some(primary) = self.migration_target.take() else {
+                        break;
+                    };
+                    mem::drop(self.select_primary(&primary, now));
                     return true;
                 }
                 break;
@@ -355,7 +358,9 @@ impl Paths {
 
         self.paths.retain(|p| {
             let mut path = p.borrow_mut();
-            let current = path.remote_cid.as_ref().unwrap();
+            let Some(current) = path.remote_cid.as_ref() else {
+                return true;
+            };
             if current.sequence_number() < retire_prior && !current.connection_id().is_empty() {
                 to_retire.push(current.sequence_number());
                 let new_cid = store.next();
@@ -656,10 +661,9 @@ impl Path {
     /// Set the remote connection ID based on the peer's choice.
     /// This is only valid during the handshake.
     pub fn set_remote_cid(&mut self, cid: ConnectionIdRef) {
-        self.remote_cid
-            .as_mut()
-            .unwrap()
-            .update_cid(ConnectionId::from(cid));
+        if let Some(remote_cid) = self.remote_cid.as_mut() {
+            remote_cid.update_cid(ConnectionId::from(cid));
+        }
     }
 
     /// Access the remote connection ID.
@@ -670,13 +674,10 @@ impl Path {
     }
 
     /// Set the stateless reset token for the connection ID that is currently in use.
-    /// Panics if the sequence number is non-zero as this is only necessary during
-    /// the handshake; all other connection IDs are initialized with a token.
     pub fn set_reset_token(&mut self, token: [u8; 16]) {
-        self.remote_cid
-            .as_mut()
-            .unwrap()
-            .set_stateless_reset_token(token);
+        if let Some(remote_cid) = self.remote_cid.as_mut() {
+            remote_cid.set_stateless_reset_token(token);
+        }
     }
 
     /// Determine if the provided token is a stateless reset token.
@@ -852,10 +853,11 @@ impl Path {
             true
         } else if matches!(self.state, ProbeState::Valid) {
             // Retire validated, non-primary paths.
-            // Allow more than 2* `MAX_PATH_PROBES` times the PTO so that an old
+            // Allow more than 2 * `MAX_PATH_PROBES` times the PTO so that an old
             // path remains around until after a previous path fails.
-            let count = u32::try_from(2 * MAX_PATH_PROBES + 1).unwrap();
-            self.validated.unwrap() + (pto * count) > now
+            let count = u32::try_from(2 * MAX_PATH_PROBES + 1).expect("result fits in u32");
+            self.validated
+                .is_some_and(|validated| validated + (pto * count) > now)
         } else {
             // Keep paths that are being actively probed.
             true

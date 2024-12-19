@@ -274,9 +274,10 @@ impl HeaderTable {
                 if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
                 }
-                used -= u64::try_from(e.size()).unwrap();
+                let size = u64::try_from(e.size()).expect("usize fits in u64");
+                used -= size;
                 if !only_check {
-                    self.used -= u64::try_from(e.size()).unwrap();
+                    self.used -= size;
                     self.dynamic.pop_back();
                 }
             }
@@ -285,8 +286,8 @@ impl HeaderTable {
     }
 
     pub fn insert_possible(&mut self, size: usize) -> bool {
-        u64::try_from(size).unwrap() <= self.capacity
-            && self.can_evict_to(self.capacity - u64::try_from(size).unwrap())
+        let size = u64::try_from(size).expect("usize fits in u64");
+        size <= self.capacity && self.can_evict_to(self.capacity - size)
     }
 
     /// Insert a new entry.
