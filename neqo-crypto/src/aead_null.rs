@@ -17,7 +17,7 @@ pub const AEAD_NULL_TAG: &[u8] = &[0x0a; 16];
 pub struct AeadNull {}
 
 impl AeadNull {
-    #[expect(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub const fn new(
         _version: Version,
         _cipher: Cipher,
@@ -32,7 +32,7 @@ impl AeadNull {
         AEAD_NULL_TAG.len()
     }
 
-    #[expect(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub fn encrypt<'a>(
         &self,
         _count: u64,
@@ -46,7 +46,7 @@ impl AeadNull {
         Ok(&output[..l + 16])
     }
 
-    #[expect(clippy::missing_errors_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub fn decrypt<'a>(
         &self,
         _count: u64,

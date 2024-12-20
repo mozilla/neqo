@@ -14,7 +14,7 @@ pub trait RequestTarget: Debug {
     fn path(&self) -> &str;
 }
 
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub struct RefRequestTarget<'s, 'a, 'p> {
     scheme: &'s str,
     authority: &'a str,
@@ -95,7 +95,7 @@ impl<'x> AsRequestTarget<'x> for Url {
     }
 }
 
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub struct UrlRequestTarget {
     url: Url,
 }

@@ -18,7 +18,7 @@ use crate::{
     path::PathRef,
 };
 
-#[expect(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub fn dump_packet(
     conn: &Connection,
     path: &PathRef,

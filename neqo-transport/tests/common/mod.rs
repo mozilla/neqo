@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(unused)]
+#![allow(unused)]
 
 use std::{cell::RefCell, mem, ops::Range, rc::Rc};
 
@@ -43,7 +43,7 @@ pub fn default_server() -> Server {
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.
 pub fn connected_server(server: &Server) -> ConnectionRef {
     // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[expect(clippy::mutable_key_type)]
+    #[allow(clippy::mutable_key_type)]
     let server_connections = server.active_connections();
     // Find confirmed connections.  There should only be one.
     let mut confirmed = server_connections

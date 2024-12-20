@@ -132,7 +132,7 @@ impl Pmtud {
         );
     }
 
-    #[expect(rustdoc::private_intra_doc_links)]
+    #[allow(rustdoc::private_intra_doc_links)]
     /// Provides a [`Fn`] that returns true if the packet is a PMTUD probe.
     ///
     /// Allows filtering packets without holding a reference to [`Pmtud`]. When

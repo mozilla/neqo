@@ -1298,7 +1298,7 @@ impl Connection {
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    #[expect(clippy::needless_pass_by_value)] // To consume an owned datagram below.
+    #[allow(clippy::needless_pass_by_value)] // To consume an owned datagram below.
     fn save_datagram(
         &mut self,
         cspace: CryptoSpace,
@@ -1365,7 +1365,7 @@ impl Connection {
 
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
-    #[expect(clippy::too_many_lines)] // Yeah, it's a work in progress.
+    #[allow(clippy::too_many_lines)] // Yeah, it's a work in progress.
     fn preprocess_packet(
         &mut self,
         packet: &PublicPacket,
@@ -2378,7 +2378,7 @@ impl Connection {
 
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    #[expect(clippy::too_many_lines)] // Yeah, that's just the way it is.
+    #[allow(clippy::too_many_lines)] // Yeah, that's just the way it is.
     fn output_path(
         &mut self,
         path: &PathRef,
@@ -2897,7 +2897,7 @@ impl Connection {
         Ok(())
     }
 
-    #[expect(clippy::too_many_lines)] // Yep, but it's a nice big match, which is basically lots of little functions.
+    #[allow(clippy::too_many_lines)] // Yep, but it's a nice big match, which is basically lots of little functions.
     fn input_frame(
         &mut self,
         path: &PathRef,

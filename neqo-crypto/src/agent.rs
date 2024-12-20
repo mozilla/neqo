@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
 
 use std::{
     cell::RefCell,
@@ -274,7 +274,7 @@ impl SecretAgentInfo {
 
 /// `SecretAgent` holds the common parts of client and server.
 #[derive(Debug)]
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
@@ -747,7 +747,7 @@ impl SecretAgent {
     /// # Panics
     ///
     /// If setup fails.
-    #[expect(clippy::branches_sharing_code)]
+    #[allow(clippy::branches_sharing_code)]
     pub fn close(&mut self) {
         // It should be safe to close multiple times.
         if self.fd.is_null() {
@@ -832,7 +832,7 @@ impl ResumptionToken {
 
 /// A TLS Client.
 #[derive(Debug)]
-#[expect(clippy::box_collection)] // We need the Box.
+#[allow(clippy::box_collection)] // We need the Box.
 pub struct Client {
     agent: SecretAgent,
 

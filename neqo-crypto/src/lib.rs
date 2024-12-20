@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![expect(clippy::unseparated_literal_suffix)] // For bindgen code.
+#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
+#![allow(clippy::unseparated_literal_suffix)] // For bindgen code.
 #![allow(clippy::used_underscore_binding)] // For bindgen code.
 
 mod aead;
@@ -64,7 +64,7 @@ mod min_version;
 use min_version::MINIMUM_NSS_VERSION;
 use neqo_common::qerror;
 
-#[expect(non_upper_case_globals)]
+#[allow(non_upper_case_globals)]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
@@ -202,7 +202,7 @@ where
     if data.is_null() || len == 0 {
         &[]
     } else {
-        #[expect(clippy::disallowed_methods)]
+        #[allow(clippy::disallowed_methods)]
         std::slice::from_raw_parts(data, len)
     }
 }

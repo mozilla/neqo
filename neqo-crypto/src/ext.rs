@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
 
 use std::{
     cell::RefCell,
@@ -77,7 +77,7 @@ impl ExtensionTracker {
         f(&mut *rc.borrow_mut())
     }
 
-    #[expect(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation)]
     unsafe extern "C" fn extension_writer(
         _fd: *mut PRFileDesc,
         message: SSLHandshakeType::Type,
@@ -108,7 +108,7 @@ impl ExtensionTracker {
         arg: *mut c_void,
     ) -> SECStatus {
         let d = null_safe_slice(data, len);
-        #[expect(clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_possible_truncation)]
         Self::wrap_handler_call(arg, |handler| {
             // Cast is safe here because the message type is always part of the enum
             match handler.handle(message as HandshakeMessage, d) {

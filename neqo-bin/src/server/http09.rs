@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used)] // This is example code.
+#![allow(clippy::unwrap_used)] // This is example code.
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
 
@@ -194,7 +194,7 @@ impl super::HttpServer for HttpServer {
     fn process_events(&mut self, now: Instant) {
         // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable
         // types.
-        #[expect(clippy::mutable_key_type)]
+        #[allow(clippy::mutable_key_type)]
         let active_conns = self.server.active_connections();
         for acr in active_conns {
             loop {

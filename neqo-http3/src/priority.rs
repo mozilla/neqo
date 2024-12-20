@@ -107,7 +107,7 @@ impl fmt::Display for Priority {
 }
 
 #[derive(Debug)]
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub struct PriorityHandler {
     push_stream: bool,
     priority: Priority,

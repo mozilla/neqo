@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
+#![allow(clippy::missing_errors_doc)] // Functions simply delegate to tokio and quinn-udp.
 
 use std::{
     io::{self, IoSliceMut},

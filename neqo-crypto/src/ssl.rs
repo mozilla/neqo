@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(dead_code, non_upper_case_globals, non_snake_case)]
+#![allow(dead_code, non_upper_case_globals, non_snake_case)]
 #![allow(clippy::too_many_lines, clippy::cognitive_complexity)] // For included code
 
 use std::os::raw::{c_uint, c_void};
@@ -46,7 +46,7 @@ pub enum Opt {
 
 impl Opt {
     // Cast is safe here because SSLOptions are within the i32 range
-    #[expect(clippy::cast_possible_wrap)]
+    #[allow(clippy::cast_possible_wrap)]
     #[must_use]
     pub const fn as_int(self) -> PRInt32 {
         let i = match self {

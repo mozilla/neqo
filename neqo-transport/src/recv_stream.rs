@@ -33,7 +33,7 @@ use crate::{
 const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
 // Export as usize for consistency with SEND_BUFFER_SIZE
-#[expect(clippy::cast_possible_truncation)] // Yeah, nope.
+#[allow(clippy::cast_possible_truncation)] // Yeah, nope.
 pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 #[derive(Debug, Default)]
@@ -1037,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
+    #[allow(clippy::single_range_in_vec_init)] // Because that lint makes no sense here.
     fn recv_noncontiguous() {
         // Non-contiguous with the start, no data available.
         recv_ranges(&[10..20], 0);

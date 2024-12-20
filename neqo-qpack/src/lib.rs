@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::module_name_repetitions)] // This lint doesn't work here.
+#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
 
 pub mod decoder;
 mod decoder_instructions;

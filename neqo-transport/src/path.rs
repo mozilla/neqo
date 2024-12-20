@@ -52,7 +52,7 @@ pub type PathRef = Rc<RefCell<Path>>;
 #[derive(Debug, Default)]
 pub struct Paths {
     /// All of the paths.  All of these paths will be permanent.
-    #[expect(clippy::struct_field_names)]
+    #[allow(clippy::struct_field_names)]
     paths: Vec<PathRef>,
     /// This is the primary path.  This will only be `None` initially, so
     /// care needs to be taken regarding that only during the handshake.
@@ -238,7 +238,7 @@ impl Paths {
         if primary_failed {
             self.primary = None;
             // Find a valid path to fall back to.
-            #[expect(clippy::option_if_let_else)]
+            #[allow(clippy::option_if_let_else)]
             if let Some(fallback) = self
                 .paths
                 .iter()

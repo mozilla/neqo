@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(dead_code, non_upper_case_globals, non_snake_case)]
+#![allow(dead_code, non_upper_case_globals, non_snake_case)]
 #![allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 
 include!(concat!(env!("OUT_DIR"), "/nspr_io.rs"));

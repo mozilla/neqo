@@ -127,7 +127,7 @@ impl SelfEncrypt {
     ///
     /// Returns an error when the self-encrypted object is invalid;
     /// when the keys have been rotated; or when NSS fails.
-    #[expect(clippy::similar_names)] // aad is similar to aead
+    #[allow(clippy::similar_names)] // aad is similar to aead
     pub fn open(&self, aad: &[u8], ciphertext: &[u8]) -> Res<Vec<u8>> {
         if ciphertext[0] != Self::VERSION {
             return Err(Error::SelfEncryptFailure);

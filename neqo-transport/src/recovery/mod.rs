@@ -901,7 +901,7 @@ impl LossRecovery {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    #[expect(clippy::option_if_let_else)]
+    #[allow(clippy::option_if_let_else)]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qtrace!([self], "get send profile {:?}", now);
         let sender = path.sender();

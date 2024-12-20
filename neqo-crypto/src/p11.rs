@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(
+#![allow(
     dead_code,
     non_upper_case_globals,
     non_camel_case_types,
@@ -28,7 +28,7 @@ use crate::{
     null_safe_slice,
 };
 
-#[expect(clippy::unreadable_literal)]
+#[allow(clippy::unreadable_literal)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }

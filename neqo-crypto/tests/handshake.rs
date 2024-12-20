@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used)]
 #![allow(dead_code)]
 
 use std::{mem, time::Instant};

@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::module_name_repetitions)]
-#![expect(clippy::unwrap_used)] // This is test code.
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::unwrap_used)] // This is test code.
 
 use std::{
     cmp::min,

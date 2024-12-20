@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(dead_code)]
+#![allow(dead_code)]
 
 use crate::ssl;
 
@@ -27,7 +27,7 @@ pub const TLS_EPOCH_APPLICATION_DATA: Epoch = 3_u16;
 macro_rules! remap_enum {
     { $t:ident: $s:ty { $( $n:ident = $v:path ),+ $(,)? } } => {
         pub type $t = $s;
-        $(#[expect(clippy::cast_possible_truncation)] pub const $n: $t = $v as $t; )+
+        $(#[allow(clippy::cast_possible_truncation)] pub const $n: $t = $v as $t; )+
     };
     { $t:ident: $s:ty => $e:ident { $( $n:ident = $v:ident ),+ $(,)? } } => {
         remap_enum!{ $t: $s { $( $n = $e::$v ),+ } }

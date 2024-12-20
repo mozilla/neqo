@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used)] // This is example code.
+#![allow(clippy::unwrap_used)] // This is example code.
 
 //! An HTTP 3 client implementation.
 
@@ -33,7 +33,7 @@ use super::{get_output_file, qlog_new, Args, CloseState, Res};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
 
 pub struct Handler<'a> {
-    #[expect(clippy::struct_field_names)]
+    #[allow(clippy::struct_field_names)]
     url_handler: UrlHandler<'a>,
     token: Option<ResumptionToken>,
     output_read_data: bool,

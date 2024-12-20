@@ -488,7 +488,7 @@ impl Server {
     /// This lists the connections that have received new events
     /// as a result of calling `process()`.
     // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[expect(clippy::mutable_key_type)]
+    #[allow(clippy::mutable_key_type)]
     #[must_use]
     pub fn active_connections(&self) -> HashSet<ConnectionRef> {
         self.connections

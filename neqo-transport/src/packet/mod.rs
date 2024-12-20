@@ -83,7 +83,7 @@ impl PacketType {
     }
 }
 
-#[expect(clippy::fallible_impl_from)]
+#[allow(clippy::fallible_impl_from)]
 impl From<PacketType> for CryptoSpace {
     fn from(v: PacketType) -> Self {
         match v {
@@ -357,7 +357,7 @@ impl PacketBuilder {
         self.pn = pn;
     }
 
-    #[expect(clippy::cast_possible_truncation)] // Nope.
+    #[allow(clippy::cast_possible_truncation)] // Nope.
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;

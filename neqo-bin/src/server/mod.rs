@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::future_not_send)]
-#![expect(clippy::unwrap_used)] // This is example code.
+#![allow(clippy::future_not_send)]
+#![allow(clippy::unwrap_used)] // This is example code.
 
 use std::{
     cell::RefCell,
@@ -190,14 +190,14 @@ fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
     fs::read(path)
 }
 
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub trait HttpServer: Display {
     fn process(&mut self, dgram: Option<Datagram<&[u8]>>, now: Instant) -> Output;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
 }
 
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub struct ServerRunner {
     now: Box<dyn Fn() -> Instant>,
     server: Box<dyn HttpServer>,

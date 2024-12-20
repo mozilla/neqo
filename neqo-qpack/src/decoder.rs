@@ -171,7 +171,7 @@ impl QPackDecoder {
     /// # Panics
     ///
     /// Never, but rust doesn't know that.
-    #[expect(clippy::map_err_ignore)]
+    #[allow(clippy::map_err_ignore)]
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
         let increment = self.table.base() - self.acked_inserts;

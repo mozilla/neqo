@@ -469,7 +469,7 @@ pub enum Http3ServerEvent {
 }
 
 #[derive(Debug, Default, Clone)]
-#[expect(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)]
 pub struct Http3ServerEvents {
     events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
 }

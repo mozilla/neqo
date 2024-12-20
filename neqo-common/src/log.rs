@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::module_name_repetitions)]
+#![allow(clippy::module_name_repetitions)]
 
 use std::{
     io::Write,

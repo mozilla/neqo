@@ -36,7 +36,7 @@ use crate::{
 pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler, now: Instant) {
     qlog.add_event_data_with_instant(|| {
         let remote = tph.remote();
-        #[expect(clippy::cast_possible_truncation)] // Nope.
+        #[allow(clippy::cast_possible_truncation)] // Nope.
         let ev_data = EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: None,
@@ -115,7 +115,7 @@ fn connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[expect(clippy::similar_names)]
+#[allow(clippy::similar_names)]
 pub fn connection_state_updated(qlog: &NeqoQlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
@@ -346,7 +346,7 @@ pub fn packet_received(
     );
 }
 
-#[expect(dead_code)]
+#[allow(dead_code)]
 pub enum QlogMetric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
@@ -423,8 +423,8 @@ pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric], now: Ins
 
 // Helper functions
 
-#[expect(clippy::too_many_lines)] // Yeah, but it's a nice match.
-#[expect(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
+#[allow(clippy::too_many_lines)] // Yeah, but it's a nice match.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
 impl From<Frame<'_>> for QuicFrame {
     fn from(frame: Frame) -> Self {
         match frame {

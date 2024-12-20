@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![expect(clippy::unwrap_used)] // This is test code.
+#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
+#![allow(clippy::unwrap_used)] // This is test code.
 
 use std::{
     cell::{OnceCell, RefCell},

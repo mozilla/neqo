@@ -78,7 +78,7 @@ impl PeriodSet {
 }
 
 #[cfg(target_os = "macos")]
-#[expect(non_camel_case_types)]
+#[allow(non_camel_case_types)]
 mod mac {
     use std::{mem::size_of, ptr::addr_of_mut};
 
@@ -124,7 +124,7 @@ mod mac {
     }
 
     const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
-    #[expect(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation)]
     const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
         (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
             as mach_msg_type_number_t;
@@ -179,7 +179,7 @@ mod mac {
 
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let policy = thread_time_constraint_policy {
             period: base as u32, // Base interval
             computation: (base * 0.5) as u32,
@@ -302,7 +302,7 @@ impl Time {
     }
 
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    #[expect(clippy::unused_self)]
+    #[allow(clippy::unused_self)]
     const fn start(&self) {}
 
     #[cfg(windows)]
@@ -313,7 +313,7 @@ impl Time {
     }
 
     #[cfg(not(target_os = "windows"))]
-    #[expect(clippy::unused_self)]
+    #[allow(clippy::unused_self)]
     const fn stop(&self) {}
 
     fn update(&mut self) {
