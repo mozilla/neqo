@@ -104,7 +104,7 @@ type Res<T> = Result<T, Error>;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
-#[allow(clippy::struct_excessive_bools)] // Not a good use of that lint.
+#[expect(clippy::struct_excessive_bools)] // Not a good use of that lint.
 pub struct Args {
     #[command(flatten)]
     shared: SharedArgs,
@@ -180,7 +180,7 @@ pub struct Args {
 impl Args {
     #[must_use]
     #[cfg(any(test, feature = "bench"))]
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub fn new(requests: &[usize], upload: bool) -> Self {
         use std::str::FromStr;
         Self {
@@ -425,7 +425,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 continue;
             }
 
-            #[allow(clippy::match_same_arms)]
+            #[expect(clippy::match_same_arms)]
             match (handler_done, self.client.is_closed()?) {
                 // more work
                 (false, _) => {}

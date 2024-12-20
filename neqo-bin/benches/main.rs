@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // OK in a bench.
+
 use std::{env, path::PathBuf, str::FromStr};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
@@ -70,7 +72,7 @@ fn transfer(c: &mut Criterion) {
     done_sender.send(()).unwrap();
 }
 
-#[allow(clippy::redundant_pub_crate)] // Bug in clippy nursery? Not sure how this lint could fire here.
+#[expect(clippy::redundant_pub_crate)] // Bug in clippy nursery? Not sure how this lint could fire here.
 fn spawn_server() -> tokio::sync::oneshot::Sender<()> {
     let (done_sender, mut done_receiver) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {

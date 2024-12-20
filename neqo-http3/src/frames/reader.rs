@@ -93,7 +93,7 @@ enum FrameReaderState {
     UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct FrameReader {
     state: FrameReaderState,

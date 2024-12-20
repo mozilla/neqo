@@ -26,7 +26,7 @@ pub mod mozpkix {
     // by bindgen when provided with the simple header:
     // #include "mozpkix/pkixnss.h"
 
-    #[allow(non_camel_case_types)]
+    #[expect(non_camel_case_types)]
     pub type mozilla_pkix_ErrorCode = ::std::os::raw::c_int;
     pub const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE: mozilla_pkix_ErrorCode = -16384;
     pub const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY: mozilla_pkix_ErrorCode = -16383;

@@ -203,7 +203,7 @@ fn zero_rtt_send_reject() {
 fn zero_rtt_update_flow_control() {
     const LOW: u64 = 3;
     const HIGH: u64 = 10;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     const MESSAGE: &[u8] = &[0; HIGH as usize];
 
     let mut client = default_client();

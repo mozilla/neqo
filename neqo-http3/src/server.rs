@@ -137,7 +137,7 @@ impl Http3Server {
         qtrace!([self], "Process http3 internal.");
         // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable
         // types.
-        #[allow(clippy::mutable_key_type)]
+        #[expect(clippy::mutable_key_type)]
         let mut active_conns = self.server.active_connections();
         active_conns.extend(
             self.http3_handlers

@@ -18,7 +18,6 @@ use crate::{
     AppError, CloseReason, Error, Res, TransportError,
 };
 
-#[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
 
 pub const FRAME_TYPE_PADDING: FrameType = 0x0;
@@ -410,7 +409,7 @@ impl<'a> Frame<'a> {
     /// # Errors
     ///
     /// Returns an error if the frame cannot be decoded.
-    #[allow(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
+    #[expect(clippy::too_many_lines)] // Yeah, but it's a nice match statement.
     pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
         /// Maximum ACK Range Count in ACK Frame
         ///

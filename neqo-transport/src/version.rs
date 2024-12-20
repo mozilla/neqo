@@ -86,7 +86,6 @@ impl Version {
         }
     }
 
-    #[allow(clippy::unused_self)] // `self` only used in feature-gated code
     pub(crate) const fn is_draft(self) -> bool {
         #[cfg(feature = "draft-29")]
         return matches!(self, Self::Draft29);

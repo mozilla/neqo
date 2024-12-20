@@ -36,7 +36,7 @@ use crate::{
 pub fn connection_tparams_set(qlog: &NeqoQlog, tph: &TransportParametersHandler, now: Instant) {
     qlog.add_event_data_with_instant(|| {
         let remote = tph.remote();
-        #[allow(clippy::cast_possible_truncation)] // Nope.
+        #[expect(clippy::cast_possible_truncation)] // Nope.
         let ev_data = EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: None,
@@ -115,7 +115,7 @@ fn connection_started(qlog: &NeqoQlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[allow(clippy::similar_names)]
+#[expect(clippy::similar_names)]
 pub fn connection_state_updated(qlog: &NeqoQlog, new: &State, now: Instant) {
     qlog.add_event_data_with_instant(
         || {
@@ -346,7 +346,7 @@ pub fn packet_received(
     );
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub enum QlogMetric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
@@ -379,7 +379,6 @@ pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric], now: Ins
             let mut pacing_rate: Option<u64> = None;
 
             for metric in updated_metrics {
-                #[allow(clippy::cast_precision_loss)] // Nought to do here.
                 match metric {
                     QlogMetric::MinRtt(v) => min_rtt = Some(v.as_secs_f32() * 1000.0),
                     QlogMetric::SmoothedRtt(v) => smoothed_rtt = Some(v.as_secs_f32() * 1000.0),
@@ -424,8 +423,8 @@ pub fn metrics_updated(qlog: &NeqoQlog, updated_metrics: &[QlogMetric], now: Ins
 
 // Helper functions
 
-#[allow(clippy::too_many_lines)] // Yeah, but it's a nice match.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
+#[expect(clippy::too_many_lines)] // Yeah, but it's a nice match.
+#[expect(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // No choice here.
 impl From<Frame<'_>> for QuicFrame {
     fn from(frame: Frame) -> Self {
         match frame {

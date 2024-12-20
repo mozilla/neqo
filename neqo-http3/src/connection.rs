@@ -517,7 +517,7 @@ impl Http3Connection {
             output = self.handle_new_stream(conn, stream_type, stream_id)?;
         }
 
-        #[allow(clippy::match_same_arms)] // clippy is being stupid here
+        #[expect(clippy::match_same_arms)] // clippy is being stupid here
         match output {
             ReceiveOutput::UnblockedStreams(unblocked_streams) => {
                 self.handle_unblocked_streams(unblocked_streams, conn)?;

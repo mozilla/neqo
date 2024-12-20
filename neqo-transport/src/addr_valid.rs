@@ -222,7 +222,7 @@ impl AddressValidation {
         let enc = &token[TOKEN_IDENTIFIER_RETRY.len()..];
         // Note that this allows the token identifier part to be corrupted.
         // That's OK here as we don't depend on that being authenticated.
-        #[allow(clippy::option_if_let_else)]
+        #[expect(clippy::option_if_let_else)]
         if let Some(cid) = self.decrypt_token(enc, peer_address, retry, now) {
             if retry {
                 // This is from Retry, so we should have an ODCID >= 8.
@@ -267,7 +267,7 @@ impl AddressValidation {
 
 // Note: these lint override can be removed in later versions where the lints
 // either don't trip a false positive or don't apply.  rustc 1.46 is fine.
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum NewTokenState {
     Client {
         /// Tokens that haven't been taken yet.

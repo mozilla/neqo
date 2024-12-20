@@ -83,7 +83,7 @@ impl PacketType {
     }
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl From<PacketType> for CryptoSpace {
     fn from(v: PacketType) -> Self {
         match v {
@@ -184,7 +184,6 @@ impl PacketBuilder {
     /// even if the token is empty.
     ///
     /// See `short()` for more on how to handle this in cases where there is no space.
-    #[allow(clippy::similar_names)]
     pub fn long(
         mut encoder: Encoder,
         pt: PacketType,
@@ -358,7 +357,7 @@ impl PacketBuilder {
         self.pn = pn;
     }
 
-    #[allow(clippy::cast_possible_truncation)] // Nope.
+    #[expect(clippy::cast_possible_truncation)] // Nope.
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + 2) + expansion;
         self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
@@ -464,7 +463,6 @@ impl PacketBuilder {
     /// # Errors
     ///
     /// This will return an error if AEAD encrypt fails.
-    #[allow(clippy::similar_names)]
     pub fn retry(
         version: Version,
         dcid: &[u8],
@@ -497,7 +495,6 @@ impl PacketBuilder {
 
     /// Make a Version Negotiation packet.
     #[must_use]
-    #[allow(clippy::similar_names)]
     pub fn version_negotiation(
         dcid: &[u8],
         scid: &[u8],
@@ -612,7 +609,6 @@ impl<'a> PublicPacket<'a> {
     /// # Errors
     ///
     /// This will return an error if the packet could not be decoded.
-    #[allow(clippy::similar_names)]
     pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
         let mut decoder = Decoder::new(data);
         let first = Self::opt(decoder.decode_uint::<u8>())?;

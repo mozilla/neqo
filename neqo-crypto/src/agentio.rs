@@ -182,7 +182,7 @@ impl AgentIoInput {
             return Err(Error::NoDataAvailable);
         }
 
-        #[allow(clippy::disallowed_methods)] // We just checked if this was empty.
+        #[expect(clippy::disallowed_methods)] // We just checked if this was empty.
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
         qtrace!([self], "read {}", hex(src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
@@ -336,7 +336,7 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
         .unwrap_or_else(|_| PR_FAILURE.into())
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
     let Some(a) = addr.as_mut() else {
         return PR_FAILURE;

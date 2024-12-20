@@ -773,7 +773,7 @@ where
 }
 
 #[cfg(test)]
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 

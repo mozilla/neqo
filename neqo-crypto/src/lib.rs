@@ -63,7 +63,7 @@ mod min_version;
 use min_version::MINIMUM_NSS_VERSION;
 use neqo_common::qerror;
 
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals)]
 mod nss {
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
@@ -201,7 +201,7 @@ where
     if data.is_null() || len == 0 {
         &[]
     } else {
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods)]
         std::slice::from_raw_parts(data, len)
     }
 }

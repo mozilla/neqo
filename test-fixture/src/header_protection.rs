@@ -29,8 +29,8 @@ pub use crate::{default_client, now, CountingConnectionIdGenerator};
 // * the protected payload including the packet number.
 // Any token is thrown away.
 #[must_use]
-#[allow(clippy::missing_panics_doc)]
-#[allow(clippy::type_complexity)]
+#[expect(clippy::missing_panics_doc)]
+#[expect(clippy::type_complexity)]
 pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u8], &[u8], &[u8])> {
     let mut dec = Decoder::new(&dgram[..]);
     let type_and_ver = dec.decode(5).unwrap().to_vec();
@@ -65,7 +65,7 @@ pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u
 /// Generate an AEAD and header protection object for a client Initial.
 /// Note that this works for QUIC version 1 only.
 #[must_use]
-#[allow(clippy::missing_panics_doc)]
+#[expect(clippy::missing_panics_doc)]
 pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, HpKey) {
     const INITIAL_SALT: &[u8] = &[
         0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c,
@@ -102,7 +102,7 @@ pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, HpKey) {
 
 // Remove header protection, returning the unmasked header and the packet number.
 #[must_use]
-#[allow(clippy::missing_panics_doc)]
+#[expect(clippy::missing_panics_doc)]
 pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     // Make a copy of the header that can be modified.
     let mut fixed_header = header.to_vec();
@@ -126,7 +126,7 @@ pub fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (V
     (fixed_header, u64::from_be_bytes(pn))
 }
 
-#[allow(clippy::missing_panics_doc)]
+#[expect(clippy::missing_panics_doc)]
 pub fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<usize>) {
     let sample_start = pn_bytes.start + 4;
     let sample_end = sample_start + 16;

@@ -47,7 +47,7 @@ impl<'a> Decoder<'a> {
     /// Only use this for tests because we panic rather than reporting a result.
     #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
-        #[allow(clippy::unwrap_used)] // Only used in tests.
+        #[expect(clippy::unwrap_used)] // Only used in tests.
         self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
 
@@ -287,7 +287,7 @@ impl Encoder {
         let mut enc = Self::with_capacity(cap);
 
         for i in 0..cap {
-            #[allow(clippy::unwrap_used)] // Only used in tests.
+            #[expect(clippy::unwrap_used)] // Only used in tests.
             let v = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap();
             enc.encode_byte(v);
         }
@@ -355,7 +355,7 @@ impl Encoder {
     /// # Panics
     ///
     /// When `f()` returns a length larger than `2^8n`.
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
         let start = self.buf.len();
         self.buf.resize(self.buf.len() + n, 0);

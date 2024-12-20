@@ -26,7 +26,7 @@ use crate::{
     null_safe_slice,
 };
 
-#[allow(clippy::unreadable_literal)]
+#[expect(clippy::unreadable_literal)]
 mod nss_p11 {
     include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 }

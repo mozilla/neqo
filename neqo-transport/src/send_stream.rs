@@ -219,7 +219,7 @@ impl RangeTracker {
     /// The only tricky parts are making sure that we maintain `self.acked`,
     /// which is the first acknowledged range.  And making sure that we don't create
     /// ranges of the same type that are adjacent; these need to be merged.
-    #[allow(clippy::missing_panics_doc)] // with a >16 exabyte packet on a 128-bit machine, maybe
+    #[allow(clippy::missing_panics_doc)]
     pub fn mark_acked(&mut self, new_off: u64, new_len: usize) {
         let end = new_off + u64::try_from(new_len).expect("usize fits in u64");
         let new_off = max(self.acked, new_off);
@@ -318,7 +318,7 @@ impl RangeTracker {
     /// +     SS
     /// = SSSSSS
     /// ```
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
         let new_end = new_off + u64::try_from(new_len).expect("usize fits in u64");
         new_off = max(self.acked, new_off);
@@ -506,7 +506,6 @@ impl TxBuffer {
         can_buffer
     }
 
-    #[allow(clippy::missing_panics_doc)] // These are not possible.
     pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
@@ -540,7 +539,7 @@ impl TxBuffer {
         self.ranges.mark_sent(offset, len);
     }
 
-    #[allow(clippy::missing_panics_doc)] // Not possible here.
+    #[allow(clippy::missing_panics_doc)]
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
         let prev_retired = self.retired();
         self.ranges.mark_acked(offset, len);
@@ -729,7 +728,7 @@ impl PartialEq for SendStream {
 impl Eq for SendStream {}
 
 impl SendStream {
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn new(
         stream_id: StreamId,
         max_stream_data: u64,
@@ -835,7 +834,7 @@ impl SendStream {
     }
 
     #[must_use]
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn bytes_written(&self) -> u64 {
         match &self.state {
             SendStreamState::Send { send_buf, .. } | SendStreamState::DataSent { send_buf, .. } => {
@@ -948,7 +947,7 @@ impl SendStream {
     }
 
     /// Maybe write a `STREAM` frame.
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn write_stream_frame(
         &mut self,
         priority: TransmissionPriority,
@@ -1112,7 +1111,7 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         self.bytes_sent = max(
             self.bytes_sent,
@@ -1131,7 +1130,7 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
         match self.state {
             SendStreamState::Send {
@@ -1169,7 +1168,7 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         self.retransmission_offset = max(
             self.retransmission_offset,
@@ -1338,7 +1337,7 @@ impl SendStream {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)] // not possible
+    #[allow(clippy::missing_panics_doc)]
     pub fn reset(&mut self, err: AppError) {
         match &self.state {
             SendStreamState::Ready { fc, .. } => {
@@ -1573,6 +1572,7 @@ impl SendStreams {
         }
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.set_fairness(stream_id, true)?;
         if let Some(stream) = self.map.get_mut(&stream_id) {

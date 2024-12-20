@@ -20,7 +20,7 @@ use qlog::{
 
 use crate::Role;
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, Default)]
 pub struct NeqoQlog {
     inner: Rc<RefCell<Option<NeqoQlogShared>>>,

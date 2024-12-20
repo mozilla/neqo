@@ -274,7 +274,7 @@ impl SecretAgentInfo {
 
 /// `SecretAgent` holds the common parts of client and server.
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
@@ -344,7 +344,6 @@ impl SecretAgent {
         Ok(fd)
     }
 
-    #[allow(clippy::missing_const_for_fn)]
     unsafe extern "C" fn auth_complete_hook(
         arg: *mut c_void,
         _fd: *mut ssl::PRFileDesc,
@@ -748,7 +747,7 @@ impl SecretAgent {
     /// # Panics
     ///
     /// If setup fails.
-    #[allow(clippy::branches_sharing_code)]
+    #[expect(clippy::branches_sharing_code)]
     pub fn close(&mut self) {
         // It should be safe to close multiple times.
         if self.fd.is_null() {
@@ -833,7 +832,7 @@ impl ResumptionToken {
 
 /// A TLS Client.
 #[derive(Debug)]
-#[allow(clippy::box_collection)] // We need the Box.
+#[expect(clippy::box_collection)] // We need the Box.
 pub struct Client {
     agent: SecretAgent,
 

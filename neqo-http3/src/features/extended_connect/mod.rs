@@ -67,12 +67,12 @@ pub(crate) enum ExtendedConnectType {
 
 impl ExtendedConnectType {
     #[must_use]
-    #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
+    #[expect(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     pub const fn string(self) -> &'static str {
         "webtransport"
     }
 
-    #[allow(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
+    #[expect(clippy::unused_self)] // This will change when we have more features using ExtendedConnectType.
     #[must_use]
     pub const fn get_stream_type(self, session_id: StreamId) -> Http3StreamType {
         Http3StreamType::WebTransport(session_id)
