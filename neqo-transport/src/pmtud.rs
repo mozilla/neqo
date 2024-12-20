@@ -268,8 +268,10 @@ impl Pmtud {
 
         let largest_ok_idx = first_failed - 1;
         let largest_ok_mtu = self.search_table[largest_ok_idx];
-        qtrace!("PMTUD Packet of size > {largest_ok_mtu} lost >= {MAX_PROBES} times");
-
+        qtrace!(
+            "PMTUD Packet of size > {largest_ok_mtu} lost >= {MAX_PROBES} times, state {:?}",
+            self.probe_state
+        );
         match self.probe_state {
             Probe::NotNeeded => {
                 if largest_ok_mtu < self.mtu {
@@ -289,7 +291,7 @@ impl Pmtud {
             Probe::Needed | Probe::Sent => {
                 // We saw multiple losses of packets > the current MTU during PMTU discovery, so
                 // we're done.
-                if largest_ok_mtu >= self.mtu {
+                if largest_ok_mtu > self.mtu {
                     self.stop(largest_ok_idx, now, stats);
                 }
             }
@@ -581,7 +583,7 @@ mod tests {
         let now = now();
         let mut pmtud = Pmtud::new(V4, Some(MTU));
         let mut stats = Stats::default();
-        // Start with completed PMTUD with MTU MTU.
+        // Start with completed PMTUD with MTU 1500.
         pmtud.stop(
             pmtud
                 .search_table
@@ -680,7 +682,7 @@ mod tests {
         let now = now();
         let mut pmtud = Pmtud::new(V4, Some(MTU));
         let mut stats = Stats::default();
-        // Start with completed PMTUD with MTU MTU.
+        // Start with completed PMTUD with MTU 1500.
         pmtud.stop(
             pmtud
                 .search_table
