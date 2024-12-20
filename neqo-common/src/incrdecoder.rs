@@ -31,7 +31,7 @@ impl IncrementalDecoderUint {
             if amount < 8 {
                 self.v <<= amount * 8;
             }
-            self.v |= dv.decode_n(amount).unwrap();
+            self.v |= dv.decode_n(amount)?;
             *r -= amount;
             if *r == 0 {
                 Some(self.v)
@@ -97,7 +97,7 @@ impl IncrementalDecoderBuffer {
     /// Never; but rust doesn't know that.
     pub fn consume(&mut self, dv: &mut Decoder) -> Option<Vec<u8>> {
         let amount = min(self.remaining, dv.remaining());
-        let b = dv.decode(amount).unwrap();
+        let b = dv.decode(amount)?;
         self.v.extend_from_slice(b);
         self.remaining -= amount;
         if self.remaining == 0 {

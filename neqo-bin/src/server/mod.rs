@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![allow(clippy::future_not_send)]
+#![allow(clippy::unwrap_used)] // This is example code.
 
 use std::{
     cell::RefCell,
@@ -263,7 +264,10 @@ impl ServerRunner {
 
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
-            let (host, socket) = self.sockets.get_mut(sockets_index).unwrap();
+            let (host, socket) = self
+                .sockets
+                .get_mut(sockets_index)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "No socket"))?;
             let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
                 break;
             };

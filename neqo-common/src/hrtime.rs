@@ -70,7 +70,7 @@ impl PeriodSet {
     fn min(&self) -> Option<Period> {
         for (i, v) in self.counts.iter().enumerate() {
             if *v > 0 {
-                return Some(Period(u8::try_from(i).unwrap() + Period::MIN.0));
+                return Some(Period(u8::try_from(i).ok()? + Period::MIN.0));
             }
         }
         None
@@ -412,6 +412,7 @@ mod test {
 
     /// Validate the delays twice.  Sometimes the first run can stall.
     /// Reliability in CI is more important than reliable timers.
+    #[cfg(test)]
     fn check_delays(max_lag: Duration) {
         if validate_delays(max_lag).is_err() {
             sleep(Duration::from_millis(50));

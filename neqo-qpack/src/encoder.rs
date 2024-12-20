@@ -546,7 +546,7 @@ mod tests {
 
     impl TestEncoder {
         pub fn change_capacity(&mut self, capacity: u64) -> Res<()> {
-            self.encoder.set_max_capacity(capacity).unwrap();
+            self.encoder.set_max_capacity(capacity)?;
             // We will try to really change the table only when we send the change capacity
             // instruction.
             self.encoder.send_encoder_updates(&mut self.conn)

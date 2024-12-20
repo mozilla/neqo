@@ -5,7 +5,8 @@
 // except according to those terms.
 
 #![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-#![allow(clippy::unseparated_literal_suffix, clippy::used_underscore_binding)] // For bindgen code.
+#![allow(clippy::unseparated_literal_suffix)] // For bindgen code.
+#![allow(clippy::used_underscore_binding)] // For bindgen code.
 
 mod aead;
 #[cfg(feature = "disable-encryption")]
