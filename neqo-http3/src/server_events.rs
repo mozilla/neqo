@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -471,6 +469,7 @@ pub enum Http3ServerEvent {
 }
 
 #[derive(Debug, Default, Clone)]
+#[expect(clippy::module_name_repetitions)]
 pub struct Http3ServerEvents {
     events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
 }

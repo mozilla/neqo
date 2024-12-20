@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::ops::Deref;
 
 use neqo_common::{Decoder, Encoder};
@@ -68,6 +66,7 @@ impl HSetting {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[expect(clippy::module_name_repetitions)]
 pub struct HSettings {
     settings: Vec<HSetting>,
 }

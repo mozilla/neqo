@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::future_not_send)]
-#![allow(clippy::unwrap_used)] // This is example code.
+#![expect(clippy::future_not_send)]
+#![expect(clippy::unwrap_used)] // This is example code.
 
 use std::{
     cell::RefCell,

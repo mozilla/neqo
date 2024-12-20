@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_errors_doc)]
+#![expect(clippy::missing_panics_doc)]
+#![expect(clippy::missing_errors_doc)]
 
 use std::{
     fmt::{self, Display},

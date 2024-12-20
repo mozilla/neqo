@@ -6,8 +6,6 @@
 
 // Congestion control
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     fmt::{self, Display},
     time::{Duration, Instant},

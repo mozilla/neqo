@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,
@@ -36,6 +34,7 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
 const MAX_EVENT_DATA_SIZE: usize = 1024;
 
+#[expect(clippy::module_name_repetitions)]
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,

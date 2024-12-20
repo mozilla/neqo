@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::fmt::{Debug, Formatter};
 
 use url::{ParseError, Url};
@@ -16,6 +14,7 @@ pub trait RequestTarget: Debug {
     fn path(&self) -> &str;
 }
 
+#[expect(clippy::module_name_repetitions)]
 pub struct RefRequestTarget<'s, 'a, 'p> {
     scheme: &'s str,
     authority: &'a str,
@@ -96,6 +95,7 @@ impl<'x> AsRequestTarget<'x> for Url {
     }
 }
 
+#[expect(clippy::module_name_repetitions)]
 pub struct UrlRequestTarget {
     url: Url,
 }

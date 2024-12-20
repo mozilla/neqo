@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use neqo_common::{event::Provider as EventProvider, Header};
@@ -107,6 +105,7 @@ pub enum Http3ClientEvent {
 }
 
 #[derive(Debug, Default, Clone)]
+#[expect(clippy::module_name_repetitions)]
 pub struct Http3ClientEvents {
     events: Rc<RefCell<VecDeque<Http3ClientEvent>>>,
 }

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unwrap_used)] // OK in a build script.
+#![expect(clippy::unwrap_used)] // OK in a build script.
 
 use std::{
     collections::HashMap,

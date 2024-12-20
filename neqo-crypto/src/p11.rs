@@ -4,11 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-#![allow(clippy::unwrap_used)] // Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed.
+#![expect(
+    dead_code,
+    non_upper_case_globals,
+    non_camel_case_types,
+    non_snake_case,
+    clippy::unwrap_used
+)]
 
 use std::{
     cell::RefCell,

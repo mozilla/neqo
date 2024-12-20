@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap},
@@ -296,6 +294,7 @@ The call to function `receive` may produce `Http3ClientEvent::DataReadable`. Act
 data is done in the `read_data` function.
 */
 #[derive(Debug)]
+#[expect(clippy::module_name_repetitions)]
 pub struct Http3Connection {
     role: Role,
     pub state: Http3State,

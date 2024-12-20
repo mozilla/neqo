@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::{os::raw::c_char, str::Utf8Error};
 
@@ -12,7 +12,7 @@ use crate::ssl::{SECStatus, SECSuccess};
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 mod codes {
-    #![allow(non_snake_case)]
+    #![expect(non_snake_case)]
     include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
     include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
 }
