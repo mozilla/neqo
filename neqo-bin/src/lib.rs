@@ -112,7 +112,7 @@ pub struct QuicParameters {
     /// The idle timeout for connections, in seconds.
     pub idle_timeout: u64,
 
-    #[arg(long = "cc", default_value = "newreno")]
+    #[arg(long = "cc", default_value = "cubic")]
     /// The congestion controller to use.
     pub congestion_control: CongestionControlAlgorithm,
 
@@ -141,7 +141,7 @@ impl Default for QuicParameters {
             max_streams_bidi: 16,
             max_streams_uni: 16,
             idle_timeout: 30,
-            congestion_control: CongestionControlAlgorithm::NewReno,
+            congestion_control: CongestionControlAlgorithm::Cubic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
