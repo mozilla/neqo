@@ -539,8 +539,8 @@ impl Path {
         let iface_mtu = match mtu::interface_and_mtu(remote.ip()) {
             Ok((name, mtu)) => {
                 qdebug!(
-                    "Outbound interface {name} for destination {} has MTU {mtu}",
-                    remote.ip()
+                    "Outbound interface {name} for destination {ip} has MTU {mtu}",
+                    ip = remote.ip()
                 );
                 stats.pmtud_iface_mtu = mtu;
                 Some(mtu)
