@@ -851,7 +851,7 @@ impl Path {
             true
         } else if matches!(self.state, ProbeState::Valid) {
             // Retire validated, non-primary paths.
-            // Allow more than 2 * `MAX_PATH_PROBES` times the PTO so that an old
+            // Allow more than `2 * MAX_PATH_PROBES` times the PTO so that an old
             // path remains around until after a previous path fails.
             let count = u32::try_from(2 * MAX_PATH_PROBES + 1).expect("result fits in u32");
             self.validated
