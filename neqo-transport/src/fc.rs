@@ -379,7 +379,12 @@ impl ReceiverFlowControl<StreamId> {
             return;
         }
 
-        // Auto-tune max_active.
+        // Auto-tune max_active, i.e. the flow control window.
+        //
+        // If the sending rate ( window_bytes used / elapsed ) exceeds the rate
+        // allowed by the maximum flow control window and the current rtt (
+        // max_active / rtt ), try to increase the maximum flow control window (
+        // max_active ).
         if let Some(max_allowed_sent_at) = self.max_allowed_sent_at {
             let elapsed = now.duration_since(max_allowed_sent_at);
             let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
@@ -390,12 +395,16 @@ impl ReceiverFlowControl<StreamId> {
                 < rtt.as_micros() * u128::from(window_bytes_used)
             {
                 let prev_max_active = self.max_active;
+                // Try doubling the flow control window.
+                //
+                // Note that the flow control window should grow at least as
+                // fast as the congestion control window, in order to not
+                // unnecessarily limit throughput.
                 self.max_active = min(2 * self.max_active, MAX_RECV_WINDOW_SIZE);
-                // TODO
                 qdebug!(
-                            "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
-                            prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
-                        );
+                    "Increasing max stream receive window: previous max_active: {} MiB new max_active: {} MiB last update: {:?} rtt: {rtt:?} stream_id: {}",
+                    prev_max_active / 1024 / 1024, self.max_active / 1024 / 1024,  now-self.max_allowed_sent_at.unwrap(), self.subject,
+                );
             }
         }
 
