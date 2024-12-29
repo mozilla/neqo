@@ -11,13 +11,16 @@ use neqo_transport::Output;
 
 use super::{Node, Rng};
 
-/// A random dropper.
+/// Drops all datagrams larger than the configured MTU.
 #[derive(Debug)]
 pub struct Mtu {
     mtu: usize,
 }
 
 impl Mtu {
+    /// Creates new [`Mtu`].
+    ///
+    /// Limit includes IP and UDP header size.
     #[must_use]
     pub const fn new(mtu: usize) -> Self {
         Self { mtu }
@@ -29,7 +32,6 @@ impl Node for Mtu {
 
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
         d.filter(|dgram| {
-            // TODO: Deduplicate with pmtud.rs?
             let header = match dgram.destination().ip() {
                 IpAddr::V4(_) => 20 + 8,
                 IpAddr::V6(_) => 40 + 8,
