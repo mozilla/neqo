@@ -756,8 +756,6 @@ impl RecvStream {
         Ok(())
     }
 
-    /// If we should tell the sender they have more credit, return an offset
-    // TODO: This doesn't return anything.
     fn flow_control_retire_data(
         new_read: u64,
         fc: &mut ReceiverFlowControl<StreamId>,
