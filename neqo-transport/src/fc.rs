@@ -246,8 +246,6 @@ where
             subject,
             max_active: max,
             max_allowed: max,
-            // TODO: Starting with None has us loose a round-trip before
-            // increasing stream receive window. Better to start with now.
             max_allowed_sent_at: None,
             consumed: 0,
             retired: 0,
@@ -320,7 +318,6 @@ where
 }
 
 impl ReceiverFlowControl<()> {
-    // TODO: Do we need to auto-tune here?
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -370,8 +367,6 @@ impl Default for ReceiverFlowControl<()> {
 }
 
 impl ReceiverFlowControl<StreamId> {
-    // TODO: Should as well apply to Connection flow control? Currently just using a huge limit.
-    // https://github.com/mozilla/neqo/blob/e44c472487b663ea4892bd2ff2786919d20329a2/neqo-transport/src/connection/params.rs#L21
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -382,15 +377,6 @@ impl ReceiverFlowControl<StreamId> {
     ) {
         if !self.frame_needed() {
             return;
-        }
-
-        // TODO: Remove. Debugging only for now.
-        let previous_retired = self.max_allowed.saturating_sub(self.max_active);
-        if let Some(previous) = self.max_allowed_sent_at {
-            let secs = (now - previous).as_secs_f64();
-            let bits = (self.retired - previous_retired) as f64 * 8.0;
-            let mbits = (bits / secs) / 1024.0 / 1024.0;
-            qdebug!("{mbits} mbit/s {rtt:?} rtt");
         }
 
         // Auto-tune max_active.
