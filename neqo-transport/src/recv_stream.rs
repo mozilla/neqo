@@ -31,10 +31,6 @@ use crate::{
     AppError, Error, Res,
 };
 
-// TODO: Remove. Should no longer be needed.
-#[cfg(test)]
-const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
-
 pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
@@ -1023,7 +1019,7 @@ mod tests {
     use crate::{
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
         packet::PacketBuilder,
-        recv_stream::{RxStreamOrderer, RX_STREAM_DATA_WINDOW},
+        recv_stream::RxStreamOrderer,
         stats::FrameStats,
         ConnectionEvents, Error, StreamId, INITIAL_RECV_WINDOW_SIZE,
     };
@@ -1472,7 +1468,7 @@ mod tests {
 
     #[test]
     fn stream_flowc_update() {
-        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
+        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
         let mut buf = vec![0u8; INITIAL_RECV_WINDOW_SIZE + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
@@ -1504,7 +1500,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
         RecvStream::new(
             StreamId::from(67),
-            RX_STREAM_DATA_WINDOW,
+            INITIAL_RECV_WINDOW_SIZE as u64,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
         )
@@ -1512,11 +1508,11 @@ mod tests {
 
     #[test]
     fn stream_max_stream_data() {
-        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
+        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
         assert!(!s.has_frames_to_write());
         let big_buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
-        s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
+        s.inbound_stream_frame(false, INITIAL_RECV_WINDOW_SIZE as u64, &[1; 1])
             .unwrap_err();
     }
 
@@ -1557,14 +1553,14 @@ mod tests {
 
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
-        let mut s = create_stream(1024 * RX_STREAM_DATA_WINDOW);
+        let mut s = create_stream(1024 * INITIAL_RECV_WINDOW_SIZE as u64);
         let mut buf = vec![0; INITIAL_RECV_WINDOW_SIZE];
         // Write from buf at first.
         s.inbound_stream_frame(false, 0, &buf).unwrap();
         // Then read into it.
         s.read(&mut buf).unwrap();
         assert!(s.has_frames_to_write());
-        s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, &[])
+        s.inbound_stream_frame(true, INITIAL_RECV_WINDOW_SIZE as u64, &[])
             .unwrap();
         assert!(!s.has_frames_to_write());
     }
@@ -1582,13 +1578,13 @@ mod tests {
     }
 
     fn create_stream_session_flow_control() -> (RecvStream, Rc<RefCell<ReceiverFlowControl<()>>>) {
-        assert!(RX_STREAM_DATA_WINDOW > u64::try_from(SESSION_WINDOW).unwrap());
+        assert!(INITIAL_RECV_WINDOW_SIZE > usize::try_from(SESSION_WINDOW).unwrap());
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             u64::try_from(SESSION_WINDOW).unwrap(),
         )));
         (
-            create_stream_with_fc(Rc::clone(&session_fc), RX_STREAM_DATA_WINDOW),
+            create_stream_with_fc(Rc::clone(&session_fc), INITIAL_RECV_WINDOW_SIZE as u64),
             session_fc,
         )
     }
@@ -1640,7 +1636,7 @@ mod tests {
         )));
         let mut s = RecvStream::new(
             StreamId::from(567),
-            RX_STREAM_DATA_WINDOW,
+            INITIAL_RECV_WINDOW_SIZE as u64,
             Rc::clone(&session_fc),
             ConnectionEvents::default(),
         );
