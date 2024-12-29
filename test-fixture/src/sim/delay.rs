@@ -97,7 +97,7 @@ impl Node for RandomDelay {
 
 impl Debug for RandomDelay {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("delay")
+        f.write_str("random_delay")
     }
 }
 
@@ -149,6 +149,6 @@ impl Node for Delay {
 
 impl Debug for Delay {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("non_random_delay")
+        f.write_str("delay")
     }
 }
