@@ -30,9 +30,12 @@ use crate::{
     Error, Res,
 };
 
-// Fraction of a flow control window after which a window update should be sent.
-// TODO: See DEFAULT_ACK_RATIO.
-pub(crate) const UPDATE_TRIGGER_FACTOR: u64 = 4;
+/// Fraction of a flow control window after which a receiver sends a window
+/// update.
+///
+/// In steady-state and max utilization, a value of 4 leads to 4 window updates
+/// per RTT.
+pub(crate) const WINDOW_UPDATE_FRACTION: u64 = 4;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -271,7 +274,7 @@ where
 
     fn should_send_flowc_update(&self) -> bool {
         let window_bytes_unused = self.max_allowed.saturating_sub(self.retired);
-        window_bytes_unused < self.max_active - self.max_active / UPDATE_TRIGGER_FACTOR
+        window_bytes_unused < self.max_active - self.max_active / WINDOW_UPDATE_FRACTION
     }
 
     pub const fn frame_needed(&self) -> bool {
@@ -633,7 +636,7 @@ mod test {
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
-        fc::UPDATE_TRIGGER_FACTOR,
+        fc::WINDOW_UPDATE_FRACTION,
         packet::PacketBuilder,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -721,7 +724,7 @@ mod test {
     #[test]
     fn max_allowed_after_items_retired() {
         let window = 100;
-        let trigger = window / UPDATE_TRIGGER_FACTOR;
+        let trigger = window / WINDOW_UPDATE_FRACTION;
         let mut fc = ReceiverFlowControl::new((), window);
         fc.retire(trigger);
         assert!(!fc.frame_needed());
