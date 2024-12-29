@@ -25,7 +25,7 @@ const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 pub const ACK_RATIO_SCALE: u8 = 10;
 /// By default, aim to have the peer acknowledge 4 times per round trip time.
 /// See `ConnectionParameters.ack_ratio` for more.
-const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
+pub(crate) const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
 /// The local value for the idle timeout period.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;

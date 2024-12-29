@@ -35,6 +35,8 @@ use crate::{
 ///
 /// In steady-state and max utilization, a value of 4 leads to 4 window updates
 /// per RTT.
+///
+/// Value aligns with [`crate::connection::params::DEFAULT_ACK_RATIO`].
 pub(crate) const WINDOW_UPDATE_FRACTION: u64 = 4;
 
 #[derive(Debug)]
