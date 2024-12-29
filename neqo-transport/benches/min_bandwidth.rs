@@ -72,7 +72,7 @@ pub fn main() {
     assert!(
         LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,
         "expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({} Mbit/s) but got {} Mbit/s",
-        LINK_BANDWIDTH  / MIB,
-        achieved_bandwidth / MIB as f64,
+        LINK_BANDWIDTH  / MBIT,
+        achieved_bandwidth / MBIT as f64,
     );
 }
