@@ -222,7 +222,9 @@ where
     max_active: u64,
     /// Last max allowed sent.
     max_allowed: u64,
-    // TODO: Not ideal as it adds an Option for all T, even though only needed for T=StreamId.
+    /// Last time a flow control update was sent.
+    ///
+    /// Only used in [`ReceiverFlowControl<StreamId`] implementation.
     max_allowed_sent_at: Option<Instant>,
     /// Item received, but not retired yet.
     /// This will be used for byte flow control: each stream will remember its largest byte
