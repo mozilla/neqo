@@ -32,7 +32,7 @@ use crate::now;
 
 pub mod network {
     pub use super::{
-        delay::{Delay, NonRandomDelay},
+        delay::{Delay, RandomDelay},
         drop::Drop,
         mtu::Mtu,
         taildrop::TailDrop,

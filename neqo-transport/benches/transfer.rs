@@ -12,7 +12,7 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Delay, TailDrop},
+        network::{RandomDelay, TailDrop},
         ReadySimulator, Simulator,
     },
 };
@@ -38,14 +38,14 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                             boxed![SendData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_uplink(),
-                        Delay::new(ZERO..JITTER),
+                        RandomDelay::new(ZERO..JITTER),
                         ConnectionNode::new_server(
                             ConnectionParameters::default().pmtud(true).pacing(pacing),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![ReceiveData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_downlink(),
-                        Delay::new(ZERO..JITTER),
+                        RandomDelay::new(ZERO..JITTER),
                     ];
                     let mut sim = Simulator::new(label, nodes);
                     if let Some(seed) = &seed {

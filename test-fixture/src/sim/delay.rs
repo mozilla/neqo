@@ -20,13 +20,13 @@ use super::{Node, Rng};
 
 /// An iterator that shares a `Random` instance and produces uniformly
 /// random `Duration`s within a specified range.
-pub struct RandomDelay {
+pub struct RandomDelayIter {
     start: Duration,
     max: u64,
     rng: Option<Rng>,
 }
 
-impl RandomDelay {
+impl RandomDelayIter {
     /// Make a new random `Duration` generator.  This panics if the range provided
     /// is inverted (i.e., `bounds.start > bounds.end`), or spans 2^64
     /// or more nanoseconds.
@@ -51,16 +51,16 @@ impl RandomDelay {
     }
 }
 
-pub struct Delay {
-    random: RandomDelay,
+pub struct RandomDelay {
+    random: RandomDelayIter,
     queue: BTreeMap<Instant, Datagram>,
 }
 
-impl Delay {
+impl RandomDelay {
     #[must_use]
     pub fn new(bounds: Range<Duration>) -> Self {
         Self {
-            random: RandomDelay::new(bounds),
+            random: RandomDelayIter::new(bounds),
             queue: BTreeMap::default(),
         }
     }
@@ -76,7 +76,7 @@ impl Delay {
     }
 }
 
-impl Node for Delay {
+impl Node for RandomDelay {
     fn init(&mut self, rng: Rng, _now: Instant) {
         self.random.set_rng(rng);
     }
@@ -95,19 +95,18 @@ impl Node for Delay {
     }
 }
 
-impl Debug for Delay {
+impl Debug for RandomDelay {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("delay")
     }
 }
 
-// TODO: Consider renaming Delay to RandomDelay and NonRandomDelay to Delay.
-pub struct NonRandomDelay {
+pub struct Delay {
     delay: Duration,
     queue: BTreeMap<Instant, VecDeque<Datagram>>,
 }
 
-impl NonRandomDelay {
+impl Delay {
     #[must_use]
     pub fn new(delay: Duration) -> Self {
         Self {
@@ -121,7 +120,7 @@ impl NonRandomDelay {
     }
 }
 
-impl Node for NonRandomDelay {
+impl Node for Delay {
     fn init(&mut self, _rng: Rng, _now: Instant) {}
 
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output {
@@ -148,7 +147,7 @@ impl Node for NonRandomDelay {
     }
 }
 
-impl Debug for NonRandomDelay {
+impl Debug for Delay {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("non_random_delay")
     }

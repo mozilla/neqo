@@ -19,7 +19,7 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Mtu, NonRandomDelay, TailDrop},
+        network::{Delay, Mtu, TailDrop},
         Simulator,
     },
 };
@@ -53,7 +53,7 @@ pub fn main() {
             ),
             Mtu::new(1500),
             gbit_link(),
-            NonRandomDelay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
+            Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
             ConnectionNode::new_server(
                 ConnectionParameters::default(),
                 boxed![ReachState::new(State::Confirmed)],
@@ -61,7 +61,7 @@ pub fn main() {
             ),
             Mtu::new(1500),
             gbit_link(),
-            NonRandomDelay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
+            Delay::new(Duration::from_millis(LINK_RTT_MS as u64 / 2)),
         ],
     )
     .setup()
