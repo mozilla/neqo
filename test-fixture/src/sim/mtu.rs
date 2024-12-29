@@ -18,9 +18,6 @@ pub struct Mtu {
 }
 
 impl Mtu {
-    /// Make a new random drop generator.  Each `drop` is called, this generates a
-    /// random value between 0 and `max` (exclusive).  If this value is less than
-    /// `threshold` a value of `true` is returned.
     #[must_use]
     pub const fn new(mtu: usize) -> Self {
         Self { mtu }
