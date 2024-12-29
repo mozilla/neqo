@@ -30,7 +30,6 @@ impl Mtu {
 impl Node for Mtu {
     fn init(&mut self, _rng: Rng, _now: Instant) {}
 
-    // Pass any datagram provided directly out, but drop some of them.
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
         d.filter(|dgram| {
             // TODO: Deduplicate with pmtud.rs?
