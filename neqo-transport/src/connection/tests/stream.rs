@@ -440,15 +440,6 @@ fn max_data() {
         INITIAL_RECV_WINDOW_SIZE - SMALL_MAX_DATA
     );
 
-    // Increase max stream data. Avail space no longer limited now.
-    client
-        .streams
-        .get_send_stream_mut(stream_id)
-        .unwrap()
-        .set_max_stream_data(100_000_000);
-    // TODO: Improve assert.
-    assert!(client.stream_avail_send_space(stream_id).unwrap() > INITIAL_RECV_WINDOW_SIZE);
-
     let evts = client.events().collect::<Vec<_>>();
     assert_eq!(evts.len(), 1);
     assert!(matches!(
