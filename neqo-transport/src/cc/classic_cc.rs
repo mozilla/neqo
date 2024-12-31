@@ -619,7 +619,7 @@ mod tests {
             CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS,
         },
         packet::{PacketNumber, PacketType},
-        recovery::SentPacket,
+        recovery::{RecoveryTokenVec, SentPacket},
         rtt::RttEstimate,
         Pmtud,
     };
@@ -652,7 +652,7 @@ mod tests {
             IpTosEcn::default(),
             now() + t,
             ack_eliciting,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             100,
         )
     }
@@ -867,7 +867,7 @@ mod tests {
                     IpTosEcn::default(),
                     by_pto(t),
                     true,
-                    Vec::new(),
+                    RecoveryTokenVec::new(),
                     1000,
                 )
             })
@@ -989,7 +989,7 @@ mod tests {
             lost[0].ecn_mark(),
             lost[0].time_sent(),
             false,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             lost[0].len(),
         );
         assert!(!persistent_congestion_by_pto(
@@ -1087,12 +1087,12 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,
+                    next_pn, // pn
                     IpTosEcn::default(),
-                    now,
-                    true,
-                    Vec::new(),
-                    cc.max_datagram_size(),
+                    now,                     // time sent
+                    true,                    // ack eliciting
+                    RecoveryTokenVec::new(), // tokens
+                    cc.max_datagram_size(),  // size
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p, now);
@@ -1115,12 +1115,12 @@ mod tests {
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
             let p = SentPacket::new(
                 PacketType::Short,
-                next_pn,
+                next_pn, // pn
                 IpTosEcn::default(),
-                now,
-                true,
-                Vec::new(),
-                cc.max_datagram_size(),
+                now,                     // time sent
+                true,                    // ack eliciting
+                RecoveryTokenVec::new(), // tokens
+                cc.max_datagram_size(),  // size
             );
             next_pn += 1;
             cc.on_packet_sent(&p, now);
@@ -1170,7 +1170,7 @@ mod tests {
             IpTosEcn::default(),
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_lost, now);
@@ -1184,7 +1184,7 @@ mod tests {
             IpTosEcn::default(),
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_not_lost, now);
@@ -1204,12 +1204,12 @@ mod tests {
             for _ in 0..packet_burst_size {
                 let p = SentPacket::new(
                     PacketType::Short,
-                    next_pn,
+                    next_pn, // pn
                     IpTosEcn::default(),
-                    now,
-                    true,
-                    Vec::new(),
-                    cc.max_datagram_size(),
+                    now,                     // time sent
+                    true,                    // ack eliciting
+                    RecoveryTokenVec::new(), // tokens
+                    cc.max_datagram_size(),  // size
                 );
                 next_pn += 1;
                 cc.on_packet_sent(&p, now);
@@ -1242,7 +1242,7 @@ mod tests {
                 IpTosEcn::default(),
                 now,
                 true,
-                Vec::new(),
+                RecoveryTokenVec::new(),
                 cc.max_datagram_size(),
             );
             next_pn += 1;
@@ -1282,7 +1282,7 @@ mod tests {
             IpTosEcn::default(),
             now,
             true,
-            Vec::new(),
+            RecoveryTokenVec::new(),
             cc.max_datagram_size(),
         );
         cc.on_packet_sent(&p_ce, now);
