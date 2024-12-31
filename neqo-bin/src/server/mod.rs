@@ -29,6 +29,7 @@ use neqo_crypto::{
     init_db, AntiReplay, Cipher,
 };
 use neqo_transport::{Output, RandomConnectionIdGenerator, Version};
+use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 
 use crate::SharedArgs;
@@ -202,7 +203,7 @@ pub struct ServerRunner {
     server: Box<dyn HttpServer>,
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
-    recv_buf: Vec<u8>,
+    recv_buf: RecvBuf,
 }
 
 impl ServerRunner {
@@ -217,7 +218,7 @@ impl ServerRunner {
             server,
             timeout: None,
             sockets,
-            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
+            recv_buf: RecvBuf::new(),
         }
     }
 
