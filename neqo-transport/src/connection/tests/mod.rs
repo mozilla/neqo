@@ -72,7 +72,7 @@ pub struct CountingConnectionIdGenerator {
 
 impl ConnectionIdDecoder for CountingConnectionIdGenerator {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        let len = usize::from(dec.peek_byte().unwrap());
+        let len = usize::from(dec.peek_byte()?);
         dec.decode(len).map(ConnectionIdRef::from)
     }
 }
@@ -81,10 +81,10 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         let mut r = random::<20>();
         r[0] = 8;
-        r[1] = u8::try_from(self.counter >> 24).unwrap();
-        r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
-        r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();
-        r[4] = u8::try_from(self.counter & 0xff).unwrap();
+        r[1] = u8::try_from(self.counter >> 24).ok()?;
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).ok()?;
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).ok()?;
+        r[4] = u8::try_from(self.counter & 0xff).ok()?;
         self.counter += 1;
         Some(ConnectionId::from(&r[..8]))
     }
