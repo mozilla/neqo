@@ -1824,33 +1824,42 @@ mod tests {
     }
 
     /// Test that the flow controls will send updates.
-    // TODO: Rework constants
     #[test]
     fn fc_state_recv_7() {
-        const SW: u64 = 1024;
-        const SW_US: usize = 1024;
-        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), SW)));
-        let mut s = create_stream_with_fc(Rc::clone(&fc), SW / 2);
+        const CONNECTION_WINDOW: u64 = 1024;
+        const CONNECTION_WINDOW_US: usize = CONNECTION_WINDOW as usize;
+
+        const STREAM_WINDOW: u64 = CONNECTION_WINDOW / 2;
+        const STREAM_WINDOW_US: usize = STREAM_WINDOW as usize;
+
+        const WINDOW_UPDATE_FRACTION_US: usize = WINDOW_UPDATE_FRACTION as usize;
+
+        let fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
+            (),
+            CONNECTION_WINDOW,
+        )));
+        let mut s = create_stream_with_fc(Rc::clone(&fc), STREAM_WINDOW);
 
         check_fc(&fc.borrow(), 0, 0);
         check_fc(s.fc().unwrap(), 0, 0);
 
-        s.inbound_stream_frame(false, 0, &[0; SW_US / 2 / WINDOW_UPDATE_FRACTION as usize])
+        // Receive data up to but not over the fc update trigger point.
+        s.inbound_stream_frame(false, 0, &[0; STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US])
             .unwrap();
-        let mut buf = [1; SW_US];
+        let mut buf = [1; CONNECTION_WINDOW_US];
         assert_eq!(
             s.read(&mut buf).unwrap(),
-            (SW_US / 2 / WINDOW_UPDATE_FRACTION as usize, false)
+            (STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US, false)
         );
         check_fc(
             &fc.borrow(),
-            SW / 2 / WINDOW_UPDATE_FRACTION,
-            SW / 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
         );
         check_fc(
             s.fc().unwrap(),
-            SW / 2 / WINDOW_UPDATE_FRACTION,
-            SW / 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
         );
 
         // Still no fc update needed.
@@ -1858,17 +1867,17 @@ mod tests {
         assert!(!s.fc().unwrap().frame_needed());
 
         // Receive one more byte that will cause a fc update after it is read.
-        s.inbound_stream_frame(false, SW / 2 / WINDOW_UPDATE_FRACTION, &[0])
+        s.inbound_stream_frame(false, STREAM_WINDOW / WINDOW_UPDATE_FRACTION, &[0])
             .unwrap();
         check_fc(
             &fc.borrow(),
-            (SW / 2 / WINDOW_UPDATE_FRACTION) + 1,
-            SW / 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
         );
         check_fc(
             s.fc().unwrap(),
-            SW / 2 / WINDOW_UPDATE_FRACTION + 1,
-            SW / 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
         );
         // Only consuming data does not cause a fc update to be sent.
         assert!(!fc.borrow().frame_needed());
@@ -1877,13 +1886,13 @@ mod tests {
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
         check_fc(
             &fc.borrow(),
-            (SW / 2 / WINDOW_UPDATE_FRACTION) + 1,
-            SW / 2 / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
         );
         check_fc(
             s.fc().unwrap(),
-            SW / 2 / WINDOW_UPDATE_FRACTION + 1,
-            SW / 2 / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION + 1,
         );
         // Data are retired and the stream fc will send an update.
         assert!(!fc.borrow().frame_needed());
@@ -1892,23 +1901,23 @@ mod tests {
         // Receive more data to increase fc further.
         s.inbound_stream_frame(
             false,
-            SW / 2 / WINDOW_UPDATE_FRACTION,
-            &[0; SW_US / 2 / WINDOW_UPDATE_FRACTION as usize],
+            STREAM_WINDOW / WINDOW_UPDATE_FRACTION,
+            &[0; STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US],
         )
         .unwrap();
         assert_eq!(
             s.read(&mut buf).unwrap(),
-            (SW_US / 2 / WINDOW_UPDATE_FRACTION as usize - 1, false)
+            (STREAM_WINDOW_US / WINDOW_UPDATE_FRACTION_US - 1, false)
         );
         check_fc(
             &fc.borrow(),
-            SW / WINDOW_UPDATE_FRACTION,
-            SW / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
         );
         check_fc(
             s.fc().unwrap(),
-            SW / WINDOW_UPDATE_FRACTION,
-            SW / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION,
         );
         assert!(!fc.borrow().frame_needed());
         assert!(s.fc().unwrap().frame_needed());
@@ -1930,18 +1939,18 @@ mod tests {
         assert_eq!(stats.max_stream_data, 1);
 
         // Receive 1 byte that will cause a session fc update after it is read.
-        s.inbound_stream_frame(false, SW / WINDOW_UPDATE_FRACTION, &[0])
+        s.inbound_stream_frame(false, STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION, &[0])
             .unwrap();
         assert_eq!(s.read(&mut buf).unwrap(), (1, false));
         check_fc(
             &fc.borrow(),
-            SW / WINDOW_UPDATE_FRACTION + 1,
-            SW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
         );
         check_fc(
             s.fc().unwrap(),
-            SW / WINDOW_UPDATE_FRACTION + 1,
-            SW / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
+            STREAM_WINDOW * 2 / WINDOW_UPDATE_FRACTION + 1,
         );
         assert!(fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
