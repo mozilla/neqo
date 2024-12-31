@@ -482,7 +482,6 @@ impl RangeTracker {
 /// Buffer to contain queued bytes and track their state.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct TxBuffer {
-    // TODO: Consider shrinking from time to time?
     send_buf: VecDeque<u8>, // buffer of not-acked bytes
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
