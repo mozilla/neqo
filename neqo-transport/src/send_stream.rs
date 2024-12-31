@@ -1790,7 +1790,6 @@ pub struct SendStreamRecoveryToken {
     fin: bool,
 }
 
-// TODO: Test that MAX_SEND_BUFFER_SIZE is not exceeded.
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
@@ -1806,6 +1805,7 @@ mod tests {
         recovery::{RecoveryToken, StreamRecoveryToken},
         send_stream::{
             RangeState, RangeTracker, SendStream, SendStreamState, SendStreams, TxBuffer,
+            MAX_SEND_BUFFER_SIZE,
         },
         stats::FrameStats,
         ConnectionEvents, StreamId, INITIAL_RECV_WINDOW_SIZE,
@@ -2789,6 +2789,19 @@ mod tests {
             .borrow_mut()
             .write_frames(&mut builder, &mut tokens, &mut stats);
         assert_eq!(stats.data_blocked, 1);
+    }
+
+    #[test]
+    fn max_send_buffer_size() {
+        // Huge FC limit. Thus buffer size limited only.
+        const FC_LIMIT: u64 = 1024 * 1024 * 1024;
+        let s = SendStream::new(
+            StreamId::from(4),
+            FC_LIMIT,
+            connection_fc(FC_LIMIT),
+            ConnectionEvents::default(),
+        );
+        assert_eq!(s.avail(), MAX_SEND_BUFFER_SIZE);
     }
 
     #[test]
