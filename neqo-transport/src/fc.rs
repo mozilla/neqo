@@ -37,7 +37,7 @@ use crate::{
 /// per RTT.
 ///
 /// Value aligns with [`crate::connection::params::DEFAULT_ACK_RATIO`].
-pub(crate) const WINDOW_UPDATE_FRACTION: u64 = 4;
+pub const WINDOW_UPDATE_FRACTION: u64 = 4;
 
 #[derive(Debug)]
 pub struct SenderFlowControl<T>
@@ -274,7 +274,7 @@ where
         }
     }
 
-    fn should_send_flowc_update(&self) -> bool {
+    const fn should_send_flowc_update(&self) -> bool {
         let window_bytes_unused = self.max_allowed.saturating_sub(self.retired);
         window_bytes_unused < self.max_active - self.max_active / WINDOW_UPDATE_FRACTION
     }

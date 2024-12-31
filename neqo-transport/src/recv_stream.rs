@@ -1576,7 +1576,7 @@ mod tests {
     }
 
     fn create_stream_session_flow_control() -> (RecvStream, Rc<RefCell<ReceiverFlowControl<()>>>) {
-        assert!(INITIAL_RECV_WINDOW_SIZE > usize::try_from(SESSION_WINDOW).unwrap());
+        static_assertions::const_assert!(INITIAL_RECV_WINDOW_SIZE > SESSION_WINDOW);
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             u64::try_from(SESSION_WINDOW).unwrap(),
@@ -1824,6 +1824,8 @@ mod tests {
     }
 
     /// Test that the flow controls will send updates.
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::cast_possible_truncation)]
     #[test]
     fn fc_state_recv_7() {
         const CONNECTION_WINDOW: u64 = 1024;
