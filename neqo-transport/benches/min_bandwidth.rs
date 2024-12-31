@@ -40,7 +40,11 @@ pub fn main() {
     let gbit_link = || {
         let rate_byte = GBIT / 8;
         let capacity_byte = rate_byte as f64 * (LINK_RTT_MS as f64 / 1_000.0);
-        TailDrop::new(rate_byte, capacity_byte as usize, Duration::ZERO)
+        TailDrop::new(
+            rate_byte,
+            usize::try_from(capacity_byte).unwrap(),
+            Duration::ZERO,
+        )
     };
 
     let simulated_time = Simulator::new(
