@@ -28,10 +28,13 @@ sfv = { version = "0.9", default-features = false }
 url = { workspace = true }
 
 [dev-dependencies]
+neqo-http3 = { path = ".", features = ["draft-29"] }
+neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
 disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
+draft-29 = []
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

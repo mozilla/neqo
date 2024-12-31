@@ -15,7 +15,7 @@ use crate::{
         reader::FrameDecoder, FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame,
     },
     settings::{HSetting, HSettingType, HSettings},
-    Error,
+    Error, PushId,
 };
 
 struct FrameReaderTest {
@@ -112,7 +112,7 @@ fn frame_reading_with_stream_push_promise() {
         header_block,
     } = frame.unwrap()
     {
-        assert_eq!(push_id, 257);
+        assert_eq!(push_id, PushId::new(257));
         assert_eq!(header_block, &[0x1, 0x2, 0x3]);
     } else {
         panic!("wrong frame type");
@@ -154,7 +154,7 @@ fn unknown_frame() {
     let frame = fr.process(&[0x03, 0x01, 0x05]);
     assert!(frame.is_some());
     if let HFrame::CancelPush { push_id } = frame.unwrap() {
-        assert!(push_id == 5);
+        assert!(push_id == PushId::new(5));
     } else {
         panic!("wrong frame type");
     }
@@ -417,7 +417,9 @@ fn complete_and_incomplete_frames() {
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
     // H3_FRAME_TYPE_CANCEL_PUSH
-    let f = HFrame::CancelPush { push_id: 5 };
+    let f = HFrame::CancelPush {
+        push_id: PushId::new(5),
+    };
     let mut enc = Encoder::default();
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();
@@ -434,7 +436,7 @@ fn complete_and_incomplete_frames() {
 
     // H3_FRAME_TYPE_PUSH_PROMISE
     let f = HFrame::PushPromise {
-        push_id: 4,
+        push_id: PushId::new(4),
         header_block: HEADER_BLOCK.to_vec(),
     };
     let mut enc = Encoder::default();
@@ -452,7 +454,9 @@ fn complete_and_incomplete_frames() {
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
     // H3_FRAME_TYPE_MAX_PUSH_ID
-    let f = HFrame::MaxPushId { push_id: 5 };
+    let f = HFrame::MaxPushId {
+        push_id: PushId::new(5),
+    };
     let mut enc = Encoder::default();
     f.encode(&mut enc);
     let buf: Vec<_> = enc.into();

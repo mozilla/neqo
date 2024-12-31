@@ -87,9 +87,10 @@ jobs:
 
       - name: Plumb in Neqo
         run: |
-          # Get qlog version used by neqo
+          # Get qlog and mtu version used by neqo
           cargo generate-lockfile
           QLOG_VERSION=$(cargo pkgid qlog | cut -d@ -f2)
+          MTU_VERSION=$(cargo pkgid mtu | cut -d@ -f2)
           rm Cargo.lock
           cd mozilla-unified
           {
@@ -97,6 +98,10 @@ jobs:
             echo 'who = "CI"'
             echo 'criteria = "safe-to-deploy"'
             echo "version = \"$QLOG_VERSION\""
+            echo '[[audits.mtu]]'
+            echo 'who = "CI"'
+            echo 'criteria = "safe-to-deploy"'
+            echo "version = \"$MTU_VERSION\""
           } >> supply-chain/audits.toml
           sed -i'' -e "s/qlog =.*/qlog = \"$QLOG_VERSION\"/" netwerk/socket/neqo_glue/Cargo.toml
           {
@@ -107,6 +112,18 @@ jobs:
             echo 'neqo-qpack = { path = "../neqo-qpack" }'
             echo 'neqo-crypto = { path = "../neqo-crypto" }'
           } >> Cargo.toml
+          {
+            echo '[[trusted.windows-bindgen]]'
+            echo 'criteria = "safe-to-deploy"'
+            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
+            echo 'start = "2021-11-15"'
+            echo 'end = "2024-09-12"'
+            echo '[[trusted.windows-metadata]]'
+            echo 'criteria = "safe-to-deploy"'
+            echo 'user-id = 64539 # Kenny Kerr (kennykerr)'
+            echo 'start = "2021-11-15"'
+            echo 'end = "2024-09-12"'
+          } >> supply-chain/audits.toml
           cargo update neqo-http3 neqo-transport neqo-common neqo-qpack neqo-crypto
           ./mach vendor rust --ignore-modified
 

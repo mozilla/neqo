@@ -341,8 +341,6 @@ enum Ready {
 }
 
 pub async fn server(mut args: Args) -> Res<()> {
-    const HQ_INTEROP: &str = "hq-interop";
-
     neqo_common::log::init(
         args.shared
             .verbose
@@ -366,13 +364,11 @@ pub async fn server(mut args: Args) -> Res<()> {
         }
 
         // These are the default for all tests except http3.
-        args.shared.use_old_http = true;
-        args.shared.alpn = String::from(HQ_INTEROP);
+        args.shared.alpn = String::from("hq-interop");
         // TODO: More options to deduplicate with client?
         match testcase.as_str() {
             "http3" => {
-                args.shared.use_old_http = false;
-                args.shared.alpn = "h3".into();
+                args.shared.alpn = String::from("h3");
             }
             "zerortt" => args.shared.quic_parameters.max_streams_bidi = 100,
             "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
@@ -414,12 +410,12 @@ pub async fn server(mut args: Args) -> Res<()> {
         .expect("unable to setup anti-replay");
     let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-    let server: Box<dyn HttpServer> = if args.shared.use_old_http {
+    let server: Box<dyn HttpServer> = if args.shared.alpn == "h3" {
+        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
+    } else {
         Box::new(
             http09::HttpServer::new(&args, anti_replay, cid_mgr).expect("We cannot make a server!"),
         )
-    } else {
-        Box::new(http3::HttpServer::new(&args, anti_replay, cid_mgr))
     };
 
     ServerRunner::new(Box::new(move || args.now()), server, sockets)

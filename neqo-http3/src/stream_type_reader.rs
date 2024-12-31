@@ -11,7 +11,7 @@ use neqo_transport::{Connection, StreamId, StreamType};
 use crate::{
     control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
     frames::{hframe::HFrameType, reader::FrameDecoder, HFrame, H3_FRAME_TYPE_HEADERS},
-    CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
+    CloseType, Error, Http3StreamType, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
 pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
@@ -23,7 +23,7 @@ pub enum NewStreamType {
     Control,
     Decoder,
     Encoder,
-    Push(u64),
+    Push(PushId),
     WebTransportStream(u64),
     Http(u64),
     Unknown,
@@ -183,7 +183,7 @@ impl NewStreamHeadReader {
                         return Err(Error::HttpGeneralProtocol);
                     }
                     return if is_push {
-                        Ok(Some(NewStreamType::Push(output)))
+                        Ok(Some(NewStreamType::Push(PushId::new(output))))
                     } else {
                         Ok(Some(NewStreamType::WebTransportStream(output)))
                     };
@@ -253,7 +253,7 @@ mod tests {
     use crate::{
         control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
         frames::{H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS},
-        CloseType, Error, NewStreamType, ReceiveOutput, RecvStream, Res,
+        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream, Res,
     };
 
     struct Test {
@@ -366,7 +366,7 @@ mod tests {
             &[HTTP3_UNI_STREAM_TYPE_PUSH, 0xaaaa_aaaa],
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::Push(PushId::new(0xaaaa_aaaa))),
                 true,
             )),
             true,
@@ -429,7 +429,7 @@ mod tests {
                                                                * HTTP3_UNI_STREAM_TYPE_PUSH */
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::Push(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::Push(PushId::new(0xaaaa_aaaa))),
                 true,
             )),
             true,
