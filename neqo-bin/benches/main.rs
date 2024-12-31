@@ -17,7 +17,6 @@ struct Benchmark {
 }
 
 fn transfer(c: &mut Criterion) {
-    neqo_common::log::init(Some(log::LevelFilter::Off));
     neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
 
     let done_sender = spawn_server();
