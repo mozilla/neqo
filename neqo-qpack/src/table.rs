@@ -260,6 +260,7 @@ impl HeaderTable {
         self.evict_to_internal(reduce, true)
     }
 
+    // TODO: Needs to be pub?
     pub fn evict_to_internal(&mut self, reduce: u64, only_check: bool) -> bool {
         qtrace!(
             [self],
@@ -387,5 +388,56 @@ impl HeaderTable {
     /// Return number of acknowledge inserts.
     pub const fn get_acked_inserts_cnt(&self) -> u64 {
         self.acked_inserts_cnt
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Due to a bug in [`HeaderTable::can_evict_to`], the function would
+    /// continuously subtract the size of the last entry instead of the size of
+    /// each entry starting from the back.
+    ///
+    /// See <https://github.com/mozilla/neqo/issues/2306> for details.
+    mod issue_2306 {
+        use super::*;
+
+        const VALUE: &[u8; 2] = b"42";
+
+        /// Given two entries where the first is smaller than the second,
+        /// subtracting the size of the second from the overall size twice leads
+        /// to an underflow.
+        #[test]
+        fn can_evict_to_no_underflow() {
+            let mut table = HeaderTable::new(true);
+            table.set_capacity(10000).unwrap();
+
+            table.insert(b"header1", VALUE).unwrap();
+            table.insert(b"larger-header1", VALUE).unwrap();
+
+            table.increment_acked(2).unwrap();
+
+            assert!(table.can_evict_to(0));
+        }
+
+        /// Given two entries where only the first is acked, continuously
+        /// subtracting the size of the last entry would give a false-positive
+        /// on whether both entries can be evicted.
+        #[test]
+        fn can_evict_to_false() {
+            let mut table = HeaderTable::new(true);
+            table.set_capacity(10000).unwrap();
+
+            table.insert(b"header1", VALUE).unwrap();
+            table.insert(b"header2", VALUE).unwrap();
+
+            table.increment_acked(1).unwrap();
+
+            let first_entry_size = table.get_dynamic_with_abs_index(0).unwrap().size() as u64;
+
+            assert!(table.can_evict_to(first_entry_size));
+            assert!(!table.can_evict_to(0));
+        }
     }
 }
