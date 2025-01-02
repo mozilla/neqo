@@ -253,21 +253,11 @@ impl HeaderTable {
     }
 
     fn evict_to(&mut self, reduce: u64) -> bool {
-        self.evict_to_internal(reduce, false)
-    }
-
-    pub fn can_evict_to(&mut self, reduce: u64) -> bool {
-        self.evict_to_internal(reduce, true)
-    }
-
-    // TODO: Needs to be pub?
-    pub fn evict_to_internal(&mut self, reduce: u64, only_check: bool) -> bool {
         qtrace!(
             [self],
-            "reduce table to {}, currently used:{} only_check:{}",
+            "reduce table to {}, currently used:{}",
             reduce,
             self.used,
-            only_check
         );
         let mut used = self.used;
         while (!self.dynamic.is_empty()) && used > reduce {
@@ -276,16 +266,26 @@ impl HeaderTable {
                     return false;
                 }
                 used -= u64::try_from(e.size()).unwrap();
-                if !only_check {
-                    self.used -= u64::try_from(e.size()).unwrap();
-                    self.dynamic.pop_back();
-                }
+                self.used -= u64::try_from(e.size()).unwrap();
+                self.dynamic.pop_back();
             }
         }
         true
     }
 
-    pub fn insert_possible(&mut self, size: usize) -> bool {
+    pub fn can_evict_to(&self, reduce: u64) -> bool {
+        let evictable_size: usize = self
+            .dynamic
+            .iter()
+            .rev()
+            .take_while(|e| e.can_reduce(self.acked_inserts_cnt))
+            .map(DynamicTableEntry::size)
+            .sum();
+
+        self.used - u64::try_from(evictable_size).unwrap() <= reduce
+    }
+
+    pub fn insert_possible(&self, size: usize) -> bool {
         u64::try_from(size).unwrap() <= self.capacity
             && self.can_evict_to(self.capacity - u64::try_from(size).unwrap())
     }
