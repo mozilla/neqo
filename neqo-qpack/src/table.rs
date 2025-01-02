@@ -73,7 +73,7 @@ pub struct HeaderTable {
     /// The total number of inserts thus far.
     base: u64,
     /// This is number of inserts that are acked. this correspond to index of the first not acked.
-    /// This is only used by thee encoder.
+    /// This is only used by the encoder.
     acked_inserts_cnt: u64,
 }
 
@@ -112,9 +112,9 @@ impl HeaderTable {
     ///
     /// # Errors
     ///
-    /// `ChangeCapacity` if table capacity cannot be reduced.
-    /// The table cannot be reduce if there are entries that are referred at the moment or their
-    /// inserts are unacked.
+    /// [`Error::ChangeCapacity`] if table capacity cannot be reduced.
+    /// The table cannot be reduced if there are entries that are referred at
+    /// the moment or their inserts are unacked.
     pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
         qtrace!([self], "set capacity to {}", cap);
         if !self.evict_to(cap) {
