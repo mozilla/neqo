@@ -833,6 +833,10 @@ mod test {
         assert_eq!(fc.next_limit(), 196);
     }
 
+    // TODO: Test flow control auto-tuning
+
+    // TODO: Test max_active never decreases
+
     fn remote_stream_limits(role: Role, bidi: u64, unidi: u64) {
         let mut fc = RemoteStreamLimits::new(2, 1, role);
         assert!(fc[StreamType::BiDi]
