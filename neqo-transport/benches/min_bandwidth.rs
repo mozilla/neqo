@@ -39,7 +39,8 @@ pub fn main() {
 
     let gbit_link = || {
         let rate_byte = GBIT / 8;
-        let capacity_byte = rate_byte as f64 * (LINK_RTT_MS as f64 / 1_000.0);
+        // Router buffer set to bandwidth-delay product.
+        let capacity_byte = rate_byte * LINK_RTT_MS / 1_000;
         TailDrop::new(
             rate_byte,
             usize::try_from(capacity_byte).unwrap(),

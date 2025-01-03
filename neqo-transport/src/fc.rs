@@ -996,7 +996,7 @@ mod test {
         let now = Instant::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
 
-        let fraction = INITIAL_RECV_WINDOW_SIZE as u64 / WINDOW_UPDATE_FRACTION as u64;
+        let fraction = INITIAL_RECV_WINDOW_SIZE as u64 / WINDOW_UPDATE_FRACTION;
 
         let consumed = fc.set_consumed(fraction)?;
         fc.add_retired(consumed);
