@@ -224,7 +224,8 @@ where
     max_allowed: u64,
     /// Last time a flow control update was sent.
     ///
-    /// Only used in [`ReceiverFlowControl<StreamId`] implementation.
+    /// Only used in [`ReceiverFlowControl<StreamId>`] implementation for
+    /// receive window auto-tuning.
     max_allowed_sent_at: Option<Instant>,
     /// Item received, but not retired yet.
     /// This will be used for byte flow control: each stream will remember its largest byte
@@ -631,6 +632,8 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 
 #[cfg(test)]
 mod test {
+    use std::time::{Duration, Instant};
+
     use neqo_common::{Encoder, Role};
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
@@ -639,7 +642,7 @@ mod test {
         packet::PacketBuilder,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
-        Error,
+        Error, Res, INITIAL_RECV_WINDOW_SIZE,
     };
 
     #[test]
@@ -833,10 +836,6 @@ mod test {
         assert_eq!(fc.next_limit(), 196);
     }
 
-    // TODO: Test flow control auto-tuning
-
-    // TODO: Test max_active never decreases
-
     fn remote_stream_limits(role: Role, bidi: u64, unidi: u64) {
         let mut fc = RemoteStreamLimits::new(2, 1, role);
         assert!(fc[StreamType::BiDi]
@@ -976,5 +975,108 @@ mod test {
     #[test]
     fn local_stream_limits_new_stream_server() {
         local_stream_limits(Role::Server, 1, 3);
+    }
+
+    fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, now: Instant) -> usize {
+        let rtt = Duration::from_millis(40);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+        let mut tokens = Vec::new();
+        fc.write_frames(
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+            now,
+            rtt,
+        );
+        tokens.len()
+    }
+
+    #[test]
+    fn trigger_factor() -> Res<()> {
+        let now = Instant::now();
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+
+        let fraction = INITIAL_RECV_WINDOW_SIZE as u64 / WINDOW_UPDATE_FRACTION as u64;
+
+        let consumed = fc.set_consumed(fraction)?;
+        fc.add_retired(consumed);
+        assert_eq!(write_frames(&mut fc, now), 0);
+
+        let consumed = fc.set_consumed(fraction + 1)?;
+        assert_eq!(write_frames(&mut fc, now), 0);
+
+        fc.add_retired(consumed);
+        assert_eq!(write_frames(&mut fc, now), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn auto_tuning_increase_no_decrease() -> Res<()> {
+        let mut now = Instant::now();
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+        let initial_max_active = fc.max_active();
+
+        // Consume and retire multiple receive windows without increasing time.
+        for _ in 1..11 {
+            let consumed = fc.set_consumed(fc.next_limit())?;
+            fc.add_retired(consumed);
+            write_frames(&mut fc, now);
+        }
+        let increased_max_active = fc.max_active();
+
+        assert!(
+            initial_max_active < increased_max_active,
+            "expect receive window auto-tuning to increase max_active on 0 latency connection"
+        );
+
+        // Huge idle time.
+        now += Duration::from_secs(60 * 60); // 1h
+        let consumed = fc.set_consumed(fc.next_limit()).unwrap();
+        fc.add_retired(consumed);
+
+        assert_eq!(write_frames(&mut fc, now), 1);
+        assert_eq!(
+            increased_max_active,
+            fc.max_active(),
+            "expect receive window auto-tuning never to decrease max_active"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stream_data_blocked_triggers_auto_tuning() -> Res<()> {
+        let now = Instant::now();
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+
+        // Send first window update to give auto-tuning algorithm a baseline.
+        let consumed = fc.set_consumed(fc.next_limit())?;
+        fc.add_retired(consumed);
+        assert_eq!(write_frames(&mut fc, now), 1);
+
+        // Use up a single byte only, i.e. way below WINDOW_UPDATE_FRACTION.
+        let consumed = fc.set_consumed(fc.retired + 1)?;
+        fc.add_retired(consumed);
+        assert_eq!(
+            write_frames(&mut fc, now),
+            0,
+            "expect receiver to not send window update unprompted"
+        );
+
+        // Receive STREAM_DATA_BLOCKED frame.
+        fc.send_flowc_update();
+        let previous_max_active = fc.max_active();
+        assert_eq!(
+            write_frames(&mut fc, now),
+            1,
+            "expect receiver to send window update"
+        );
+        assert!(
+            previous_max_active < fc.max_active(),
+            "expect receiver to auto-tune (i.e. increase) max_active"
+        );
+
+        Ok(())
     }
 }
