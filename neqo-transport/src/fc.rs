@@ -632,7 +632,10 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 
 #[cfg(test)]
 mod test {
-    use std::time::{Duration, Instant};
+    use std::{
+        collections::VecDeque,
+        time::{Duration, Instant},
+    };
 
     use neqo_common::{Encoder, Role};
 
@@ -640,6 +643,7 @@ mod test {
     use crate::{
         fc::WINDOW_UPDATE_FRACTION,
         packet::PacketBuilder,
+        recv_stream::MAX_RECV_WINDOW_SIZE,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
         Error, Res, INITIAL_RECV_WINDOW_SIZE,
@@ -1076,6 +1080,83 @@ mod test {
             previous_max_active < fc.max_active(),
             "expect receiver to auto-tune (i.e. increase) max_active"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
+        test_fixture::fixture_init();
+        for _ in 0..1_000 {
+            let mut now = Instant::now();
+            let mut fc =
+                ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
+
+            let bandwidth =
+                (u16::from_be_bytes(neqo_crypto::random::<2>()) % 1_000) as u64 * 1024 * 1024;
+            let delay_ms = neqo_crypto::random::<1>()[0];
+            let bdp = bandwidth * delay_ms as u64 / 1_000 / 8;
+
+            if bdp < INITIAL_RECV_WINDOW_SIZE as u64 || bdp > MAX_RECV_WINDOW_SIZE {
+                continue;
+            }
+
+            log::debug!(
+                "bandwidth {} MBit/s, delay {delay_ms} ms, bdp {} MiB",
+                bandwidth / 1_000 / 1_000,
+                bdp / 1024 / 1024
+            );
+
+            let mut max_actives = VecDeque::new();
+            loop {
+                max_actives.push_front(fc.max_active());
+                if max_actives.len() >= 50 {
+                    let first = max_actives[0];
+                    if max_actives.iter().take(50).all(|v| *v == first) {
+                        log::debug!("done with max_active {} MB", fc.max_active() / 1024 / 1024);
+
+                        if fc.max_active() < bdp {
+                            panic!(
+                                "Got max_active of {} MiB with bandwidth {} MBit/s, delay {delay_ms} ms, bdp {} MiB, {:?}",
+                                fc.max_active() / 1024 / 1024,
+                                bandwidth / 1_000 / 1_000,
+                                bdp / 1024 / 1024,
+                                max_actives
+                            );
+                        }
+
+                        if fc.max_active > 3 * bdp {
+                            panic!(
+                                "max_active {} MB > 3 * bdp {} MB",
+                                fc.max_active / 1024 / 1024,
+                                bdp / 1024 / 1024
+                            );
+                        }
+
+                        break;
+                    }
+                }
+
+                let consumed = fc.set_consumed(std::cmp::min(
+                    dbg!(fc.next_limit()),
+                    dbg!(fc.retired() + bdp),
+                ))?;
+                fc.add_retired(dbg!(consumed));
+                let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
+                let mut tokens = Vec::new();
+                fc.write_frames(
+                    &mut builder,
+                    &mut tokens,
+                    &mut FrameStats::default(),
+                    now,
+                    Duration::from_millis(delay_ms as u64),
+                );
+
+                assert!(consumed > 0);
+
+                now += Duration::from_secs_f64(dbg!(consumed as f64 * 8.0 / bandwidth as f64));
+            }
+        }
 
         Ok(())
     }
