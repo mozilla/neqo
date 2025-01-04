@@ -34,6 +34,7 @@ use crate::{
     AppError, Error, Res,
 };
 
+/// Keep in sync with [`MAX_RECV_WINDOW_SIZE`].
 const MAX_SEND_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 
 /// The priority that is assigned to sending data for the stream.

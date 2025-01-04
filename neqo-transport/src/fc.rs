@@ -633,11 +633,13 @@ impl IndexMut<StreamType> for LocalStreamLimits {
 #[cfg(test)]
 mod test {
     use std::{
+        cmp::min,
         collections::VecDeque,
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Encoder, Role};
+    use neqo_common::{qdebug, Encoder, Role};
+    use neqo_crypto::random;
 
     use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
     use crate::{
@@ -981,8 +983,7 @@ mod test {
         local_stream_limits(Role::Server, 1, 3);
     }
 
-    fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, now: Instant) -> usize {
-        let rtt = Duration::from_millis(40);
+    fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
         let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
         let mut tokens = Vec::new();
         fc.write_frames(
@@ -997,6 +998,7 @@ mod test {
 
     #[test]
     fn trigger_factor() -> Res<()> {
+        let rtt = Duration::from_millis(40);
         let now = Instant::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
 
@@ -1004,19 +1006,20 @@ mod test {
 
         let consumed = fc.set_consumed(fraction)?;
         fc.add_retired(consumed);
-        assert_eq!(write_frames(&mut fc, now), 0);
+        assert_eq!(write_frames(&mut fc, rtt, now), 0);
 
         let consumed = fc.set_consumed(fraction + 1)?;
-        assert_eq!(write_frames(&mut fc, now), 0);
+        assert_eq!(write_frames(&mut fc, rtt, now), 0);
 
         fc.add_retired(consumed);
-        assert_eq!(write_frames(&mut fc, now), 1);
+        assert_eq!(write_frames(&mut fc, rtt, now), 1);
 
         Ok(())
     }
 
     #[test]
     fn auto_tuning_increase_no_decrease() -> Res<()> {
+        let rtt = Duration::from_millis(40);
         let mut now = Instant::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
         let initial_max_active = fc.max_active();
@@ -1025,7 +1028,7 @@ mod test {
         for _ in 1..11 {
             let consumed = fc.set_consumed(fc.next_limit())?;
             fc.add_retired(consumed);
-            write_frames(&mut fc, now);
+            write_frames(&mut fc, rtt, now);
         }
         let increased_max_active = fc.max_active();
 
@@ -1039,7 +1042,7 @@ mod test {
         let consumed = fc.set_consumed(fc.next_limit()).unwrap();
         fc.add_retired(consumed);
 
-        assert_eq!(write_frames(&mut fc, now), 1);
+        assert_eq!(write_frames(&mut fc, rtt, now), 1);
         assert_eq!(
             increased_max_active,
             fc.max_active(),
@@ -1051,19 +1054,20 @@ mod test {
 
     #[test]
     fn stream_data_blocked_triggers_auto_tuning() -> Res<()> {
+        let rtt = Duration::from_millis(40);
         let now = Instant::now();
         let mut fc = ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
 
         // Send first window update to give auto-tuning algorithm a baseline.
         let consumed = fc.set_consumed(fc.next_limit())?;
         fc.add_retired(consumed);
-        assert_eq!(write_frames(&mut fc, now), 1);
+        assert_eq!(write_frames(&mut fc, rtt, now), 1);
 
         // Use up a single byte only, i.e. way below WINDOW_UPDATE_FRACTION.
         let consumed = fc.set_consumed(fc.retired + 1)?;
         fc.add_retired(consumed);
         assert_eq!(
-            write_frames(&mut fc, now),
+            write_frames(&mut fc, rtt, now),
             0,
             "expect receiver to not send window update unprompted"
         );
@@ -1072,7 +1076,7 @@ mod test {
         fc.send_flowc_update();
         let previous_max_active = fc.max_active();
         assert_eq!(
-            write_frames(&mut fc, now),
+            write_frames(&mut fc, rtt, now),
             1,
             "expect receiver to send window update"
         );
@@ -1084,78 +1088,103 @@ mod test {
         Ok(())
     }
 
+    #[allow(clippy::cast_precision_loss)]
     #[test]
     fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
+        const DATA_FRAME_SIZE: u64 = 1_500;
+
         test_fixture::fixture_init();
-        for _ in 0..1_000 {
+
+        // Run multiple iterations with randomized bandwidth and rtt.
+        for _ in 0..1_000_000 {
+            // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
+            let bandwidth = u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1024 * 1024;
+            // Random delay between 1 ms and 256 ms.
+            let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
+            let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
+
             let mut now = Instant::now();
+
+            let mut send_to_recv = VecDeque::new();
+            let mut recv_to_send = VecDeque::new();
+
+            let mut last_max_active = INITIAL_RECV_WINDOW_SIZE as u64;
+            let mut last_max_active_changed = now;
+
+            let mut sender_window = INITIAL_RECV_WINDOW_SIZE as u64;
             let mut fc =
                 ReceiverFlowControl::new(StreamId::new(0), INITIAL_RECV_WINDOW_SIZE as u64);
 
-            let bandwidth =
-                (u16::from_be_bytes(neqo_crypto::random::<2>()) % 1_000) as u64 * 1024 * 1024;
-            let delay_ms = neqo_crypto::random::<1>()[0];
-            let bdp = bandwidth * delay_ms as u64 / 1_000 / 8;
-
-            if bdp < INITIAL_RECV_WINDOW_SIZE as u64 || bdp > MAX_RECV_WINDOW_SIZE {
-                continue;
-            }
-
-            log::debug!(
-                "bandwidth {} MBit/s, delay {delay_ms} ms, bdp {} MiB",
-                bandwidth / 1_000 / 1_000,
-                bdp / 1024 / 1024
-            );
-
-            let mut max_actives = VecDeque::new();
             loop {
-                max_actives.push_front(fc.max_active());
-                if max_actives.len() >= 50 {
-                    let first = max_actives[0];
-                    if max_actives.iter().take(50).all(|v| *v == first) {
-                        log::debug!("done with max_active {} MB", fc.max_active() / 1024 / 1024);
+                // Sender receives window updates.
+                if recv_to_send.front().is_some_and(|(at, _)| *at <= now) {
+                    let (_, update) = recv_to_send.pop_front().unwrap();
+                    sender_window += update;
+                }
 
-                        if fc.max_active() < bdp {
-                            panic!(
-                                "Got max_active of {} MiB with bandwidth {} MBit/s, delay {delay_ms} ms, bdp {} MiB, {:?}",
-                                fc.max_active() / 1024 / 1024,
-                                bandwidth / 1_000 / 1_000,
-                                bdp / 1024 / 1024,
-                                max_actives
-                            );
+                // Sender sends data frames.
+                let sender_progressed = if sender_window > 0 {
+                    let to_send = min(DATA_FRAME_SIZE, sender_window);
+                    send_to_recv.push_back((now, to_send));
+                    sender_window -= to_send;
+                    now += Duration::from_secs_f64(to_send as f64 * 8.0 / bandwidth as f64);
+                    true
+                } else {
+                    false
+                };
+
+                // Receiver receives data frames.
+                let mut receiver_progressed = false;
+                if send_to_recv.front().is_some_and(|(at, _)| *at <= now) {
+                    let (_, data) = send_to_recv.pop_front().unwrap();
+                    let consumed = fc.set_consumed(fc.retired() + data)?;
+                    fc.add_retired(consumed);
+
+                    // Receiver sends window updates.
+                    let prev_max_allowed = fc.max_allowed;
+                    if write_frames(&mut fc, rtt, now) == 1 {
+                        recv_to_send.push_front((now, fc.max_allowed - prev_max_allowed));
+                        receiver_progressed = true;
+                        if last_max_active < fc.max_active() {
+                            last_max_active = fc.max_active();
+                            last_max_active_changed = now;
                         }
-
-                        if fc.max_active > 3 * bdp {
-                            panic!(
-                                "max_active {} MB > 3 * bdp {} MB",
-                                fc.max_active / 1024 / 1024,
-                                bdp / 1024 / 1024
-                            );
-                        }
-
-                        break;
                     }
                 }
 
-                let consumed = fc.set_consumed(std::cmp::min(
-                    dbg!(fc.next_limit()),
-                    dbg!(fc.retired() + bdp),
-                ))?;
-                fc.add_retired(dbg!(consumed));
-                let mut builder = PacketBuilder::short(Encoder::new(), false, None::<&[u8]>);
-                let mut tokens = Vec::new();
-                fc.write_frames(
-                    &mut builder,
-                    &mut tokens,
-                    &mut FrameStats::default(),
-                    now,
-                    Duration::from_millis(delay_ms as u64),
-                );
+                // When idle, travel in (simulated) time.
+                if !sender_progressed && !receiver_progressed {
+                    now = [recv_to_send.front(), send_to_recv.front()]
+                        .into_iter()
+                        .flatten()
+                        .map(|(at, _)| *at)
+                        .min()
+                        .expect("both are None");
+                }
 
-                assert!(consumed > 0);
-
-                now += Duration::from_secs_f64(dbg!(consumed as f64 * 8.0 / bandwidth as f64));
+                // Consider auto-tuning done once receive window hasn't changed for 4 RTT.
+                if now.duration_since(last_max_active_changed) > 4 * rtt {
+                    break;
+                }
             }
+
+            let summary = format!(
+                "Got receive window of {} MiB on connection with bandwidth {} MBit/s, delay {rtt:?}, bdp {} MiB.",
+                fc.max_active() / 1024 / 1024,
+                bandwidth / 1_000 / 1_000,
+                bdp / 1024 / 1024,
+            );
+
+            assert!(
+                fc.max_active() >= bdp || fc.max_active() == MAX_RECV_WINDOW_SIZE,
+                "{summary} Receive window is smaller than the bdp."
+            );
+            assert!(
+                fc.max_active <= 2 * bdp || fc.max_active == INITIAL_RECV_WINDOW_SIZE as u64,
+                "{summary} Receive window is more than twice the bdp."
+            );
+
+            qdebug!("{summary}");
         }
 
         Ok(())

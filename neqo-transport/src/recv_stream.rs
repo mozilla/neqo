@@ -35,6 +35,8 @@ pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
 /// for the size of the stream receive window.
+///
+/// Keep in sync with [`MAX_SEND_BUFFER_SIZE`].
 pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Default)]
