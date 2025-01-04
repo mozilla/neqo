@@ -36,6 +36,13 @@ pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
 /// for the size of the stream receive window.
 ///
+/// A value of 10 MiB allows for:
+///
+/// - 10ms rtt and 8.3 GBit/s
+/// - 20ms rtt and 4.2 GBit/s
+/// - 40ms rtt and 2.1 GBit/s
+/// - 100ms rtt and 0.8 GBit/s
+///
 /// Keep in sync with [`MAX_SEND_BUFFER_SIZE`].
 pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
 
