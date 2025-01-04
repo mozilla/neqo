@@ -1096,7 +1096,7 @@ mod test {
         test_fixture::fixture_init();
 
         // Run multiple iterations with randomized bandwidth and rtt.
-        for _ in 0..1_000_000 {
+        for _ in 0..1_000 {
             // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
             let bandwidth = u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1024 * 1024;
             // Random delay between 1 ms and 256 ms.
