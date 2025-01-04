@@ -43,7 +43,7 @@ pub const INITIAL_RECV_WINDOW_SIZE: usize = 1024 * 1024;
 /// - 40ms rtt and 2.1 GBit/s
 /// - 100ms rtt and 0.8 GBit/s
 ///
-/// Keep in sync with [`MAX_SEND_BUFFER_SIZE`].
+/// Keep in sync with [`crate::send_stream::MAX_SEND_BUFFER_SIZE`].
 pub const MAX_RECV_WINDOW_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Default)]
