@@ -1169,7 +1169,7 @@ mod test {
             }
 
             let summary = format!(
-                "Got receive window of {} MiB on connection with bandwidth {} MBit/s, delay {rtt:?}, bdp {} MiB.",
+                "Got receive window of {} MiB on connection with bandwidth {} MBit/s ({bandwidth} Bit/s), delay {rtt:?}, bdp {} MiB.",
                 fc.max_active() / 1024 / 1024,
                 bandwidth / 1_000 / 1_000,
                 bdp / 1024 / 1024,
