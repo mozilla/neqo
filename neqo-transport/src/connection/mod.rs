@@ -3125,8 +3125,7 @@ impl Connection {
     fn decode_ack_delay(&self, v: u64) -> Duration {
         // If we have remote transport parameters, use them.
         // Otherwise, ack delay should be zero (because it's the handshake).
-        self.tps.borrow().remote.as_ref().map_or_else(
-            || Duration::new(0, 0),
+        self.tps.borrow().remote.as_ref().map_or_default(
             |r| {
                 let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))
                     .expect("ACK_DELAY_EXPONENT > 20 is invalid per RFC9000");
