@@ -133,7 +133,7 @@ jobs:
           # Flags to pass to neqo when it runs against another implementation.
           declare -A neqo_flags=(
             ["neqo"]=""
-            ["msquic"]="-o -a hq-interop"
+            ["msquic"]="-a hq-interop"
             ["gquiche"]=""
           )
 
