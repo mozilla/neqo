@@ -120,9 +120,9 @@ impl<'a> Decoder<'a> {
         let b1 = self.decode_n(1)?;
         match b1 >> 6 {
             0 => Some(b1),
-            1 => Some((b1 & 0x3f) << 8 | self.decode_n(1)?),
-            2 => Some((b1 & 0x3f) << 24 | self.decode_n(3)?),
-            3 => Some((b1 & 0x3f) << 56 | self.decode_n(7)?),
+            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
+            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
+            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
             _ => unreachable!(),
         }
     }
