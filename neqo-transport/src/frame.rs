@@ -12,7 +12,7 @@ use neqo_common::{qtrace, Decoder, Encoder};
 
 use crate::{
     cid::MAX_CONNECTION_ID_LEN,
-    ecn::Count,
+    ecn,
     packet::PacketType,
     stream_id::{StreamId, StreamType},
     AppError, CloseReason, Error, Res, TransportError,
@@ -119,7 +119,7 @@ pub enum Frame<'a> {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: Vec<AckRange>,
-        ecn_count: Option<Count>,
+        ecn_count: Option<ecn::Count>,
     },
     ResetStream {
         stream_id: StreamId,
@@ -452,7 +452,7 @@ impl<'a> Frame<'a> {
 
             // Now check for the values for ACK_ECN.
             let ecn_count = if ecn {
-                Some(Count::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
+                Some(ecn::Count::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
             } else {
                 None
             };

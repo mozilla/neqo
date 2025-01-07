@@ -28,7 +28,7 @@ use sent::SentPackets;
 pub use token::{RecoveryToken, StreamRecoveryToken};
 
 use crate::{
-    ecn::Count,
+    ecn,
     packet::PacketNumber,
     path::{Path, PathRef},
     qlog::{self, QlogMetric},
@@ -610,7 +610,7 @@ impl LossRecovery {
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         acked_ranges: R,
-        ack_ecn: Option<Count>,
+        ack_ecn: Option<ecn::Count>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -988,7 +988,7 @@ mod tests {
     use crate::{
         cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
-        ecn::Count,
+        ecn,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
         stats::{Stats, StatsCell},
@@ -1016,7 +1016,7 @@ mod tests {
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<PacketNumber>>,
-            ack_ecn: Option<Count>,
+            ack_ecn: Option<ecn::Count>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {

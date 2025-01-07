@@ -24,7 +24,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
-    ecn::{Count, Info},
+    ecn,
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
     pmtud::Pmtud,
@@ -200,7 +200,7 @@ impl Paths {
     ) -> bool {
         debug_assert!(!self.is_temporary(path));
         let baseline = self.primary().map_or_else(
-            || Info::default().baseline(),
+            || ecn::Info::default().baseline(),
             |p| p.borrow().ecn_info.baseline(),
         );
         path.borrow_mut().set_ecn_baseline(baseline);
@@ -519,7 +519,7 @@ pub struct Path {
     /// The number of bytes sent on this path.
     sent_bytes: usize,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
-    ecn_info: Info,
+    ecn_info: ecn::Info,
     /// For logging of events.
     qlog: NeqoQlog,
 }
@@ -562,12 +562,12 @@ impl Path {
             sender,
             received_bytes: 0,
             sent_bytes: 0,
-            ecn_info: Info::default(),
+            ecn_info: ecn::Info::default(),
             qlog,
         }
     }
 
-    pub fn set_ecn_baseline(&mut self, baseline: Count) {
+    pub fn set_ecn_baseline(&mut self, baseline: ecn::Count) {
         self.ecn_info.set_baseline(baseline);
     }
 
@@ -971,7 +971,7 @@ impl Path {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        ack_ecn: Option<Count>,
+        ack_ecn: Option<ecn::Count>,
         now: Instant,
         stats: &mut Stats,
     ) {

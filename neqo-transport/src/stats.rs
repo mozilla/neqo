@@ -16,10 +16,7 @@ use std::{
 
 use neqo_common::qwarn;
 
-use crate::{
-    ecn::{Count, ValidationCount},
-    packet::PacketNumber,
-};
+use crate::{ecn, packet::PacketNumber};
 
 pub const MAX_PTO_COUNTS: usize = 16;
 
@@ -202,7 +199,7 @@ pub struct Stats {
     pub datagram_tx: DatagramStats,
 
     /// ECN path validation count, indexed by validation outcome.
-    pub ecn_path_validation: ValidationCount,
+    pub ecn_path_validation: ecn::ValidationCount,
     /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
     ///
     /// Note: Given that QUIC ACKs only carry [`Ect0`], [`Ect1`] and [`Ce`], but
@@ -214,9 +211,9 @@ pub struct Stats {
     /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
     /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
     /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
-    pub ecn_tx: Count,
+    pub ecn_tx: ecn::Count,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header.
-    pub ecn_rx: Count,
+    pub ecn_rx: ecn::Count,
 }
 
 impl Stats {
