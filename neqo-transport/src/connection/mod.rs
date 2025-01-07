@@ -627,7 +627,7 @@ impl Connection {
                 self.version,
                 u64::try_from(rtt.as_millis()).unwrap_or(0),
             )
-            .expect("can create resumption token")
+            .expect("caller checked if a resumption token existed")
     }
 
     fn confirmed(&self) -> bool {
