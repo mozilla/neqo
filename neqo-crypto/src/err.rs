@@ -28,6 +28,7 @@ pub mod mozpkix {
 
     #[allow(non_camel_case_types)]
     pub type mozilla_pkix_ErrorCode = ::std::os::raw::c_int;
+    #[allow(clippy::decimal_literal_representation)]
     pub const MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE: mozilla_pkix_ErrorCode = -16384;
     pub const MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY: mozilla_pkix_ErrorCode = -16383;
     pub const MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE: mozilla_pkix_ErrorCode = -16382;

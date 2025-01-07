@@ -9,7 +9,8 @@
     non_upper_case_globals,
     non_snake_case,
     clippy::too_many_lines,
-    clippy::cognitive_complexity
+    clippy::cognitive_complexity,
+    clippy::decimal_literal_representation
 )]
 
 use std::os::raw::{c_uint, c_void};

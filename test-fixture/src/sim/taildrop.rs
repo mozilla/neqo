@@ -81,7 +81,7 @@ impl TailDrop {
     /// with a fat 32k buffer (about 30ms), and the default forward delay of 50ms.
     #[must_use]
     pub const fn dsl_downlink() -> Self {
-        Self::new(1_000_000, 32_768, Duration::from_millis(50))
+        Self::new(1_000_000, 0x8000, Duration::from_millis(50))
     }
 
     /// Cut uplink to one fifth of the downlink (2Mbps), and reduce the buffer to 1/4.

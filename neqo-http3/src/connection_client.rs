@@ -2791,7 +2791,7 @@ mod tests {
     // send a request with 16384 bytes. The DATA frame length field will need 4 byte.
     #[test]
     fn fetch_with_data_length_16384bytes() {
-        fetch_with_data_length_xbytes(&[0_u8; 16384], &[0x0, 0x80, 0x0, 0x40, 0x0]);
+        fetch_with_data_length_xbytes(&[0_u8; 0x4000], &[0x0, 0x80, 0x0, 0x40, 0x0]);
     }
 
     // Send 2 data frames so that the second one cannot fit into the send_buf and it is only
@@ -2941,7 +2941,7 @@ mod tests {
     #[test]
     fn fetch_two_data_frame_second_16384bytes_place_for_16389() {
         let (buf, hdr) = alloc_buffer(SEND_BUFFER_SIZE - 16412);
-        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x80, 0x0, 0x40, 0x0], &[0_u8; 16384]);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x80, 0x0, 0x40, 0x0], &[0_u8; 0x4000]);
     }
 
     // Test receiving STOP_SENDING with the HttpNoError error code.
@@ -7153,7 +7153,7 @@ mod tests {
         }
     }
 
-    const MAX_TABLE_SIZE: u64 = 65536;
+    const MAX_TABLE_SIZE: u64 = 0x0001_0000;
     const MAX_BLOCKED_STREAMS: u16 = 5;
 
     fn get_resumption_token(server: &mut Http3Server) -> ResumptionToken {

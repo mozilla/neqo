@@ -20,12 +20,12 @@ use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket,
 // 2018, pp. 1-8, doi: 10.23919/TMA.2018.8506538. keywords:
 // {Servers;Probes;Tools;Clamps;Middleboxes;Standards},
 const MTU_SIZES_V4: &[usize] = &[
-    1280, 1380, 1420, 1472, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
+    1280, 1380, 1420, 1472, 1500, 2047, 4095, 8191, 16383, 0x7FFF, 0xFFFF5,
 ];
 const MTU_SIZES_V6: &[usize] = &[
     1280, 1380,
     1420, // 1420 is not in the paper for v6, but adding it makes the arrays the same length
-    1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
+    1470, 1500, 2047, 4095, 8191, 16383, 0x7FFF, 0xFFFF,
 ];
 const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
 const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();

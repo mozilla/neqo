@@ -369,7 +369,7 @@ impl TransportParameters {
             | INITIAL_MAX_STREAMS_UNI
             | MIN_ACK_DELAY
             | MAX_DATAGRAM_FRAME_SIZE => 0,
-            MAX_UDP_PAYLOAD_SIZE => 65527,
+            MAX_UDP_PAYLOAD_SIZE => 0xFFF7,
             ACK_DELAY_EXPONENT => 3,
             MAX_ACK_DELAY => 25,
             ACTIVE_CONNECTION_ID_LIMIT => 2,

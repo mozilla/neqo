@@ -18,7 +18,7 @@ use crate::{
     ConnectionEvents, Error, Res, Stats,
 };
 
-pub const MAX_QUIC_DATAGRAM: u64 = 65535;
+pub const MAX_QUIC_DATAGRAM: u64 = 0xFFFF;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DatagramTracking {

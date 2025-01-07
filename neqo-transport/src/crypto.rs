@@ -654,7 +654,7 @@ impl CryptoDxState {
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
         // Adjust them as we encounter larger packets.
-        debug_assert!(body.len() < 65536);
+        debug_assert!(body.len() < 0x0001_0000);
         if body.len() > self.largest_packet_len {
             let new_bits = usize::leading_zeros(self.largest_packet_len - 1)
                 - usize::leading_zeros(body.len() - 1);
@@ -1362,7 +1362,7 @@ pub enum CryptoStreams {
 
 impl CryptoStreams {
     /// Keep around 64k if a server wants to push excess data at us.
-    const BUFFER_LIMIT: u64 = 65536;
+    const BUFFER_LIMIT: u64 = 0x0001_0000;
 
     pub fn discard(&mut self, space: PacketNumberSpace) {
         match space {

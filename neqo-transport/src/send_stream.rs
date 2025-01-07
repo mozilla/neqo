@@ -2424,7 +2424,7 @@ mod tests {
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
-        s.set_max_stream_data(1_048_576);
+        s.set_max_stream_data(0x0010_0000);
         let res = s.send(&big_buf[..SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
@@ -3110,8 +3110,8 @@ mod tests {
     /// that if we don't, then we don't allow other frames to be added.
     #[test]
     fn stream_frame_16384() {
-        stream_frame_at_boundary(&[4; 16383]);
-        stream_frame_at_boundary(&[4; 16384]);
+        stream_frame_at_boundary(&[4; 0x4000 - 1]);
+        stream_frame_at_boundary(&[4; 0x4000]);
     }
 
     /// 63/64 is the other odd boundary.
