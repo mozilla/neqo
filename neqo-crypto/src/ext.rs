@@ -88,10 +88,8 @@ impl ExtensionTracker {
     ) -> PRBool {
         let d = std::slice::from_raw_parts_mut(data, max_len as usize);
         Self::wrap_handler_call(arg, |handler| {
-            #[allow(
-                clippy::cast_sign_loss,
-                reason = "Cast is safe here because the message type is always part of the enum"
-            )]
+            // Cast is safe here because the message type is always part of the enum
+            #[allow(clippy::cast_sign_loss)]
             match handler.write(message as HandshakeMessage, d) {
                 ExtensionWriterResult::Write(sz) => {
                     *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
@@ -113,10 +111,8 @@ impl ExtensionTracker {
         let d = null_safe_slice(data, len);
         #[allow(clippy::cast_possible_truncation)]
         Self::wrap_handler_call(arg, |handler| {
-            #[allow(
-                clippy::cast_sign_loss,
-                reason = "Cast is safe here because the message type is always part of the enum"
-            )]
+            // Cast is safe here because the message type is always part of the enum
+            #[allow(clippy::cast_sign_loss)]
             match handler.handle(message as HandshakeMessage, d) {
                 ExtensionHandlerResult::Ok => SECSuccess,
                 ExtensionHandlerResult::Alert(a) => {
