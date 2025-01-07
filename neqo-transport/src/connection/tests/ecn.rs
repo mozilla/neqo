@@ -19,7 +19,7 @@ use crate::{
         new_server, send_and_receive, send_something, send_something_with_modifier,
         send_with_modifier_and_receive, DEFAULT_RTT,
     },
-    ecn::{EcnValidationOutcome, ECN_TEST_COUNT},
+    ecn::{ValidationOutcome, ECN_TEST_COUNT},
     path::MAX_PATH_PROBES,
     ConnectionId, ConnectionParameters, StreamType,
 };
@@ -156,8 +156,8 @@ fn stats() {
     for stats in [client.stats(), server.stats()] {
         for (outcome, count) in stats.ecn_path_validation.iter() {
             match outcome {
-                EcnValidationOutcome::Capable => assert_eq!(*count, 1),
-                EcnValidationOutcome::NotCapable(_) => assert_eq!(*count, 0),
+                ValidationOutcome::Capable => assert_eq!(*count, 1),
+                ValidationOutcome::NotCapable(_) => assert_eq!(*count, 0),
             }
         }
 

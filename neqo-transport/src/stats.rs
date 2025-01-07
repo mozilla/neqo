@@ -17,7 +17,7 @@ use std::{
 use neqo_common::qwarn;
 
 use crate::{
-    ecn::{EcnCount, EcnValidationCount},
+    ecn::{Count, ValidationCount},
     packet::PacketNumber,
 };
 
@@ -202,7 +202,7 @@ pub struct Stats {
     pub datagram_tx: DatagramStats,
 
     /// ECN path validation count, indexed by validation outcome.
-    pub ecn_path_validation: EcnValidationCount,
+    pub ecn_path_validation: ValidationCount,
     /// ECN counts for outgoing UDP datagrams, returned by remote through QUIC ACKs.
     ///
     /// Note: Given that QUIC ACKs only carry [`Ect0`], [`Ect1`] and [`Ce`], but
@@ -214,9 +214,9 @@ pub struct Stats {
     /// [`Ect1`]: neqo_common::tos::IpTosEcn::Ect1
     /// [`Ce`]: neqo_common::tos::IpTosEcn::Ce
     /// [`NotEct`]: neqo_common::tos::IpTosEcn::NotEct
-    pub ecn_tx: EcnCount,
+    pub ecn_tx: Count,
     /// ECN counts for incoming UDP datagrams, read from IP TOS header.
-    pub ecn_rx: EcnCount,
+    pub ecn_rx: Count,
 }
 
 impl Stats {
