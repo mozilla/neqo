@@ -498,10 +498,7 @@ impl Connection {
     /// # Panics
     /// This panics if the transport parameter is known to this crate.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
-        #[cfg(not(test))]
-        {
-            assert!(!tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
-        }
+        debug_assert!(!tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
         if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())
