@@ -1296,7 +1296,7 @@ impl Http3Connection {
             send_events,
             recv_events,
             true,
-        );
+        )?;
         Ok(stream_id)
     }
 
@@ -1327,7 +1327,7 @@ impl Http3Connection {
             send_events,
             recv_events,
             false,
-        );
+        )?;
         Ok(())
     }
 
@@ -1339,8 +1339,8 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
         local: bool,
-    ) {
-        webtransport_session.borrow_mut().add_stream(stream_id);
+    ) -> Res<()> {
+        webtransport_session.borrow_mut().add_stream(stream_id)?;
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
                 self.send_streams.insert(
@@ -1382,6 +1382,7 @@ impl Http3Connection {
                 )),
             );
         }
+        Ok(())
     }
 
     pub fn webtransport_send_datagram(
@@ -1527,7 +1528,7 @@ impl Http3Connection {
             .http_stream()
             .ok_or(Error::InvalidStreamId)?;
 
-        if stream.maybe_update_priority(priority) {
+        if stream.maybe_update_priority(priority)? {
             self.control_stream_local.queue_update_priority(stream_id);
             Ok(true)
         } else {

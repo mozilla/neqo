@@ -80,7 +80,7 @@ impl ControlStreamLocal {
                 let mut enc = Encoder::new();
                 hframe.encode(&mut enc);
                 if self.stream.send_atomic(conn, enc.as_ref())? {
-                    stream.priority_update_sent();
+                    stream.priority_update_sent()?;
                 } else {
                     self.outstanding_priority_update.push_front(update_id);
                     break;

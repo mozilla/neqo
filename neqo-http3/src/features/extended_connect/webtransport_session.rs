@@ -165,11 +165,11 @@ impl WebTransportSession {
         Ok((ReceiveOutput::NoOutput, self.state == SessionState::Done))
     }
 
-    fn maybe_update_priority(&mut self, priority: Priority) -> bool {
-        let Some(stream) = self.control_stream_recv.http_stream() else {
-            return false;
-        };
-        stream.maybe_update_priority(priority)
+    fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool> {
+        self.control_stream_recv
+            .http_stream()
+            .ok_or(Error::Internal)?
+            .maybe_update_priority(priority)
     }
 
     fn priority_update_frame(&mut self) -> Option<HFrame> {
@@ -178,11 +178,11 @@ impl WebTransportSession {
             .priority_update_frame()
     }
 
-    fn priority_update_sent(&mut self) {
-        let Some(stream) = self.control_stream_recv.http_stream() else {
-            return;
-        };
-        stream.priority_update_sent();
+    fn priority_update_sent(&mut self) -> Res<()> {
+        self.control_stream_recv
+            .http_stream()
+            .ok_or(Error::Internal)?
+            .priority_update_sent()
     }
 
     fn send(&mut self, conn: &mut Connection) -> Res<()> {
@@ -293,7 +293,7 @@ impl WebTransportSession {
         Ok(())
     }
 
-    pub fn add_stream(&mut self, stream_id: StreamId) {
+    pub fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         if self.state == SessionState::Active {
             if stream_id.is_bidi() {
                 self.send_streams.insert(stream_id);
@@ -309,9 +309,10 @@ impl WebTransportSession {
                     .extended_connect_new_stream(Http3StreamInfo::new(
                         stream_id,
                         ExtendedConnectType::WebTransport.get_stream_type(self.session_id),
-                    ));
+                    ))?;
             }
         }
+        Ok(())
     }
 
     pub fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -459,7 +460,7 @@ impl HttpRecvStream for Rc<RefCell<WebTransportSession>> {
         self.borrow_mut().header_unblocked(conn)
     }
 
-    fn maybe_update_priority(&mut self, priority: Priority) -> bool {
+    fn maybe_update_priority(&mut self, priority: Priority) -> Res<bool> {
         self.borrow_mut().maybe_update_priority(priority)
     }
 
@@ -467,8 +468,8 @@ impl HttpRecvStream for Rc<RefCell<WebTransportSession>> {
         self.borrow_mut().priority_update_frame()
     }
 
-    fn priority_update_sent(&mut self) {
-        self.borrow_mut().priority_update_sent();
+    fn priority_update_sent(&mut self) -> Res<()> {
+        self.borrow_mut().priority_update_sent()
     }
 }
 

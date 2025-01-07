@@ -2946,7 +2946,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count, ack_delay, now);
+                self.handle_ack(space, ranges, ecn_count, ack_delay, now)?;
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3122,14 +3122,23 @@ impl Connection {
         }
     }
 
-    fn decode_ack_delay(&self, v: u64) -> Duration {
+    fn decode_ack_delay(&self, v: u64) -> Res<Duration> {
         // If we have remote transport parameters, use them.
         // Otherwise, ack delay should be zero (because it's the handshake).
-        self.tps.borrow().remote.as_ref().map_or_default(
+        self.tps.borrow().remote.as_ref().map_or_else(
+            || Ok(Duration::default()),
             |r| {
-                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))
-                    .expect("ACK_DELAY_EXPONENT > 20 is invalid per RFC9000");
-                Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
+                let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT))?;
+                if exponent > 20 {
+                    // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000
+                    return Err(Error::TransportParameterError);
+                }
+                let corrected = if v.leading_zeros() >= exponent {
+                    v << exponent
+                } else {
+                    u64::MAX
+                };
+                Ok(Duration::from_micros(corrected))
             },
         )
     }
@@ -3141,21 +3150,22 @@ impl Connection {
         ack_ecn: Option<EcnCount>,
         ack_delay: u64,
         now: Instant,
-    ) where
+    ) -> Res<()>
+    where
         R: IntoIterator<Item = RangeInclusive<PacketNumber>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
         let Some(path) = self.paths.primary() else {
-            return;
+            return Ok(());
         };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
             ack_ranges,
             ack_ecn,
-            self.decode_ack_delay(ack_delay),
+            self.decode_ack_delay(ack_delay)?,
             now,
         );
         let largest_acknowledged = acked_packets.first().map(SentPacket::pn);
@@ -3185,6 +3195,7 @@ impl Connection {
         if let Some(largest_acknowledged) = largest_acknowledged {
             stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
         }
+        Ok(())
     }
 
     /// Tell 0-RTT packets that they were "lost".

@@ -1285,7 +1285,7 @@ impl CryptoStates {
         }
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
+    #[cfg(all(not(feature = "disable-encryption"), test))]
     #[cfg(test)]
     pub(crate) fn test_chacha() -> Self {
         const SECRET: &[u8] = &[
@@ -1522,37 +1522,39 @@ impl CryptoStreams {
             Some((offset, length))
         }
 
-        if let Some(cs) = self.get_mut(space) {
-            if let Some((offset, data)) = cs.tx.next_bytes() {
-                let written = if offset == 0 {
-                    if let Some(sni) = find_sni(data) {
-                        // Cut the crypto data in two at the midpoint of the SNI and swap the
-                        // chunks.
-                        let mid = sni.start + (sni.end - sni.start) / 2;
-                        let (left, right) = data.split_at(mid);
-                        [
-                            write_chunk(offset + mid as u64, right, builder),
-                            write_chunk(offset, left, builder),
-                        ]
-                    } else {
-                        // No SNI found, write the entire data.
-                        [write_chunk(offset, data, builder), None]
-                    }
-                } else {
-                    // Not at the start of the crypto stream, write the entire data.
-                    [write_chunk(offset, data, builder), None]
-                };
-                for (offset, length) in written.into_iter().flatten() {
-                    cs.tx.mark_as_sent(offset, length);
-                    qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
-                    tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
-                        space,
-                        offset,
-                        length,
-                    }));
-                    stats.crypto += 1;
-                }
+        let Some(cs) = self.get_mut(space) else {
+            return;
+        };
+        let Some((offset, data)) = cs.tx.next_bytes() else {
+            return;
+        };
+        let written = if offset == 0 {
+            if let Some(sni) = find_sni(data) {
+                // Cut the crypto data in two at the midpoint of the SNI and swap the
+                // chunks.
+                let mid = sni.start + (sni.end - sni.start) / 2;
+                let (left, right) = data.split_at(mid);
+                [
+                    write_chunk(offset + mid as u64, right, builder),
+                    write_chunk(offset, left, builder),
+                ]
+            } else {
+                // No SNI found, write the entire data.
+                [write_chunk(offset, data, builder), None]
             }
+        } else {
+            // Not at the start of the crypto stream, write the entire data.
+            [write_chunk(offset, data, builder), None]
+        };
+        for (offset, length) in written.into_iter().flatten() {
+            cs.tx.mark_as_sent(offset, length);
+            qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
+            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
+                space,
+                offset,
+                length,
+            }));
+            stats.crypto += 1;
         }
     }
 }

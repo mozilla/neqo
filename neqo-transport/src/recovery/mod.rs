@@ -643,39 +643,38 @@ impl LossRecovery {
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
         let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
-        if let Some(sp) = self.spaces.get_mut(pn_space) {
-            let loss_delay = primary_path.borrow().rtt().loss_delay();
-            let mut lost = Vec::new();
-            sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
-            self.stats.borrow_mut().lost += lost.len();
+        let Some(sp) = self.spaces.get_mut(pn_space) else {
+            return (Vec::new(), Vec::new());
+        };
+        let loss_delay = primary_path.borrow().rtt().loss_delay();
+        let mut lost = Vec::new();
+        sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
+        self.stats.borrow_mut().lost += lost.len();
 
-            // Tell the congestion controller about any lost packets.
-            // The PTO for congestion control is the raw number, without exponential
-            // backoff, so that we can determine persistent congestion.
-            primary_path.borrow_mut().on_packets_lost(
-                prev_largest_acked,
-                self.confirmed(),
-                &lost,
-                &mut self.stats.borrow_mut(),
-                now,
-            );
+        // Tell the congestion controller about any lost packets.
+        // The PTO for congestion control is the raw number, without exponential
+        // backoff, so that we can determine persistent congestion.
+        primary_path.borrow_mut().on_packets_lost(
+            prev_largest_acked,
+            self.confirmed(),
+            &lost,
+            &mut self.stats.borrow_mut(),
+            now,
+        );
 
-            // This must happen after on_packets_lost. If in recovery, this could
-            // take us out, and then lost packets will start a new recovery period
-            // when it shouldn't.
-            primary_path.borrow_mut().on_packets_acked(
-                &acked_packets,
-                ack_ecn,
-                now,
-                &mut self.stats.borrow_mut(),
-            );
+        // This must happen after on_packets_lost. If in recovery, this could
+        // take us out, and then lost packets will start a new recovery period
+        // when it shouldn't.
+        primary_path.borrow_mut().on_packets_acked(
+            &acked_packets,
+            ack_ecn,
+            now,
+            &mut self.stats.borrow_mut(),
+        );
 
-            self.pto_state = None;
+        self.pto_state = None;
 
-            (acked_packets, lost)
-        } else {
-            (Vec::new(), Vec::new())
-        }
+        (acked_packets, lost)
     }
 
     /// When receiving a retry, get all the sent packets so that they can be flushed.

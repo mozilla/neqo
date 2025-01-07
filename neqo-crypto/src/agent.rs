@@ -581,14 +581,16 @@ impl SecretAgent {
     // This function tracks whether handshake() or handshake_raw() was used
     // and prevents the other from being used.
     fn set_raw(&mut self, r: bool) -> Res<()> {
-        if self.raw.is_none() {
+        if let Some(raw) = self.raw {
+            if raw == r {
+                Ok(())
+            } else {
+                Err(Error::MixedHandshakeMethod)
+            }
+        } else {
             self.secrets.register(self.fd)?;
             self.raw = Some(r);
             Ok(())
-        } else if self.raw.ok_or(Error::InternalError)? == r {
-            Ok(())
-        } else {
-            Err(Error::MixedHandshakeMethod)
         }
     }
 

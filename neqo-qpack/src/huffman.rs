@@ -80,10 +80,7 @@ pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
     let mut output = Vec::new();
     while reader.has_more_data() {
         if let Some(c) = decode_character(&mut reader)? {
-            if c == 256 {
-                return Err(Error::HuffmanDecompressionFailed);
-            }
-            output.push(u8::try_from(c).map_err(|_| Error::InternalError)?);
+            output.push(u8::try_from(c).map_err(|_| Error::HuffmanDecompressionFailed)?);
         }
     }
 

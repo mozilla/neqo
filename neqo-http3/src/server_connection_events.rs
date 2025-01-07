@@ -12,7 +12,8 @@ use neqo_transport::{AppError, StreamId};
 use crate::{
     connection::Http3State,
     features::extended_connect::{ExtendedConnectEvents, ExtendedConnectType, SessionCloseReason},
-    CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, SendStreamEvents,
+    CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
+    SendStreamEvents,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -142,8 +143,9 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         });
     }
 
-    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) {
+    fn extended_connect_new_stream(&self, stream_info: Http3StreamInfo) -> Res<()> {
         self.insert(Http3ServerConnEvent::ExtendedConnectNewStream(stream_info));
+        Ok(())
     }
 
     fn new_datagram(&self, session_id: StreamId, datagram: Vec<u8>) {
