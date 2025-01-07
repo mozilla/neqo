@@ -6,6 +6,8 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#![allow(clippy::module_name_repetitions)]
+
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]

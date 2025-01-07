@@ -6,6 +6,8 @@
 
 // Buffering data to send until it is acked.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},

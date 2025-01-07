@@ -6,6 +6,8 @@
 
 // Functions that handle capturing QLOG traces.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     ops::{Deref, RangeInclusive},
     time::{Duration, Instant},
