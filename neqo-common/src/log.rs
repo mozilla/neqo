@@ -59,25 +59,45 @@ pub fn init(level_filter: Option<log::LevelFilter>) {
 #[macro_export]
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qerror {
-    ($($arg:tt)*) => ( { ::neqo_common::log::init(None); ::log::error!($($arg)*); } );
+    ($($arg:tt)*) => ( {
+        #[cfg(any(test, feature = "bench"))]
+        ::neqo_common::log::init(None);
+        ::log::error!($($arg)*);
+    } );
 }
 #[macro_export]
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qwarn {
-    ($($arg:tt)*) => ( { ::neqo_common::log::init(None); ::log::warn!($($arg)*); } );
+    ($($arg:tt)*) => ( {
+        #[cfg(any(test, feature = "bench"))]
+        ::neqo_common::log::init(None);
+        ::log::warn!($($arg)*);
+    } );
 }
 #[macro_export]
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qinfo {
-    ($($arg:tt)*) => ( { ::neqo_common::log::init(None); ::log::info!($($arg)*); } );
+    ($($arg:tt)*) => ( {
+        #[cfg(any(test, feature = "bench"))]
+        ::neqo_common::log::init(None);
+        ::log::info!($($arg)*);
+    } );
 }
 #[macro_export]
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qdebug {
-    ($($arg:tt)*) => ( { ::neqo_common::log::init(None); ::log::debug!($($arg)*); } );
+    ($($arg:tt)*) => ( {
+        #[cfg(any(test, feature = "bench"))]
+        ::neqo_common::log::init(None);
+        ::log::debug!($($arg)*);
+    } );
 }
 #[macro_export]
 // TODO: Enable `#[clippy::format_args]` once our MSRV is >= 1.84
 macro_rules! qtrace {
-    ($($arg:tt)*) => ( { ::neqo_common::log::init(None); ::log::trace!($($arg)*); } );
+    ($($arg:tt)*) => ( {
+        #[cfg(any(test, feature = "bench"))]
+        ::neqo_common::log::init(None);
+        ::log::trace!($($arg)*);
+    } );
 }
