@@ -325,7 +325,7 @@ impl Http3ServerHandler {
                         MessageType::Response,
                         Http3StreamType::Http,
                         stream_id,
-                        self.base_handler.qpack_encoder.clone(),
+                        Rc::clone(&self.base_handler.qpack_encoder),
                         Box::new(self.events.clone()),
                     )),
                     Box::new(RecvMessage::new(

@@ -404,7 +404,7 @@ impl Connection {
             state: State::Init,
             paths: Paths::default(),
             cid_manager,
-            tps: tphandler.clone(),
+            tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
             address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
@@ -442,7 +442,7 @@ impl Connection {
         zero_rtt_checker: impl ZeroRttChecker + 'static,
     ) -> Res<()> {
         self.crypto
-            .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
+            .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
     }
 
     /// # Errors
