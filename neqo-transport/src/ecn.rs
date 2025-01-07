@@ -16,13 +16,13 @@ use crate::{
 };
 
 /// The number of packets to use for testing a path for ECN capability.
-pub const ECN_TEST_COUNT: usize = 10;
+pub const TEST_COUNT: usize = 10;
 
 /// The number of packets to use for testing a path for ECN capability when exchanging
-/// Initials during the handshake. This is a lower number than [`ECN_TEST_COUNT`] to avoid
-/// unnecessarily delaying the handshake; we would otherwise double the PTO [`ECN_TEST_COUNT`]
+/// Initials during the handshake. This is a lower number than [`TEST_COUNT`] to avoid
+/// unnecessarily delaying the handshake; we would otherwise double the PTO [`TEST_COUNT`]
 /// times.
-const ECN_TEST_COUNT_INITIAL_PHASE: usize = 3;
+const TEST_COUNT_INITIAL_PHASE: usize = 3;
 
 /// The state information related to testing a path for ECN capability.
 /// See RFC9000, Appendix A.4.
@@ -181,14 +181,14 @@ impl Info {
     }
 
     /// Count the number of packets sent out on this path during ECN validation.
-    /// Exit ECN validation if the number of packets sent exceeds `ECN_TEST_COUNT`.
+    /// Exit ECN validation if the number of packets sent exceeds `TEST_COUNT`.
     /// We do not implement the part of the RFC that says to exit ECN validation if the time since
     /// the start of ECN validation exceeds 3 * PTO, since this seems to happen much too quickly.
     pub fn on_packet_sent(&mut self, stats: &mut Stats) {
         if let ValidationState::Testing { probes_sent, .. } = &mut self.state {
             *probes_sent += 1;
             qdebug!("ECN probing: sent {} probes", probes_sent);
-            if *probes_sent == ECN_TEST_COUNT {
+            if *probes_sent == TEST_COUNT {
                 qdebug!("ECN probing concluded with {} probes sent", probes_sent);
                 self.state.set(ValidationState::Unknown, stats);
             }
@@ -229,7 +229,7 @@ impl Info {
                 .count();
             // If we have lost all initial probes a bunch of times, we can conclude that the path
             // is not ECN capable and likely drops all ECN marked packets.
-            if probes_sent == probes_lost && *probes_lost == ECN_TEST_COUNT_INITIAL_PHASE {
+            if probes_sent == probes_lost && *probes_lost == TEST_COUNT_INITIAL_PHASE {
                 qdebug!(
                     "ECN validation failed, all {} initial marked packets were lost",
                     probes_lost
