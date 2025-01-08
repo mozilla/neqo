@@ -6,6 +6,8 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#![allow(clippy::module_name_repetitions)]
+
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]
@@ -26,7 +28,7 @@ use sent::SentPackets;
 pub use token::{RecoveryToken, StreamRecoveryToken};
 
 use crate::{
-    ecn::EcnCount,
+    ecn,
     packet::PacketNumber,
     path::{Path, PathRef},
     qlog::{self, QlogMetric},
@@ -604,7 +606,7 @@ impl LossRecovery {
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         acked_ranges: R,
-        ack_ecn: Option<EcnCount>,
+        ack_ecn: Option<ecn::Count>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -982,7 +984,7 @@ mod tests {
     use crate::{
         cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
-        ecn::EcnCount,
+        ecn,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
         stats::{Stats, StatsCell},
@@ -1010,7 +1012,7 @@ mod tests {
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<PacketNumber>>,
-            ack_ecn: Option<EcnCount>,
+            ack_ecn: Option<ecn::Count>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
