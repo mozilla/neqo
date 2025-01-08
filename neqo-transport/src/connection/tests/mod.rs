@@ -555,6 +555,7 @@ fn induce_persistent_congestion(
 const POST_HANDSHAKE_CWND: usize = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
+#[allow(clippy::integer_division)]
 const fn cwnd_packets(data: usize, mtu: usize) -> usize {
     // Add one if the last chunk is >= ACK_ONLY_SIZE_LIMIT.
     (data + mtu - ACK_ONLY_SIZE_LIMIT) / mtu

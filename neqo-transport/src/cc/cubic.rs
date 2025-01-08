@@ -202,6 +202,7 @@ impl WindowAdjustment for Cubic {
                 curr_cwnd_f64
             };
         self.ca_epoch_start = None;
+        #[allow(clippy::integer_division)]
         (
             curr_cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
             acked_bytes * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,

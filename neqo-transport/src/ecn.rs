@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::integer_division)] // The `Enum` derive hits this clippy lint for some reason.
+
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};

@@ -414,7 +414,7 @@ impl PushController {
     pub fn maybe_send_max_push_id_frame(&mut self, base_handler: &mut Http3Connection) {
         let push_done = self.push_streams.number_done();
         if self.max_concurent_push > 0
-            && (self.current_max_push_id - push_done) <= (self.max_concurent_push / 2).into()
+            && (self.current_max_push_id - push_done) <= (self.max_concurent_push >> 1).into()
         {
             self.current_max_push_id = push_done + self.max_concurent_push;
             base_handler.queue_control_frame(&HFrame::MaxPushId {

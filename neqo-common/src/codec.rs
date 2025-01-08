@@ -282,7 +282,7 @@ impl Encoder {
         let s = s.as_ref();
         assert_eq!(s.len() % 2, 0, "Needs to be even length");
 
-        let cap = s.len() / 2;
+        let cap = s.len() >> 1;
         let mut enc = Self::with_capacity(cap);
 
         for i in 0..cap {
@@ -737,7 +737,7 @@ mod tests {
         ];
 
         for c in cases {
-            assert_eq!(Encoder::varint_len(c.v), c.b.len() / 2);
+            assert_eq!(Encoder::varint_len(c.v), c.b.len() >> 1);
 
             let mut enc = Encoder::default();
             enc.encode_varint(c.v);

@@ -244,7 +244,7 @@ where
         }
 
         self.retired = retired;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.retired + (self.max_active >> 1) > self.max_allowed {
             self.frame_pending = true;
         }
     }
@@ -318,7 +318,7 @@ impl ReceiverFlowControl<()> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.retired + (self.max_active >> 1) > self.max_allowed {
             self.frame_pending = true;
         }
     }
@@ -372,7 +372,7 @@ impl ReceiverFlowControl<StreamId> {
     pub fn add_retired(&mut self, count: u64) {
         debug_assert!(self.retired + count <= self.consumed);
         self.retired += count;
-        if self.retired + self.max_active / 2 > self.max_allowed {
+        if self.retired + (self.max_active >> 1) > self.max_allowed {
             self.frame_pending = true;
         }
     }

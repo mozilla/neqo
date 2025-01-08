@@ -42,7 +42,7 @@ impl WindowAdjustment for NewReno {
         acked_bytes: usize,
         _max_datagram_size: usize,
     ) -> (usize, usize) {
-        (curr_cwnd / 2, acked_bytes / 2)
+        (curr_cwnd >> 1, acked_bytes >> 1)
     }
 
     fn on_app_limited(&mut self) {}

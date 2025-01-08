@@ -487,7 +487,7 @@ impl RecvdPackets {
         let max_ranges = if let Some(avail) = builder.remaining().checked_sub(Self::USEFUL_ACK_LEN)
         {
             // Apply a hard maximum to keep plenty of space for other stuff.
-            min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
+            min(1 + (avail >> 4), MAX_ACKS_PER_FRAME)
         } else {
             return;
         };
@@ -516,7 +516,7 @@ impl RecvdPackets {
 
         let elapsed = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent, so delay is in multiples of 8 microseconds.
-        let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
+        let ack_delay = u64::try_from(elapsed.as_micros() >> 3).unwrap_or(u64::MAX);
         let ack_delay = min((1 << 62) - 1, ack_delay);
         builder.encode_varint(ack_delay);
         builder.encode_varint(u64::try_from(ranges.len() - 1).unwrap()); // extra ranges

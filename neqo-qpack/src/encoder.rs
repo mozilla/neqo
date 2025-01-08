@@ -307,7 +307,7 @@ impl QPackEncoder {
                 );
                 return Err(Error::InternalError);
             }
-            self.max_entries = cap / 32;
+            self.max_entries = cap >> 5; // Divide by 32
             self.next_capacity = None;
         }
         Ok(())

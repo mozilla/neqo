@@ -152,7 +152,7 @@ mod tests {
         let mut i = 0;
         while i < b.len() {
             // Feed in b in increasing-sized chunks.
-            let incr = if i < b.len() / 2 { i + 1 } else { b.len() - i };
+            let incr = if i < b.len() >> 1 { i + 1 } else { b.len() - i };
             let mut dv = Decoder::from(&b[i..i + incr]);
             i += incr;
             match dec.consume(&mut dv) {

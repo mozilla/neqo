@@ -74,6 +74,7 @@ fn drop_ecn_marked_datagrams() -> fn(Datagram) -> Option<Datagram> {
 }
 
 #[test]
+#[allow(clippy::integer_division)]
 fn handshake_delay_with_ecn_blackhole() {
     let start = now();
     let mut client = default_client();

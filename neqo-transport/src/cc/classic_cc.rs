@@ -592,7 +592,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
             // Allow for potential doubling of the congestion window during slow start.
             // That is, the application might not have been able to send enough to respond
             // to increases to the congestion window.
-            self.bytes_in_flight < self.congestion_window / 2
+            self.bytes_in_flight < self.congestion_window >> 1
         } else {
             // We're not limited if the in-flight data is within a single burst of the
             // congestion window.
@@ -641,8 +641,8 @@ mod tests {
     }
 
     fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
-        assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
-        assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
+        assert_eq!(cc.cwnd(), cc.cwnd_initial() >> 1);
+        assert_eq!(cc.ssthresh(), cc.cwnd_initial() >> 1);
     }
 
     fn lost(pn: PacketNumber, ack_eliciting: bool, t: Duration) -> SentPacket {
@@ -695,10 +695,16 @@ mod tests {
     fn persistent_congestion(lost_packets: &[SentPacket], persistent_expected: bool) {
         let cc = congestion_control(CongestionControlAlgorithm::NewReno);
         let cwnd_initial = cc.cwnd_initial();
-        persistent_congestion_by_algorithm(cc, cwnd_initial / 2, lost_packets, persistent_expected);
+        persistent_congestion_by_algorithm(
+            cc,
+            cwnd_initial >> 1,
+            lost_packets,
+            persistent_expected,
+        );
 
         let cc = congestion_control(CongestionControlAlgorithm::Cubic);
         let cwnd_initial = cc.cwnd_initial();
+        #[allow(clippy::integer_division)]
         persistent_congestion_by_algorithm(
             cc,
             cwnd_initial * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR,
@@ -1155,7 +1161,7 @@ mod tests {
 
     #[test]
     fn app_limited_congestion_avoidance() {
-        const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS / 2;
+        const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS >> 1;
         const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - 2;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
 

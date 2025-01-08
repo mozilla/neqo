@@ -43,6 +43,7 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 get_unwrap = "warn"
+integer_division = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
 # compilation take more to run than to build otherwise.

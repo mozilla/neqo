@@ -84,6 +84,7 @@ impl Pacer {
         // self.t + rtt * (self.p - self.c) / (PACER_SPEEDUP * cwnd)
         let r = rtt.as_nanos();
         let d = r.saturating_mul(u128::try_from(self.p - self.c).unwrap());
+        #[allow(clippy::integer_division)]
         let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
         let w = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
 

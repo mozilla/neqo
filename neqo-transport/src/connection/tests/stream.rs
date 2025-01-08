@@ -1196,25 +1196,25 @@ fn session_flow_control_affects_all_streams() {
 
     assert_eq!(
         client
-            .stream_send(stream_id, &[b'a'; SMALL_MAX_DATA / 2 + 1])
+            .stream_send(stream_id, &[b'a'; (SMALL_MAX_DATA >> 1) + 1])
             .unwrap(),
-        SMALL_MAX_DATA / 2 + 1
+        (SMALL_MAX_DATA >> 1) + 1
     );
 
     assert_eq!(
         client.stream_avail_send_space(stream_id).unwrap(),
-        SMALL_MAX_DATA / 2 - 1
+        (SMALL_MAX_DATA >> 1) - 1
     );
     assert_eq!(
         client.stream_avail_send_space(stream_id2).unwrap(),
-        SMALL_MAX_DATA / 2 - 1
+        (SMALL_MAX_DATA >> 1) - 1
     );
 
     exchange_data(&mut client, &mut server);
 
     let mut buf = [0x0; SMALL_MAX_DATA];
     let (read, _) = server.stream_recv(stream_id, &mut buf).unwrap();
-    assert_eq!(read, SMALL_MAX_DATA / 2 + 1);
+    assert_eq!(read, (SMALL_MAX_DATA >> 1) + 1);
 
     exchange_data(&mut client, &mut server);
 

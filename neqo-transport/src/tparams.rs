@@ -239,7 +239,7 @@ impl TransportParameter {
 
         let current = dv(dec)?;
         // This rounding down is OK because `decode` checks for left over data.
-        let count = dec.remaining() / 4;
+        let count = dec.remaining() >> 2;
         let mut other = Vec::with_capacity(count);
         for _ in 0..count {
             other.push(dv(dec)?);

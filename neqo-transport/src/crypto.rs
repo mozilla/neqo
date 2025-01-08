@@ -1525,7 +1525,7 @@ impl CryptoStreams {
             let written = if offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let mid = sni.start + ((sni.end - sni.start) >> 1);
                     let (left, right) = data.split_at(mid);
                     [
                         write_chunk(offset + mid as u64, right, builder),

@@ -2101,7 +2101,7 @@ impl Connection {
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
         let pn_len = mem::size_of::<PacketNumber>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
+            - usize::try_from(unacked_range.leading_zeros() >> 3).unwrap();
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"

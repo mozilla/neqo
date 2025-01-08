@@ -31,10 +31,12 @@ use crate::{
     rtt::RttEstimate,
 };
 
+#[allow(clippy::integer_division)]
 const fn cwnd_after_loss(cwnd: usize) -> usize {
     cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
 }
 
+#[allow(clippy::integer_division)]
 const fn cwnd_after_loss_slow_start(cwnd: usize, mtu: usize) -> usize {
     (cwnd + mtu) * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
 }
@@ -120,6 +122,7 @@ fn tcp_phase() {
         // Expected acks during a period of RTT / CUBIC_ALPHA.
         let acks = expected_tcp_acks(cwnd_rtt_start, cubic.max_datagram_size());
         // The time between acks if they are ideally paced over a RTT.
+        #[allow(clippy::integer_division)]
         let time_increase =
             RTT / u32::try_from(cwnd_rtt_start / cubic.max_datagram_size()).unwrap();
 
@@ -138,6 +141,7 @@ fn tcp_phase() {
     let cwnd_rtt_start = cubic.cwnd();
     // cwnd_rtt_start has change, therefore calculate new time_increase (the time
     // between acks if they are ideally paced over a RTT).
+    #[allow(clippy::integer_division)]
     let time_increase = RTT / u32::try_from(cwnd_rtt_start / cubic.max_datagram_size()).unwrap();
     let mut num_acks = 0; // count the number of acks. until cwnd is increased by cubic.max_datagram_size().
 
@@ -163,6 +167,7 @@ fn tcp_phase() {
     let elapsed_time = now - start_time;
 
     // calculate new time_increase.
+    #[allow(clippy::integer_division)]
     let time_increase =
         RTT / u32::try_from(cwnd_rtt_start_after_tcp / cubic.max_datagram_size()).unwrap();
     let mut num_acks2 = 0; // count the number of acks. until cwnd is increased by MAX_DATAGRAM_SIZE.
@@ -223,6 +228,7 @@ fn cubic_phase() {
     for _ in 0..num_rtts_w_max {
         let cwnd_rtt_start = cubic.cwnd();
         // Expected acks
+        #[allow(clippy::integer_division)]
         let acks = cwnd_rtt_start / cubic.max_datagram_size();
         let time_increase = RTT / u32::try_from(acks).unwrap();
         for _ in 0..acks {

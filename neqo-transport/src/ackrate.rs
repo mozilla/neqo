@@ -33,6 +33,7 @@ impl AckRate {
         const RTT_RATIO: u32 = ACK_RATIO_SCALE as u32;
         const MAX_DELAY: Duration = Duration::from_millis(50);
 
+        #[allow(clippy::integer_division)]
         let packets = cwnd * PACKET_RATIO / mtu / usize::from(ratio);
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);

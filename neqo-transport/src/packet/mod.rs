@@ -774,9 +774,9 @@ impl<'a> PublicPacket<'a> {
     const fn decode_pn(expected: PacketNumber, pn: u64, w: usize) -> PacketNumber {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;
-        if candidate + (window / 2) <= expected {
+        if candidate + (window >> 1) <= expected {
             candidate + window
-        } else if candidate > expected + (window / 2) {
+        } else if candidate > expected + (window >> 1) {
             match candidate.checked_sub(window) {
                 Some(pn_sub) => pn_sub,
                 None => candidate,

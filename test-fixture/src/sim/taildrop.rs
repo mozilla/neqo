@@ -107,6 +107,7 @@ impl TailDrop {
         // This ensures that high rates and small packets don't result in rounding
         // down times too badly.
         // Duration consists of a u64 and a u32, so we have 32 high bits to spare.
+        #[allow(clippy::integer_division)]
         let t = sz * (ONE_SECOND_NS << 32) / u128::try_from(self.rate).unwrap()
             + u128::from(self.sub_ns_delay);
         let send_ns = u64::try_from(t >> 32).unwrap();

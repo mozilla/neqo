@@ -29,8 +29,8 @@ fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
 }
 
 fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
-    assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
-    assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
+    assert_eq!(cc.cwnd(), cc.cwnd_initial() >> 1);
+    assert_eq!(cc.ssthresh(), cc.cwnd_initial() >> 1);
 }
 
 #[test]
@@ -217,11 +217,11 @@ fn issue_1465() {
 
     // go back into recovery
     assert!(cc.recovery_packet());
-    assert_eq!(cc.cwnd(), cur_cwnd / 2);
+    assert_eq!(cc.cwnd(), cur_cwnd >> 1);
     assert_eq!(cc.acked_bytes(), 0);
     assert_eq!(cc.bytes_in_flight(), 2 * cc.max_datagram_size());
 
     // this shouldn't introduce further cwnd reduction, but it did before https://github.com/mozilla/neqo/pull/1465
     cc.on_packets_lost(Some(now), None, PTO, &[p6], now);
-    assert_eq!(cc.cwnd(), cur_cwnd / 2);
+    assert_eq!(cc.cwnd(), cur_cwnd >> 1);
 }
