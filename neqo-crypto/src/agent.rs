@@ -135,7 +135,7 @@ impl SecretAgentPreInfo {
             ssl::SSL_GetPreliminaryChannelInfo(
                 fd,
                 info.as_mut_ptr(),
-                c_uint::try_from(size_of::<ssl::SSLPreliminaryChannelInfo>())?,
+                c_uint::try_from(std::mem::size_of::<ssl::SSLPreliminaryChannelInfo>())?,
             )
         })?;
 
@@ -222,7 +222,7 @@ impl SecretAgentInfo {
             ssl::SSL_GetChannelInfo(
                 fd,
                 info.as_mut_ptr(),
-                c_uint::try_from(size_of::<ssl::SSLChannelInfo>())?,
+                c_uint::try_from(std::mem::size_of::<ssl::SSLChannelInfo>())?,
             )
         })?;
         let info = unsafe { info.assume_init() };
@@ -876,7 +876,7 @@ impl Client {
             token,
             len,
             info.as_mut_ptr(),
-            c_uint::try_from(size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
+            c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
         );
         if info_res.is_err() {
             // Ignore the token.

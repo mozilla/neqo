@@ -264,7 +264,7 @@ impl Item {
         SECItem {
             type_: SECItemType::siBuffer,
             data: data.cast_mut().cast(),
-            len: c_uint::try_from(size_of::<T>()).unwrap(),
+            len: c_uint::try_from(std::mem::size_of::<T>()).unwrap(),
         }
     }
 

@@ -126,7 +126,7 @@ mod mac {
     const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
     #[allow(clippy::cast_possible_truncation)]
     const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
-        (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
+        (std::mem::size_of::<thread_time_constraint_policy>() / std::mem::size_of::<integer_t>())
             as mach_msg_type_number_t;
 
     // These function definitions are taken from a comment in <thread_policy.h>.

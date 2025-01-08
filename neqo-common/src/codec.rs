@@ -111,7 +111,7 @@ impl<'a> Decoder<'a> {
     /// unsigned integer types: `u8`, `u16`, `u32`, or `u64`.
     /// Signed types will fail if the high bit is set.
     pub fn decode_uint<T: TryFrom<u64>>(&mut self) -> Option<T> {
-        let v = self.decode_n(size_of::<T>());
+        let v = self.decode_n(std::mem::size_of::<T>());
         v.and_then(|v| T::try_from(v).ok())
     }
 

@@ -53,7 +53,7 @@ unit_bindings = "warn"
 unused_import_braces = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
-unused_qualifications = "warn"
+# unused_qualifications = "warn" // Try to re-enable when MSRV is > 1.76
 
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }
