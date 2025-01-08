@@ -181,12 +181,10 @@ impl LossRecoverySpace {
         self.sent_packets
             .iter_mut()
             .filter_map(|sent| {
-                if sent.pto() {
+                sent.pto().then(|| {
                     qtrace!("PTO: marking packet {} lost ", sent.pn());
-                    Some(&*sent)
-                } else {
-                    None
-                }
+                    &*sent
+                })
             })
             .take(count)
     }
@@ -477,13 +475,11 @@ impl PtoState {
     /// Generate a sending profile, indicating what space it should be from.
     /// This takes a packet from the supply if one remains, or returns `None`.
     pub fn send_profile(&mut self, mtu: usize) -> Option<SendProfile> {
-        if self.packets > 0 {
+        (self.packets > 0).then(|| {
             // This is a PTO, so ignore the limit.
             self.packets -= 1;
-            Some(SendProfile::new_pto(self.space, mtu, self.probe))
-        } else {
-            None
-        }
+            SendProfile::new_pto(self.space, mtu, self.probe)
+        })
     }
 }
 

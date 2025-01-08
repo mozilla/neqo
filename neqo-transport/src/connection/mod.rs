@@ -699,15 +699,13 @@ impl Connection {
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
         assert_eq!(self.role, Role::Client);
 
-        if self.crypto.has_resumption_token() {
+        self.crypto.has_resumption_token().then(|| {
             let token = self.make_resumption_token();
             if self.crypto.has_resumption_token() {
                 self.release_resumption_token_timer = Some(now + 3 * self.pto());
             }
-            Some(token)
-        } else {
-            None
-        }
+            token
+        })
     }
 
     /// Enable resumption, using a token previously provided.
