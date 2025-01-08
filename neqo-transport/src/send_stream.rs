@@ -884,15 +884,13 @@ impl SendStream {
                             "next_bytes apply retransmission limit at {}",
                             self.retransmission_offset
                         );
-                        if self.retransmission_offset > offset {
+                        (self.retransmission_offset > offset).then(|| {
                             let len = min(
                                 usize::try_from(self.retransmission_offset - offset).unwrap(),
                                 slice.len(),
                             );
-                            Some((offset, &slice[..len]))
-                        } else {
-                            None
-                        }
+                            (offset, &slice[..len])
+                        })
                     } else {
                         Some((offset, slice))
                     }
