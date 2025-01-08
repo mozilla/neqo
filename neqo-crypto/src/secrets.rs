@@ -75,12 +75,7 @@ impl Secrets {
         secrets.put_raw(epoch.into(), dir, secret);
     }
 
-    fn put_raw(
-        &mut self,
-        epoch: Epoch,
-        dir: SSLSecretDirection::Type,
-        key_ptr: *mut PK11SymKey,
-    ) {
+    fn put_raw(&mut self, epoch: Epoch, dir: SSLSecretDirection::Type, key_ptr: *mut PK11SymKey) {
         let key_ptr = unsafe { PK11_ReferenceSymKey(key_ptr) };
         let key = SymKey::from_ptr(key_ptr).expect("NSS shouldn't be passing out NULL secrets");
         self.put(SecretDirection::from(dir), epoch, key);

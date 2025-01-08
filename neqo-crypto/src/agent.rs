@@ -27,7 +27,7 @@ use crate::{
     assert_initialized,
     auth::AuthenticationStatus,
     constants::{
-        Alert, Cipher, Extension, Group, SignatureScheme, Epoch, Version, TLS_VERSION_1_3,
+        Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
     },
     ech,
     err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res},
