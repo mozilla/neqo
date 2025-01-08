@@ -42,7 +42,7 @@ url = { version = "2.5.3", default-features = false, features = ["std"] }
 cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-multiple_crate_versions = "allow"
+if_then_some_else_none = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
 # compilation take more to run than to build otherwise.

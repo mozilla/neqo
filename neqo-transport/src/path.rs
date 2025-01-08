@@ -85,13 +85,7 @@ impl Paths {
     ) -> PathRef {
         self.paths
             .iter()
-            .find_map(|p| {
-                if p.borrow().received_on(local, remote) {
-                    Some(Rc::clone(p))
-                } else {
-                    None
-                }
-            })
+            .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
                 let mut p =
                     Path::temporary(local, remote, cc, pacing, self.qlog.clone(), now, stats);
@@ -178,7 +172,7 @@ impl Paths {
             .paths
             .iter()
             .enumerate()
-            .find_map(|(i, p)| if Rc::ptr_eq(p, path) { Some(i) } else { None })
+            .find_map(|(i, p)| Rc::ptr_eq(p, path).then_some(i))
             .expect("migration target should be permanent");
         self.paths.swap(0, idx);
 
@@ -306,13 +300,7 @@ impl Paths {
     pub fn select_path(&self) -> Option<PathRef> {
         self.paths
             .iter()
-            .find_map(|p| {
-                if p.borrow().has_probe() {
-                    Some(Rc::clone(p))
-                } else {
-                    None
-                }
-            })
+            .find_map(|p| p.borrow().has_probe().then(|| Rc::clone(p)))
             .or_else(|| self.primary.clone())
     }
 
