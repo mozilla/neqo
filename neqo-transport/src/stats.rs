@@ -237,6 +237,7 @@ impl Stats {
     /// # Panics
     ///
     /// When preconditions are violated.
+    #[allow(clippy::indexing_slicing)] // These are safe.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);
         if count >= MAX_PTO_COUNTS {

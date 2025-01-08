@@ -56,7 +56,7 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
             }
             qtrace!(
                 "SNI range {start}..{end}: {:?}",
-                String::from_utf8_lossy(&buf[start..end])
+                String::from_utf8_lossy(buf.get(start..end)?)
             );
             return Some(start..end);
         }

@@ -174,7 +174,13 @@ impl FrameReader {
                 (0, f) => (None, false, f),
                 (amount, f) => {
                     qtrace!("FrameReader::receive: reading {} byte, fin={}", amount, f);
-                    (self.consume::<T>(Decoder::from(&buf[..amount]))?, true, f)
+                    (
+                        self.consume::<T>(Decoder::from(
+                            &buf.get(..amount).ok_or(Error::Internal)?,
+                        ))?,
+                        true,
+                        f,
+                    )
                 }
             };
 

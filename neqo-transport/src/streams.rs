@@ -251,21 +251,23 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
+    /// # Errors
+    /// When the frame cannot be written.
     pub fn write_frames(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         if priority == TransmissionPriority::Important {
             self.write_maintenance_frames(builder, tokens, stats);
             if builder.is_full() {
-                return;
+                return Ok(());
             }
         }
 
-        self.send.write_frames(priority, builder, tokens, stats);
+        self.send.write_frames(priority, builder, tokens, stats)
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {

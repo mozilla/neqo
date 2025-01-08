@@ -226,11 +226,16 @@ impl QuicParameters {
             params
         };
         if let Some(&first) = self.quic_version.first() {
-            let all = if self.quic_version[1..].contains(&first) {
-                &self.quic_version[1..]
-            } else {
-                &self.quic_version
-            };
+            let all = self
+                .quic_version
+                .get(1..)
+                .map_or(self.quic_version.as_slice(), |others| {
+                    if others.contains(&first) {
+                        others
+                    } else {
+                        &self.quic_version
+                    }
+                });
             params.versions(first, all.to_vec())
         } else {
             let version = match alpn {

@@ -220,7 +220,7 @@ impl SendStream for SendMessage {
 
         let sent = self
             .stream
-            .send_atomic(conn, &buf[..to_send])
+            .send_atomic(conn, buf.get(..to_send).ok_or(Error::Internal)?)
             .map_err(|e| Error::map_stream_send_errors(&e))?;
         debug_assert!(sent);
         Ok(to_send)

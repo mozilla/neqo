@@ -106,7 +106,7 @@ impl HpKey {
                         mech,
                         CK_ATTRIBUTE_TYPE::from(CKA_ENCRYPT),
                         *key,
-                        &Item::wrap(&ZERO[..0]), // Borrow a zero-length slice of ZERO.
+                        &Item::wrap(ZERO.get(..0).ok_or(Error::InternalError)?), /* Borrow a zero-length slice of ZERO. */
                     )
                 };
                 let context = Context::from_ptr(context_ptr).or(Err(Error::CipherInitFailure))?;
@@ -153,7 +153,11 @@ impl HpKey {
                         output.as_mut_ptr(),
                         &mut output_len,
                         c_int::try_from(output.len())?,
-                        sample[..Self::SAMPLE_SIZE].as_ptr().cast(),
+                        sample
+                            .get(..Self::SAMPLE_SIZE)
+                            .ok_or(Error::InternalError)?
+                            .as_ptr()
+                            .cast(),
                         c_int::try_from(Self::SAMPLE_SIZE)?,
                     )
                 })?;
@@ -165,7 +169,11 @@ impl HpKey {
                 let params: CK_CHACHA20_PARAMS = CK_CHACHA20_PARAMS {
                     pBlockCounter: sample.as_ptr().cast_mut(),
                     blockCounterBits: 32,
-                    pNonce: sample[4..Self::SAMPLE_SIZE].as_ptr().cast_mut(),
+                    pNonce: sample
+                        .get(4..Self::SAMPLE_SIZE)
+                        .ok_or(Error::InternalError)?
+                        .as_ptr()
+                        .cast_mut(),
                     ulNonceBits: 96,
                 };
                 let mut output_len: c_uint = 0;

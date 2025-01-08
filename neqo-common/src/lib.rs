@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-
 mod codec;
 mod datagram;
 pub mod event;
@@ -42,6 +40,7 @@ pub fn hex(buf: impl AsRef<[u8]>) -> String {
 }
 
 #[must_use]
+#[allow(clippy::indexing_slicing)]
 pub fn hex_snip_middle(buf: impl AsRef<[u8]>) -> String {
     const SHOW_LEN: usize = 8;
     let buf = buf.as_ref();
@@ -74,10 +73,12 @@ pub fn hex_with_len(buf: impl AsRef<[u8]>) -> String {
 
 #[must_use]
 pub const fn const_max(a: usize, b: usize) -> usize {
+    #[allow(clippy::indexing_slicing)]
     [a, b][(a < b) as usize]
 }
 #[must_use]
 pub const fn const_min(a: usize, b: usize) -> usize {
+    #[allow(clippy::indexing_slicing)]
     [a, b][(a >= b) as usize]
 }
 

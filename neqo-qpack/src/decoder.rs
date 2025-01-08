@@ -229,7 +229,7 @@ impl QPackDecoder {
                         .collect::<Vec<_>>();
                     if !r.is_empty() {
                         debug_assert!(r.len() == 1);
-                        debug_assert!(r[0] == req_insert_cnt);
+                        debug_assert!(*r.first().ok_or(Error::Internal)? == req_insert_cnt);
                         return Ok(None);
                     }
                     self.blocked_streams.push((stream_id, req_insert_cnt));

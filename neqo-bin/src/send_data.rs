@@ -53,6 +53,7 @@ impl SendData {
 
     fn slice(&self) -> &[u8] {
         let end = min(self.data.len(), self.offset + self.remaining);
+        #[allow(clippy::indexing_slicing)]
         &self.data[self.offset..end]
     }
 

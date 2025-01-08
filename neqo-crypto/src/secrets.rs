@@ -46,6 +46,7 @@ pub struct DirectionalSecrets {
     secrets: [Option<SymKey>; 3],
 }
 
+#[allow(clippy::indexing_slicing)] // Will be fixed as part of #2320.
 impl DirectionalSecrets {
     fn put(&mut self, epoch: Epoch, key: SymKey) {
         assert!(epoch > 0);

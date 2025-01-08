@@ -1256,6 +1256,7 @@ impl Connection {
         if d.len() < 16 || !self.state.connected() {
             return false;
         }
+        #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
         <&[u8; 16]>::try_from(&d.as_ref()[d.len() - 16..])
             .is_ok_and(|token| path.borrow().is_stateless_reset(token))
     }
@@ -1270,7 +1271,11 @@ impl Connection {
         if first && self.is_stateless_reset(path, d) {
             // Failing to process a packet in a datagram might
             // indicate that there is a stateless reset present.
-            qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
+            qdebug!(
+                [self],
+                "Stateless reset: {}",
+                hex(d.get(d.len() - 16..).ok_or(Error::InternalError)?)
+            );
             self.state_signaling.reset();
             self.set_state(
                 State::Draining {
@@ -1306,15 +1311,18 @@ impl Connection {
         d: Datagram<impl AsRef<[u8]>>,
         remaining: usize,
         now: Instant,
-    ) {
+    ) -> Res<()> {
         let d = Datagram::new(
             d.source(),
             d.destination(),
             d.tos(),
-            d[d.len() - remaining..].to_vec(),
+            d.get(d.len() - remaining..)
+                .ok_or(Error::InternalError)?
+                .to_vec(),
         );
         self.saved_datagrams.save(cspace, d, now);
         self.stats.borrow_mut().saved_datagrams += 1;
+        Ok(())
     }
 
     /// Perform version negotiation.
@@ -1653,7 +1661,7 @@ impl Connection {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
                             let remaining = slc.len();
-                            self.save_datagram(cspace, d, remaining, now);
+                            self.save_datagram(cspace, d, remaining, now)?;
                             return Ok(());
                         }
                         Error::KeysExhausted => {
@@ -2128,7 +2136,7 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
-    ) {
+    ) -> Res<()> {
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server {
@@ -2143,35 +2151,35 @@ impl Connection {
             TransmissionPriority::Important,
         ] {
             self.streams
-                .write_frames(prio, builder, tokens, frame_stats);
+                .write_frames(prio, builder, tokens, frame_stats)?;
             if builder.is_full() {
-                return;
+                return Ok(());
             }
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
         self.cid_manager.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
             self.streams
-                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+                .write_frames(prio, builder, tokens, &mut stats.frame_tx)?;
             if builder.is_full() {
-                return;
+                return Ok(());
             }
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
         self.quic_datagrams.write_frames(builder, tokens, stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2184,21 +2192,22 @@ impl Connection {
             frame_stats,
         );
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.new_token.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
+            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats)?;
 
         #[cfg(test)]
         if let Some(w) = &mut self.test_frame_writer {
             w.write_frames(builder);
         }
+        Ok(())
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
@@ -2259,7 +2268,7 @@ impl Connection {
         builder: &mut PacketBuilder,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (Vec<RecoveryToken>, bool, bool) {
+    ) -> Res<(Vec<RecoveryToken>, bool, bool)> {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2295,7 +2304,7 @@ impl Connection {
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send ACKs!
-            return (tokens, false, false);
+            return Ok((tokens, false, false));
         }
 
         if primary {
@@ -2310,7 +2319,7 @@ impl Connection {
                         .send_probe(builder, &mut self.stats.borrow_mut());
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens);
+                self.write_appdata_frames(builder, &mut tokens)?;
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(space, builder, &mut tokens, stats);
@@ -2335,7 +2344,7 @@ impl Connection {
             false
         };
 
-        (tokens, ack_eliciting, padded)
+        Ok((tokens, ack_eliciting, padded))
     }
 
     fn write_closing_frames(
@@ -2443,8 +2452,14 @@ impl Connection {
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, *space, now, path, &mut tokens);
             } else {
-                (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, *space, &profile, &mut builder, header_start != 0, now);
+                (tokens, ack_eliciting, padded) = self.write_frames(
+                    path,
+                    *space,
+                    &profile,
+                    &mut builder,
+                    header_start != 0,
+                    now,
+                )?;
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2458,7 +2473,10 @@ impl Connection {
                 "TX ->",
                 pt,
                 pn,
-                &builder.as_ref()[payload_start..],
+                builder
+                    .as_ref()
+                    .get(payload_start..)
+                    .ok_or(Error::InternalError)?,
                 path.borrow().tos(),
                 builder.len() + aead_expansion,
             );
@@ -2467,7 +2485,10 @@ impl Connection {
                 pt,
                 pn,
                 builder.len() - header_start + aead_expansion,
-                &builder.as_ref()[payload_start..],
+                builder
+                    .as_ref()
+                    .get(payload_start..)
+                    .ok_or(Error::InternalError)?,
                 now,
             );
 

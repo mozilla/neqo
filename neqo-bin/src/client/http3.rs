@@ -207,7 +207,7 @@ impl super::Handler for Handler<'_> {
                             handler.process_data_readable(
                                 stream_id,
                                 fin,
-                                &self.read_buffer[..sz],
+                                self.read_buffer.get(..sz).ok_or(Error::Internal)?,
                                 self.output_read_data,
                             )?;
 

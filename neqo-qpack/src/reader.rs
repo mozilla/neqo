@@ -71,6 +71,7 @@ impl ReadByte for ReceiverBufferWrapper<'_> {
         if self.offset == self.buf.len() {
             Err(Error::DecompressionFailed)
         } else {
+            #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
             let b = self.buf[self.offset];
             self.offset += 1;
             Ok(b)
@@ -83,11 +84,11 @@ impl<'a> ReceiverBufferWrapper<'a> {
         Self { buf, offset: 0 }
     }
 
-    pub const fn peek(&self) -> Res<u8> {
+    pub fn peek(&self) -> Res<u8> {
         if self.offset == self.buf.len() {
             Err(Error::DecompressionFailed)
         } else {
-            Ok(self.buf[self.offset])
+            self.buf.get(self.offset).ok_or(Error::Internal).copied()
         }
     }
 
@@ -142,7 +143,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
         } else {
             let start = self.offset;
             self.offset += len;
-            Ok(&self.buf[start..self.offset])
+            self.buf.get(start..self.offset).ok_or(Error::Internal)
         }
     }
 }
@@ -303,7 +304,7 @@ impl LiteralReader {
                     self.state = LiteralReaderState::ReadLiteral { offset: 0 };
                 }
                 LiteralReaderState::ReadLiteral { offset } => {
-                    let amount = s.read(&mut self.literal[*offset..])?;
+                    let amount = s.read(self.literal.get_mut(*offset..).ok_or(Error::Internal)?)?;
                     *offset += amount;
                     if *offset == self.literal.len() {
                         self.state = LiteralReaderState::Done;

@@ -18,6 +18,7 @@ use crate::{
     p11::{PK11SymKey, SymKey},
     scoped_ptr,
     ssl::{self, PRUint16, PRUint64, PRUint8, SSLAeadContext},
+    Error,
 };
 
 experimental_api!(SSL_MakeAead(
@@ -123,7 +124,7 @@ impl RealAead {
                 c_uint::try_from(output.len())?,
             )
         }?;
-        Ok(&output[0..(l.try_into()?)])
+        output.get(0..(l.try_into()?)).ok_or(Error::InternalError)
     }
 
     /// Decrypt a ciphertext.
@@ -156,7 +157,7 @@ impl RealAead {
                 c_uint::try_from(output.len())?,
             )
         }?;
-        Ok(&output[0..(l.try_into()?)])
+        output.get(0..(l.try_into()?)).ok_or(Error::InternalError)
     }
 }
 

@@ -1398,13 +1398,13 @@ impl CryptoStreams {
         self.get_mut(space)
             .ok_or(Error::ProtocolViolation)?
             .tx
-            .send(data);
-        Ok(())
+            .send(data)
+            .map(|_| ())
     }
 
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::InternalError)?.rx;
-        rx.inbound_frame(offset, data);
+        rx.inbound_frame(offset, data)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
             Ok(())
         } else {
@@ -1417,11 +1417,10 @@ impl CryptoStreams {
     }
 
     pub fn read_to_end(&mut self, space: PacketNumberSpace, buf: &mut Vec<u8>) -> Res<usize> {
-        Ok(self
-            .get_mut(space)
+        self.get_mut(space)
             .ok_or(Error::ProtocolViolation)?
             .rx
-            .read_to_end(buf))
+            .read_to_end(buf)
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -1516,6 +1515,7 @@ impl CryptoStreams {
 
             builder.encode_varint(crate::frame::FRAME_TYPE_CRYPTO);
             builder.encode_varint(offset);
+            #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
             builder.encode_vvec(&data[..length]);
             Some((offset, length))
         }

@@ -201,6 +201,7 @@ impl Args {
             ipv4_only: false,
             ipv6_only: false,
             test: None,
+            #[allow(clippy::indexing_slicing)]
             upload_size: if upload { requests[0] } else { 100 },
             stats: false,
             cid_len: 0,

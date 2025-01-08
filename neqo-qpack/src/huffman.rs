@@ -38,7 +38,7 @@ impl<'a> BitReader<'a> {
             self.current_bit = 8;
         }
         self.current_bit -= 1;
-        Ok((self.input[self.offset] >> self.current_bit) & 0x01)
+        Ok((self.input.get(self.offset).ok_or(Error::Internal)? >> self.current_bit) & 0x01)
     }
 
     pub fn verify_ending(&mut self, i: u8) -> Res<()> {
@@ -50,7 +50,7 @@ impl<'a> BitReader<'a> {
             Ok(())
         } else if self.offset != self.input.len() {
             Err(Error::HuffmanDecompressionFailed)
-        } else if self.input[self.input.len() - 1] & ((0x1 << (i + self.current_bit)) - 1)
+        } else if self.input.last().ok_or(Error::Internal)? & ((0x1 << (i + self.current_bit)) - 1)
             == ((0x1 << (i + self.current_bit)) - 1)
         {
             self.current_bit = 0;
@@ -101,7 +101,7 @@ fn decode_character(reader: &mut BitReader) -> Res<Option<u16>> {
             }
             Ok(b) => {
                 i += 1;
-                if let Some(next) = &node.next[usize::from(b)] {
+                if let Some(next) = &node.next.get(usize::from(b)).ok_or(Error::Internal)? {
                     node = next;
                 } else {
                     reader.verify_ending(i)?;
@@ -123,6 +123,7 @@ pub fn encode_huffman(input: &[u8]) -> Vec<u8> {
     let mut left: u8 = 8;
     let mut saved: u8 = 0;
     for c in input {
+        #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
         let mut e = HUFFMAN_TABLE[*c as usize];
 
         // Fill the previous byte

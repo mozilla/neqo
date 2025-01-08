@@ -293,7 +293,7 @@ impl<'b> Handler<'b> {
             if sz == 0 {
                 return Ok(fin);
             }
-            let read_buffer = &read_buffer[0..sz];
+            let read_buffer = &read_buffer.get(0..sz).ok_or(Error::InternalError)?;
 
             if let Some(out_file) = maybe_out_file {
                 out_file.write_all(read_buffer)?;

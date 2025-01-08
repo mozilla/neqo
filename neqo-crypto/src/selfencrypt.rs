@@ -97,7 +97,12 @@ impl SelfEncrypt {
         let offset = enc.len();
         let mut output: Vec<u8> = enc.into();
         output.resize(encoded_len, 0);
-        cipher.encrypt(0, extended_aad.as_ref(), plaintext, &mut output[offset..])?;
+        cipher.encrypt(
+            0,
+            extended_aad.as_ref(),
+            plaintext,
+            output.get_mut(offset..).ok_or(Error::InternalError)?,
+        )?;
         qtrace!(
             ["SelfEncrypt"],
             "seal {} {} -> {}",
@@ -129,24 +134,28 @@ impl SelfEncrypt {
     /// when the keys have been rotated; or when NSS fails.
     #[allow(clippy::similar_names)] // aad is similar to aead
     pub fn open(&self, aad: &[u8], ciphertext: &[u8]) -> Res<Vec<u8>> {
-        if ciphertext[0] != Self::VERSION {
+        if *ciphertext.first().ok_or(Error::InternalError)? != Self::VERSION {
             return Err(Error::SelfEncryptFailure);
         }
-        let Some(key) = self.select_key(ciphertext[1]) else {
+        let Some(key) = self.select_key(*ciphertext.get(1).ok_or(Error::InternalError)?) else {
             return Err(Error::SelfEncryptFailure);
         };
         let offset = 2 + Self::SALT_LENGTH;
 
         let mut extended_aad = Encoder::with_capacity(offset + aad.len());
-        extended_aad.encode(&ciphertext[0..offset]);
+        extended_aad.encode(ciphertext.get(0..offset).ok_or(Error::InternalError)?);
         extended_aad.encode(aad);
 
-        let aead = self.make_aead(key, &ciphertext[2..offset])?;
+        let aead = self.make_aead(key, ciphertext.get(2..offset).ok_or(Error::InternalError)?)?;
         // NSS insists on having extra space available for decryption.
         let padded_len = ciphertext.len() - offset;
         let mut output = vec![0; padded_len];
-        let decrypted =
-            aead.decrypt(0, extended_aad.as_ref(), &ciphertext[offset..], &mut output)?;
+        let decrypted = aead.decrypt(
+            0,
+            extended_aad.as_ref(),
+            ciphertext.get(offset..).ok_or(Error::InternalError)?,
+            &mut output,
+        )?;
         let final_len = decrypted.len();
         output.truncate(final_len);
         qtrace!(

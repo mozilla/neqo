@@ -19,7 +19,8 @@ use neqo_crypto::{
 use smallvec::SmallVec;
 
 use crate::{
-    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Res,
+    cid::ConnectionId, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error,
+    Res,
 };
 
 /// A prefix we add to Retry tokens to distinguish them from `NEW_TOKEN` tokens.
@@ -185,12 +186,14 @@ impl AddressValidation {
     /// Note that if this check fails, then the token will be treated like it came
     /// from `NEW_TOKEN` instead.  If there truly is corruption of packets that causes
     /// validation failure, it will be a failure that we try to recover from.
-    fn is_likely_retry(token: &[u8]) -> bool {
+    fn is_likely_retry(token: &[u8]) -> Res<bool> {
         let mut difference = 0;
         for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
-            difference += (token[i] ^ TOKEN_IDENTIFIER_RETRY[i]).count_ones();
+            difference += (token.get(i).ok_or(Error::InternalError)?
+                ^ TOKEN_IDENTIFIER_RETRY.get(i).ok_or(Error::InternalError)?)
+            .count_ones();
         }
-        usize::try_from(difference).unwrap() < TOKEN_IDENTIFIER_RETRY.len()
+        Ok(usize::try_from(difference)? < TOKEN_IDENTIFIER_RETRY.len())
     }
 
     pub fn validate(
@@ -218,8 +221,10 @@ impl AddressValidation {
             qinfo!("AddressValidation: too short token");
             return AddressValidationResult::Invalid;
         }
-        let retry = Self::is_likely_retry(token);
-        let enc = &token[TOKEN_IDENTIFIER_RETRY.len()..];
+        let retry = Self::is_likely_retry(token).unwrap_or(false);
+        let Some(enc) = &token.get(TOKEN_IDENTIFIER_RETRY.len()..) else {
+            return AddressValidationResult::Invalid;
+        };
         // Note that this allows the token identifier part to be corrupted.
         // That's OK here as we don't depend on that being authenticated.
         #[allow(clippy::option_if_let_else)]
@@ -310,6 +315,7 @@ impl NewTokenState {
                     old.remove(0);
                 }
                 old.push(t);
+                #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
                 old[old.len() - 1].as_slice()
             })
         } else {

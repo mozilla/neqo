@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::indexing_slicing)]
+
 // Encoding and decoding packets off the wire.
 use std::{
     cmp::min,
@@ -408,8 +410,16 @@ impl PacketBuilder {
             self.write_len(crypto.expansion());
         }
 
-        let hdr = &self.encoder.as_ref()[self.header.clone()];
-        let body = &self.encoder.as_ref()[self.header.end..];
+        let hdr = &self
+            .encoder
+            .as_ref()
+            .get(self.header.clone())
+            .ok_or(Error::InternalError)?;
+        let body = &self
+            .encoder
+            .as_ref()
+            .get(self.header.end..)
+            .ok_or(Error::InternalError)?;
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
@@ -423,13 +433,23 @@ impl PacketBuilder {
         if offset + SAMPLE_SIZE > ciphertext.len() {
             return Err(Error::InternalError);
         }
-        let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
+        let sample = &ciphertext
+            .get(offset..offset + SAMPLE_SIZE)
+            .ok_or(Error::InternalError)?;
         let mask = crypto.compute_mask(sample)?;
 
         // Apply the mask.
-        self.encoder.as_mut()[self.header.start] ^= mask[0] & self.offsets.first_byte_mask;
+        *self
+            .encoder
+            .as_mut()
+            .get_mut(self.header.start)
+            .ok_or(Error::InternalError)? ^= mask[0] & self.offsets.first_byte_mask;
         for (i, j) in (1..=self.offsets.pn.len()).zip(self.offsets.pn) {
-            self.encoder.as_mut()[j] ^= mask[i];
+            *self
+                .encoder
+                .as_mut()
+                .get_mut(j)
+                .ok_or(Error::InternalError)? ^= mask.get(i).ok_or(Error::InternalError)?;
         }
 
         // Finally, cut off the plaintext and add back the ciphertext.
@@ -799,7 +819,10 @@ impl<'a> PublicPacket<'a> {
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
             .map_or(Err(Error::NoMoreData), |sample| {
-                qtrace!("unmask hdr={}", hex(&self.data[..sample_offset]));
+                qtrace!(
+                    "unmask hdr={}",
+                    hex(self.data.get(..sample_offset).ok_or(Error::InternalError)?)
+                );
                 crypto.compute_mask(sample)
             })?;
 
@@ -809,18 +832,28 @@ impl<'a> PublicPacket<'a> {
         } else {
             PACKET_HP_MASK_LONG
         };
-        let first_byte = self.data[0] ^ (mask[0] & bits);
+        let first_byte = self.data.first().ok_or(Error::InternalError)? ^ (mask[0] & bits);
 
         // Make a copy of the header to work on.
-        let mut hdrbytes = self.data[..self.header_len + 4].to_vec();
-        hdrbytes[0] = first_byte;
+        let mut hdrbytes = self
+            .data
+            .get(..self.header_len + 4)
+            .ok_or(Error::InternalError)?
+            .to_vec();
+        *hdrbytes.get_mut(0).ok_or(Error::InternalError)? = first_byte;
 
         // Unmask the PN.
         let mut pn_encoded: u64 = 0;
         for i in 0..MAX_PACKET_NUMBER_LEN {
-            hdrbytes[self.header_len + i] ^= mask[1 + i];
+            *hdrbytes
+                .get_mut(self.header_len + i)
+                .ok_or(Error::InternalError)? ^= mask.get(1 + i).ok_or(Error::InternalError)?;
             pn_encoded <<= 8;
-            pn_encoded += u64::from(hdrbytes[self.header_len + i]);
+            pn_encoded += u64::from(
+                *hdrbytes
+                    .get(self.header_len + i)
+                    .ok_or(Error::InternalError)?,
+            );
         }
 
         // Now decode the packet number length and apply it, hopefully in constant time.
@@ -837,7 +870,9 @@ impl<'a> PublicPacket<'a> {
             key_phase,
             pn,
             hdrbytes,
-            &self.data[self.header_len + pn_len..],
+            self.data
+                .get(self.header_len + pn_len..)
+                .ok_or(Error::InternalError)?,
         ))
     }
 
@@ -891,7 +926,11 @@ impl<'a> PublicPacket<'a> {
         if self.packet_type != PacketType::VersionNegotiation {
             return Err(Error::InvalidPacket);
         }
-        let mut decoder = Decoder::new(&self.data[self.header_len..]);
+        let mut decoder = Decoder::new(
+            self.data
+                .get(self.header_len..)
+                .ok_or(Error::InternalError)?,
+        );
         let mut res = Vec::new();
         while decoder.remaining() > 0 {
             let version = Self::opt(decoder.decode_uint::<WireVersion>())?;

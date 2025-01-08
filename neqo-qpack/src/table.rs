@@ -131,10 +131,7 @@ impl HeaderTable {
     /// `HeaderLookup` if the index does not exist in the static table.
     pub fn get_static(index: u64) -> Res<&'static StaticTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
-        if inx > HEADER_STATIC_TABLE.len() {
-            return Err(Error::HeaderLookup);
-        }
-        Ok(&HEADER_STATIC_TABLE[inx])
+        HEADER_STATIC_TABLE.get(inx).ok_or(Error::HeaderLookup)
     }
 
     fn get_dynamic_with_abs_index(&mut self, index: u64) -> Res<&mut DynamicTableEntry> {
@@ -147,7 +144,7 @@ impl HeaderTable {
         if inx >= self.dynamic.len() {
             return Err(Error::HeaderLookup);
         }
-        Ok(&mut self.dynamic[inx])
+        self.dynamic.get_mut(inx).ok_or(Error::Internal)
     }
 
     fn get_dynamic_with_relative_index(&self, index: u64) -> Res<&DynamicTableEntry> {
@@ -155,7 +152,7 @@ impl HeaderTable {
         if inx >= self.dynamic.len() {
             return Err(Error::HeaderLookup);
         }
-        Ok(&self.dynamic[inx])
+        self.dynamic.get(inx).ok_or(Error::Internal)
     }
 
     /// Get a entry in the  dynamic table.

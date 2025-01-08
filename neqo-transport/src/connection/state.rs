@@ -184,6 +184,7 @@ impl ClosingFrame {
         // multiple packet number spaces, limit the overall size to 256.
         let available = min(256, builder.remaining());
         let reason = if available < Encoder::vvec_len(self.reason_phrase.len()) {
+            #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
             &self.reason_phrase[..available - 2]
         } else {
             &self.reason_phrase

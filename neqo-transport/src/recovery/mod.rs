@@ -910,13 +910,15 @@ impl LossRecovery {
             );
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
 
-            primary_path.borrow_mut().on_packets_lost(
-                space.largest_acked_sent_time,
-                confirmed,
-                &lost_packets[first..],
-                &mut self.stats.borrow_mut(),
-                now,
-            );
+            if let Some(others) = lost_packets.get(first..) {
+                primary_path.borrow_mut().on_packets_lost(
+                    space.largest_acked_sent_time,
+                    confirmed,
+                    others,
+                    &mut self.stats.borrow_mut(),
+                    now,
+                );
+            }
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 

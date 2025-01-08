@@ -136,6 +136,7 @@ impl HFrame {
             Self::Grease => {
                 // Encode some number of random bytes.
                 let r = random::<8>();
+                #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
                 enc.encode_vvec(&r[1..usize::from(1 + (r[0] & 0x7))]);
             }
             Self::PriorityUpdateRequest {

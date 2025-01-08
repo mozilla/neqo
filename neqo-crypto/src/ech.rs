@@ -196,5 +196,9 @@ pub fn encode_config(config: u8, public_name: &str, pk: &PublicKey) -> Res<Vec<u
             c_uint::try_from(encoded.len())?,
         )?;
     }
-    Ok(Vec::from(&encoded[..usize::try_from(encoded_len)?]))
+    Ok(Vec::from(
+        encoded
+            .get(..usize::try_from(encoded_len)?)
+            .ok_or(Error::InternalError)?,
+    ))
 }

@@ -493,16 +493,17 @@ impl TxBuffer {
     }
 
     /// Attempt to add some or all of the passed-in buffer to the `TxBuffer`.
-    pub fn send(&mut self, buf: &[u8]) -> usize {
+    pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
         let can_buffer = min(SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
-            self.send_buf.extend(&buf[..can_buffer]);
+            self.send_buf
+                .extend(buf.get(..can_buffer).ok_or(Error::InternalError)?);
             debug_assert!(self.send_buf.len() <= SEND_BUFFER_SIZE);
         }
-        can_buffer
+        Ok(can_buffer)
     }
 
-    #[allow(clippy::missing_panics_doc)] // These are not possible.
+    #[allow(clippy::missing_panics_doc, clippy::indexing_slicing)] // These are not possible.
     pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
@@ -510,8 +511,7 @@ impl TxBuffer {
             return None;
         }
 
-        // Convert from ranges-relative-to-zero to
-        // ranges-relative-to-buffer-start
+        // Convert from ranges-relative-to-zero to ranges-relative-to-buffer-start
         let buff_off = usize::try_from(start - self.retired()).unwrap();
 
         // Deque returns two slices. Create a subslice from whichever
@@ -759,33 +759,34 @@ impl SendStream {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         qtrace!("write STREAM frames at priority {:?}", priority);
         if !self.write_reset_frame(priority, builder, tokens, stats) {
             self.write_blocked_frame(priority, builder, tokens, stats);
-            self.write_stream_frame(priority, builder, tokens, stats);
+            self.write_stream_frame(priority, builder, tokens, stats)?;
         }
+        Ok(())
     }
 
-    // return false if the builder is full and the caller should stop iterating
+    // Return false if the builder is full and the caller should stop iterating
     pub fn write_frames_with_early_return(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) -> bool {
+    ) -> Res<bool> {
         if !self.write_reset_frame(priority, builder, tokens, stats) {
             self.write_blocked_frame(priority, builder, tokens, stats);
             if builder.is_full() {
-                return false;
+                return Ok(false);
             }
-            self.write_stream_frame(priority, builder, tokens, stats);
+            self.write_stream_frame(priority, builder, tokens, stats)?;
             if builder.is_full() {
-                return false;
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     pub fn set_fairness(&mut self, make_fair: bool) {
@@ -887,6 +888,7 @@ impl SendStream {
                                 usize::try_from(self.retransmission_offset - offset).unwrap(),
                                 slice.len(),
                             );
+                            #[allow(clippy::indexing_slicing)] // We know this is safe.
                             Some((offset, &slice[..len]))
                         } else {
                             None
@@ -951,13 +953,13 @@ impl SendStream {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         let retransmission = if priority == self.priority {
             false
         } else if priority == self.priority + self.retransmission_priority {
             true
         } else {
-            return;
+            return Ok(());
         };
 
         let id = self.stream_id;
@@ -972,14 +974,14 @@ impl SendStream {
                 };
             if overhead > builder.remaining() {
                 qtrace!([self], "write_frame no space for header");
-                return;
+                return Ok(());
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
             let fin = final_size.is_some_and(|fs| fs == offset + u64::try_from(length).unwrap());
             if length == 0 && !fin {
                 qtrace!([self], "write_frame no data, no fin");
-                return;
+                return Ok(());
             }
 
             // Write the stream out.
@@ -989,10 +991,10 @@ impl SendStream {
                 builder.encode_varint(offset);
             }
             if fill {
-                builder.encode(&data[..length]);
+                builder.encode(data.get(..length).ok_or(Error::InternalError)?);
                 builder.mark_full();
             } else {
-                builder.encode_vvec(&data[..length]);
+                builder.encode_vvec(data.get(..length).ok_or(Error::InternalError)?);
             }
             debug_assert!(builder.len() <= builder.limit());
 
@@ -1007,6 +1009,7 @@ impl SendStream {
             )));
             stats.stream += 1;
         }
+        Ok(())
     }
 
     pub fn reset_acked(&mut self) {
@@ -1285,7 +1288,7 @@ impl SendStream {
                 return Ok(0);
             }
 
-            &buf[..self.avail()]
+            buf.get(..self.avail()).ok_or(Error::InternalError)?
         } else {
             buf
         };
@@ -1297,7 +1300,7 @@ impl SendStream {
                 conn_fc,
                 send_buf,
             } => {
-                let sent = send_buf.send(buf);
+                let sent = send_buf.send(buf)?;
                 fc.consume(sent);
                 conn_fc.borrow_mut().consume(sent);
                 Ok(sent)
@@ -1497,7 +1500,7 @@ impl Iterator for OrderGroupIter<'_> {
         }
         self.started_at = self.started_at.or(Some(self.group.next));
         let orig = self.group.update_next();
-        Some(self.group.vec[orig])
+        self.group.vec.get(orig).copied()
     }
 }
 
@@ -1693,7 +1696,7 @@ impl SendStreams {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         qtrace!("write STREAM frames at priority {:?}", priority);
         // WebTransport data (which is Normal) may have a SendOrder
         // priority attached.  The spec states (6.3 write-chunk 6.1):
@@ -1732,7 +1735,7 @@ impl SendStreams {
         for stream in self.map.values_mut() {
             if !stream.is_fair() {
                 qtrace!("   {}", stream);
-                if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
+                if !stream.write_frames_with_early_return(priority, builder, tokens, stats)? {
                     break;
                 }
             }
@@ -1751,10 +1754,11 @@ impl SendStreams {
             } else {
                 qtrace!("   None");
             }
-            if !stream.write_frames_with_early_return(priority, builder, tokens, stats) {
+            if !stream.write_frames_with_early_return(priority, builder, tokens, stats)? {
                 break;
             }
         }
+        Ok(())
     }
 
     #[allow(clippy::missing_panics_doc)]
@@ -2277,7 +2281,7 @@ mod tests {
 
         // Fill the buffer
         let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
-        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
+        assert_eq!(txb.send(&big_buf).unwrap(), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
                          Some((0, x)) if x.len() == SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
@@ -2314,7 +2318,7 @@ mod tests {
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
         txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
-        assert_eq!(txb.send(&[2; 30]), 30);
+        assert_eq!(txb.send(&[2; 30]).unwrap(), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 5
@@ -2340,7 +2344,7 @@ mod tests {
 
         // Fill the buffer
         let big_buf = vec![1; SEND_BUFFER_SIZE * 2];
-        assert_eq!(txb.send(&big_buf), SEND_BUFFER_SIZE);
+        assert_eq!(txb.send(&big_buf).unwrap(), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
                          Some((0, x)) if x.len()==SEND_BUFFER_SIZE
                          && x.iter().all(|ch| *ch == 1)));
@@ -2355,7 +2359,7 @@ mod tests {
         ));
 
         // Valid new data placed in split locations
-        assert_eq!(txb.send(&[2; 100]), 100);
+        assert_eq!(txb.send(&[2; 100]).unwrap(), 100);
 
         // Mark a little more as sent
         txb.mark_as_sent(forty_bytes_from_end, 10);
@@ -2440,7 +2444,7 @@ mod tests {
     #[test]
     fn tx_buffer_acks() {
         let mut tx = TxBuffer::new();
-        assert_eq!(tx.send(&[4; 100]), 100);
+        assert_eq!(tx.send(&[4; 100]).unwrap(), 100);
         let res = tx.next_bytes().unwrap();
         assert_eq!(res.0, 0);
         assert_eq!(res.1.len(), 100);
@@ -2606,7 +2610,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 6);
         assert_eq!(tokens.len(), 1);
         let f1_token = tokens.remove(0);
@@ -2620,7 +2625,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 10);
         assert_eq!(tokens.len(), 1);
         let f2_token = tokens.remove(0);
@@ -2633,7 +2639,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written);
         assert!(tokens.is_empty());
 
@@ -2648,7 +2655,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 7); // Needs a length this time.
         assert_eq!(tokens.len(), 1);
         let f4_token = tokens.remove(0);
@@ -2664,7 +2672,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 10);
         assert_eq!(tokens.len(), 1);
         let f5_token = tokens.remove(0);
@@ -2690,7 +2699,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f1_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f1_token).offset, 0);
         assert_eq!(as_stream_token(&f1_token).length, 10);
@@ -2702,7 +2712,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert!(tokens.is_empty());
 
         ss.get_mut(StreamId::from(0)).unwrap().close();
@@ -2712,7 +2723,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f2_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f2_token).offset, 10);
         assert_eq!(as_stream_token(&f2_token).length, 0);
@@ -2727,7 +2739,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f3_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f3_token).offset, 10);
         assert_eq!(as_stream_token(&f3_token).length, 0);
@@ -2742,7 +2755,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f4_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f4_token).offset, 0);
         assert_eq!(as_stream_token(&f4_token).length, 10);
@@ -2910,7 +2924,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut stats,
-        );
+        )
+        .unwrap();
         assert_eq!(stats.stream, 0);
     }
 
@@ -2973,7 +2988,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut stats,
-        );
+        )
+        .unwrap();
         qtrace!(
             "STREAM frame: {}",
             hex_with_len(&builder.as_ref()[header_len..])
@@ -3074,7 +3090,8 @@ mod tests {
                 &mut builder,
                 &mut tokens,
                 &mut stats,
-            );
+            )
+            .unwrap();
             assert_eq!(stats.stream, 1);
             assert_eq!(builder.is_full(), expect_full);
             Vec::from(Encoder::from(builder)).split_off(header_len)

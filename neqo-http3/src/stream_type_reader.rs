@@ -114,7 +114,9 @@ impl NewStreamHeadReader {
                 match conn.stream_recv(*stream_id, &mut buf[..])? {
                     (0, f) => return Ok((None, f)),
                     (amount, f) => {
-                        let res = reader.consume(&mut Decoder::from(&buf[..amount]));
+                        let res = reader.consume(&mut Decoder::from(
+                            &buf.get(..amount).ok_or(Error::Internal)?,
+                        ));
                         if res.is_some() || f {
                             return Ok((res, f));
                         }

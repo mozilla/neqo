@@ -18,6 +18,7 @@ pub fn huffman_decoder_root() -> &'static HuffmanDecoderNode {
     ROOT.get_or_init(|| make_huffman_tree(0, 0))
 }
 
+#[allow(clippy::indexing_slicing)]
 fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
     let mut found = false;
     let mut next = [None, None];

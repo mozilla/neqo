@@ -690,6 +690,7 @@ impl ExtensionHandler for TransportParametersHandler {
         let mut enc = Encoder::default();
         self.local.encode(&mut enc);
         assert!(enc.len() <= d.len());
+        #[allow(clippy::indexing_slicing)] // Cannot fail, but the compiler can't tell.
         d[..enc.len()].copy_from_slice(enc.as_ref());
         ExtensionWriterResult::Write(enc.len())
     }

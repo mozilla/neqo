@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::indexing_slicing)] // This lint doesn't work here.
+
 use std::{fmt::Debug, mem::size_of};
 
 use crate::hex_with_len;

@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::indexing_slicing)] // OK in tests.
+
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::{event::Provider, header::HeadersExt};

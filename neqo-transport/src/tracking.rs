@@ -341,6 +341,7 @@ impl RecvdPackets {
     // This doesn't do a binary search on the assumption that
     // new packets will generally be added to the start of the list.
     fn add(&mut self, pn: PacketNumber) {
+        #[allow(clippy::indexing_slicing)] // This is safe.
         for i in 0..self.ranges.len() {
             match self.ranges[i].add(pn) {
                 InsertionResult::Largest => return,

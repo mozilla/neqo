@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::indexing_slicing)] // This lint doesn't work here.
+
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
 
 use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};

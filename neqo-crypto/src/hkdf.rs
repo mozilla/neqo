@@ -64,7 +64,9 @@ pub fn generate_key(version: Version, cipher: Cipher) -> Res<SymKey> {
     //   import_key(version, &random::<{ key_size(version, cipher) }>())
     import_key(
         version,
-        &random::<MAX_KEY_SIZE>()[0..key_size(version, cipher)?],
+        random::<MAX_KEY_SIZE>()
+            .get(0..key_size(version, cipher)?)
+            .ok_or(Error::InternalError)?,
     )
 }
 

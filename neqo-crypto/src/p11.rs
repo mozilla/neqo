@@ -370,6 +370,7 @@ impl RandomCache {
         }
     }
 
+    #[allow(clippy::indexing_slicing)]
     fn randomize<B: AsMut<[u8]>>(&mut self, mut buf: B) -> B {
         let m_buf = buf.as_mut();
         debug_assert!(m_buf.len() <= Self::CUTOFF);

@@ -80,7 +80,12 @@ pub fn recv_inner<'a>(
             continue;
         }
 
-        break &recv_buf[..meta.len];
+        break recv_buf.get(..meta.len).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "datagram length exceeds receive buffer",
+            )
+        })?;
     };
 
     qtrace!(
