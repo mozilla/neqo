@@ -452,7 +452,9 @@ impl<'a> Frame<'a> {
 
             // Now check for the values for ACK_ECN.
             let ecn_count = ecn
-                .then(|| -> Res<ecn::Count> { Ok(ecn::Count::new(0, dv(dec)?, dv(dec)?, dv(dec)?)) })
+                .then(|| -> Res<ecn::Count> {
+                    Ok(ecn::Count::new(0, dv(dec)?, dv(dec)?, dv(dec)?))
+                })
                 .transpose()?;
 
             Ok(Frame::Ack {
