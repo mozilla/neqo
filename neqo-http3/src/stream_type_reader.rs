@@ -237,8 +237,6 @@ impl RecvStream for NewStreamHeadReader {
 
 #[cfg(test)]
 mod tests {
-    use std::mem;
-
     use neqo_common::{Encoder, Role};
     use neqo_qpack::{
         decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER,
@@ -269,7 +267,7 @@ mod tests {
             // create a stream
             let stream_id = conn_s.stream_create(stream_type).unwrap();
             let out = conn_s.process_output(now());
-            mem::drop(conn_c.process(out.dgram(), now()));
+            drop(conn_c.process(out.dgram(), now()));
 
             Self {
                 conn_c,
@@ -292,7 +290,7 @@ mod tests {
                     .stream_send(self.stream_id, &enc[i..=i])
                     .unwrap();
                 let out = self.conn_s.process_output(now());
-                mem::drop(self.conn_c.process(out.dgram(), now()));
+                drop(self.conn_c.process(out.dgram(), now()));
                 assert_eq!(
                     self.decoder.receive(&mut self.conn_c).unwrap(),
                     (ReceiveOutput::NoOutput, false)
@@ -306,7 +304,7 @@ mod tests {
                 self.conn_s.stream_close_send(self.stream_id).unwrap();
             }
             let out = self.conn_s.process_output(now());
-            mem::drop(self.conn_c.process(out.dgram(), now()));
+            drop(self.conn_c.process(out.dgram(), now()));
             assert_eq!(&self.decoder.receive(&mut self.conn_c), outcome);
             assert_eq!(self.decoder.done(), done);
         }

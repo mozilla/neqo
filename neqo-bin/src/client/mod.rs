@@ -47,7 +47,7 @@ pub enum Error {
     IoError(io::Error),
     QlogError(qlog::Error),
     TransportError(neqo_transport::Error),
-    ApplicationError(neqo_transport::AppError),
+    ApplicationError(AppError),
     CryptoError(neqo_crypto::Error),
 }
 
@@ -81,8 +81,8 @@ impl From<neqo_transport::Error> for Error {
     }
 }
 
-impl From<neqo_transport::CloseReason> for Error {
-    fn from(err: neqo_transport::CloseReason) -> Self {
+impl From<CloseReason> for Error {
+    fn from(err: CloseReason) -> Self {
         match err {
             CloseReason::Transport(e) => Self::TransportError(e),
             CloseReason::Application(e) => Self::ApplicationError(e),
@@ -183,7 +183,7 @@ impl Args {
     pub fn new(requests: &[usize], upload: bool) -> Self {
         use std::str::FromStr;
         Self {
-            shared: crate::SharedArgs::default(),
+            shared: SharedArgs::default(),
             urls: requests
                 .iter()
                 .map(|r| Url::from_str(&format!("http://[::1]:12345/{r}")).unwrap())

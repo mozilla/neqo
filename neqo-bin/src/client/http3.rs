@@ -155,7 +155,7 @@ impl super::Client for Http3Client {
     }
 
     fn has_events(&self) -> bool {
-        neqo_common::event::Provider::has_events(self)
+        Provider::has_events(self)
     }
 }
 

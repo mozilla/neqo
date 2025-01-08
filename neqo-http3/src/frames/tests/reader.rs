@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt::Debug, mem};
+use std::fmt::Debug;
 
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId, StreamType};
@@ -40,7 +40,7 @@ impl FrameReaderTest {
     fn process<T: FrameDecoder<T>>(&mut self, v: &[u8]) -> Option<T> {
         self.conn_s.stream_send(self.stream_id, v).unwrap();
         let out = self.conn_s.process_output(now());
-        mem::drop(self.conn_c.process(out.dgram(), now()));
+        drop(self.conn_c.process(out.dgram(), now()));
         let (frame, fin) = self
             .fr
             .receive::<T>(&mut StreamReaderConnectionWrapper::new(
@@ -231,12 +231,12 @@ fn test_reading_frame<T: FrameDecoder<T> + PartialEq + Debug>(
     }
 
     let out = fr.conn_s.process_output(now());
-    mem::drop(fr.conn_c.process(out.dgram(), now()));
+    drop(fr.conn_c.process(out.dgram(), now()));
 
     if matches!(test_to_send, FrameReadingTestSend::DataThenFin) {
         fr.conn_s.stream_close_send(fr.stream_id).unwrap();
         let out = fr.conn_s.process_output(now());
-        mem::drop(fr.conn_c.process(out.dgram(), now()));
+        drop(fr.conn_c.process(out.dgram(), now()));
     }
 
     let rv = fr.fr.receive::<T>(&mut StreamReaderConnectionWrapper::new(
@@ -483,11 +483,11 @@ fn frame_reading_when_stream_is_closed_before_sending_data() {
 
     fr.conn_s.stream_send(fr.stream_id, &[0x00]).unwrap();
     let out = fr.conn_s.process_output(now());
-    mem::drop(fr.conn_c.process(out.dgram(), now()));
+    drop(fr.conn_c.process(out.dgram(), now()));
 
     assert_eq!(Ok(()), fr.conn_c.stream_close_send(fr.stream_id));
     let out = fr.conn_c.process_output(now());
-    mem::drop(fr.conn_s.process(out.dgram(), now()));
+    drop(fr.conn_s.process(out.dgram(), now()));
     assert_eq!(
         Ok((None, true)),
         fr.fr
@@ -506,11 +506,11 @@ fn wt_frame_reading_when_stream_is_closed_before_sending_data() {
 
     fr.conn_s.stream_send(fr.stream_id, &[0x00]).unwrap();
     let out = fr.conn_s.process_output(now());
-    mem::drop(fr.conn_c.process(out.dgram(), now()));
+    drop(fr.conn_c.process(out.dgram(), now()));
 
     assert_eq!(Ok(()), fr.conn_c.stream_close_send(fr.stream_id));
     let out = fr.conn_c.process_output(now());
-    mem::drop(fr.conn_s.process(out.dgram(), now()));
+    drop(fr.conn_s.process(out.dgram(), now()));
     assert_eq!(
         Ok((None, true)),
         fr.fr

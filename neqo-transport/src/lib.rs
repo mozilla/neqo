@@ -252,4 +252,4 @@ impl From<CloseError> for CloseReason {
     }
 }
 
-pub type Res<T> = std::result::Result<T, Error>;
+pub type Res<T> = Result<T, Error>;

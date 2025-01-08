@@ -80,7 +80,7 @@ impl PeriodSet {
 #[cfg(target_os = "macos")]
 #[allow(non_camel_case_types)]
 mod mac {
-    use std::{mem::size_of, ptr::addr_of_mut};
+    use std::ptr::addr_of_mut;
 
     // These are manually extracted from the many bindings generated
     // by bindgen when provided with the simple header:

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{mem, time::Duration};
+use std::time::Duration;
 
 use neqo_common::{event::Provider, Decoder, Encoder};
 use test_fixture::{assertions, datagram, now};
@@ -27,11 +27,11 @@ const INITIAL_PTO: Duration = Duration::from_millis(300);
 fn unknown_version() {
     let mut client = default_client();
     // Start the handshake.
-    mem::drop(client.process_output(now()).dgram());
+    drop(client.process_output(now()).dgram());
 
     let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
     unknown_version_packet.resize(MIN_INITIAL_PACKET_SIZE, 0x0);
-    mem::drop(client.process(Some(datagram(unknown_version_packet)), now()));
+    drop(client.process(Some(datagram(unknown_version_packet)), now()));
     assert_eq!(1, client.stats().dropped_rx);
 }
 

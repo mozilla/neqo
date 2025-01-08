@@ -1823,7 +1823,7 @@ impl Connection {
                 self.setup_handshake_path(path, now);
             } else {
                 // Otherwise try to get a usable connection ID.
-                mem::drop(self.ensure_permanent(path, now));
+                drop(self.ensure_permanent(path, now));
             }
         }
     }
@@ -2100,8 +2100,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len = mem::size_of::<PacketNumber>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
+        let pn_len =
+            size_of::<PacketNumber>() - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3595,7 +3595,7 @@ impl ::std::fmt::Display for Connection {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{:?} ", self.role)?;
         if let Some(cid) = self.odcid() {
-            std::fmt::Display::fmt(&cid, f)
+            fmt::Display::fmt(&cid, f)
         } else {
             write!(f, "...")
         }

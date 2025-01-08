@@ -285,8 +285,6 @@ fn map_error(err: &Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use std::mem;
-
     use neqo_common::Header;
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
@@ -334,7 +332,7 @@ mod tests {
             .stream_send(decoder.recv_stream_id, encoder_instruction)
             .unwrap();
         let out = decoder.peer_conn.process_output(now());
-        mem::drop(decoder.conn.process(out.dgram(), now()));
+        drop(decoder.conn.process(out.dgram(), now()));
         assert_eq!(
             decoder
                 .decoder
@@ -346,7 +344,7 @@ mod tests {
     fn send_instructions_and_check(decoder: &mut TestDecoder, decoder_instruction: &[u8]) {
         decoder.decoder.send(&mut decoder.conn).unwrap();
         let out = decoder.conn.process_output(now());
-        mem::drop(decoder.peer_conn.process(out.dgram(), now()));
+        drop(decoder.peer_conn.process(out.dgram(), now()));
         let mut buf = [0_u8; 100];
         let (amount, fin) = decoder
             .peer_conn

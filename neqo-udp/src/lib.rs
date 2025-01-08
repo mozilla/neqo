@@ -147,7 +147,7 @@ impl<S: SocketRef> Socket<S> {
     /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            state: UdpSocketState::new((&socket).into())?,
             inner: socket,
         })
     }
@@ -197,7 +197,7 @@ mod tests {
         sender.send(&datagram)?;
         let mut recv_buf = vec![0; RECV_BUF_SIZE];
         let res = receiver.recv(receiver_addr, &mut recv_buf);
-        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(res.unwrap_err().kind(), io::ErrorKind::WouldBlock);
 
         Ok(())
     }
