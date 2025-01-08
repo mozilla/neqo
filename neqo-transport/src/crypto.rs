@@ -16,10 +16,9 @@ use std::{
 
 use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 use neqo_crypto::{
-    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Epoch, Error as CryptoError, HandshakeState,
-    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, ZeroRttChecker,
+    hkdf, hp::HpKey, Aead, Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState,
+    PrivateKey, PublicKey, Record, RecordList, ResumptionToken, SymKey, Epoch, ZeroRttChecker,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
-    TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
     TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519,
     TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
 };
@@ -192,10 +191,10 @@ impl Crypto {
         let input = data.map(|d| {
             qtrace!("Handshake record received {:0x?} ", d);
             let epoch = match space {
-                PacketNumberSpace::Initial => TLS_EPOCH_INITIAL,
-                PacketNumberSpace::Handshake => TLS_EPOCH_HANDSHAKE,
+                PacketNumberSpace::Initial => Epoch::Initial,
+                PacketNumberSpace::Handshake => Epoch::Handshake,
                 // Our epoch progresses forward, but the TLS epoch is fixed to 3.
-                PacketNumberSpace::ApplicationData => TLS_EPOCH_APPLICATION_DATA,
+                PacketNumberSpace::ApplicationData => Epoch::ApplicationData,
             };
             Record {
                 ct: TLS_CT_HANDSHAKE,
@@ -232,11 +231,11 @@ impl Crypto {
         let (dir, secret) = match role {
             Role::Client => (
                 CryptoDxDirection::Write,
-                self.tls.write_secret(TLS_EPOCH_ZERO_RTT),
+                self.tls.write_secret(Epoch::ZeroRtt),
             ),
             Role::Server => (
                 CryptoDxDirection::Read,
-                self.tls.read_secret(TLS_EPOCH_ZERO_RTT),
+                self.tls.read_secret(Epoch::ZeroRtt),
             ),
         };
         let secret = secret.ok_or(Error::InternalError)?;
@@ -266,13 +265,13 @@ impl Crypto {
 
     fn install_handshake_keys(&mut self) -> Res<bool> {
         qtrace!([self], "Attempt to install handshake keys");
-        let Some(write_secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) else {
+        let Some(write_secret) = self.tls.write_secret(Epoch::Handshake) else {
             // No keys is fine.
             return Ok(false);
         };
         let read_secret = self
             .tls
-            .read_secret(TLS_EPOCH_HANDSHAKE)
+            .read_secret(Epoch::Handshake)
             .ok_or(Error::InternalError)?;
         let cipher = match self.tls.info() {
             None => self.tls.preinfo()?.cipher_suite(),
@@ -287,7 +286,7 @@ impl Crypto {
 
     fn maybe_install_application_write_key(&mut self, version: Version) -> Res<()> {
         qtrace!([self], "Attempt to install application write key");
-        if let Some(secret) = self.tls.write_secret(TLS_EPOCH_APPLICATION_DATA) {
+        if let Some(secret) = self.tls.write_secret(Epoch::ApplicationData) {
             self.states.set_application_write_key(version, &secret)?;
             qdebug!([self], "Application write key installed");
         }
@@ -301,7 +300,7 @@ impl Crypto {
         debug_assert!(self.states.app_write.is_some());
         let read_secret = self
             .tls
-            .read_secret(TLS_EPOCH_APPLICATION_DATA)
+            .read_secret(Epoch::ApplicationData)
             .ok_or(Error::InternalError)?;
         self.states
             .set_application_read_key(version, &read_secret, expire_0rtt)?;
@@ -487,7 +486,7 @@ impl CryptoDxState {
 
         let secret = hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label)?;
 
-        Self::new(version, direction, TLS_EPOCH_INITIAL, &secret, cipher)
+        Self::new(version, direction, Epoch::Initial, &secret, cipher)
     }
 
     /// Determine the confidentiality and integrity limits for the cipher.
@@ -620,13 +619,13 @@ impl CryptoDxState {
         // Only initiate a key update if we have processed exactly one packet
         // and we are in an epoch greater than 3.
         self.used_pn.start + 1 == self.used_pn.end
-            && self.epoch > usize::from(TLS_EPOCH_APPLICATION_DATA)
+            && self.epoch > usize::from(Epoch::ApplicationData)
     }
 
     #[must_use]
     pub fn can_update(&self, largest_acknowledged: Option<PacketNumber>) -> bool {
         largest_acknowledged.map_or_else(
-            || self.epoch == usize::from(TLS_EPOCH_APPLICATION_DATA),
+            || self.epoch == usize::from(Epoch::ApplicationData),
             |la| self.used_pn.contains(&la),
         )
     }
@@ -765,7 +764,7 @@ impl CryptoDxAppData {
         cipher: Cipher,
     ) -> Res<Self> {
         Ok(Self {
-            dx: CryptoDxState::new(version, dir, TLS_EPOCH_APPLICATION_DATA, secret, cipher)?,
+            dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher)?,
             cipher,
             next_secret: Self::update_secret(cipher, secret)?,
         })
@@ -1028,7 +1027,7 @@ impl CryptoStates {
         self.zero_rtt = Some(CryptoDxState::new(
             version,
             dir,
-            TLS_EPOCH_ZERO_RTT,
+            Epoch::ZeroRtt,
             secret,
             cipher,
         )?);
@@ -1069,14 +1068,14 @@ impl CryptoStates {
             tx: CryptoDxState::new(
                 version,
                 CryptoDxDirection::Write,
-                TLS_EPOCH_HANDSHAKE,
+                Epoch::Handshake,
                 write_secret,
                 cipher,
             )?,
             rx: CryptoDxState::new(
                 version,
                 CryptoDxDirection::Read,
-                TLS_EPOCH_HANDSHAKE,
+                Epoch::Handshake,
                 read_secret,
                 cipher,
             )?,

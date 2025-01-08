@@ -98,7 +98,7 @@ impl RecordList {
         let records = arg.cast::<Self>().as_mut().unwrap();
 
         let slice = null_safe_slice(data, len);
-        records.append(epoch, ContentType::try_from(ct).unwrap(), slice);
+        records.append(epoch.into(), ContentType::try_from(ct).unwrap(), slice);
         ssl::SECSuccess
     }
 

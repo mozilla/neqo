@@ -15,7 +15,7 @@ use std::{
 
 use enum_map::{enum_map, Enum, EnumMap};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
-use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
+use neqo_crypto::Epoch;
 
 use crate::{
     ecn::EcnCount,
@@ -47,8 +47,8 @@ impl PacketNumberSpace {
 impl From<Epoch> for PacketNumberSpace {
     fn from(epoch: Epoch) -> Self {
         match epoch {
-            TLS_EPOCH_INITIAL => Self::Initial,
-            TLS_EPOCH_HANDSHAKE => Self::Handshake,
+            Epoch::Initial => Self::Initial,
+            Epoch::Handshake => Self::Handshake,
             _ => Self::ApplicationData,
         }
     }

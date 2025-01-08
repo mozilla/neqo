@@ -6,6 +6,7 @@
 
 use std::{os::raw::c_void, pin::Pin};
 
+use enum_map::EnumMap;
 use neqo_common::qdebug;
 
 use crate::{
@@ -43,23 +44,16 @@ impl From<SSLSecretDirection::Type> for SecretDirection {
 #[allow(clippy::module_name_repetitions)]
 pub struct DirectionalSecrets {
     // We only need to maintain 3 secrets for the epochs used during the handshake.
-    secrets: [Option<SymKey>; 3],
+    secrets: EnumMap<Epoch, Option<SymKey>>,
 }
 
 impl DirectionalSecrets {
     fn put(&mut self, epoch: Epoch, key: SymKey) {
-        assert!(epoch > 0);
-        let i = (epoch - 1) as usize;
-        assert!(i < self.secrets.len());
-        // assert!(self.secrets[i].is_none());
-        self.secrets[i] = Some(key);
+        self.secrets[epoch] = Some(key);
     }
 
     pub fn take(&mut self, epoch: Epoch) -> Option<SymKey> {
-        assert!(epoch > 0);
-        let i = (epoch - 1) as usize;
-        assert!(i < self.secrets.len());
-        self.secrets[i].take()
+        self.secrets[epoch].take()
     }
 }
 
@@ -78,10 +72,15 @@ impl Secrets {
         arg: *mut c_void,
     ) {
         let secrets = arg.cast::<Self>().as_mut().unwrap();
-        secrets.put_raw(epoch, dir, secret);
+        secrets.put_raw(epoch.into(), dir, secret);
     }
 
-    fn put_raw(&mut self, epoch: Epoch, dir: SSLSecretDirection::Type, key_ptr: *mut PK11SymKey) {
+    fn put_raw(
+        &mut self,
+        epoch: Epoch,
+        dir: SSLSecretDirection::Type,
+        key_ptr: *mut PK11SymKey,
+    ) {
         let key_ptr = unsafe { PK11_ReferenceSymKey(key_ptr) };
         let key = SymKey::from_ptr(key_ptr).expect("NSS shouldn't be passing out NULL secrets");
         self.put(SecretDirection::from(dir), epoch, key);
