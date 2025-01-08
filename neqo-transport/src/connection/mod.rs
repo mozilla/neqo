@@ -2220,23 +2220,20 @@ impl Connection {
             return true;
         }
 
+        let pto = path.borrow().rtt().pto(self.confirmed());
         let probe = if untracked && builder.packet_empty() || force_probe {
             // If we received an untracked packet and we aren't probing already
             // or the PTO timer fired: probe.
             true
+        } else if !builder.packet_empty() {
+            // The packet only contains an ACK.  Check whether we want to
+            // force an ACK with a PING so we can stop tracking packets.
+            self.loss_recovery.should_probe(pto, now)
+        } else if self.streams.need_keep_alive() {
+            // We need to keep the connection alive, including sending a PING again.
+            self.idle_timeout.send_keep_alive(now, pto, tokens)
         } else {
-            let pto = path.borrow().rtt().pto(self.confirmed());
-            if !builder.packet_empty() {
-                // The packet only contains an ACK.  Check whether we want to
-                // force an ACK with a PING so we can stop tracking packets.
-                self.loss_recovery.should_probe(pto, now)
-            } else if self.streams.need_keep_alive() {
-                // We need to keep the connection alive, including sending
-                // a PING again.
-                self.idle_timeout.send_keep_alive(now, pto, tokens)
-            } else {
-                false
-            }
+            false
         };
         if probe {
             // Nothing ack-eliciting and we need to probe; send PING.
@@ -2244,6 +2241,8 @@ impl Connection {
             builder.encode_varint(crate::frame::FRAME_TYPE_PING);
             let stats = &mut self.stats.borrow_mut().frame_tx;
             stats.ping += 1;
+            // Any PING we send here can also double as a keep-alive.
+            self.idle_timeout.send_keep_alive(now, pto, tokens);
         }
         probe
     }
