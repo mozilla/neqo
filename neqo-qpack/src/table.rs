@@ -113,8 +113,8 @@ impl HeaderTable {
     /// # Errors
     ///
     /// [`Error::ChangeCapacity`] if table capacity cannot be reduced.
-    /// The table cannot be reduced if there are entries that are referred at
-    /// the moment or their inserts are unacked.
+    /// The table cannot be reduced if there are entries that are referred to at
+    /// the moment, or whose inserts are unacked.
     pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
         qtrace!([self], "set capacity to {}", cap);
         if !self.evict_to(cap) {
