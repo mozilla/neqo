@@ -33,7 +33,7 @@ rust-version = "1.76.0"
 enum-map = { version = "2.7", default-features = false }
 log = { version = "0.4", default-features = false }
 qlog = { version = "0.13", default-features = false }
-quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log"] }
+quinn-udp = { version = "0.5.6", default-features = false, features = ["direct-log", "fast-apple-datapath"] }
 regex = { version = "1.9", default-features = false, features = ["unicode-perl"] }
 static_assertions = { version = "1.1", default-features = false }
 url = { version = "2.5.3", default-features = false, features = ["std"] }
@@ -43,6 +43,10 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 cfg_not_test = "warn"
+if_then_some_else_none = "warn"
+get_unwrap = "warn"
+pathbuf_init_then_push = "warn"
+renamed_function_params = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
 # compilation take more to run than to build otherwise.

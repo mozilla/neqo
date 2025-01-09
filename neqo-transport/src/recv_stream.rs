@@ -7,6 +7,8 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::max,
@@ -70,15 +72,13 @@ impl RecvStreams {
     pub fn keep_alive(&mut self, id: StreamId, k: bool) -> Res<()> {
         let self_ka = &mut self.keep_alive;
         let s = self.streams.get_mut(&id).ok_or(Error::InvalidStreamId)?;
-        s.keep_alive = if k {
-            Some(self_ka.upgrade().unwrap_or_else(|| {
+        s.keep_alive = k.then(|| {
+            self_ka.upgrade().unwrap_or_else(|| {
                 let r = Rc::new(());
                 *self_ka = Rc::downgrade(&r);
                 r
-            }))
-        } else {
-            None
-        };
+            })
+        });
         Ok(())
     }
 
@@ -1169,7 +1169,7 @@ mod tests {
 
         // Add a chunk
         s.inbound_frame(0, &[0; 150]);
-        assert_eq!(s.data_ranges.get(&0).unwrap().len(), 150);
+        assert_eq!(s.data_ranges[&0].len(), 150);
         // Read, providing only enough space for the first 100.
         let mut buf = [0; 100];
         let count = s.read(&mut buf[..]);
@@ -1180,7 +1180,7 @@ mod tests {
         // This shouldn't truncate the first frame, as we're already
         // Reading from it.
         s.inbound_frame(120, &[0; 60]);
-        assert_eq!(s.data_ranges.get(&0).unwrap().len(), 180);
+        assert_eq!(s.data_ranges[&0].len(), 180);
         // Read second part of first frame and all of the second frame
         let count = s.read(&mut buf[..]);
         assert_eq!(count, 80);
