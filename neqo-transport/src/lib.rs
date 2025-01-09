@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
