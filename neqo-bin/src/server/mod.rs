@@ -392,7 +392,7 @@ pub async fn server(mut args: Args) -> Res<()> {
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
         qerror!("No valid hosts defined");
-        Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
     let sockets = hosts
         .into_iter()
