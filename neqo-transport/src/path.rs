@@ -24,7 +24,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cc::CongestionControlAlgorithm,
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
-    ecn::{EcnCount, EcnInfo},
+    ecn,
     frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID},
     packet::PacketBuilder,
     pmtud::Pmtud,
@@ -194,7 +194,7 @@ impl Paths {
     ) -> bool {
         debug_assert!(!self.is_temporary(path));
         let baseline = self.primary().map_or_else(
-            || EcnInfo::default().baseline(),
+            || ecn::Info::default().baseline(),
             |p| p.borrow().ecn_info.baseline(),
         );
         path.borrow_mut().set_ecn_baseline(baseline);
@@ -507,7 +507,7 @@ pub struct Path {
     /// The number of bytes sent on this path.
     sent_bytes: usize,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
-    ecn_info: EcnInfo,
+    ecn_info: ecn::Info,
     /// For logging of events.
     qlog: NeqoQlog,
 }
@@ -550,12 +550,12 @@ impl Path {
             sender,
             received_bytes: 0,
             sent_bytes: 0,
-            ecn_info: EcnInfo::default(),
+            ecn_info: ecn::Info::default(),
             qlog,
         }
     }
 
-    pub fn set_ecn_baseline(&mut self, baseline: EcnCount) {
+    pub fn set_ecn_baseline(&mut self, baseline: ecn::Count) {
         self.ecn_info.set_baseline(baseline);
     }
 
@@ -676,7 +676,7 @@ impl Path {
 
     /// Make a datagram.
     pub fn datagram<V: Into<Vec<u8>>>(&mut self, payload: V, stats: &mut Stats) -> Datagram {
-        // Make sure to use the TOS value from before calling EcnInfo::on_packet_sent, which may
+        // Make sure to use the TOS value from before calling ecn::Info::on_packet_sent, which may
         // update the ECN state and can hence change it - this packet should still be sent
         // with the current value.
         let tos = self.tos();
@@ -740,7 +740,7 @@ impl Path {
                     "Possible ECN blackhole, disabling ECN and re-probing path"
                 );
                 self.ecn_info
-                    .disable_ecn(stats, crate::ecn::EcnValidationError::BlackHole);
+                    .disable_ecn(stats, crate::ecn::ValidationError::BlackHole);
                 ProbeState::ProbeNeeded { probe_count: 0 }
             } else {
                 qinfo!([self], "Probing failed");
@@ -959,7 +959,7 @@ impl Path {
     pub fn on_packets_acked(
         &mut self,
         acked_pkts: &[SentPacket],
-        ack_ecn: Option<EcnCount>,
+        ack_ecn: Option<ecn::Count>,
         now: Instant,
         stats: &mut Stats,
     ) {

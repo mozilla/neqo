@@ -7,6 +7,8 @@
 // Building a stream of ordered bytes to give the application from a series of
 // incoming STREAM frames.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::max,

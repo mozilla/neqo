@@ -6,6 +6,8 @@
 
 // The class implementing a QUIC connection.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -36,7 +38,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    ecn::EcnCount,
+    ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -3132,7 +3134,7 @@ impl Connection {
         &mut self,
         space: PacketNumberSpace,
         ack_ranges: R,
-        ack_ecn: Option<EcnCount>,
+        ack_ecn: Option<ecn::Count>,
         ack_delay: u64,
         now: Instant,
     ) where
