@@ -190,13 +190,12 @@ impl crate::connection::test_internal::FrameWriter for PingWriter {
 fn handshake_with_modifier(
     client: &mut Connection,
     server: &mut Connection,
-    now: Instant,
+    mut now: Instant,
     rtt: Duration,
     modifier: fn(Datagram) -> Option<Datagram>,
 ) -> Instant {
     let mut a = client;
     let mut b = server;
-    let mut now = now;
 
     let mut input = None;
     let is_done = |c: &mut Connection| {
