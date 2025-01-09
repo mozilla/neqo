@@ -18,7 +18,7 @@ use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::{
-    ecn::EcnCount,
+    ecn,
     frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
@@ -272,7 +272,7 @@ pub struct RecvdPackets {
     /// for the purposes of generating immediate acknowledgment.
     ignore_order: bool,
     // The counts of different ECN marks that have been received.
-    ecn_count: EcnCount,
+    ecn_count: ecn::Count,
 }
 
 impl RecvdPackets {
@@ -295,12 +295,12 @@ impl RecvdPackets {
                 0
             },
             ignore_order: false,
-            ecn_count: EcnCount::default(),
+            ecn_count: ecn::Count::default(),
         }
     }
 
     /// Get the ECN counts.
-    pub fn ecn_marks(&mut self) -> &mut EcnCount {
+    pub fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 

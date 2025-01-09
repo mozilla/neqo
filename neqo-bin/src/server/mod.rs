@@ -268,6 +268,7 @@ impl ServerRunner {
                 .sockets
                 .get_mut(sockets_index)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "No socket"))?;
+            let (host, socket) = &mut self.sockets[sockets_index];
             let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
                 break;
             };

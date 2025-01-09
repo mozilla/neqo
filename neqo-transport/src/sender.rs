@@ -159,11 +159,7 @@ impl PacketSender {
     #[must_use]
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
         // Only pace if there are bytes in flight.
-        if self.cc.bytes_in_flight() > 0 {
-            Some(self.pacer.next(rtt, self.cc.cwnd()))
-        } else {
-            None
-        }
+        (self.cc.bytes_in_flight() > 0).then(|| self.pacer.next(rtt, self.cc.cwnd()))
     }
 
     #[must_use]

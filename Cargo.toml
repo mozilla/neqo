@@ -42,6 +42,9 @@ url = { version = "2.5.3", default-features = false, features = ["std"] }
 cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+if_then_some_else_none = "warn"
+get_unwrap = "warn"
+pathbuf_init_then_push = "warn"
 unwrap_used = "warn"
 unwrap_in_result = "warn"
 

@@ -6,6 +6,8 @@
 
 // The class implementing a QUIC connection.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -36,7 +38,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    ecn::EcnCount,
+    ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -699,15 +701,13 @@ impl Connection {
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
         assert_eq!(self.role, Role::Client);
 
-        if self.crypto.has_resumption_token() {
+        self.crypto.has_resumption_token().then(|| {
             let token = self.make_resumption_token();
             if self.crypto.has_resumption_token() {
                 self.release_resumption_token_timer = Some(now + 3 * self.pto());
             }
-            Some(token)
-        } else {
-            None
-        }
+            token
+        })
     }
 
     /// Enable resumption, using a token previously provided.
@@ -3147,7 +3147,7 @@ impl Connection {
         &mut self,
         space: PacketNumberSpace,
         ack_ranges: R,
-        ack_ecn: Option<EcnCount>,
+        ack_ecn: Option<ecn::Count>,
         ack_delay: u64,
         now: Instant,
     ) -> Res<()>

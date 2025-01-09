@@ -345,11 +345,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     }
     dec.skip_vvec(); // The rest of the packet.
     let p1 = &buf[..dec.offset()];
-    let p2 = if dec.remaining() > 0 {
-        Some(dec.decode_remainder())
-    } else {
-        None
-    };
+    let p2 = (dec.remaining() > 0).then(|| dec.decode_remainder());
     qtrace!("split packet: {} {:?}", hex(p1), p2.map(hex));
     (p1, p2)
 }

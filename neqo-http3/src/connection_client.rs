@@ -43,13 +43,7 @@ fn id_gte<U>(base: StreamId) -> impl FnMut((&StreamId, &U)) -> Option<StreamId> 
 where
     U: ?Sized,
 {
-    move |(id, _)| {
-        if *id >= base && !(id.is_bidi() ^ base.is_bidi()) {
-            Some(*id)
-        } else {
-            None
-        }
-    }
+    move |(id, _)| (*id >= base && !(id.is_bidi() ^ base.is_bidi())).then_some(*id)
 }
 
 const fn alpn_from_quic_version(version: Version) -> &'static str {
