@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, Output, State, StreamId, StreamType,

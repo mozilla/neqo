@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{header::HeadersExt, hex, qdebug, qerror, qinfo, Datagram, Header};
+use neqo_common::{header::HeadersExt as _, hex, qdebug, qerror, qinfo, Datagram, Header};
 use neqo_crypto::{generate_ech_keys, random, AntiReplay};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,

@@ -35,7 +35,7 @@ use crate::{
     qpack_decoder_receiver::DecoderRecvStream,
     qpack_encoder_receiver::EncoderRecvStream,
     recv_message::{RecvMessage, RecvMessageInfo},
-    request_target::{AsRequestTarget, RequestTarget},
+    request_target::{AsRequestTarget, RequestTarget as _},
     send_message::SendMessage,
     settings::{HSettingType, HSettings, HttpZeroRttChecker},
     stream_type_reader::NewStreamHeadReader,
