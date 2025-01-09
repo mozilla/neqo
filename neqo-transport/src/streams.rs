@@ -429,8 +429,10 @@ impl Streams {
         self.send.set_sendorder(stream_id, sendorder)
     }
 
-    pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) {
-        self.send.set_fairness(stream_id, fairness);
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        self.send.set_fairness(stream_id, fairness)
     }
 
     /// # Errors

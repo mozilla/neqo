@@ -3331,8 +3331,11 @@ impl Connection {
     }
 
     /// Set the Fairness of a stream
-    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) {
-        self.streams.set_fairness(stream_id, fairness);
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
+        self.streams.set_fairness(stream_id, fairness)
     }
 
     /// # Errors

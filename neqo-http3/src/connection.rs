@@ -737,8 +737,12 @@ impl Http3Connection {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
                 }
-                // set incoming WebTransport streams to be fair (share bandwidth)
-                conn.stream_fairness(stream_id, true);
+                // Set incoming WebTransport streams to be fair (share bandwidth).
+                // We may call this with an invalid stream ID, so ignore that error.
+                match conn.stream_fairness(stream_id, true) {
+                    Ok(()) | Err(neqo_transport::Error::InvalidStreamId) => (),
+                    Err(e) => return Err(Error::from(e)),
+                };
                 qinfo!(
                     [self],
                     "A new WebTransport stream {} for session {}.",
@@ -1024,8 +1028,17 @@ impl Http3Connection {
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
     /// streams of the same sendOrder group (or the unordered group).  Unfair streams
     /// will give bandwidth preferentially to the lowest streamId with data to send.
-    pub fn stream_set_fairness(conn: &mut Connection, stream_id: StreamId, fairness: bool) {
-        conn.stream_fairness(stream_id, fairness);
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStreamId` if the stream id doesn't exist
+    pub fn stream_set_fairness(
+        conn: &mut Connection,
+        stream_id: StreamId,
+        fairness: bool,
+    ) -> Res<()> {
+        conn.stream_fairness(stream_id, fairness)
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     pub fn cancel_fetch(
@@ -1275,7 +1288,7 @@ impl Http3Connection {
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
         // This really can't fail, panics if it does
-        conn.stream_fairness(stream_id, true);
+        conn.stream_fairness(stream_id, true)?;
 
         self.webtransport_create_stream_internal(
             wt,
