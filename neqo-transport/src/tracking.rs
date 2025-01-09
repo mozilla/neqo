@@ -86,14 +86,14 @@ impl PacketNumberSpaceSet {
 impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
     type Output = bool;
 
-    fn index(&self, space: PacketNumberSpace) -> &Self::Output {
-        &self.spaces[space]
+    fn index(&self, index: PacketNumberSpace) -> &Self::Output {
+        &self.spaces[index]
     }
 }
 
 impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
-    fn index_mut(&mut self, space: PacketNumberSpace) -> &mut Self::Output {
-        &mut self.spaces[space]
+    fn index_mut(&mut self, index: PacketNumberSpace) -> &mut Self::Output {
+        &mut self.spaces[index]
     }
 }
 
