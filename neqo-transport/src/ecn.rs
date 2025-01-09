@@ -112,18 +112,18 @@ impl Sub<Self> for Count {
     type Output = Self;
 
     /// Subtract the ECN counts in `other` from `self`.
-    fn sub(self, other: Self) -> Self {
+    fn sub(self, rhs: Self) -> Self {
         let mut diff = Self::default();
         for (ecn, count) in &mut *diff {
-            *count = self[ecn].saturating_sub(other[ecn]);
+            *count = self[ecn].saturating_sub(rhs[ecn]);
         }
         diff
     }
 }
 
 impl AddAssign<IpTosEcn> for Count {
-    fn add_assign(&mut self, ecn: IpTosEcn) {
-        self[ecn] += 1;
+    fn add_assign(&mut self, rhs: IpTosEcn) {
+        self[rhs] += 1;
     }
 }
 

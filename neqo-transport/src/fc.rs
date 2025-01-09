@@ -500,8 +500,8 @@ impl RemoteStreamLimits {
 impl Index<StreamType> for RemoteStreamLimits {
     type Output = RemoteStreamLimit;
 
-    fn index(&self, idx: StreamType) -> &Self::Output {
-        match idx {
+    fn index(&self, index: StreamType) -> &Self::Output {
+        match index {
             StreamType::BiDi => &self.bidirectional,
             StreamType::UniDi => &self.unidirectional,
         }
@@ -509,8 +509,8 @@ impl Index<StreamType> for RemoteStreamLimits {
 }
 
 impl IndexMut<StreamType> for RemoteStreamLimits {
-    fn index_mut(&mut self, idx: StreamType) -> &mut Self::Output {
-        match idx {
+    fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
+        match index {
             StreamType::BiDi => &mut self.bidirectional,
             StreamType::UniDi => &mut self.unidirectional,
         }
@@ -555,8 +555,8 @@ impl LocalStreamLimits {
 impl Index<StreamType> for LocalStreamLimits {
     type Output = SenderFlowControl<StreamType>;
 
-    fn index(&self, idx: StreamType) -> &Self::Output {
-        match idx {
+    fn index(&self, index: StreamType) -> &Self::Output {
+        match index {
             StreamType::BiDi => &self.bidirectional,
             StreamType::UniDi => &self.unidirectional,
         }
@@ -564,8 +564,8 @@ impl Index<StreamType> for LocalStreamLimits {
 }
 
 impl IndexMut<StreamType> for LocalStreamLimits {
-    fn index_mut(&mut self, idx: StreamType) -> &mut Self::Output {
-        match idx {
+    fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
+        match index {
             StreamType::BiDi => &mut self.bidirectional,
             StreamType::UniDi => &mut self.unidirectional,
         }
