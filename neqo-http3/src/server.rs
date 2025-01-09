@@ -152,6 +152,7 @@ impl Http3Server {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn process_events(&mut self, conn: &ConnectionRef, now: Instant) {
         let mut remove = false;
         let http3_parameters = &self.http3_parameters;
