@@ -138,10 +138,10 @@ impl Node for ConnectionNode {
         self.setup_goals(now);
     }
 
-    fn process(&mut self, mut dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
         _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
-            let res = self.c.process(dgram.take(), now);
+            let res = self.c.process(d.take(), now);
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
