@@ -14,9 +14,6 @@ on:
         type: boolean
         required: false
         default: false
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}

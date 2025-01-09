@@ -9,8 +9,6 @@ on:
   merge_group:
   workflow_dispatch:
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
   DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
