@@ -6,6 +6,8 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cmp::{max, min},
     time::{Duration, Instant},

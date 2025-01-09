@@ -276,8 +276,7 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
-            let mut dir = std::env::temp_dir();
-            dir.push(format!(
+            let dir = std::env::temp_dir().join(format!(
                 "neqo-bin-test-{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
