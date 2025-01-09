@@ -228,20 +228,15 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))] // empty send unsupported on apple for now <https://github.com/quinn-rs/quinn/pull/2123>
     fn handle_empty_datagram() -> Result<(), io::Error> {
-        let sender = socket()?;
+        // quinn-udp doesn't support sending emtpy datagrams across all
+        // platforms. Use `std` socket instead.  See also
+        // <https://github.com/quinn-rs/quinn/pull/2123>.
+        let sender = std::net::UdpSocket::bind("127.0.0.1:0")?;
         let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram = Datagram::new(
-            sender.inner.local_addr()?,
-            receiver.inner.local_addr()?,
-            IpTos::default(),
-            vec![],
-        );
-
-        sender.send(&datagram)?;
+        sender.send_to(&[], receiver.inner.local_addr()?)?;
         let mut recv_buf = RecvBuf::new();
         let mut datagrams = receiver.recv(receiver_addr, &mut recv_buf)?;
 
