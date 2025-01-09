@@ -879,28 +879,23 @@ impl SendStream {
         match self.state {
             SendStreamState::Send {
                 ref mut send_buf, ..
-            } => {
-                let result = send_buf.next_bytes();
-                if let Some((offset, slice)) = result {
-                    if retransmission_only {
-                        qtrace!(
-                            "next_bytes apply retransmission limit at {}",
-                            self.retransmission_offset
-                        );
-                        (self.retransmission_offset > offset).then(|| {
-                            let len = min(
-                                usize::try_from(self.retransmission_offset - offset).ok()?,
-                                slice.len(),
-                            );
-                            (offset, &slice[..len])
-                        })
-                    } else {
-                        Some((offset, slice))
-                    }
+            } => send_buf.next_bytes().and_then(|(offset, slice)| {
+                if retransmission_only {
+                    qtrace!(
+                        "next_bytes apply retransmission limit at {}",
+                        self.retransmission_offset
+                    );
+                    (self.retransmission_offset > offset).then(|| {
+                        let Ok(delta) = usize::try_from(self.retransmission_offset - offset) else {
+                            return None;
+                        };
+                        let len = min(delta, slice.len());
+                        Some((offset, &slice[..len]))
+                    })?
                 } else {
-                    None
+                    Some((offset, slice))
                 }
-            }
+            }),
             SendStreamState::DataSent {
                 ref mut send_buf,
                 fin_sent,

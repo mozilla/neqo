@@ -259,14 +259,12 @@ impl HeaderTable {
             reduce,
             self.used,
         );
-        let mut used = self.used;
-        while (!self.dynamic.is_empty()) && used > reduce {
+        while (!self.dynamic.is_empty()) && self.used > reduce {
             if let Some(e) = self.dynamic.back() {
                 if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
                 }
-                used -= u64::try_from(e.size()).expect("usize fits in u64");
-                self.used -= u64::try_from(e.size()).unwrap();
+                self.used -= u64::try_from(e.size()).expect("usize fits in u64");
                 self.dynamic.pop_back();
             }
         }
@@ -282,7 +280,7 @@ impl HeaderTable {
             .map(DynamicTableEntry::size)
             .sum();
 
-        self.used - u64::try_from(size).expect("usize fits in u64") <= reduce
+        self.used - u64::try_from(evictable_size).expect("usize fits in u64") <= reduce
     }
 
     pub fn insert_possible(&self, size: usize) -> bool {
