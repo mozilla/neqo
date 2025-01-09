@@ -47,6 +47,7 @@ get_unwrap = "warn"
 pathbuf_init_then_push = "warn"
 ref_patterns = "warn"
 renamed_function_params = "warn"
+unused_trait_names = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
 # compilation take more to run than to build otherwise.
