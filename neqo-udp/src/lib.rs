@@ -30,8 +30,8 @@ const RECV_BUF_SIZE: usize = u16::MAX as usize;
 /// multiple datagrams into a single buffer, can benefit from using multiple
 /// buffers instead.
 ///
-/// Platforms with segmentation offloading don't benefit from additionally using
-/// multiple buffers.
+/// Platforms with segmentation offloading have not shown performance
+/// improvements when additionally using multiple buffers.
 ///
 /// - Linux/Android: use segmentation offloading via GRO
 /// - Windows: use segmentation offloading via URO (caveat see <https://github.com/quinn-rs/quinn/issues/2041>)
