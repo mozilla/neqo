@@ -45,6 +45,7 @@ pedantic = { level = "warn", priority = -1 }
 if_then_some_else_none = "warn"
 get_unwrap = "warn"
 pathbuf_init_then_push = "warn"
+renamed_function_params = "warn"
 try_err = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
