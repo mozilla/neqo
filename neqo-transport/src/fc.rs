@@ -68,13 +68,11 @@ where
     /// control if the change was an increase and `None` otherwise.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
         debug_assert!(limit < u64::MAX);
-        if limit > self.limit {
+        (limit > self.limit).then(|| {
             self.limit = limit;
             self.blocked_frame = false;
-            Some(self.available())
-        } else {
-            None
-        }
+            self.available()
+        })
     }
 
     /// Consume flow control.
