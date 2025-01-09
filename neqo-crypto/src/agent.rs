@@ -337,7 +337,9 @@ impl SecretAgent {
             ssl::SSL_ImportFD(null_mut(), base_fd.cast())
         };
         if fd.is_null() {
-            unsafe { prio::PR_Close(base_fd) };
+            unsafe {
+                prio::PR_Close(base_fd);
+            }
             return Err(Error::CreateSslSocket);
         }
         Ok(fd)
@@ -758,11 +760,15 @@ impl SecretAgent {
         if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
             let _records = self.setup_raw().expect("Can only close");
-            unsafe { prio::PR_Close(self.fd.cast()) };
+            unsafe {
+                prio::PR_Close(self.fd.cast());
+            }
         } else {
             // Need to hold the IO wrapper in scope until the close is done.
             let _io = self.io.wrap(&[]);
-            unsafe { prio::PR_Close(self.fd.cast()) };
+            unsafe {
+                prio::PR_Close(self.fd.cast());
+            }
         };
         let _output = self.io.take_output();
         self.fd = null_mut();
