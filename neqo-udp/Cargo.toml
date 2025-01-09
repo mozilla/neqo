@@ -21,6 +21,9 @@ log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 quinn-udp = { workspace = true }
 
+[build-dependencies]
+cfg_aliases = "0.2"
+
 [package.metadata.cargo-machete]
 ignored = ["log"]
 
