@@ -55,7 +55,7 @@ impl NeqoQlog {
             .map_err(qlog::Error::IoError)?;
 
         let streamer = QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
+            qlog::QLOG_VERSION.to_owned(),
             title,
             description,
             None,
@@ -198,7 +198,7 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs_f64() * 1_000.0)
                 .ok(),
-            time_format: Some("relative".to_string()),
+            time_format: Some("relative".to_owned()),
         }),
     }
 }

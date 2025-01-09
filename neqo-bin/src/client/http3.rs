@@ -454,7 +454,7 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
                 *state = None;
                 Some(Header::new(name, value.as_ref()))
             } else {
-                *state = Some(value.as_ref().to_string());
+                *state = Some(value.as_ref().to_owned());
                 None
             }
         })

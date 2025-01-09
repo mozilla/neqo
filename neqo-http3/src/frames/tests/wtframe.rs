@@ -11,7 +11,7 @@ use crate::frames::WebTransportFrame;
 fn wt_close_session() {
     let f = WebTransportFrame::CloseSession {
         error: 5,
-        message: "Hello".to_string(),
+        message: "Hello".to_owned(),
     };
     enc_dec_wtframe(&f, "6843090000000548656c6c6f", 0);
 }

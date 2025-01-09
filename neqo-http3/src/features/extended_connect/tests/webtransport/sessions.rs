@@ -249,7 +249,7 @@ fn wt_session_close_frame_client() {
         &wt_session,
         &SessionCloseReason::Clean {
             error: ERROR_NUM,
-            message: ERROR_MESSAGE.to_string(),
+            message: ERROR_MESSAGE.to_owned(),
         },
     );
 }
@@ -268,7 +268,7 @@ fn wt_session_close_frame_server() {
         wt_session.stream_id(),
         &SessionCloseReason::Clean {
             error: ERROR_NUM,
-            message: ERROR_MESSAGE.to_string(),
+            message: ERROR_MESSAGE.to_owned(),
         },
         None,
     );
@@ -318,7 +318,7 @@ fn wt_unknown_session_frame_client() {
             wt_session.stream_id(),
             SessionCloseReason::Clean {
                 error: ERROR_NUM,
-                message: ERROR_MESSAGE.to_string(),
+                message: ERROR_MESSAGE.to_owned(),
             },
         )),
     );
@@ -333,7 +333,7 @@ fn wt_close_session_frame_broken_client() {
     let mut enc = Encoder::default();
     WebTransportFrame::CloseSession {
         error: 5,
-        message: "Hello".to_string(),
+        message: "Hello".to_owned(),
     }
     .encode(&mut enc);
     let mut buf: Vec<_> = enc.into();
@@ -434,7 +434,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
             wt_session.stream_id(),
             SessionCloseReason::Clean {
                 error: ERROR_NUM,
-                message: ERROR_MESSAGE.to_string(),
+                message: ERROR_MESSAGE.to_owned(),
             },
         )),
     );

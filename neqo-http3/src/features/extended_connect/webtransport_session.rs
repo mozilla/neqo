@@ -382,7 +382,7 @@ impl WebTransportSession {
         self.state = SessionState::Done;
         let close_frame = WebTransportFrame::CloseSession {
             error,
-            message: message.to_string(),
+            message: message.to_owned(),
         };
         let mut encoder = Encoder::default();
         close_frame.encode(&mut encoder);

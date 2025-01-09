@@ -124,9 +124,9 @@ impl Default for Args {
         use std::str::FromStr;
         Self {
             shared: crate::SharedArgs::default(),
-            hosts: vec!["[::]:12345".to_string()],
+            hosts: vec!["[::]:12345".to_owned()],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
-            key: "key".to_string(),
+            key: "key".to_owned(),
             retry: false,
             ech: false,
         }

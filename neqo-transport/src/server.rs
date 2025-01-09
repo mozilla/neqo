@@ -269,8 +269,8 @@ impl Server {
                 NeqoQlog::enabled_with_file(
                     qlog_dir.clone(),
                     Role::Server,
-                    Some("Neqo server qlog".to_string()),
-                    Some("Neqo server qlog".to_string()),
+                    Some("Neqo server qlog".to_owned()),
+                    Some("Neqo server qlog".to_owned()),
                     format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {

@@ -1124,7 +1124,7 @@ fn wt_session_close_frame_and_streams_client() {
             wt_session.stream_id(),
             SessionCloseReason::Clean {
                 error: ERROR_NUM,
-                message: ERROR_MESSAGE.to_string(),
+                message: ERROR_MESSAGE.to_owned(),
             },
         )),
     );

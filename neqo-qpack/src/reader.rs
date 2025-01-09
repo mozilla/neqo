@@ -130,9 +130,9 @@ impl<'a> ReceiverBufferWrapper<'a> {
             .try_into()
             .or(Err(Error::DecompressionFailed))?;
         if use_huffman {
-            Ok(parse_utf8(&decode_huffman(self.slice(length)?)?)?.to_string())
+            Ok(parse_utf8(&decode_huffman(self.slice(length)?)?)?.to_owned())
         } else {
-            Ok(parse_utf8(self.slice(length)?)?.to_string())
+            Ok(parse_utf8(self.slice(length)?)?.to_owned())
         }
     }
 

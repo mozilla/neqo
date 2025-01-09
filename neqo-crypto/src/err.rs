@@ -136,7 +136,7 @@ where
     unsafe {
         let p = f();
         if p.is_null() {
-            return dflt.to_string();
+            return dflt.to_owned();
         }
         CStr::from_ptr(p).to_string_lossy().into_owned()
     }

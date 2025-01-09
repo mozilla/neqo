@@ -399,7 +399,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
     let contents = buf.clone();
     let streamer = QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
+        qlog::QLOG_VERSION.to_owned(),
         None,
         None,
         None,

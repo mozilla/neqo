@@ -176,7 +176,7 @@ fn frame_reading_with_stream_wt_close_session() {
     assert!(frame.is_some());
     let WebTransportFrame::CloseSession { error, message } = frame.unwrap();
     assert_eq!(error, 5);
-    assert_eq!(message, "Hello".to_string());
+    assert_eq!(message, "Hello".to_owned());
 }
 
 // Test an unknown frame for WebTransportFrames.
@@ -201,7 +201,7 @@ fn unknown_wt_frame() {
     assert!(frame.is_some());
     let WebTransportFrame::CloseSession { error, message } = frame.unwrap();
     assert_eq!(error, 5);
-    assert_eq!(message, "Hello".to_string());
+    assert_eq!(message, "Hello".to_owned());
 }
 
 enum FrameReadingTestSend {
@@ -468,7 +468,7 @@ fn complete_and_incomplete_wt_frames() {
     // H3_FRAME_TYPE_MAX_PUSH_ID
     let f = WebTransportFrame::CloseSession {
         error: 5,
-        message: "Hello".to_string(),
+        message: "Hello".to_owned(),
     };
     let mut enc = Encoder::default();
     f.encode(&mut enc);
