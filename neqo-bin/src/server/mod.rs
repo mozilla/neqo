@@ -264,7 +264,7 @@ impl ServerRunner {
 
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
-            let (host, socket) = self.sockets.get_mut(sockets_index).unwrap();
+            let (host, socket) = &mut self.sockets[sockets_index];
             let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
                 break;
             };

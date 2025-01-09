@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::module_name_repetitions)]
+
 // Encoding and decoding packets off the wire.
 use std::{
     cmp::min,
@@ -202,7 +204,8 @@ impl PacketBuilder {
                 + scid.as_ref().map_or(0, |d| d.as_ref().len())
                 < limit - encoder.len()
         {
-            encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.to_byte(version) << 4);
+            encoder
+                .encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | (pt.to_byte(version) << 4));
             encoder.encode_uint(4, version.wire_version());
             encoder.encode_vec(1, dcid.take().as_ref().map_or(&[], AsRef::as_ref));
             encoder.encode_vec(1, scid.take().as_ref().map_or(&[], AsRef::as_ref));
