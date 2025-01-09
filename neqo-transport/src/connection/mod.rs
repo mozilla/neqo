@@ -1559,7 +1559,7 @@ impl Connection {
         );
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
-        self.capture_error(Some(path), now, 0, res).ok();
+        _ = self.capture_error(Some(path), now, 0, res);
     }
 
     fn input_path(
@@ -3331,11 +3331,8 @@ impl Connection {
     }
 
     /// Set the Fairness of a stream
-    ///
-    /// # Errors
-    /// When the stream does not exist.
-    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
-        self.streams.set_fairness(stream_id, fairness)
+    pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) {
+        self.streams.set_fairness(stream_id, fairness);
     }
 
     /// # Errors

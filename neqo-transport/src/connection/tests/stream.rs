@@ -131,8 +131,8 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
         streams.push(id);
         ordered.push((id, *sendorder));
         // must be set before sendorder
-        client.streams.set_fairness(id, true).ok();
-        client.streams.set_sendorder(id, *sendorder).ok();
+        client.streams.set_fairness(id, true);
+        client.streams.set_sendorder(id, *sendorder).unwrap();
     }
     // Write some data to all the streams
     for stream_id in streams {

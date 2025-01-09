@@ -1565,10 +1565,8 @@ impl SendStreams {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::missing_errors_doc)]
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
-        self.set_fairness(stream_id, true)?;
+        self.set_fairness(stream_id, true);
         if let Some(stream) = self.map.get_mut(&stream_id) {
             // don't grab stream here; causes borrow errors
             let old_sendorder = stream.sendorder();
@@ -1591,10 +1589,11 @@ impl SendStreams {
         }
     }
 
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::missing_errors_doc)]
-    pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
-        let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
+    pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) {
+        let Some(stream) = self.map.get_mut(&stream_id) else {
+            // We can get called with an invalid stream ID, and that is OK.
+            return;
+        };
         let was_fair = stream.fair;
         stream.set_fairness(make_fair);
         if !was_fair && make_fair {
@@ -1626,7 +1625,6 @@ impl SendStreams {
             };
             group.remove(stream_id);
         }
-        Ok(())
     }
 
     pub fn acked(&mut self, token: &SendStreamRecoveryToken) {
