@@ -121,6 +121,13 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'nightly'
 
+      - uses: codecov/test-results-action@4e79e65778be1cecd5df25e14af1eafb6df80ea9 # v1.0.2
+        with:
+          files: target/nextest/ci/junit.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
       - name: Save simulation seeds artifact
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
