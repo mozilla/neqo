@@ -1565,6 +1565,8 @@ impl SendStreams {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.set_fairness(stream_id, true)?;
         if let Some(stream) = self.map.get_mut(&stream_id) {
@@ -1589,6 +1591,8 @@ impl SendStreams {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::missing_errors_doc)]
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
         let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
         let was_fair = stream.fair;
