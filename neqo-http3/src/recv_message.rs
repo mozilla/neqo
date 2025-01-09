@@ -296,10 +296,7 @@ impl RecvMessage {
                         }
                     };
                 }
-                RecvMessageState::DecodingHeaders {
-                    ref header_block,
-                    fin,
-                } => {
+                RecvMessageState::DecodingHeaders { header_block, fin } => {
                     if self
                         .qpack_decoder
                         .borrow()
