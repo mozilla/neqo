@@ -249,12 +249,11 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
     let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, stream_id, now);
     now = next_now;
     for i in 0..5 {
-        qinfo!("iteration {}", i);
+        qinfo!("iteration {i}");
 
         let c_tx_size: usize = c_tx_dgrams.iter().map(Datagram::len).sum();
         qinfo!(
-            "client sending {} bytes into cwnd of {}",
-            c_tx_size,
+            "client sending {c_tx_size} bytes into cwnd of {}",
             cwnd(&client)
         );
         assert_eq!(c_tx_size, expected_cwnd);
@@ -398,7 +397,7 @@ fn ack_are_not_cc() {
 
     // The server hasn't received any of these packets yet, the server
     // won't ACK, but if it sends an ack-eliciting packet instead.
-    qdebug!([server], "Sending ack-eliciting");
+    qdebug!("[{server}] Sending ack-eliciting");
     let other_stream = server.stream_create(StreamType::BiDi).unwrap();
     assert_eq!(other_stream, 1);
     server.stream_send(other_stream, b"dropped").unwrap();
@@ -412,10 +411,10 @@ fn ack_are_not_cc() {
     assert!(ack_eliciting_packet.is_some());
 
     // The client can ack the server packet even if cc windows is full.
-    qdebug!([client], "Process ack-eliciting");
+    qdebug!("[{client}] Process ack-eliciting");
     let ack_pkt = client.process(ack_eliciting_packet, now).dgram();
     assert!(ack_pkt.is_some());
-    qdebug!([server], "Handle ACK");
+    qdebug!("[{server}] Handle ACK");
     let prev_ack_count = server.stats().frame_rx.ack;
     server.process_input(ack_pkt.unwrap(), now);
     assert_eq!(server.stats().frame_rx.ack, prev_ack_count + 1);

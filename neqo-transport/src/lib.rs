@@ -177,7 +177,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qwarn!("Crypto operation failed {:?}", err);
+        qwarn!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::CryptoError(err),

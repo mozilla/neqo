@@ -119,7 +119,7 @@ impl Cubic {
             self.w_max = self.last_max_cwnd;
             self.k = self.calc_k(curr_cwnd_f64, max_datagram_size);
         }
-        qtrace!([self], "New epoch");
+        qtrace!("[{self}] New epoch");
     }
 }
 

@@ -146,7 +146,7 @@ impl WebTransportSession {
     }
 
     fn receive(&mut self, conn: &mut Connection) -> Res<(ReceiveOutput, bool)> {
-        qtrace!([self], "receive control data");
+        qtrace!("[{self}] receive control data");
         let (out, _) = self.control_stream_recv.receive(conn)?;
         debug_assert!(out == ReceiveOutput::NoOutput);
         self.maybe_check_headers();
@@ -229,11 +229,7 @@ impl WebTransportSession {
 
         if let Some((headers, interim, fin)) = self.stream_event_listener.borrow_mut().get_headers()
         {
-            qtrace!(
-                "ExtendedConnect response headers {:?}, fin={}",
-                headers,
-                fin
-            );
+            qtrace!("ExtendedConnect response headers {headers:?}, fin={fin}");
 
             if interim {
                 if fin {
@@ -346,7 +342,7 @@ impl WebTransportSession {
                 &mut self.control_stream_recv,
             ))
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
-        qtrace!([self], "Received frame: {:?} fin={}", f, fin);
+        qtrace!("[{self}] Received frame: {f:?} fin={fin}");
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
             self.events.session_end(
                 ExtendedConnectType::WebTransport,
@@ -410,7 +406,7 @@ impl WebTransportSession {
         buf: &[u8],
         id: impl Into<DatagramTracking>,
     ) -> Res<()> {
-        qtrace!([self], "send_datagram state={:?}", self.state);
+        qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state == SessionState::Active {
             let mut dgram_data = Encoder::default();
             dgram_data.encode_varint(self.session_id.as_u64() / 4);

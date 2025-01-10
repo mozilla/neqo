@@ -191,9 +191,8 @@ impl VersionConfig {
     /// and by the client on resumption.
     pub(crate) fn set_initial(&mut self, initial: Version) {
         qdebug!(
-            "Overwrite initial version {:?} ==> {:?}",
-            self.initial,
-            initial
+            "Overwrite initial version {:?} ==> {initial:?}",
+            self.initial
         );
         assert!(self.all.contains(&initial));
         self.initial = initial;
