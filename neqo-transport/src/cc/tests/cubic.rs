@@ -23,7 +23,7 @@ use crate::{
             convert_to_f64, Cubic, CUBIC_ALPHA, CUBIC_BETA_USIZE_DIVIDEND,
             CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE,
         },
-        CongestionControl,
+        CongestionControl as _,
     },
     packet::PacketType,
     pmtud::Pmtud,
