@@ -11,7 +11,7 @@ use std::{
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, BufWriter},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -21,7 +21,7 @@ use std::{
 use clap::Parser;
 use futures::{
     future::{select, Either},
-    FutureExt, TryFutureExt,
+    FutureExt as _, TryFutureExt as _,
 };
 use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
 use neqo_crypto::{
@@ -182,7 +182,7 @@ impl Args {
     #[cfg(any(test, feature = "bench"))]
     #[allow(clippy::missing_panics_doc)]
     pub fn new(requests: &[usize], upload: bool) -> Self {
-        use std::str::FromStr;
+        use std::str::FromStr as _;
         Self {
             shared: crate::SharedArgs::default(),
             urls: requests
