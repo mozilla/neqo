@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
     time::{Duration, Instant},
@@ -1229,7 +1228,7 @@ fn error_on_new_path_with_no_connection_id() {
     // See issue #1697. We had a crash when the client had a temporary path and
     // process_output is called.
     let closing_frames = client.stats().frame_tx.connection_close;
-    mem::drop(client.process_output(now()));
+    drop(client.process_output(now()));
     assert!(matches!(
         client.state(),
         State::Closing {

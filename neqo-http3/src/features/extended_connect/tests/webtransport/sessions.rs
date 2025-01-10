@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::mem;
-
 use neqo_common::{event::Provider as _, header::HeadersExt as _, Encoder};
 use neqo_transport::StreamType;
 use test_fixture::now;
@@ -26,7 +24,7 @@ use crate::{
 #[test]
 fn wt_session() {
     let mut wt = WtTest::new();
-    mem::drop(wt.create_wt_session());
+    drop(wt.create_wt_session());
 }
 
 #[test]

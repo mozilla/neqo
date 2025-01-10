@@ -30,7 +30,7 @@ use crate::{
 pub type TransportParameterId = u64;
 macro_rules! tpids {
         { $($n:ident = $v:expr),+ $(,)? } => {
-            $(pub const $n: TransportParameterId = $v as TransportParameterId;)+
+            $(pub const $n: TransportParameterId = $v;)+
 
             /// A complete list of internal transport parameters.
             #[cfg(not(test))]

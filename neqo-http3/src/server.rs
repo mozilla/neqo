@@ -311,7 +311,6 @@ fn prepare_data(
 mod tests {
     use std::{
         collections::HashMap,
-        mem,
         ops::{Deref, DerefMut},
     };
 
@@ -506,7 +505,7 @@ mod tests {
     // The server will open the control and qpack streams and send SETTINGS frame.
     #[test]
     fn server_connect() {
-        mem::drop(connect_and_receive_settings());
+        drop(connect_and_receive_settings());
     }
 
     struct PeerConnection {
@@ -559,7 +558,7 @@ mod tests {
         assert_eq!(sent, Ok(1));
         let out1 = neqo_trans_conn.process_output(now());
         let out2 = server.process(out1.dgram(), now());
-        mem::drop(neqo_trans_conn.process(out2.dgram(), now()));
+        drop(neqo_trans_conn.process(out2.dgram(), now()));
 
         // assert no error occurred.
         assert_not_closed(server);
@@ -579,7 +578,7 @@ mod tests {
     // Server: Test receiving a new control stream and a SETTINGS frame.
     #[test]
     fn server_receive_control_frame() {
-        mem::drop(connect());
+        drop(connect());
     }
 
     // Server: Test that the connection will be closed if control stream
@@ -710,9 +709,9 @@ mod tests {
             .unwrap();
         let out = peer_conn.process_output(now());
         let out = hconn.process(out.dgram(), now());
-        mem::drop(peer_conn.process(out.dgram(), now()));
+        drop(peer_conn.process(out.dgram(), now()));
         let out = hconn.process_output(now());
-        mem::drop(peer_conn.process(out.dgram(), now()));
+        drop(peer_conn.process(out.dgram(), now()));
 
         // check for stop-sending with Error::HttpStreamCreation.
         let mut stop_sending_event_found = false;
@@ -741,7 +740,7 @@ mod tests {
         _ = peer_conn.stream_send(push_stream_id, &[0x1]).unwrap();
         let out = peer_conn.process_output(now());
         let out = hconn.process(out.dgram(), now());
-        mem::drop(peer_conn.conn.process(out.dgram(), now()));
+        drop(peer_conn.conn.process(out.dgram(), now()));
         assert_closed(&hconn, &Error::HttpStreamCreation);
     }
 
