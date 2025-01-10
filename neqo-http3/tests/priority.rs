@@ -83,11 +83,7 @@ fn priority_update() {
     };
 
     match header_event {
-        Http3ServerEvent::Headers {
-            stream: _,
-            headers,
-            fin,
-        } => {
+        Http3ServerEvent::Headers { headers, fin, .. } => {
             let expected_headers = &[
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
