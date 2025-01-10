@@ -8,7 +8,6 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
@@ -19,6 +18,7 @@ use neqo_crypto::{
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     random, HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
 };
+use rustc_hash::FxHashMap;
 
 use crate::{
     cid::{ConnectionId, ConnectionIdEntry, CONNECTION_ID_SEQNO_PREFERRED, MAX_CONNECTION_ID_LEN},
@@ -312,7 +312,7 @@ impl TransportParameter {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransportParameters {
-    params: HashMap<TransportParameterId, TransportParameter>,
+    params: FxHashMap<TransportParameterId, TransportParameter>,
 }
 
 impl TransportParameters {
