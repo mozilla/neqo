@@ -73,7 +73,7 @@ impl WebTransportSession {
                     first_frame_type: None,
                 },
                 qpack_decoder,
-                Box::new(stream_event_listener.clone()),
+                Box::new(Rc::clone(&stream_event_listener)),
                 None,
                 PriorityHandler::new(false, Priority::default()),
             )),
@@ -82,7 +82,7 @@ impl WebTransportSession {
                 Http3StreamType::ExtendedConnect,
                 session_id,
                 qpack_encoder,
-                Box::new(stream_event_listener.clone()),
+                Box::new(Rc::clone(&stream_event_listener)),
             )),
             stream_event_listener,
             session_id,
@@ -111,11 +111,11 @@ impl WebTransportSession {
         control_stream_recv
             .http_stream()
             .unwrap()
-            .set_new_listener(Box::new(stream_event_listener.clone()));
+            .set_new_listener(Box::new(Rc::clone(&stream_event_listener)));
         control_stream_send
             .http_stream()
             .unwrap()
-            .set_new_listener(Box::new(stream_event_listener.clone()));
+            .set_new_listener(Box::new(Rc::clone(&stream_event_listener)));
         Self {
             control_stream_recv,
             control_stream_send,
@@ -451,7 +451,7 @@ impl RecvStream for Rc<RefCell<WebTransportSession>> {
     }
 
     fn webtransport(&self) -> Option<Rc<RefCell<WebTransportSession>>> {
-        Some(self.clone())
+        Some(Self::clone(self))
     }
 }
 
