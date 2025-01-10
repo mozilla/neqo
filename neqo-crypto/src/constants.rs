@@ -27,14 +27,16 @@ pub enum Epoch {
     // Also, we don't use TLS epochs > 3.
 }
 
-impl From<u16> for Epoch {
-    fn from(e: u16) -> Self {
-        match e {
-            0 => Self::Initial,
-            1 => Self::ZeroRtt,
-            2 => Self::Handshake,
-            3 => Self::ApplicationData,
-            _ => unreachable!(),
+impl TryFrom<u16> for Epoch {
+    type Error = ();
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Initial),
+            1 => Ok(Self::ZeroRtt),
+            2 => Ok(Self::Handshake),
+            3 => Ok(Self::ApplicationData),
+            _ => Err(()),
         }
     }
 }
