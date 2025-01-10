@@ -34,7 +34,7 @@ use crate::{
     pmtud::Pmtud,
     stats::FrameStats,
     tparams::{self, PreferredAddress, TransportParameter},
-    CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
+    CloseReason, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator, ConnectionIdRef,
     ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
 };
 

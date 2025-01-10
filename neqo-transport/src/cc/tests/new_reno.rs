@@ -13,7 +13,7 @@ use test_fixture::now;
 
 use super::{IP_ADDR, MTU, RTT};
 use crate::{
-    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl},
+    cc::{new_reno::NewReno, ClassicCongestionControl, CongestionControl as _},
     packet::PacketType,
     pmtud::Pmtud,
     recovery::SentPacket,

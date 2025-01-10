@@ -9,7 +9,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::{
-    ops::{Deref, RangeInclusive},
+    ops::{Deref as _, RangeInclusive},
     time::{Duration, Instant},
 };
 

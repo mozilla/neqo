@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{event::Provider, header::HeadersExt, Encoder};
+use neqo_common::{event::Provider as _, header::HeadersExt as _, Encoder};
 use neqo_transport::StreamType;
 use test_fixture::now;
 

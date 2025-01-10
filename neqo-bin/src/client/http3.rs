@@ -11,14 +11,14 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Display,
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufWriter, Write as _},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
     time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
+use neqo_common::{event::Provider as _, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{

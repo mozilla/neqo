@@ -600,8 +600,8 @@ impl SecretAgent {
     /// Calling this function returns None until the connection is complete.
     #[must_use]
     pub const fn info(&self) -> Option<&SecretAgentInfo> {
-        match self.state {
-            HandshakeState::Complete(ref info) => Some(info),
+        match &self.state {
+            HandshakeState::Complete(info) => Some(info),
             _ => None,
         }
     }
@@ -692,8 +692,8 @@ impl SecretAgent {
             // Within this scope, _h maintains a mutable reference to self.io.
             let _h = self.io.wrap(input);
             match self.state {
-                HandshakeState::Authenticated(ref err) => unsafe {
-                    ssl::SSL_AuthCertificateComplete(self.fd, *err)
+                HandshakeState::Authenticated(err) => unsafe {
+                    ssl::SSL_AuthCertificateComplete(self.fd, err)
                 },
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
             }
@@ -726,9 +726,9 @@ impl SecretAgent {
         let records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
-        if let HandshakeState::Authenticated(ref err) = self.state {
+        if let HandshakeState::Authenticated(err) = self.state {
             let result =
-                secstatus_to_res(unsafe { ssl::SSL_AuthCertificateComplete(self.fd, *err) });
+                secstatus_to_res(unsafe { ssl::SSL_AuthCertificateComplete(self.fd, err) });
             qdebug!([self], "SSL_AuthCertificateComplete: {:?}", result);
             // This should return SECSuccess, so don't use update_state().
             self.capture_error(result)?;

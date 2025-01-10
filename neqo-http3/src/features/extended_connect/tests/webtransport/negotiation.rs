@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{event::Provider, Encoder};
+use neqo_common::{event::Provider as _, Encoder};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{CloseReason, Connection, StreamType};
 use test_fixture::{default_server_h3, now};

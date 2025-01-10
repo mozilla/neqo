@@ -11,7 +11,7 @@ use std::{
     fmt::{self, Display},
     fs::{create_dir_all, File, OpenOptions},
     io::{self, BufWriter},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -21,7 +21,7 @@ use std::{
 use clap::Parser;
 use futures::{
     future::{select, Either},
-    FutureExt, TryFutureExt,
+    FutureExt as _, TryFutureExt as _,
 };
 use neqo_common::{qdebug, qerror, qinfo, qlog::NeqoQlog, qwarn, Datagram, Role};
 use neqo_crypto::{
@@ -30,6 +30,7 @@ use neqo_crypto::{
 };
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
+use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -181,7 +182,7 @@ impl Args {
     #[cfg(any(test, feature = "bench"))]
     #[allow(clippy::missing_panics_doc)]
     pub fn new(requests: &[usize], upload: bool) -> Self {
-        use std::str::FromStr;
+        use std::str::FromStr as _;
         Self {
             shared: SharedArgs::default(),
             urls: requests
@@ -394,7 +395,7 @@ struct Runner<'a, H: Handler> {
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
-    recv_buf: Vec<u8>,
+    recv_buf: RecvBuf,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -412,7 +413,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             handler,
             args,
             timeout: None,
-            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
+            recv_buf: RecvBuf::new(),
         }
     }
 
@@ -481,9 +482,6 @@ impl<'a, H: Handler> Runner<'a, H> {
             let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? else {
                 break;
             };
-            if dgrams.len() == 0 {
-                break;
-            }
             self.client.process_multiple_input(dgrams, Instant::now());
             self.process_output().await?;
         }

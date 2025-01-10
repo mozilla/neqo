@@ -203,7 +203,7 @@ impl AddressValidationInfo {
 
     pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
         match self {
-            Self::Server(ref w) => w.upgrade().and_then(|validation| {
+            Self::Server(w) => w.upgrade().and_then(|validation| {
                 validation
                     .borrow()
                     .generate_new_token(peer_address, now)
