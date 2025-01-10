@@ -44,6 +44,7 @@ nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 if_then_some_else_none = "warn"
 get_unwrap = "warn"
+multiple_inherent_impl = "warn"
 pathbuf_init_then_push = "warn"
 ref_patterns = "warn"
 renamed_function_params = "warn"
