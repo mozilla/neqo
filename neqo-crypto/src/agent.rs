@@ -878,7 +878,8 @@ impl Client {
         arg: *mut c_void,
     ) -> ssl::SECStatus {
         let mut info: MaybeUninit<ssl::SSLResumptionTokenInfo> = MaybeUninit::uninit();
-        let Ok(info_len) = c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>()) else {
+        let Ok(info_len) = c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>())
+        else {
             return ssl::SECFailure;
         };
         let info_res = &ssl::SSL_GetResumptionTokenInfo(token, len, info.as_mut_ptr(), info_len);
