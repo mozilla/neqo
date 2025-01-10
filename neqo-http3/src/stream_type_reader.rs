@@ -253,7 +253,7 @@ mod tests {
     use crate::{
         control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
         frames::{H3_FRAME_TYPE_HEADERS, H3_FRAME_TYPE_SETTINGS},
-        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream, Res,
+        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream as _, Res,
     };
 
     struct Test {

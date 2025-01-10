@@ -10,7 +10,7 @@ mod sessions;
 mod streams;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider, header::HeadersExt};
+use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType};
 use test_fixture::{
