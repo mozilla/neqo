@@ -124,7 +124,7 @@ impl Default for Args {
     fn default() -> Self {
         use std::str::FromStr as _;
         Self {
-            shared: crate::SharedArgs::default(),
+            shared: SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
             db: PathBuf::from_str("../test-fixture/db").unwrap(),
             key: "key".to_string(),

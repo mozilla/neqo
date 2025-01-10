@@ -38,6 +38,23 @@ regex = { version = "1.9", default-features = false, features = ["unicode-perl"]
 static_assertions = { version = "1.1", default-features = false }
 url = { version = "2.5.3", default-features = false, features = ["std"] }
 
+[workspace.lints.rust]
+absolute_paths_not_starting_with_crate = "warn"
+ambiguous_negative_literals = "warn"
+closure_returning_async_block = "warn"
+explicit_outlives_requirements = "warn"
+macro_use_extern_crate = "warn"
+missing_abi = "warn"
+non_ascii_idents = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+# unused_qualifications = "warn" // Try to re-enable when MSRV is > 1.76
+
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
