@@ -21,29 +21,33 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
     }
 
     #[must_use]
-    fn skip_vec<const N: usize>(dec: &mut Decoder) -> Option<()> {
-        let len = dec.decode_uint(N)?.try_into().ok()?;
-        skip(dec, len)
+    fn skip_vec<T>(dec: &mut Decoder) -> Option<()>
+    where
+        T: TryFrom<u64>,
+        usize: TryFrom<T>,
+    {
+        let len = dec.decode_uint::<T>()?;
+        skip(dec, usize::try_from(len).ok()?)
     }
 
     let mut dec = Decoder::from(buf);
 
     // Return if buf is empty or does not contain a ClientHello (first byte == 1)
-    if buf.is_empty() || dec.decode_byte()? != 1 {
+    if buf.is_empty() || dec.decode_uint::<u8>()? != 1 {
         return None;
     }
     skip(&mut dec, 3 + 2 + 32)?; // Skip length, version, random
-    skip_vec::<1>(&mut dec)?; // Skip session_id
-    skip_vec::<2>(&mut dec)?; // Skip cipher_suites
-    skip_vec::<1>(&mut dec)?; // Skip compression_methods
+    skip_vec::<u8>(&mut dec)?; // Skip session_id
+    skip_vec::<u16>(&mut dec)?; // Skip cipher_suites
+    skip_vec::<u8>(&mut dec)?; // Skip compression_methods
     skip(&mut dec, 2)?;
 
     while dec.remaining() >= 4 {
-        let ext_type: u16 = dec.decode_uint(2)?.try_into().ok()?;
-        let ext_len: u16 = dec.decode_uint(2)?.try_into().ok()?;
+        let ext_type: u16 = dec.decode_uint()?;
+        let ext_len: u16 = dec.decode_uint()?;
         if ext_type == 0 {
             // SNI!
-            let sni_len: u16 = dec.decode_uint(2)?.try_into().ok()?;
+            let sni_len: u16 = dec.decode_uint()?;
             skip(&mut dec, 3)?; // Skip name_type and host_name length
             let start = dec.offset();
             let end = start + usize::from(sni_len) - 3;

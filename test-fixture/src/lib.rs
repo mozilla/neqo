@@ -20,7 +20,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider,
+    event::Provider as _,
     hex,
     qlog::{new_trace, NeqoQlog},
     qtrace, Datagram, Decoder, IpTosEcn, Role,
@@ -329,8 +329,8 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
         return (buf, None);
     }
     let mut dec = Decoder::from(buf);
-    let first = dec.decode_byte().unwrap();
-    let v = Version::try_from(WireVersion::try_from(dec.decode_uint(4).unwrap()).unwrap()).unwrap(); // Version.
+    let first: u8 = dec.decode_uint().unwrap();
+    let v = Version::try_from(dec.decode_uint::<WireVersion>().unwrap()).unwrap(); // Version.
     let (initial_type, retry_type) = if v == Version::Version2 {
         (0b1001_0000, 0b1000_0000)
     } else {
@@ -344,11 +344,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     }
     dec.skip_vvec(); // The rest of the packet.
     let p1 = &buf[..dec.offset()];
-    let p2 = if dec.remaining() > 0 {
-        Some(dec.decode_remainder())
-    } else {
-        None
-    };
+    let p2 = (dec.remaining() > 0).then(|| dec.decode_remainder());
     qtrace!("split packet: {} {:?}", hex(p1), p2.map(hex));
     (p1, p2)
 }
@@ -418,6 +414,6 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
 
 pub const EXPECTED_LOG_HEADER: &str = concat!(
     "\u{1e}",
-    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"Example qlog trace description","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"neqo-Client trace","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
     "\n"
 );

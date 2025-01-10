@@ -6,6 +6,8 @@
 
 // Buffering data to send until it is acked.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min, Ordering},
@@ -882,15 +884,13 @@ impl SendStream {
                             "next_bytes apply retransmission limit at {}",
                             self.retransmission_offset
                         );
-                        if self.retransmission_offset > offset {
+                        (self.retransmission_offset > offset).then(|| {
                             let len = min(
                                 usize::try_from(self.retransmission_offset - offset).unwrap(),
                                 slice.len(),
                             );
-                            Some((offset, &slice[..len]))
-                        } else {
-                            None
-                        }
+                            (offset, &slice[..len])
+                        })
                     } else {
                         Some((offset, slice))
                     }
@@ -1793,7 +1793,7 @@ pub struct SendStreamRecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{event::Provider, hex_with_len, qtrace, Encoder};
+    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder};
 
     use super::SendStreamRecoveryToken;
     use crate::{

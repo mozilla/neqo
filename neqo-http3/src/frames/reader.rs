@@ -24,7 +24,7 @@ pub trait FrameDecoder<T> {
 
     /// # Errors
     ///
-    /// Returns `HttpFrameUnexpected` if frames is not alowed, i.e. is a `H3_RESERVED_FRAME_TYPES`.
+    /// Returns `HttpFrameUnexpected` if frames is not allowed, i.e. is a `H3_RESERVED_FRAME_TYPES`.
     fn frame_type_allowed(_frame_type: HFrameType) -> Res<()> {
         Ok(())
     }
@@ -154,7 +154,7 @@ impl FrameReader {
         }
     }
 
-    /// returns true if quic stream was closed.
+    /// Returns true if QUIC stream was closed.
     ///
     /// # Errors
     ///
@@ -235,9 +235,6 @@ impl FrameReader {
         }
         Ok(None)
     }
-}
-
-impl FrameReader {
     fn frame_type_decoded<T: FrameDecoder<T>>(&mut self, frame_type: HFrameType) -> Res<()> {
         T::frame_type_allowed(frame_type)?;
         self.frame_type = frame_type;

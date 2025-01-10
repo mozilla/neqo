@@ -8,7 +8,6 @@
 #![allow(clippy::cast_sign_loss)]
 
 use std::{
-    net::{IpAddr, Ipv4Addr},
     ops::Sub,
     time::{Duration, Instant},
 };
@@ -16,6 +15,7 @@ use std::{
 use neqo_common::IpTosEcn;
 use test_fixture::now;
 
+use super::{IP_ADDR, MTU, RTT};
 use crate::{
     cc::{
         classic_cc::ClassicCongestionControl,
@@ -23,16 +23,13 @@ use crate::{
             convert_to_f64, Cubic, CUBIC_ALPHA, CUBIC_BETA_USIZE_DIVIDEND,
             CUBIC_BETA_USIZE_DIVISOR, CUBIC_C, CUBIC_FAST_CONVERGENCE,
         },
-        CongestionControl,
+        CongestionControl as _,
     },
     packet::PacketType,
     pmtud::Pmtud,
     recovery::SentPacket,
     rtt::RttEstimate,
 };
-
-const IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-const RTT: Duration = Duration::from_millis(100);
 
 const fn cwnd_after_loss(cwnd: usize) -> usize {
     cwnd * CUBIC_BETA_USIZE_DIVIDEND / CUBIC_BETA_USIZE_DIVISOR
@@ -95,7 +92,7 @@ fn expected_tcp_acks(cwnd_rtt_start: usize, mtu: usize) -> u64 {
 
 #[test]
 fn tcp_phase() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     // change to congestion avoidance state.
     cubic.set_ssthresh(1);
@@ -202,7 +199,7 @@ fn tcp_phase() {
 
 #[test]
 fn cubic_phase() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
     let cwnd_initial_f64: f64 = convert_to_f64(cubic.cwnd_initial());
     // Set last_max_cwnd to a higher number make sure that cc is the cubic phase (cwnd is calculated
     // by the cubic equation).
@@ -257,7 +254,7 @@ fn assert_within<T: Sub<Output = T> + PartialOrd + Copy>(value: T, expected: T, 
 
 #[test]
 fn congestion_event_slow_start() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
@@ -288,7 +285,7 @@ fn congestion_event_slow_start() {
 
 #[test]
 fn congestion_event_congestion_avoidance() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
@@ -312,7 +309,7 @@ fn congestion_event_congestion_avoidance() {
 
 #[test]
 fn congestion_event_congestion_avoidance_2() {
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);
@@ -341,7 +338,7 @@ fn congestion_event_congestion_avoidance_2() {
 #[test]
 fn congestion_event_congestion_avoidance_no_overflow() {
     const PTO: Duration = Duration::from_millis(120);
-    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR));
+    let mut cubic = ClassicCongestionControl::new(Cubic::default(), Pmtud::new(IP_ADDR, MTU));
 
     // Set ssthresh to something small to make sure that cc is in the congection avoidance phase.
     cubic.set_ssthresh(1);

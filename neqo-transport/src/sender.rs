@@ -109,7 +109,7 @@ impl PacketSender {
         stats: &mut Stats,
     ) {
         self.cc.on_packets_acked(acked_pkts, rtt_est, now);
-        self.pmtud_mut().on_packets_acked(acked_pkts, stats);
+        self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
     }
 
@@ -161,11 +161,7 @@ impl PacketSender {
     #[must_use]
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
         // Only pace if there are bytes in flight.
-        if self.cc.bytes_in_flight() > 0 {
-            Some(self.pacer.next(rtt, self.cc.cwnd()))
-        } else {
-            None
-        }
+        (self.cc.bytes_in_flight() > 0).then(|| self.pacer.next(rtt, self.cc.cwnd()))
     }
 
     #[must_use]

@@ -6,7 +6,7 @@
 
 use std::{mem, time::Duration};
 
-use neqo_common::{event::Provider, Decoder, Encoder};
+use neqo_common::{event::Provider as _, Decoder, Encoder};
 use test_fixture::{assertions, datagram, now};
 
 use super::{

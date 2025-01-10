@@ -203,7 +203,7 @@ impl QPackEncoder {
     }
 
     fn call_instruction(&mut self, instruction: DecoderInstruction, qlog: &NeqoQlog) -> Res<()> {
-        qdebug!([self], "call intruction {:?}", instruction);
+        qdebug!([self], "call instruction {:?}", instruction);
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
                 qlog::qpack_read_insert_count_increment_instruction(
@@ -290,7 +290,7 @@ impl QPackEncoder {
         stream_id: StreamId,
     ) -> Res<()> {
         if let Some(cap) = self.next_capacity {
-            // Check if it is possible to reduce the capacity, e.g. if enough space can be make free
+            // Check if it is possible to reduce the capacity, e.g. if enough space can be made free
             // for the reduction.
             if cap < self.table.capacity() && !self.table.can_evict_to(cap) {
                 return Err(Error::DynamicTableFull);
@@ -891,7 +891,7 @@ mod tests {
         assert!(res.is_ok());
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
-        // insert "content-length: 12345 which will fail because the ntry in the table cannot be
+        // insert "content-length: 12345 which will fail because the entry in the table cannot be
         // evicted.
         let res =
             encoder
@@ -912,7 +912,7 @@ mod tests {
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
 
-    // Test inserts block on waiting for acks
+    // Test inserts block on waiting for ACKs
     // test the table insertion is blocked:
     // 0 - waiting for a header ack
     // 2 - waiting for a stream cancel.
@@ -1220,7 +1220,7 @@ mod tests {
         // receive a header_ack for the first header block.
         recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
 
-        // The stream is not blocking anymore because header ack also acks the instruction.
+        // The stream is not blocking anymore because header ack also ACKs the instruction.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
     }
 
@@ -1260,7 +1260,7 @@ mod tests {
         // receive a header_ack for the second header block. This will ack the first as well
         recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_2);
 
-        // The stream is not blocking anymore because header ack also acks the instruction.
+        // The stream is not blocking anymore because header ack also ACKs the instruction.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
     }
 
@@ -1302,7 +1302,7 @@ mod tests {
         // acked. and the second steam will still be blocking.
         recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
 
-        // The stream is not blocking anymore because header ack also acks the instruction.
+        // The stream is not blocking anymore because header ack also ACKs the instruction.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
     }
 
@@ -1636,7 +1636,7 @@ mod tests {
                 0x36, 0x04, 0x31, 0x32, 0x33, 0x34
             ]
         );
-        // Also check that ther is no new instruction send by the encoder.
+        // Also check that there is no new instruction send by the encoder.
         assert!(encoder.conn.process_output(now()).dgram().is_none());
     }
 

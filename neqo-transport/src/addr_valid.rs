@@ -166,9 +166,9 @@ impl AddressValidation {
         let peer_addr = Self::encode_aad(peer_address, retry);
         let data = self.self_encrypt.open(peer_addr.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);
-        match dec.decode_uint(4) {
+        match dec.decode_uint::<u32>() {
             Some(d) => {
-                let end = self.start_time + Duration::from_millis(d);
+                let end = self.start_time + Duration::from_millis(u64::from(d));
                 if end < now {
                     qtrace!("Expired token: {:?} vs. {:?}", end, now);
                     return None;
@@ -292,7 +292,7 @@ impl NewTokenState {
     /// Is there a token available?
     pub fn has_token(&self) -> bool {
         match self {
-            Self::Client { ref pending, .. } => !pending.is_empty(),
+            Self::Client { pending, .. } => !pending.is_empty(),
             Self::Server(..) => false,
         }
     }
@@ -322,7 +322,7 @@ impl NewTokenState {
     pub fn save_token(&mut self, token: Vec<u8>) {
         if let Self::Client {
             ref mut pending,
-            ref old,
+            old,
         } = self
         {
             for t in old.iter().rev().chain(pending.iter().rev()) {

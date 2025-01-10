@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, mem, rc::Rc};
 
-use neqo_common::event::Provider;
+use neqo_common::event::Provider as _;
 use test_fixture::now;
 
 use super::{
@@ -208,7 +208,7 @@ fn critical() {
     let now = now();
 
     // Rather than connect, send stream data in 0.5-RTT.
-    // That allows this to test that critical streams pre-empt most frame types.
+    // That allows this to test that critical streams preempt most frame types.
     let dgram = client.process_output(now).dgram();
     let dgram = server.process(dgram, now).dgram();
     client.process_input(dgram.unwrap(), now);
@@ -259,7 +259,7 @@ fn important() {
     let now = now();
 
     // Rather than connect, send stream data in 0.5-RTT.
-    // That allows this to test that important streams pre-empt most frame types.
+    // That allows this to test that important streams preempt most frame types.
     let dgram = client.process_output(now).dgram();
     let dgram = server.process(dgram, now).dgram();
     client.process_input(dgram.unwrap(), now);
@@ -312,7 +312,7 @@ fn high_normal() {
     let now = now();
 
     // Rather than connect, send stream data in 0.5-RTT.
-    // That allows this to test that important streams pre-empt most frame types.
+    // That allows this to test that important streams preempt most frame types.
     let dgram = client.process_output(now).dgram();
     let dgram = server.process(dgram, now).dgram();
     client.process_input(dgram.unwrap(), now);

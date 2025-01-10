@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{event::Provider, qdebug, Datagram};
+use neqo_common::{event::Provider as _, qdebug, Datagram};
 use neqo_crypto::{
     constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys, AuthenticationStatus,
 };

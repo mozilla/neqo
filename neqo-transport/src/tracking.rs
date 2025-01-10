@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Tracking of received packets and generating acks thereof.
+// Tracking of received packets and generating ACKs thereof.
 
 use std::{
     cmp::min,
@@ -18,7 +18,7 @@ use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::{
-    ecn::EcnCount,
+    ecn,
     frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
@@ -86,14 +86,14 @@ impl PacketNumberSpaceSet {
 impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
     type Output = bool;
 
-    fn index(&self, space: PacketNumberSpace) -> &Self::Output {
-        &self.spaces[space]
+    fn index(&self, index: PacketNumberSpace) -> &Self::Output {
+        &self.spaces[index]
     }
 }
 
 impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
-    fn index_mut(&mut self, space: PacketNumberSpace) -> &mut Self::Output {
-        &mut self.spaces[space]
+    fn index_mut(&mut self, index: PacketNumberSpace) -> &mut Self::Output {
+        &mut self.spaces[index]
     }
 }
 
@@ -158,7 +158,7 @@ impl PacketRange {
         }
     }
 
-    /// Get the number of acknowleged packets in the range.
+    /// Get the number of acknowledged packets in the range.
     pub const fn len(&self) -> u64 {
         self.largest - self.smallest + 1
     }
@@ -271,7 +271,7 @@ pub struct RecvdPackets {
     /// for the purposes of generating immediate acknowledgment.
     ignore_order: bool,
     // The counts of different ECN marks that have been received.
-    ecn_count: EcnCount,
+    ecn_count: ecn::Count,
 }
 
 impl RecvdPackets {
@@ -294,12 +294,12 @@ impl RecvdPackets {
                 0
             },
             ignore_order: false,
-            ecn_count: EcnCount::default(),
+            ecn_count: ecn::Count::default(),
         }
     }
 
     /// Get the ECN counts.
-    pub fn ecn_marks(&mut self) -> &mut EcnCount {
+    pub fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 
@@ -1062,7 +1062,7 @@ mod tests {
         assert_eq!(stats.ack, 1);
 
         let mut dec = builder.as_decoder();
-        _ = dec.decode_byte().unwrap(); // Skip the short header.
+        dec.skip(1); // Skip the short header.
         let frame = Frame::decode(&mut dec).unwrap();
         if let Frame::Ack { ack_ranges, .. } = frame {
             assert_eq!(ack_ranges.len(), 0);

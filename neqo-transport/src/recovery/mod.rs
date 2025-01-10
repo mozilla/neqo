@@ -6,6 +6,8 @@
 
 // Tracking of sent packets and detecting their loss.
 
+#![allow(clippy::module_name_repetitions)]
+
 #[cfg(feature = "bench")]
 pub mod sent;
 #[cfg(not(feature = "bench"))]
@@ -14,7 +16,7 @@ mod token;
 
 use std::{
     cmp::{max, min},
-    convert::TryFrom,
+    convert::TryFrom as _,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -26,7 +28,7 @@ use sent::SentPackets;
 pub use token::{RecoveryToken, StreamRecoveryToken};
 
 use crate::{
-    ecn::EcnCount,
+    ecn,
     packet::PacketNumber,
     path::{Path, PathRef},
     qlog::{self, QlogMetric},
@@ -181,12 +183,10 @@ impl LossRecoverySpace {
         self.sent_packets
             .iter_mut()
             .filter_map(|sent| {
-                if sent.pto() {
+                sent.pto().then(|| {
                     qtrace!("PTO: marking packet {} lost ", sent.pn());
-                    Some(&*sent)
-                } else {
-                    None
-                }
+                    &*sent
+                })
             })
             .take(count)
     }
@@ -477,13 +477,11 @@ impl PtoState {
     /// Generate a sending profile, indicating what space it should be from.
     /// This takes a packet from the supply if one remains, or returns `None`.
     pub fn send_profile(&mut self, mtu: usize) -> Option<SendProfile> {
-        if self.packets > 0 {
+        (self.packets > 0).then(|| {
             // This is a PTO, so ignore the limit.
             self.packets -= 1;
-            Some(SendProfile::new_pto(self.space, mtu, self.probe))
-        } else {
-            None
-        }
+            SendProfile::new_pto(self.space, mtu, self.probe)
+        })
     }
 }
 
@@ -608,7 +606,7 @@ impl LossRecovery {
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
         acked_ranges: R,
-        ack_ecn: Option<EcnCount>,
+        ack_ecn: Option<ecn::Count>,
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>)
@@ -971,7 +969,7 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use std::{
         cell::RefCell,
-        convert::TryInto,
+        convert::TryInto as _,
         ops::{Deref, DerefMut, RangeInclusive},
         rc::Rc,
         time::{Duration, Instant},
@@ -986,7 +984,7 @@ mod tests {
     use crate::{
         cc::CongestionControlAlgorithm,
         cid::{ConnectionId, ConnectionIdEntry},
-        ecn::EcnCount,
+        ecn,
         packet::{PacketNumber, PacketType},
         path::{Path, PathRef},
         stats::{Stats, StatsCell},
@@ -1014,7 +1012,7 @@ mod tests {
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<PacketNumber>>,
-            ack_ecn: Option<EcnCount>,
+            ack_ecn: Option<ecn::Count>,
             ack_delay: Duration,
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
@@ -1050,6 +1048,7 @@ mod tests {
     impl Default for Fixture {
         fn default() -> Self {
             const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
+            let stats = StatsCell::default();
             let mut path = Path::temporary(
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
@@ -1057,6 +1056,7 @@ mod tests {
                 true,
                 NeqoQlog::default(),
                 now(),
+                &mut stats.borrow_mut(),
             );
             path.make_permanent(
                 None,
@@ -1065,7 +1065,7 @@ mod tests {
             path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);
             Self {
-                lr: LossRecovery::new(StatsCell::default(), FAST_PTO_SCALE),
+                lr: LossRecovery::new(stats, FAST_PTO_SCALE),
                 path: Rc::new(RefCell::new(path)),
             }
         }

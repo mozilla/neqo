@@ -186,7 +186,7 @@ pub fn new_trace(role: Role) -> qlog::TraceSeq {
             flow: None,
         },
         title: Some(format!("neqo-{role} trace")),
-        description: Some("Example qlog trace description".to_string()),
+        description: Some(format!("neqo-{role} trace")),
         configuration: Some(Configuration {
             time_offset: Some(0.0),
             original_uris: None,

@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::enum_map;
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
+use neqo_common::{event::Provider as _, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
@@ -690,6 +690,7 @@ fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
         c.conn_params.get_cc_algorithm(),
         c.conn_params.pacing_enabled(),
         now,
+        &mut c.stats.borrow_mut(),
     );
     if path.borrow().amplification_limit() < path.borrow().plpmtu() {
         // If the amplification limit is less than the PLPMTU, then the path

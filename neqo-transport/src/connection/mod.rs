@@ -6,6 +6,8 @@
 
 // The class implementing a QUIC connection.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -36,7 +38,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
     },
     crypto::{Crypto, CryptoDxState, CryptoSpace},
-    ecn::EcnCount,
+    ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{
         CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
@@ -201,7 +203,7 @@ impl AddressValidationInfo {
 
     pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
         match self {
-            Self::Server(ref w) => w.upgrade().and_then(|validation| {
+            Self::Server(w) => w.upgrade().and_then(|validation| {
                 validation
                     .borrow()
                     .generate_new_token(peer_address, now)
@@ -337,6 +339,7 @@ impl Connection {
             c.conn_params.pacing_enabled(),
             NeqoQlog::default(),
             now,
+            &mut c.stats.borrow_mut(),
         );
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
         Ok(c)
@@ -698,15 +701,13 @@ impl Connection {
     pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
         assert_eq!(self.role, Role::Client);
 
-        if self.crypto.has_resumption_token() {
+        self.crypto.has_resumption_token().then(|| {
             let token = self.make_resumption_token();
             if self.crypto.has_resumption_token() {
                 self.release_resumption_token_timer = Some(now + 3 * self.pto());
             }
-            Some(token)
-        } else {
-            None
-        }
+            token
+        })
     }
 
     /// Enable resumption, using a token previously provided.
@@ -731,9 +732,10 @@ impl Connection {
         );
         let mut dec = Decoder::from(token.as_ref());
 
-        let version = Version::try_from(u32::try_from(
-            dec.decode_uint(4).ok_or(Error::InvalidResumptionToken)?,
-        )?)?;
+        let version = Version::try_from(
+            dec.decode_uint::<WireVersion>()
+                .ok_or(Error::InvalidResumptionToken)?,
+        )?;
         qtrace!([self], "  version {:?}", version);
         if !self.conn_params.get_versions().all().contains(&version) {
             return Err(Error::DisabledVersion);
@@ -1553,6 +1555,7 @@ impl Connection {
             self.conn_params.get_cc_algorithm(),
             self.conn_params.pacing_enabled(),
             now,
+            &mut self.stats.borrow_mut(),
         );
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
@@ -1698,7 +1701,7 @@ impl Connection {
 
         // Get the next packet number we'll send, for ACK verification.
         // TODO: Once PR #2118 lands, this can move to `input_frame`. For now, it needs to be here,
-        // because we can drop packet number spaces as we parse throught the packet, and if an ACK
+        // because we can drop packet number spaces as we parse through the packet, and if an ACK
         // frame follows a CRYPTO frame that makes us drop a space, we need to know this
         // packet number to verify the ACK against.
         let next_pn = self
@@ -1924,6 +1927,7 @@ impl Connection {
             self.conn_params.get_cc_algorithm(),
             self.conn_params.pacing_enabled(),
             now,
+            &mut self.stats.borrow_mut(),
         );
         self.ensure_permanent(&path, now)?;
         qinfo!(
@@ -2290,7 +2294,7 @@ impl Connection {
         }
 
         if profile.ack_only(space) {
-            // If we are CC limited we can only send acks!
+            // If we are CC limited we can only send ACKs!
             return (tokens, false, false);
         }
 
@@ -2884,7 +2888,7 @@ impl Connection {
                 .ok_or(Error::InternalError)?
                 .borrow_mut()
                 .pmtud_mut()
-                .start();
+                .start(now, &mut self.stats.borrow_mut());
         }
         Ok(())
     }
@@ -3130,7 +3134,7 @@ impl Connection {
         &mut self,
         space: PacketNumberSpace,
         ack_ranges: R,
-        ack_ecn: Option<EcnCount>,
+        ack_ecn: Option<ecn::Count>,
         ack_delay: u64,
         now: Instant,
     ) where
@@ -3277,8 +3281,8 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// `ConnectionState` if the connecton stat does not allow to create streams.
-    /// `StreamLimitError` if we are limiied by server's stream concurence.
+    /// `ConnectionState` if the connection stat does not allow to create streams.
+    /// `StreamLimitError` if we are limited by server's stream concurrence.
     pub fn stream_create(&mut self, st: StreamType) -> Res<StreamId> {
         // Can't make streams while closing, otherwise rely on the stream limits.
         match self.state {
@@ -3547,7 +3551,7 @@ impl Connection {
     /// # Errors
     ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The funcion does not check if the
+    /// the allowed remote datagram size. The function does not check if the
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet. The app is encourage to use `max_datagram_size`

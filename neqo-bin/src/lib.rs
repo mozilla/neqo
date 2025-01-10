@@ -9,7 +9,7 @@
 
 use std::{
     fmt::{self, Display},
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
 };
@@ -63,10 +63,6 @@ pub struct SharedArgs {
     /// Enable special behavior for use with QUIC Network Simulator
     pub qns_test: Option<String>,
 
-    #[arg(name = "use-old-http", short = 'o', long)]
-    /// Use http 0.9 instead of HTTP/3
-    pub use_old_http: bool,
-
     #[command(flatten)]
     pub quic_parameters: QuicParameters,
 }
@@ -83,7 +79,6 @@ impl Default for SharedArgs {
             max_blocked_streams: 10,
             ciphers: vec![],
             qns_test: None,
-            use_old_http: false,
             quic_parameters: QuicParameters::default(),
         }
     }
@@ -240,10 +235,8 @@ impl QuicParameters {
         } else {
             let version = match alpn {
                 "h3" | "hq-interop" => Version::Version1,
+                #[cfg(feature = "draft-29")]
                 "h3-29" | "hq-29" => Version::Draft29,
-                "h3-30" | "hq-30" => Version::Draft30,
-                "h3-31" | "hq-31" => Version::Draft31,
-                "h3-32" | "hq-32" => Version::Draft32,
                 _ => Version::default(),
             };
             params.versions(version, Version::all())
@@ -273,7 +266,7 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr, time::SystemTime};
+    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
 
     use crate::{client, server};
 
@@ -283,8 +276,7 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
-            let mut dir = std::env::temp_dir();
-            dir.push(format!(
+            let dir = std::env::temp_dir().join(format!(
                 "neqo-bin-test-{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)

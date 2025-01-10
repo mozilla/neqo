@@ -202,10 +202,10 @@ impl Streams {
             }
             Frame::StreamsBlocked { .. } => {
                 stats.streams_blocked += 1;
-                // We send an update evry time we retire a stream. There is no need to
+                // We send an update every time we retire a stream. There is no need to
                 // trigger flow updates here.
             }
-            _ => unreachable!("This is not a stream Frame"),
+            _ => return Err(Error::InternalError), // This is not a stream frame.
         }
         Ok(())
     }
@@ -337,7 +337,7 @@ impl Streams {
         let (removed_bidi, removed_uni) = self.recv.clear_terminal(&self.send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
-        // The updates will be send if any steams has been removed.
+        // The updates will be send if any streams has been removed.
         self.remote_stream_limits[StreamType::BiDi].add_retired(removed_bidi);
         self.remote_stream_limits[StreamType::UniDi].add_retired(removed_uni);
     }
@@ -405,15 +405,22 @@ impl Streams {
     /// indicated by its stream id.
     /// # Errors
     /// When the stream cannot be created due to stream limits.
+    /// When the stream is locally-initiated and has not existed.
     pub fn obtain_stream(
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         self.ensure_created_if_remote(stream_id)?;
-        Ok((
-            self.send.get_mut(stream_id).ok(),
-            self.recv.get_mut(stream_id).ok(),
-        ))
+        // Has this local stream existed in the past, i.e., is its index lower than the number of
+        // used streams?
+        let existed = !stream_id.is_remote_initiated(self.role)
+            && self.local_stream_limits[stream_id.stream_type()].used() > stream_id.index();
+        let ss = self.send.get_mut(stream_id).ok();
+        let rs = self.recv.get_mut(stream_id).ok();
+        if ss.is_none() && rs.is_none() && !existed {
+            return Err(Error::StreamStateError);
+        }
+        Ok((ss, rs))
     }
 
     /// # Errors

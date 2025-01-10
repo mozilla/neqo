@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::module_name_repetitions)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -110,7 +112,8 @@ impl Crypto {
         agent.disable_end_of_early_data()?;
         let extension = match version {
             Version::Version2 | Version::Version1 => 0x39,
-            Version::Draft29 | Version::Draft30 | Version::Draft31 | Version::Draft32 => 0xffa5,
+            #[cfg(feature = "draft-29")]
+            Version::Draft29 => 0xffa5,
         };
         agent.extension_handler(extension, tphandler)?;
         Ok(Self {
@@ -729,8 +732,8 @@ pub struct CryptoState {
 impl Index<CryptoDxDirection> for CryptoState {
     type Output = CryptoDxState;
 
-    fn index(&self, dir: CryptoDxDirection) -> &Self::Output {
-        match dir {
+    fn index(&self, index: CryptoDxDirection) -> &Self::Output {
+        match index {
             CryptoDxDirection::Read => &self.rx,
             CryptoDxDirection::Write => &self.tx,
         }
@@ -738,8 +741,8 @@ impl Index<CryptoDxDirection> for CryptoState {
 }
 
 impl IndexMut<CryptoDxDirection> for CryptoState {
-    fn index_mut(&mut self, dir: CryptoDxDirection) -> &mut Self::Output {
-        match dir {
+    fn index_mut(&mut self, index: CryptoDxDirection) -> &mut Self::Output {
+        match index {
             CryptoDxDirection::Read => &mut self.rx,
             CryptoDxDirection::Write => &mut self.tx,
         }

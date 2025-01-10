@@ -6,7 +6,7 @@
 
 use std::{
     mem,
-    ops::{Deref, Div},
+    ops::{Deref, Div as _},
 };
 
 use neqo_common::{qtrace, Header};
@@ -386,7 +386,7 @@ impl<'a> HeaderDecoder<'a> {
     fn read_literal_with_name_ref_dynamic(&mut self, table: &HeaderTable) -> Res<Header> {
         qtrace!(
             [self],
-            "read literal with name reference ot the dynamic table."
+            "read literal with name reference of the dynamic table."
         );
 
         let index = self

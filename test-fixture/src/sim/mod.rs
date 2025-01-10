@@ -110,7 +110,7 @@ impl NodeHolder {
     fn ready(&self, now: Instant) -> bool {
         match self.state {
             Active => true,
-            Waiting(t) => t >= now,
+            Waiting(t) => t <= now,
             Idle => false,
         }
     }

@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)] // This lint doesn't work here.
-
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
@@ -86,7 +84,7 @@ const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 pub enum Error {
     NoError,
     // Each time this error is returned a different parameter is supplied.
-    // This will be used to distinguish each occurance of this error.
+    // This will be used to distinguish each occurrence of this error.
     InternalError,
     ConnectionRefused,
     FlowControlError,

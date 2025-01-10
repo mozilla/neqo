@@ -73,7 +73,7 @@ pub struct HeaderTable {
     /// The total number of inserts thus far.
     base: u64,
     /// This is number of inserts that are acked. this correspond to index of the first not acked.
-    /// This is only used by thee encoder.
+    /// This is only used by the encoder.
     acked_inserts_cnt: u64,
 }
 
@@ -112,9 +112,9 @@ impl HeaderTable {
     ///
     /// # Errors
     ///
-    /// `ChangeCapacity` if table capacity cannot be reduced.
-    /// The table cannot be reduce if there are entries that are referred at the moment or their
-    /// inserts are unacked.
+    /// [`Error::ChangeCapacity`] if table capacity cannot be reduced.
+    /// The table cannot be reduced if there are entries that are referred to at
+    /// the moment, or whose inserts are unacked.
     pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
         qtrace!([self], "set capacity to {}", cap);
         if !self.evict_to(cap) {
@@ -253,20 +253,11 @@ impl HeaderTable {
     }
 
     fn evict_to(&mut self, reduce: u64) -> bool {
-        self.evict_to_internal(reduce, false)
-    }
-
-    pub fn can_evict_to(&mut self, reduce: u64) -> bool {
-        self.evict_to_internal(reduce, true)
-    }
-
-    pub fn evict_to_internal(&mut self, reduce: u64, only_check: bool) -> bool {
         qtrace!(
             [self],
-            "reduce table to {}, currently used:{} only_check:{}",
+            "reduce table to {}, currently used:{}",
             reduce,
             self.used,
-            only_check
         );
         let mut used = self.used;
         while (!self.dynamic.is_empty()) && used > reduce {
@@ -275,16 +266,26 @@ impl HeaderTable {
                     return false;
                 }
                 used -= u64::try_from(e.size()).unwrap();
-                if !only_check {
-                    self.used -= u64::try_from(e.size()).unwrap();
-                    self.dynamic.pop_back();
-                }
+                self.used -= u64::try_from(e.size()).unwrap();
+                self.dynamic.pop_back();
             }
         }
         true
     }
 
-    pub fn insert_possible(&mut self, size: usize) -> bool {
+    pub fn can_evict_to(&self, reduce: u64) -> bool {
+        let evictable_size: usize = self
+            .dynamic
+            .iter()
+            .rev()
+            .take_while(|e| e.can_reduce(self.acked_inserts_cnt))
+            .map(DynamicTableEntry::size)
+            .sum();
+
+        self.used - u64::try_from(evictable_size).unwrap() <= reduce
+    }
+
+    pub fn insert_possible(&self, size: usize) -> bool {
         u64::try_from(size).unwrap() <= self.capacity
             && self.can_evict_to(self.capacity - u64::try_from(size).unwrap())
     }
@@ -365,7 +366,7 @@ impl HeaderTable {
             let entry = self.get_dynamic(index, self.base, false)?;
             name = entry.name().to_vec();
             value = entry.value().to_vec();
-            qtrace!([self], "dumplicate name={:?} value={:?}", name, value);
+            qtrace!([self], "duplicate name={:?} value={:?}", name, value);
         }
         self.insert(&name, &value)
     }
@@ -387,5 +388,56 @@ impl HeaderTable {
     /// Return number of acknowledge inserts.
     pub const fn get_acked_inserts_cnt(&self) -> u64 {
         self.acked_inserts_cnt
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Due to a bug in [`HeaderTable::can_evict_to`], the function would
+    /// continuously subtract the size of the last entry instead of the size of
+    /// each entry starting from the back.
+    ///
+    /// See <https://github.com/mozilla/neqo/issues/2306> for details.
+    mod issue_2306 {
+        use super::*;
+
+        const VALUE: &[u8; 2] = b"42";
+
+        /// Given two entries where the first is smaller than the second,
+        /// subtracting the size of the second from the overall size twice leads
+        /// to an underflow.
+        #[test]
+        fn can_evict_to_no_underflow() {
+            let mut table = HeaderTable::new(true);
+            table.set_capacity(10000).unwrap();
+
+            table.insert(b"header1", VALUE).unwrap();
+            table.insert(b"larger-header1", VALUE).unwrap();
+
+            table.increment_acked(2).unwrap();
+
+            assert!(table.can_evict_to(0));
+        }
+
+        /// Given two entries where only the first is acked, continuously
+        /// subtracting the size of the last entry would give a false-positive
+        /// on whether both entries can be evicted.
+        #[test]
+        fn can_evict_to_false() {
+            let mut table = HeaderTable::new(true);
+            table.set_capacity(10000).unwrap();
+
+            table.insert(b"header1", VALUE).unwrap();
+            table.insert(b"header2", VALUE).unwrap();
+
+            table.increment_acked(1).unwrap();
+
+            let first_entry_size = table.get_dynamic_with_abs_index(0).unwrap().size() as u64;
+
+            assert!(table.can_evict_to(first_entry_size));
+            assert!(!table.can_evict_to(0));
+        }
     }
 }

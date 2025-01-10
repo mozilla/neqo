@@ -17,7 +17,8 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Role,
+    event::Provider as _, hex, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
+    IpTos, Role,
 };
 use neqo_crypto::{
     encode_ech_config, AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult,
@@ -235,10 +236,20 @@ impl Server {
                             Output::None
                         },
                         |p| {
+                            qdebug!(
+                                [self],
+                                "type={:?} path:{} {}->{} {:?} len {}",
+                                PacketType::Retry,
+                                initial.dst_cid,
+                                dgram.destination(),
+                                dgram.source(),
+                                IpTos::default(),
+                                p.len(),
+                            );
                             Output::Datagram(Datagram::new(
                                 dgram.destination(),
                                 dgram.source(),
-                                dgram.tos(),
+                                IpTos::default(),
                                 p,
                             ))
                         },
@@ -260,7 +271,7 @@ impl Server {
                     Role::Server,
                     Some("Neqo server qlog".to_string()),
                     Some("Neqo server qlog".to_string()),
-                    odcid,
+                    format!("server-{odcid}"),
                 )
                 .unwrap_or_else(|e| {
                     qerror!("failed to create NeqoQlog: {}", e);
@@ -386,6 +397,16 @@ impl Server {
                 packet.wire_version(),
                 self.conn_params.get_versions().all(),
             );
+            qdebug!(
+                [self],
+                "type={:?} path:{} {}->{} {:?} len {}",
+                PacketType::VersionNegotiation,
+                packet.dcid(),
+                dgram.destination(),
+                dgram.source(),
+                IpTos::default(),
+                vn.len(),
+            );
 
             crate::qlog::server_version_information_failed(
                 &self.create_qlog_trace(packet.dcid()),
@@ -397,7 +418,7 @@ impl Server {
             return Output::Datagram(Datagram::new(
                 dgram.destination(),
                 dgram.source(),
-                dgram.tos(),
+                IpTos::default(),
                 vn,
             ));
         }

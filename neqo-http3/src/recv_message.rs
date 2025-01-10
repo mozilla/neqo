@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
-use neqo_common::{qdebug, qinfo, qtrace, Header};
+use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -16,7 +16,7 @@ use crate::{
     priority::PriorityHandler,
     push_controller::PushController,
     qlog, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
+    MessageType, Priority, PushId, ReceiveOutput, RecvStream, Res, Stream,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -61,7 +61,7 @@ enum RecvMessageState {
 
 #[derive(Debug)]
 struct PushInfo {
-    push_id: u64,
+    push_id: PushId,
     header_block: Vec<u8>,
 }
 
@@ -167,12 +167,8 @@ impl RecvMessage {
         }
 
         let is_web_transport = self.message_type == MessageType::Request
-            && headers
-                .iter()
-                .any(|h| h.name() == ":method" && h.value() == "CONNECT")
-            && headers
-                .iter()
-                .any(|h| h.name() == ":protocol" && h.value() == "webtransport");
+            && headers.contains_header(":method", "CONNECT")
+            && headers.contains_header(":protocol", "webtransport");
         if is_web_transport {
             self.conn_events
                 .extended_connect_new_session(self.stream_id, headers);
@@ -224,7 +220,7 @@ impl RecvMessage {
         Ok(())
     }
 
-    fn handle_push_promise(&mut self, push_id: u64, header_block: Vec<u8>) -> Res<()> {
+    fn handle_push_promise(&mut self, push_id: PushId, header_block: Vec<u8>) -> Res<()> {
         if self.push_handler.is_none() {
             return Err(Error::HttpFrameUnexpected);
         }
@@ -300,10 +296,7 @@ impl RecvMessage {
                         }
                     };
                 }
-                RecvMessageState::DecodingHeaders {
-                    ref header_block,
-                    fin,
-                } => {
+                RecvMessageState::DecodingHeaders { header_block, fin } => {
                     if self
                         .qpack_decoder
                         .borrow()

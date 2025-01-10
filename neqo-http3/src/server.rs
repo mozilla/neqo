@@ -315,7 +315,7 @@ mod tests {
         ops::{Deref, DerefMut},
     };
 
-    use neqo_common::{event::Provider, Encoder};
+    use neqo_common::{event::Provider as _, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
@@ -502,7 +502,7 @@ mod tests {
         (server, client)
     }
 
-    // Test http3 connection inintialization.
+    // Test http3 connection initialization.
     // The server will open the control and qpack streams and send SETTINGS frame.
     #[test]
     fn server_connect() {
@@ -561,7 +561,7 @@ mod tests {
         let out2 = server.process(out1.dgram(), now());
         mem::drop(neqo_trans_conn.process(out2.dgram(), now()));
 
-        // assert no error occured.
+        // assert no error occurred.
         assert_not_closed(server);
 
         PeerConnection {
@@ -685,13 +685,13 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x0, 0x2, 0x1, 0x2]);
     }
 
-    // send HEADERS frame on a cortrol stream
+    // send HEADERS frame on a control stream
     #[test]
     fn server_headers_frame_on_control_stream() {
         test_wrong_frame_on_control_stream(&[0x1, 0x2, 0x1, 0x2]);
     }
 
-    // send PUSH_PROMISE frame on a cortrol stream
+    // send PUSH_PROMISE frame on a control stream
     #[test]
     fn server_push_promise_frame_on_control_stream() {
         test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
@@ -836,7 +836,7 @@ mod tests {
     fn test_incomplete_frame(res: &[u8]) {
         let (mut hconn, mut peer_conn) = connect_and_receive_settings();
 
-        // send an incomplete reequest.
+        // send an incomplete request.
         let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
         peer_conn.stream_send(stream_id, res).unwrap();
         peer_conn.stream_close_send(stream_id).unwrap();
