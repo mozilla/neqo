@@ -448,7 +448,7 @@ impl CryptoDxState {
         cipher: Cipher,
     ) -> Res<Self> {
         qdebug!(
-            "Making {:?} {} CryptoDxState, v={:?} cipher={}",
+            "Making {:?} {:?} CryptoDxState, v={:?} cipher={}",
             direction,
             epoch,
             version,

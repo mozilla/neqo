@@ -52,17 +52,6 @@ impl From<Epoch> for usize {
     }
 }
 
-impl std::fmt::Display for Epoch {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::Initial => write!(f, "Initial"),
-            Self::ZeroRtt => write!(f, "ZeroRtt"),
-            Self::Handshake => write!(f, "Handshake"),
-            Self::ApplicationData => write!(f, "ApplicationData"),
-        }
-    }
-}
-
 /// Rather than defining a type alias and a bunch of constants, which leads to a ton of repetition,
 /// use this macro.
 macro_rules! remap_enum {
