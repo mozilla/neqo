@@ -20,7 +20,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, hex, qdebug, qinfo, qwarn, Datagram, Header};
+use neqo_common::{event::Provider, hex, qdebug, qinfo, qwarn, Datagram, Header};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
@@ -157,7 +157,7 @@ impl super::Client for Http3Client {
     }
 
     fn has_events(&self) -> bool {
-        neqo_common::event::Provider::has_events(self)
+        Provider::has_events(self)
     }
 }
 

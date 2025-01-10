@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::{event::Provider as _, qtrace, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
@@ -100,7 +97,7 @@ fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option
     let out = hconn_c.process_output(now()); // Initial
     let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
     let out = hconn_c.process(out.dgram(), now()); // ACK
-    mem::drop(hconn_s.process(out.dgram(), now())); // consume ACK
+    drop(hconn_s.process(out.dgram(), now())); // consume ACK
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
@@ -192,14 +189,14 @@ fn fetch() {
     let out = hconn_c.process(dgram, now());
     qtrace!("-----server");
     let out = hconn_s.process(out.dgram(), now());
-    mem::drop(hconn_c.process(out.dgram(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
     process_server_events(&hconn_s);
     let out = hconn_s.process(None::<Datagram>, now());
 
     qtrace!("-----client");
-    mem::drop(hconn_c.process(out.dgram(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
     let out = hconn_s.process(None::<Datagram>, now());
-    mem::drop(hconn_c.process(out.dgram(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
 }
 
@@ -221,7 +218,7 @@ fn response_103() {
     let out = hconn_c.process(dgram, now());
 
     let out = hconn_s.process(out.dgram(), now());
-    mem::drop(hconn_c.process(out.dgram(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
     let request = receive_request(&hconn_s).unwrap();
     let info_headers = [
         Header::new(":status", "103"),
@@ -231,7 +228,7 @@ fn response_103() {
     request.send_headers(&info_headers).unwrap();
     let out = hconn_s.process(None::<Datagram>, now());
 
-    mem::drop(hconn_c.process(out.dgram(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
 
     let info_headers_event = |e| {
         matches!(e, Http3ClientEvent::HeaderReady { headers,
@@ -242,7 +239,7 @@ fn response_103() {
 
     set_response(&request);
     let out = hconn_s.process(None::<Datagram>, now());
-    mem::drop(hconn_c.process(out.dgram(), now()));
+    drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
 }
 
@@ -259,7 +256,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
         ConnectionParameters::default().max_stream_data(StreamType::BiDi, false, STREAM_LIMIT),
     ));
     let mut hconn_s = default_http3_server();
-    mem::drop(connect_peers(&mut hconn_c, &mut hconn_s));
+    drop(connect_peers(&mut hconn_c, &mut hconn_s));
 
     // Client sends GET to server.
     let stream_id = hconn_c.fetch(
@@ -333,7 +330,7 @@ fn data_writable_events() {
     ));
     let mut hconn_s = default_http3_server();
 
-    mem::drop(connect_peers(&mut hconn_c, &mut hconn_s));
+    drop(connect_peers(&mut hconn_c, &mut hconn_s));
 
     // Create a request.
     let req = hconn_c

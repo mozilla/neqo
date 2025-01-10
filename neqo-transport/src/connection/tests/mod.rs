@@ -180,7 +180,7 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 /// This inserts a PING frame into packets.
 struct PingWriter {}
 
-impl crate::connection::test_internal::FrameWriter for PingWriter {
+impl test_internal::FrameWriter for PingWriter {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
         builder.encode_varint(FRAME_TYPE_PING);
     }

@@ -7,7 +7,6 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display},
-    mem,
     net::SocketAddr,
     rc::Rc,
     time::{Duration, Instant},
@@ -197,7 +196,7 @@ impl Paths {
         path.borrow_mut().set_ecn_baseline(baseline);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
-            mem::drop(self.select_primary(path, now));
+            drop(self.select_primary(path, now));
             self.migration_target = None;
         } else {
             self.migration_target = Some(Rc::clone(path));
@@ -240,7 +239,7 @@ impl Paths {
                 // Need a clone as `fallback` is borrowed from `self`.
                 let path = Rc::clone(fallback);
                 qinfo!([path.borrow()], "Failing over after primary path failed");
-                mem::drop(self.select_primary(&path, now));
+                drop(self.select_primary(&path, now));
                 true
             } else {
                 false
@@ -319,7 +318,7 @@ impl Paths {
                     let Some(primary) = self.migration_target.take() else {
                         break;
                     };
-                    mem::drop(self.select_primary(&primary, now));
+                    drop(self.select_primary(&primary, now));
                     return true;
                 }
                 break;

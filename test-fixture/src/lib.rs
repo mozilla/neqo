@@ -419,7 +419,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         None,
         None,
         None,
-        std::time::Instant::now(),
+        Instant::now(),
         trace,
         EventImportance::Base,
         Box::new(buf),
