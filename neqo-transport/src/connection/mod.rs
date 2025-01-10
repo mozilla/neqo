@@ -502,7 +502,6 @@ impl Connection {
         tp: tparams::TransportParameterId,
         value: tparams::TransportParameter,
     ) -> Res<()> {
-        assert!(cfg!(test) || tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
         if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())
