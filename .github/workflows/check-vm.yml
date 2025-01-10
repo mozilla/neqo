@@ -113,6 +113,8 @@ jobs:
             fi
             sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
             . "$HOME/.cargo/env"
+            # FIXME: Why do we need to set this on NetBSD?
+            export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
             cargo check --all-targets
             cargo clippy -- -D warnings
             # FIXME: No profiler support in netbsd currently, error is:
