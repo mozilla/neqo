@@ -45,15 +45,14 @@ jobs:
             set -e
             pkg install -y curl llvm nss pkgconf
           run: | # This executes as user
+            set -e
+            # FIXME: We're only comparing the NSS minor version here.
             NSS_MINOR_VERSION="$(pkg-config --modversion nss | cut -d. -f2)"
             NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)"
             if [ "$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
-              # Only check on this OS if the system NSS is usable.
-              # Exit with no error otherwise.
               echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
-            set -e
             sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
             . "$HOME/.cargo/env"
             cargo check --all-targets
@@ -73,6 +72,13 @@ jobs:
             pkg_add rust rust-clippy llvm-16.0.6p30 nss pkgconf # rustup doesn't support OpenBSD at all
           run: | # This executes as user
             set -e
+            # FIXME: We're only comparing the NSS minor version here.
+            NSS_MINOR_VERSION="$(pkg-config --modversion nss | cut -d. -f2)"
+            NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)"
+            if [ "$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
+              echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
+              exit 0
+            fi
             export LIBCLANG_PATH=/usr/local/llvm16/lib
             cargo check --all-targets
             cargo clippy -- -D warnings
@@ -98,6 +104,13 @@ jobs:
             pkgin -y install curl clang nss pkgconf
           run: | # This executes as user
             set -e
+            # FIXME: We're only comparing the NSS minor version here.
+            NSS_MINOR_VERSION="$(pkg-config --modversion nss | cut -d. -f2)"
+            NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)"
+            if [ "$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
+              echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
+              exit 0
+            fi
             sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
             . "$HOME/.cargo/env"
             cargo check --all-targets
@@ -122,6 +135,13 @@ jobs:
             pkg install clang-libs nss pkg-config
           run: | # This executes as also as root on Solaris
             set -e
+            # FIXME: We're only comparing the NSS minor version here.
+            NSS_MINOR_VERSION="$(pkg-config --modversion nss | cut -d. -f2)"
+            NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)"
+            if [ "$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
+              echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
+              exit 0
+            fi
             source <(curl -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install) || true # This doesn't exit with zero on success
             export LIBCLANG_PATH="/usr/lib/amd64"
             cargo check --all-targets
