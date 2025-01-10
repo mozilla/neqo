@@ -370,14 +370,9 @@ impl Drop for Time {
     }
 }
 
-// Only run these tests in CI on platforms other than MacOS and Windows, where the timer
-// inaccuracies are too high to pass the tests.
-#[cfg(all(
-    test,
-    not(all(any(target_os = "macos", target_os = "windows"), feature = "ci")),
-    // Sanitizers are too slow to uphold timing assumptions.
-    not(neqo_sanitize),
-))]
+// Only run these tests in CI on Linux, where the timer accuracies are OK enough to pass the tests,
+// but only when not running sanitizers.
+#[cfg(all(test, target_os = "linux", not(neqo_sanitize)))]
 mod test {
     use std::{
         thread::{sleep, spawn},
