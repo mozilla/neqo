@@ -305,7 +305,7 @@ impl SentPackets {
 mod tests {
     use std::{
         cell::OnceCell,
-        convert::TryFrom,
+        convert::TryFrom as _,
         time::{Duration, Instant},
     };
 

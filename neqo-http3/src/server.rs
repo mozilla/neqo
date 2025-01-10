@@ -314,7 +314,7 @@ mod tests {
         ops::{Deref, DerefMut},
     };
 
-    use neqo_common::{event::Provider, Encoder};
+    use neqo_common::{event::Provider as _, Encoder};
     use neqo_crypto::{AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{

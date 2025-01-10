@@ -8,7 +8,7 @@
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
 
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::{

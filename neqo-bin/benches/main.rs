@@ -6,7 +6,7 @@
 
 #![allow(clippy::unwrap_used)] // OK in a bench.
 
-use std::{env, path::PathBuf, str::FromStr};
+use std::{env, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use neqo_bin::{client, server};

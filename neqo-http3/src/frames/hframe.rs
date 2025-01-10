@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt::Debug, io::Write};
+use std::{fmt::Debug, io::Write as _};
 
 use neqo_common::{Decoder, Encoder};
 use neqo_crypto::random;

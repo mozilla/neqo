@@ -12,14 +12,14 @@ use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufWriter, Write as _},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
+use neqo_common::{event::Provider as _, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,

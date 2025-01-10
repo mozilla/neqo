@@ -6,7 +6,7 @@
 
 use std::mem;
 
-use neqo_common::{event::Provider, header::HeadersExt, Encoder};
+use neqo_common::{event::Provider as _, header::HeadersExt as _, Encoder};
 use neqo_transport::StreamType;
 use test_fixture::now;
 

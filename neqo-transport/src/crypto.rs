@@ -733,8 +733,8 @@ pub struct CryptoState {
 impl Index<CryptoDxDirection> for CryptoState {
     type Output = CryptoDxState;
 
-    fn index(&self, dir: CryptoDxDirection) -> &Self::Output {
-        match dir {
+    fn index(&self, index: CryptoDxDirection) -> &Self::Output {
+        match index {
             CryptoDxDirection::Read => &self.rx,
             CryptoDxDirection::Write => &self.tx,
         }
@@ -742,8 +742,8 @@ impl Index<CryptoDxDirection> for CryptoState {
 }
 
 impl IndexMut<CryptoDxDirection> for CryptoState {
-    fn index_mut(&mut self, dir: CryptoDxDirection) -> &mut Self::Output {
-        match dir {
+    fn index_mut(&mut self, index: CryptoDxDirection) -> &mut Self::Output {
+        match index {
             CryptoDxDirection::Read => &mut self.rx,
             CryptoDxDirection::Write => &mut self.tx,
         }

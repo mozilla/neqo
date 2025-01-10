@@ -21,7 +21,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider,
+    event::Provider as _,
     hex,
     qlog::{new_trace, NeqoQlog},
     qtrace, Datagram, Decoder, IpTosEcn, Role,
