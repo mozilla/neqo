@@ -46,11 +46,11 @@ jobs:
             pkg install -y curl llvm nss pkgconf
           run: | # This executes as user
             NSS_MINOR_VERSION="$(pkg-config --modversion nss | cut -d. -f2)"
-            NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)""
-            if ["$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
+            NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)"
+            if [ "$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
               # Only check on this OS if the system NSS is usable.
               # Exit with no error otherwise.
-              echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION)"
+              echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION); skipping checks"
               exit 0
             fi
             set -e
