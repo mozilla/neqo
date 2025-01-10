@@ -28,38 +28,27 @@ use crate::{
 };
 
 pub type TransportParameterId = u64;
-macro_rules! tpids {
-        { $($n:ident = $v:expr),+ $(,)? } => {
-            $(pub const $n: TransportParameterId = $v;)+
-
-            /// A complete list of internal transport parameters.
-            #[cfg(not(test))]
-            pub(crate) const INTERNAL_TRANSPORT_PARAMETERS: &[TransportParameterId] = &[ $($n),+ ];
-        };
-    }
-tpids! {
-    ORIGINAL_DESTINATION_CONNECTION_ID = 0x00,
-    IDLE_TIMEOUT = 0x01,
-    STATELESS_RESET_TOKEN = 0x02,
-    MAX_UDP_PAYLOAD_SIZE = 0x03,
-    INITIAL_MAX_DATA = 0x04,
-    INITIAL_MAX_STREAM_DATA_BIDI_LOCAL = 0x05,
-    INITIAL_MAX_STREAM_DATA_BIDI_REMOTE = 0x06,
-    INITIAL_MAX_STREAM_DATA_UNI = 0x07,
-    INITIAL_MAX_STREAMS_BIDI = 0x08,
-    INITIAL_MAX_STREAMS_UNI = 0x09,
-    ACK_DELAY_EXPONENT = 0x0a,
-    MAX_ACK_DELAY = 0x0b,
-    DISABLE_MIGRATION = 0x0c,
-    PREFERRED_ADDRESS = 0x0d,
-    ACTIVE_CONNECTION_ID_LIMIT = 0x0e,
-    INITIAL_SOURCE_CONNECTION_ID = 0x0f,
-    RETRY_SOURCE_CONNECTION_ID = 0x10,
-    VERSION_INFORMATION = 0x11,
-    GREASE_QUIC_BIT = 0x2ab2,
-    MIN_ACK_DELAY = 0xff02_de1a,
-    MAX_DATAGRAM_FRAME_SIZE = 0x0020,
-}
+pub const ORIGINAL_DESTINATION_CONNECTION_ID: TransportParameterId = 0x00;
+pub const IDLE_TIMEOUT: TransportParameterId = 0x01;
+pub const STATELESS_RESET_TOKEN: TransportParameterId = 0x02;
+pub const MAX_UDP_PAYLOAD_SIZE: TransportParameterId = 0x03;
+pub const INITIAL_MAX_DATA: TransportParameterId = 0x04;
+pub const INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: TransportParameterId = 0x05;
+pub const INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: TransportParameterId = 0x06;
+pub const INITIAL_MAX_STREAM_DATA_UNI: TransportParameterId = 0x07;
+pub const INITIAL_MAX_STREAMS_BIDI: TransportParameterId = 0x08;
+pub const INITIAL_MAX_STREAMS_UNI: TransportParameterId = 0x09;
+pub const ACK_DELAY_EXPONENT: TransportParameterId = 0x0a;
+pub const MAX_ACK_DELAY: TransportParameterId = 0x0b;
+pub const DISABLE_MIGRATION: TransportParameterId = 0x0c;
+pub const PREFERRED_ADDRESS: TransportParameterId = 0x0d;
+pub const ACTIVE_CONNECTION_ID_LIMIT: TransportParameterId = 0x0e;
+pub const INITIAL_SOURCE_CONNECTION_ID: TransportParameterId = 0x0f;
+pub const RETRY_SOURCE_CONNECTION_ID: TransportParameterId = 0x10;
+pub const VERSION_INFORMATION: TransportParameterId = 0x11;
+pub const GREASE_QUIC_BIT: TransportParameterId = 0x2ab2;
+pub const MIN_ACK_DELAY: TransportParameterId = 0xff02_de1a;
+pub const MAX_DATAGRAM_FRAME_SIZE: TransportParameterId = 0x0020;
 
 #[derive(Clone, Debug)]
 pub struct PreferredAddress {
