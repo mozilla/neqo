@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider, header::HeadersExt};
+use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,

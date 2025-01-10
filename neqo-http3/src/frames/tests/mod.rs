@@ -33,7 +33,7 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     // create a stream
     let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
 
-    let mut fr: FrameReader = FrameReader::new();
+    let mut fr = FrameReader::new();
 
     // convert string into u8 vector
     let buf = Encoder::from_hex(st);
