@@ -59,6 +59,7 @@ unused_macro_rules = "warn"
 cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
 create_dir = "warn"
 if_then_some_else_none = "warn"
@@ -71,6 +72,7 @@ renamed_function_params = "warn"
 semicolon_inside_block = "warn"
 try_err = "warn"
 unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
 unused_trait_names = "warn"
 
 # Optimize build dependencies, because bindgen and proc macros / style
