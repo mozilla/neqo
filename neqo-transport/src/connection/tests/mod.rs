@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::enum_map;
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder, Role};
+use neqo_common::{event::Provider as _, qdebug, qtrace, Datagram, Decoder, Role};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{fixture_init, new_neqo_qlog, now, DEFAULT_ADDR};
 
@@ -180,7 +180,7 @@ pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
 /// This inserts a PING frame into packets.
 struct PingWriter {}
 
-impl crate::connection::test_internal::FrameWriter for PingWriter {
+impl test_internal::FrameWriter for PingWriter {
     fn write_frames(&mut self, builder: &mut PacketBuilder) {
         builder.encode_varint(FRAME_TYPE_PING);
     }

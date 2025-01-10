@@ -193,7 +193,7 @@ impl<S: SocketRef> Socket<S> {
     /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            state: UdpSocketState::new((&socket).into())?,
             inner: socket,
         })
     }
@@ -233,7 +233,7 @@ mod tests {
         // platforms. Use `std` socket instead.  See also
         // <https://github.com/quinn-rs/quinn/pull/2123>.
         let sender = std::net::UdpSocket::bind("127.0.0.1:0")?;
-        let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
+        let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         sender.send_to(&[], receiver.inner.local_addr()?)?;

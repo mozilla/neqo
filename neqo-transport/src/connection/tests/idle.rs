@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::{qtrace, Encoder};
 use test_fixture::{now, split_datagram};
@@ -44,10 +41,10 @@ fn test_idle_timeout(client: &mut Connection, server: &mut Connection, timeout: 
     assert_eq!(res, Output::Callback(timeout));
 
     // Still connected after timeout-1 seconds. Idle timer not reset
-    mem::drop(client.process_output(now + timeout.checked_sub(Duration::from_secs(1)).unwrap()));
+    drop(client.process_output(now + timeout.checked_sub(Duration::from_secs(1)).unwrap()));
     assert!(matches!(client.state(), State::Confirmed));
 
-    mem::drop(client.process_output(now + timeout));
+    drop(client.process_output(now + timeout));
 
     // Not connected after timeout.
     assert!(matches!(client.state(), State::Closed(_)));
@@ -220,10 +217,10 @@ fn idle_send_packet2() {
 
     // First transmission at t=GAP.
     now += GAP;
-    mem::drop(send_something(&mut client, now));
+    drop(send_something(&mut client, now));
 
     // Second transmission at t=2*GAP.
-    mem::drop(send_something(&mut client, now + GAP));
+    drop(send_something(&mut client, now + GAP));
     assert!((GAP * 2 + DELTA) < default_timeout());
 
     // Still connected just before GAP + default_timeout().
@@ -266,16 +263,16 @@ fn idle_recv_packet() {
     assert_eq!(server.stream_send(stream, b"world").unwrap(), 5);
     let out = server.process_output(now);
     assert_ne!(out.as_dgram_ref(), None);
-    mem::drop(client.process(out.dgram(), now));
+    drop(client.process(out.dgram(), now));
     assert!(matches!(client.state(), State::Confirmed));
 
     // Add a little less than the idle timeout and we're still connected.
     now += default_timeout() - FUDGE;
-    mem::drop(client.process_output(now));
+    drop(client.process_output(now));
     assert!(matches!(client.state(), State::Confirmed));
 
     now += FUDGE;
-    mem::drop(client.process_output(now));
+    drop(client.process_output(now));
 
     assert!(matches!(client.state(), State::Closed(_)));
 }
@@ -303,7 +300,7 @@ fn idle_caching() {
     let dgram = client.process_output(middle).dgram();
 
     // Get the server to send its first probe and throw that away.
-    mem::drop(server.process_output(middle).dgram());
+    drop(server.process_output(middle).dgram());
     // Now let the server process the RTX'ed client Initial.  This causes the server
     // to send CRYPTO frames again, so manually extract and discard those.
     server.process_input(dgram.unwrap(), middle);
@@ -339,7 +336,7 @@ fn idle_caching() {
     let dgram = server.process_output(end).dgram();
     let (initial, _) = split_datagram(&dgram.unwrap());
     neqo_common::qwarn!("client ingests initial, finally");
-    mem::drop(client.process(Some(initial), end));
+    drop(client.process(Some(initial), end));
     maybe_authenticate(&mut client);
     let dgram = client.process_output(end).dgram();
     let dgram = server.process(dgram, end).dgram();

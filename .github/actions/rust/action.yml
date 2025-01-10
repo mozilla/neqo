@@ -24,8 +24,7 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # master
       with:
-        # TODO: Unpin once https://github.com/rust-lang/rust/issues/135235 is fixed.
-        toolchain: ${{ inputs.version == 'nightly' && 'nightly-2025-01-07' || inputs.version }}
+        toolchain: ${{ inputs.version  }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 

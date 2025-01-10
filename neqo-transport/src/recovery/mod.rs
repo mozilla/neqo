@@ -16,7 +16,6 @@ mod token;
 
 use std::{
     cmp::{max, min},
-    convert::TryFrom,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -969,7 +968,6 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use std::{
         cell::RefCell,
-        convert::TryInto,
         ops::{Deref, DerefMut, RangeInclusive},
         rc::Rc,
         time::{Duration, Instant},

@@ -6,7 +6,7 @@
 
 use std::{rc::Rc, time::Instant};
 
-use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Header, MessageType, Role};
+use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Header, MessageType, Role};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
 };
@@ -325,7 +325,7 @@ impl Http3ServerHandler {
                         MessageType::Response,
                         Http3StreamType::Http,
                         stream_id,
-                        self.base_handler.qpack_encoder.clone(),
+                        Rc::clone(&self.base_handler.qpack_encoder),
                         Box::new(self.events.clone()),
                     )),
                     Box::new(RecvMessage::new(

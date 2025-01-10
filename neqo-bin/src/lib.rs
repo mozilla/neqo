@@ -9,7 +9,7 @@
 
 use std::{
     fmt::{self, Display},
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::Duration,
 };
@@ -266,7 +266,7 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr, time::SystemTime};
+    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
 
     use crate::{client, server};
 
