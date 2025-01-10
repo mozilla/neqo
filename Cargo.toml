@@ -49,6 +49,7 @@ pathbuf_init_then_push = "warn"
 redundant_type_annotations = "warn"
 ref_patterns = "warn"
 renamed_function_params = "warn"
+try_err = "warn"
 unneeded_field_pattern = "warn"
 unused_trait_names = "warn"
 
