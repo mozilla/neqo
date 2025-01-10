@@ -379,7 +379,7 @@ mod tests {
     use test_receiver::TestReceiver;
 
     use super::{
-        parse_utf8, str, test_receiver, Error, IntReader, LiteralReader, ReadByte,
+        parse_utf8, str, test_receiver, Error, IntReader, LiteralReader, ReadByte as _,
         ReceiverBufferWrapper, Res,
     };
 
