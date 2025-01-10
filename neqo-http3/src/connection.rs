@@ -881,7 +881,7 @@ impl Http3Connection {
             MessageType::Request,
             stream_type,
             stream_id,
-            self.qpack_encoder.clone(),
+            Rc::clone(&self.qpack_encoder),
             send_events,
         );
 
@@ -1102,8 +1102,8 @@ impl Http3Connection {
         )));
         self.add_streams(
             id,
-            Box::new(extended_conn.clone()),
-            Box::new(extended_conn.clone()),
+            Box::new(Rc::clone(&extended_conn)),
+            Box::new(Rc::clone(&extended_conn)),
         );
 
         let final_headers = Self::create_fetch_headers(&RequestDescription {
@@ -1183,7 +1183,7 @@ impl Http3Connection {
                         )));
                     self.add_streams(
                         stream_id,
-                        Box::new(extended_conn.clone()),
+                        Box::new(Rc::clone(&extended_conn)),
                         Box::new(extended_conn),
                     );
                     self.streams_with_pending_data.insert(stream_id);
@@ -1326,7 +1326,7 @@ impl Http3Connection {
                     stream_id,
                     session_id,
                     send_events,
-                    webtransport_session.clone(),
+                    Rc::clone(&webtransport_session),
                     local,
                 )),
                 Box::new(WebTransportRecvStream::new(

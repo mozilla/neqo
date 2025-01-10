@@ -331,7 +331,7 @@ impl WebTransportRequest {
 
         Ok(Http3OrWebTransportStream::new(
             self.stream_handler.conn.clone(),
-            self.stream_handler.handler.clone(),
+            Rc::clone(&self.stream_handler.handler),
             Http3StreamInfo::new(id, Http3StreamType::WebTransport(session_id)),
         ))
     }

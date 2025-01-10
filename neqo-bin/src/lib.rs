@@ -282,7 +282,7 @@ mod tests {
                     .unwrap()
                     .as_secs()
             ));
-            fs::create_dir(&dir).unwrap();
+            fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 
