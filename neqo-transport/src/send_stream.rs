@@ -1793,7 +1793,7 @@ pub struct SendStreamRecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{event::Provider, hex_with_len, qtrace, Encoder};
+    use neqo_common::{event::Provider as _, hex_with_len, qtrace, Encoder};
 
     use super::SendStreamRecoveryToken;
     use crate::{

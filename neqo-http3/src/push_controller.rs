@@ -156,6 +156,12 @@ pub struct PushController {
     conn_events: Http3ClientEvents,
 }
 
+impl Display for PushController {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Push controller")
+    }
+}
+
 impl PushController {
     pub const fn new(max_concurent_push: u64, conn_events: Http3ClientEvents) -> Self {
         Self {
@@ -165,15 +171,7 @@ impl PushController {
             conn_events,
         }
     }
-}
 
-impl Display for PushController {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Push controller")
-    }
-}
-
-impl PushController {
     /// A new `push_promise` has been received.
     ///
     /// # Errors

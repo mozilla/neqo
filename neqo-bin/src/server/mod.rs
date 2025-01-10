@@ -10,7 +10,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     fs, io,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     pin::Pin,
     process::exit,
@@ -21,7 +21,7 @@ use std::{
 use clap::Parser;
 use futures::{
     future::{select, select_all, Either},
-    FutureExt,
+    FutureExt as _,
 };
 use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{
@@ -122,7 +122,7 @@ pub struct Args {
 #[cfg(any(test, feature = "bench"))]
 impl Default for Args {
     fn default() -> Self {
-        use std::str::FromStr;
+        use std::str::FromStr as _;
         Self {
             shared: crate::SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
@@ -393,7 +393,7 @@ pub async fn server(mut args: Args) -> Res<()> {
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
         qerror!("No valid hosts defined");
-        Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"))?;
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
     let sockets = hosts
         .into_iter()
