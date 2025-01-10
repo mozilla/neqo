@@ -33,6 +33,7 @@ macro_rules! tpids {
             $(pub const $n: TransportParameterId = $v;)+
 
             /// A complete list of internal transport parameters.
+            #[cfg(test)]
             pub(crate) const INTERNAL_TRANSPORT_PARAMETERS: &[TransportParameterId] = &[ $($n),+ ];
         };
     }

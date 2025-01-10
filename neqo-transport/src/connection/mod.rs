@@ -55,10 +55,7 @@ use crate::{
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
-    tparams::{
-        self, TransportParameter, TransportParameterId, TransportParameters,
-        TransportParametersHandler,
-    },
+    tparams::{self, TransportParameters, TransportParametersHandler},
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
     version::{Version, WireVersion},
     AppError, CloseReason, Error, Res, StreamId,
@@ -499,8 +496,13 @@ impl Connection {
     /// When the transport parameter is invalid.
     /// # Panics
     /// This panics if the transport parameter is known to this crate.
-    pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
-        debug_assert!(!tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
+    #[cfg(test)]
+    pub fn set_local_tparam(
+        &self,
+        tp: tparams::TransportParameterId,
+        value: tparams::TransportParameter,
+    ) -> Res<()> {
+        assert!(cfg!(test) || tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
         if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())
