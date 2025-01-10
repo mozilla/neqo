@@ -1217,7 +1217,7 @@ fn server_initial_retransmits_identical() {
     // Force the server to retransmit its Initial packet a number of times and make sure the
     // retranmissions are identical to the original. Also, verify the PTO durations.
     let mut server = default_server();
-    let mut total_ptos: Duration = Duration::from_secs(0);
+    let mut total_ptos = Duration::from_secs(0);
     for i in 1..=3 {
         let si = server.process(ci.take(), now).dgram().unwrap();
         assert_eq!(si.len(), server.plpmtu());
