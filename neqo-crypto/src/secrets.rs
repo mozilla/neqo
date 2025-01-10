@@ -6,6 +6,7 @@
 
 use std::{os::raw::c_void, pin::Pin};
 
+use enum_map::EnumMap;
 use neqo_common::qdebug;
 
 use crate::{
@@ -43,23 +44,16 @@ impl From<SSLSecretDirection::Type> for SecretDirection {
 #[allow(clippy::module_name_repetitions)]
 pub struct DirectionalSecrets {
     // We only need to maintain 3 secrets for the epochs used during the handshake.
-    secrets: [Option<SymKey>; 3],
+    secrets: EnumMap<Epoch, Option<SymKey>>,
 }
 
 impl DirectionalSecrets {
     fn put(&mut self, epoch: Epoch, key: SymKey) {
-        assert!(epoch > 0);
-        let i = (epoch - 1) as usize;
-        assert!(i < self.secrets.len());
-        // assert!(self.secrets[i].is_none());
-        self.secrets[i] = Some(key);
+        self.secrets[epoch] = Some(key);
     }
 
     pub fn take(&mut self, epoch: Epoch) -> Option<SymKey> {
-        assert!(epoch > 0);
-        let i = (epoch - 1) as usize;
-        assert!(i < self.secrets.len());
-        self.secrets[i].take()
+        self.secrets[epoch].take()
     }
 }
 
@@ -77,7 +71,13 @@ impl Secrets {
         secret: *mut PK11SymKey,
         arg: *mut c_void,
     ) {
-        let secrets = arg.cast::<Self>().as_mut().unwrap();
+        let Ok(epoch) = Epoch::try_from(epoch) else {
+            // Don't touch secrets.
+            return;
+        };
+        let Some(secrets) = arg.cast::<Self>().as_mut() else {
+            return;
+        };
         secrets.put_raw(epoch, dir, secret);
     }
 

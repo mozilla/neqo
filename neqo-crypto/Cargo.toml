@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
+enum-map = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common" }
 
