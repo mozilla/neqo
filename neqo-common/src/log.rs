@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::{
-    io::Write,
+    io::Write as _,
     sync::{Once, OnceLock},
     time::{Duration, Instant},
 };

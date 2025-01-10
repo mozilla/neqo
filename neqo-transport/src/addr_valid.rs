@@ -292,7 +292,7 @@ impl NewTokenState {
     /// Is there a token available?
     pub fn has_token(&self) -> bool {
         match self {
-            Self::Client { ref pending, .. } => !pending.is_empty(),
+            Self::Client { pending, .. } => !pending.is_empty(),
             Self::Server(..) => false,
         }
     }
@@ -322,7 +322,7 @@ impl NewTokenState {
     pub fn save_token(&mut self, token: Vec<u8>) {
         if let Self::Client {
             ref mut pending,
-            ref old,
+            old,
         } = self
         {
             for t in old.iter().rev().chain(pending.iter().rev()) {

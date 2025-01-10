@@ -1276,7 +1276,7 @@ impl EventProvider for Http3Client {
 mod tests {
     use std::{mem, time::Duration};
 
-    use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
+    use neqo_common::{event::Provider as _, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::{encoder::QPackEncoder, QpackSettings};
     use neqo_transport::{
@@ -1297,7 +1297,7 @@ mod tests {
         frames::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS},
-        Http3Server, Priority, PushId, RecvStream,
+        Http3Server, Priority, PushId, RecvStream as _,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {

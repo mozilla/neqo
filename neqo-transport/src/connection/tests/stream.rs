@@ -6,7 +6,7 @@
 
 use std::{cmp::max, collections::HashMap, mem};
 
-use neqo_common::{event::Provider, qdebug};
+use neqo_common::{event::Provider as _, qdebug};
 use test_fixture::now;
 
 use super::{

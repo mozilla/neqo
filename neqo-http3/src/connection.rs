@@ -35,7 +35,7 @@ use crate::{
     qpack_decoder_receiver::DecoderRecvStream,
     qpack_encoder_receiver::EncoderRecvStream,
     recv_message::{RecvMessage, RecvMessageInfo},
-    request_target::{AsRequestTarget, RequestTarget},
+    request_target::{AsRequestTarget, RequestTarget as _},
     send_message::SendMessage,
     settings::{HSettingType, HSettings, HttpZeroRttChecker},
     stream_type_reader::NewStreamHeadReader,
@@ -1604,7 +1604,7 @@ impl Http3Connection {
         conn: &mut Connection,
     ) -> Option<Box<dyn RecvStream>> {
         let stream = self.recv_streams.remove(&stream_id);
-        if let Some(ref s) = stream {
+        if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
                 self.send_streams.remove(&stream_id).unwrap();
                 if let Some(wt) = s.webtransport() {
@@ -1621,7 +1621,7 @@ impl Http3Connection {
         conn: &mut Connection,
     ) -> Option<Box<dyn SendStream>> {
         let stream = self.send_streams.remove(&stream_id);
-        if let Some(ref s) = stream {
+        if let Some(s) = &stream {
             if s.stream_type() == Http3StreamType::ExtendedConnect {
                 if let Some(wt) = self.recv_streams.remove(&stream_id).unwrap().webtransport() {
                     self.remove_extended_connect(&wt, conn);
