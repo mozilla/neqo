@@ -869,6 +869,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "regex",
+ "rustc-hash 2.1.0",
  "tokio",
  "url",
 ]

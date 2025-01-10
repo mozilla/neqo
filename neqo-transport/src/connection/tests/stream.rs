@@ -4,9 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap};
+use std::cmp::max;
 
 use neqo_common::{event::Provider as _, qdebug};
+use rustc_hash::FxHashMap;
 use test_fixture::now;
 
 use super::{
@@ -164,7 +165,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
         })
         .enumerate()
         .map(|(a, b)| (b, a))
-        .collect::<HashMap<_, _>>();
+        .collect::<FxHashMap<_, _>>();
 
     // streams should arrive in priority order, not order of creation, if sendorder prioritization
     // is working correctly

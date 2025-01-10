@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{borrow::Cow, cell::RefCell, collections::HashMap, fmt::Display, rc::Rc, time::Instant};
+use std::{borrow::Cow, cell::RefCell, fmt::Display, rc::Rc, time::Instant};
 
 use neqo_common::{event::Provider as _, hex, qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{generate_ech_keys, random, AllowZeroRtt, AntiReplay};
@@ -14,6 +14,7 @@ use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, Output, State, StreamId,
 };
 use regex::Regex;
+use rustc_hash::FxHashMap;
 
 use super::{qns_read_response, Args};
 use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
@@ -26,8 +27,8 @@ struct HttpStreamState {
 
 pub struct HttpServer {
     server: Server,
-    write_state: HashMap<StreamId, HttpStreamState>,
-    read_state: HashMap<StreamId, Vec<u8>>,
+    write_state: FxHashMap<StreamId, HttpStreamState>,
+    read_state: FxHashMap<StreamId, Vec<u8>>,
     is_qns_test: bool,
     regex: Regex,
     read_buffer: Vec<u8>,
@@ -66,8 +67,8 @@ impl HttpServer {
         let is_qns_test = args.shared.qns_test.is_some();
         Ok(Self {
             server,
-            write_state: HashMap::new(),
-            read_state: HashMap::new(),
+            write_state: FxHashMap::default(),
+            read_state: FxHashMap::default(),
             is_qns_test,
             regex: if is_qns_test {
                 Regex::new(r"GET +/(\S+)(?:\r)?\n").unwrap()
