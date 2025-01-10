@@ -10,7 +10,7 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
-    ops::Deref as _,
+    ops::Deref,
     rc::Rc,
 };
 
