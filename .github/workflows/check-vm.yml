@@ -30,6 +30,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - id: nss-version
+        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+
       - run: curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
 
       - if: matrix.os == 'freebsd'
@@ -41,6 +45,14 @@ jobs:
             set -e
             pkg install -y curl llvm nss pkgconf
           run: | # This executes as user
+            NSS_MINOR_VERSION="$(pkg-config --modversion nss | cut -d. -f2)"
+            NSS_MINIMUM_VERSION="$(echo ${{ steps.nss-version.outputs.minimum }} | cut -d. -f2)""
+            if ["$NSS_MINOR_VERSION" -lt "$NSS_MINIMUM_VERSION" ]; then
+              # Only check on this OS if the system NSS is usable.
+              # Exit with no error otherwise.
+              echo "System NSS package too old (minorversion $NSS_MINOR_VERSION < $NSS_MINIMUM_VERSION)"
+              exit 0
+            fi
             set -e
             sh rustup.sh --default-toolchain stable --profile minimal --component clippy llvm-tools -y
             . "$HOME/.cargo/env"
