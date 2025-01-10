@@ -51,7 +51,7 @@ neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-bench = ["neqo-transport/bench"]
+bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench"]
 draft-29 = []
 
 [package.metadata.cargo-machete]

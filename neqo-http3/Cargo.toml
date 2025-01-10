@@ -33,6 +33,7 @@ neqo-transport = { path = "./../neqo-transport", features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
+bench = ["neqo-common/bench", "neqo-crypto/bench", "neqo-qpack/bench", "neqo-transport/bench"]
 disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
 draft-29 = []
 
