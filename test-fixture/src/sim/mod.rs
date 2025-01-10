@@ -251,7 +251,7 @@ impl Simulator {
 
         qinfo!("{}: seed {}", self.name, self.rng.borrow().seed_str());
         for n in &mut self.nodes {
-            n.init(self.rng.clone(), start);
+            n.init(Rc::clone(&self.rng), start);
         }
 
         let setup_start = Instant::now();

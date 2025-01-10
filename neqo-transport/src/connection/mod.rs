@@ -55,10 +55,7 @@ use crate::{
     stats::{Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
-    tparams::{
-        self, TransportParameter, TransportParameterId, TransportParameters,
-        TransportParametersHandler,
-    },
+    tparams::{self, TransportParameters, TransportParametersHandler},
     tracking::{AckTracker, PacketNumberSpace, RecvdPackets},
     version::{Version, WireVersion},
     AppError, CloseReason, Error, Res, StreamId,
@@ -406,7 +403,7 @@ impl Connection {
             state: State::Init,
             paths: Paths::default(),
             cid_manager,
-            tps: tphandler.clone(),
+            tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
             address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
@@ -444,7 +441,7 @@ impl Connection {
         zero_rtt_checker: impl ZeroRttChecker + 'static,
     ) -> Res<()> {
         self.crypto
-            .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
+            .server_enable_0rtt(Rc::clone(&self.tps), anti_replay, zero_rtt_checker)
     }
 
     /// # Errors
@@ -499,11 +496,12 @@ impl Connection {
     /// When the transport parameter is invalid.
     /// # Panics
     /// This panics if the transport parameter is known to this crate.
-    pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
-        #[cfg(not(test))]
-        {
-            assert!(!tparams::INTERNAL_TRANSPORT_PARAMETERS.contains(&tp));
-        }
+    #[cfg(test)]
+    pub fn set_local_tparam(
+        &self,
+        tp: tparams::TransportParameterId,
+        value: tparams::TransportParameter,
+    ) -> Res<()> {
         if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())
@@ -1558,7 +1556,7 @@ impl Connection {
         );
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
-        self.capture_error(Some(path), now, 0, res).ok();
+        _ = self.capture_error(Some(path), now, 0, res);
     }
 
     fn input_path(

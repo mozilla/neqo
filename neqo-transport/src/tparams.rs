@@ -31,10 +31,6 @@ pub type TransportParameterId = u64;
 macro_rules! tpids {
         { $($n:ident = $v:expr),+ $(,)? } => {
             $(pub const $n: TransportParameterId = $v;)+
-
-            /// A complete list of internal transport parameters.
-            #[cfg(not(test))]
-            pub(crate) const INTERNAL_TRANSPORT_PARAMETERS: &[TransportParameterId] = &[ $($n),+ ];
         };
     }
 tpids! {

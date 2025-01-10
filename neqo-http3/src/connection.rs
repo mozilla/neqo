@@ -736,8 +736,12 @@ impl Http3Connection {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
                 }
-                // set incoming WebTransport streams to be fair (share bandwidth)
-                conn.stream_fairness(stream_id, true).ok();
+                // Set incoming WebTransport streams to be fair (share bandwidth).
+                // We may call this with an invalid stream ID, so ignore that error.
+                match conn.stream_fairness(stream_id, true) {
+                    Ok(()) | Err(neqo_transport::Error::InvalidStreamId) => (),
+                    Err(e) => return Err(Error::from(e)),
+                };
                 qinfo!(
                     [self],
                     "A new WebTransport stream {} for session {}.",
@@ -901,7 +905,7 @@ impl Http3Connection {
             MessageType::Request,
             stream_type,
             stream_id,
-            self.qpack_encoder.clone(),
+            Rc::clone(&self.qpack_encoder),
             send_events,
         );
 
@@ -1132,8 +1136,8 @@ impl Http3Connection {
         )));
         self.add_streams(
             id,
-            Box::new(extended_conn.clone()),
-            Box::new(extended_conn.clone()),
+            Box::new(Rc::clone(&extended_conn)),
+            Box::new(Rc::clone(&extended_conn)),
         );
 
         let final_headers = Self::create_fetch_headers(&RequestDescription {
@@ -1220,7 +1224,7 @@ impl Http3Connection {
                         )?));
                     self.add_streams(
                         stream_id,
-                        Box::new(extended_conn.clone()),
+                        Box::new(Rc::clone(&extended_conn)),
                         Box::new(extended_conn),
                     );
                     self.streams_with_pending_data.insert(stream_id);
@@ -1286,7 +1290,6 @@ impl Http3Connection {
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
-        // This really can't fail, panics if it does
         conn.stream_fairness(stream_id, true)?;
 
         self.webtransport_create_stream_internal(
@@ -1371,7 +1374,7 @@ impl Http3Connection {
                     stream_id,
                     session_id,
                     send_events,
-                    webtransport_session.clone(),
+                    Rc::clone(&webtransport_session),
                     local,
                 )),
                 Box::new(WebTransportRecvStream::new(

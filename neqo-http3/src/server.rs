@@ -151,6 +151,7 @@ impl Http3Server {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn process_events(&mut self, conn: &ConnectionRef, now: Instant) {
         let mut remove = false;
         let http3_parameters = &self.http3_parameters;
@@ -171,7 +172,11 @@ impl Http3Server {
                         headers,
                         fin,
                     } => self.events.headers(
-                        Http3OrWebTransportStream::new(conn.clone(), handler.clone(), stream_info),
+                        Http3OrWebTransportStream::new(
+                            conn.clone(),
+                            Rc::clone(handler),
+                            stream_info,
+                        ),
                         headers,
                         fin,
                     ),
@@ -187,15 +192,19 @@ impl Http3Server {
                     }
                     Http3ServerConnEvent::DataWritable { stream_info } => self
                         .events
-                        .data_writable(conn.clone(), handler.clone(), stream_info),
+                        .data_writable(conn.clone(), Rc::clone(handler), stream_info),
                     Http3ServerConnEvent::StreamReset { stream_info, error } => {
-                        self.events
-                            .stream_reset(conn.clone(), handler.clone(), stream_info, error);
+                        self.events.stream_reset(
+                            conn.clone(),
+                            Rc::clone(handler),
+                            stream_info,
+                            error,
+                        );
                     }
                     Http3ServerConnEvent::StreamStopSending { stream_info, error } => {
                         self.events.stream_stop_sending(
                             conn.clone(),
-                            handler.clone(),
+                            Rc::clone(handler),
                             stream_info,
                             error,
                         );
@@ -215,7 +224,7 @@ impl Http3Server {
                     }
                     Http3ServerConnEvent::ExtendedConnect { stream_id, headers } => {
                         self.events.webtransport_new_session(
-                            WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
+                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
                             headers,
                         );
                     }
@@ -225,7 +234,7 @@ impl Http3Server {
                         headers,
                         ..
                     } => self.events.webtransport_session_closed(
-                        WebTransportRequest::new(conn.clone(), handler.clone(), stream_id),
+                        WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
                         reason,
                         headers,
                     ),
@@ -233,14 +242,14 @@ impl Http3Server {
                         .events
                         .webtransport_new_stream(Http3OrWebTransportStream::new(
                             conn.clone(),
-                            handler.clone(),
+                            Rc::clone(handler),
                             stream_info,
                         )),
                     Http3ServerConnEvent::ExtendedConnectDatagram {
                         session_id,
                         datagram,
                     } => self.events.webtransport_datagram(
-                        WebTransportRequest::new(conn.clone(), handler.clone(), session_id),
+                        WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
                         datagram,
                     ),
                 }
@@ -293,7 +302,7 @@ fn prepare_data(
                     data.resize(amount, 0);
                 }
 
-                events.data(conn.clone(), handler.clone(), stream_info, data, fin);
+                events.data(conn.clone(), Rc::clone(handler), stream_info, data, fin);
             }
             if amount < MAX_EVENT_DATA_SIZE || fin {
                 break;
