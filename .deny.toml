@@ -1,0 +1,31 @@
+[bans]
+multiple-versions = "deny"
+wildcards = "allow" # TODO: Is there a better way to allowlist local deps?
+allow-wildcard-paths = true
+
+[bans.workspace-dependencies]
+duplicates = "allow"
+include-path-dependencies = true
+unused = "allow"
+
+[licenses]
+unused-allowed-license = "allow"
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MPL-2.0",
+    "MIT",
+    "MIT-0",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+required-git-spec = "rev"
