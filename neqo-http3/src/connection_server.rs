@@ -6,7 +6,7 @@
 
 use std::{rc::Rc, time::Instant};
 
-use neqo_common::{event::Provider, qdebug, qinfo, qtrace, Header, MessageType, Role};
+use neqo_common::{event::Provider as _, qdebug, qinfo, qtrace, Header, MessageType, Role};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
 };
