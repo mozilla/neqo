@@ -1287,7 +1287,6 @@ impl Http3Connection {
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
-        // This really can't fail, panics if it does
         conn.stream_fairness(stream_id, true)?;
 
         self.webtransport_create_stream_internal(
