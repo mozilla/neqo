@@ -234,9 +234,6 @@ impl FrameReader {
         }
         Ok(None)
     }
-}
-
-impl FrameReader {
     fn frame_type_decoded<T: FrameDecoder<T>>(&mut self, frame_type: HFrameType) -> Res<()> {
         T::frame_type_allowed(frame_type)?;
         self.frame_type = frame_type;

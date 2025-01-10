@@ -11,7 +11,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Display,
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufWriter, Write as _},
     net::SocketAddr,
     path::PathBuf,
     rc::Rc,
@@ -155,7 +155,7 @@ impl super::Client for Http3Client {
     }
 
     fn has_events(&self) -> bool {
-        neqo_common::event::Provider::has_events(self)
+        Provider::has_events(self)
     }
 }
 

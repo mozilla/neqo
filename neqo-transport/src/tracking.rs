@@ -18,7 +18,7 @@ use neqo_common::{qdebug, qinfo, qtrace, qwarn, IpTosEcn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::{
-    ecn::EcnCount,
+    ecn,
     frame::{FRAME_TYPE_ACK, FRAME_TYPE_ACK_ECN},
     packet::{PacketBuilder, PacketNumber, PacketType},
     recovery::RecoveryToken,
@@ -86,14 +86,14 @@ impl PacketNumberSpaceSet {
 impl Index<PacketNumberSpace> for PacketNumberSpaceSet {
     type Output = bool;
 
-    fn index(&self, space: PacketNumberSpace) -> &Self::Output {
-        &self.spaces[space]
+    fn index(&self, index: PacketNumberSpace) -> &Self::Output {
+        &self.spaces[index]
     }
 }
 
 impl IndexMut<PacketNumberSpace> for PacketNumberSpaceSet {
-    fn index_mut(&mut self, space: PacketNumberSpace) -> &mut Self::Output {
-        &mut self.spaces[space]
+    fn index_mut(&mut self, index: PacketNumberSpace) -> &mut Self::Output {
+        &mut self.spaces[index]
     }
 }
 
@@ -271,7 +271,7 @@ pub struct RecvdPackets {
     /// for the purposes of generating immediate acknowledgment.
     ignore_order: bool,
     // The counts of different ECN marks that have been received.
-    ecn_count: EcnCount,
+    ecn_count: ecn::Count,
 }
 
 impl RecvdPackets {
@@ -294,12 +294,12 @@ impl RecvdPackets {
                 0
             },
             ignore_order: false,
-            ecn_count: EcnCount::default(),
+            ecn_count: ecn::Count::default(),
         }
     }
 
     /// Get the ECN counts.
-    pub fn ecn_marks(&mut self) -> &mut EcnCount {
+    pub fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 

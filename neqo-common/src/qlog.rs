@@ -59,7 +59,7 @@ impl NeqoQlog {
             title,
             description,
             None,
-            std::time::Instant::now(),
+            Instant::now(),
             new_trace(role),
             qlog::events::EventImportance::Base,
             Box::new(BufWriter::new(file)),
@@ -171,7 +171,7 @@ impl Drop for NeqoQlogShared {
 }
 
 #[must_use]
-pub fn new_trace(role: Role) -> qlog::TraceSeq {
+pub fn new_trace(role: Role) -> TraceSeq {
     TraceSeq {
         vantage_point: VantagePoint {
             name: Some(format!("neqo-{role}")),

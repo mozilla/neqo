@@ -6,7 +6,7 @@
 
 use std::{
     mem,
-    ops::{Deref, Div},
+    ops::{Deref, Div as _},
 };
 
 use neqo_common::{qtrace, Header};

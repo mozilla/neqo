@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{mem, time::Duration};
+use std::time::Duration;
 
 use neqo_common::{qdebug, qinfo, Datagram, IpTosEcn};
 
@@ -303,7 +303,7 @@ fn cc_slow_start_to_persistent_congestion_no_acks() {
 
     // Server: Receive and generate ack
     now += DEFAULT_RTT / 2;
-    mem::drop(ack_bytes(&mut server, stream, c_tx_dgrams, now));
+    drop(ack_bytes(&mut server, stream, c_tx_dgrams, now));
 
     // ACK lost.
     induce_persistent_congestion(&mut client, &mut server, stream, now);
@@ -354,7 +354,7 @@ fn cc_persistent_congestion_to_slow_start() {
 
     // Server: Receive and generate ack
     now += Duration::from_millis(10);
-    mem::drop(ack_bytes(&mut server, stream, c_tx_dgrams, now));
+    drop(ack_bytes(&mut server, stream, c_tx_dgrams, now));
 
     // ACK lost.
 

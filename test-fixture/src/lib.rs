@@ -20,7 +20,7 @@ use std::{
 };
 
 use neqo_common::{
-    event::Provider,
+    event::Provider as _,
     hex,
     qlog::{new_trace, NeqoQlog},
     qtrace, Datagram, Decoder, IpTosEcn, Role,
@@ -344,11 +344,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     }
     dec.skip_vvec(); // The rest of the packet.
     let p1 = &buf[..dec.offset()];
-    let p2 = if dec.remaining() > 0 {
-        Some(dec.decode_remainder())
-    } else {
-        None
-    };
+    let p2 = (dec.remaining() > 0).then(|| dec.decode_remainder());
     qtrace!("split packet: {} {:?}", hex(p1), p2.map(hex));
     (p1, p2)
 }
@@ -407,7 +403,7 @@ pub fn new_neqo_qlog() -> (NeqoQlog, SharedVec) {
         None,
         None,
         None,
-        std::time::Instant::now(),
+        Instant::now(),
         trace,
         EventImportance::Base,
         Box::new(buf),
