@@ -190,7 +190,7 @@ impl Info {
             qdebug!("ECN probing: sent {probes_sent} probes");
             if *probes_sent == TEST_COUNT {
                 qdebug!("ECN probing concluded with {probes_sent} probes sent");
-                self.state.set(EcnValidationState::Unknown, stats);
+                self.state.set(ValidationState::Unknown, stats);
             }
         }
     }
