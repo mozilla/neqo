@@ -60,6 +60,7 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 cfg_not_test = "warn"
+clone_on_ref_ptr = "warn"
 if_then_some_else_none = "warn"
 get_unwrap = "warn"
 multiple_inherent_impl = "warn"
