@@ -105,7 +105,7 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
-    std::mem::drop(client.process(out.dgram(), now()));
+    drop(client.process(out.dgram(), now()));
 }
 
 fn connect(

@@ -17,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider as _, qdebug, qinfo, qwarn, Datagram};
+use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
 use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
@@ -61,7 +61,7 @@ impl super::Handler for Handler<'_> {
                         self.needs_key_update = false;
                         self.download_urls(client);
                     }
-                    Err(neqo_transport::Error::KeyUpdateBlocked) => (),
+                    Err(Error::KeyUpdateBlocked) => (),
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -213,7 +213,7 @@ impl super::Client for Connection {
     }
 
     fn has_events(&self) -> bool {
-        neqo_common::event::Provider::has_events(self)
+        Provider::has_events(self)
     }
 }
 

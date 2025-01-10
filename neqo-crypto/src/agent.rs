@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
-    mem::{self, MaybeUninit},
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     os::raw::{c_uint, c_void},
     pin::Pin,
@@ -135,7 +135,7 @@ impl SecretAgentPreInfo {
             ssl::SSL_GetPreliminaryChannelInfo(
                 fd,
                 info.as_mut_ptr(),
-                c_uint::try_from(mem::size_of::<ssl::SSLPreliminaryChannelInfo>())?,
+                c_uint::try_from(std::mem::size_of::<ssl::SSLPreliminaryChannelInfo>())?,
             )
         })?;
 
@@ -222,7 +222,7 @@ impl SecretAgentInfo {
             ssl::SSL_GetChannelInfo(
                 fd,
                 info.as_mut_ptr(),
-                c_uint::try_from(mem::size_of::<ssl::SSLChannelInfo>())?,
+                c_uint::try_from(std::mem::size_of::<ssl::SSLChannelInfo>())?,
             )
         })?;
         let info = unsafe { info.assume_init() };
@@ -337,7 +337,9 @@ impl SecretAgent {
             ssl::SSL_ImportFD(null_mut(), base_fd.cast())
         };
         if fd.is_null() {
-            unsafe { prio::PR_Close(base_fd) };
+            unsafe {
+                prio::PR_Close(base_fd);
+            }
             return Err(Error::CreateSslSocket);
         }
         Ok(fd)
@@ -347,8 +349,8 @@ impl SecretAgent {
     unsafe extern "C" fn auth_complete_hook(
         arg: *mut c_void,
         _fd: *mut ssl::PRFileDesc,
-        _check_sig: ssl::PRBool,
-        _is_server: ssl::PRBool,
+        _check_sig: PRBool,
+        _is_server: PRBool,
     ) -> ssl::SECStatus {
         let auth_required_ptr = arg.cast::<bool>();
         *auth_required_ptr = true;
@@ -394,7 +396,7 @@ impl SecretAgent {
 
         self.now.bind(self.fd)?;
         self.configure(grease)?;
-        secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, ssl::PRBool::from(is_server)) })
+        secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, PRBool::from(is_server)) })
     }
 
     /// Default configuration.
@@ -438,13 +440,13 @@ impl SecretAgent {
         for i in 0..cipher_count {
             let p = all_ciphers.wrapping_add(i);
             secstatus_to_res(unsafe {
-                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), ssl::PRBool::from(false))
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), PRBool::from(false))
             })?;
         }
 
         for c in ciphers {
             secstatus_to_res(unsafe {
-                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), ssl::PRBool::from(true))
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), PRBool::from(true))
             })?;
         }
         Ok(())
@@ -758,11 +760,15 @@ impl SecretAgent {
         if self.raw == Some(true) {
             // Need to hold the record list in scope until the close is done.
             let _records = self.setup_raw().expect("Can only close");
-            unsafe { prio::PR_Close(self.fd.cast()) };
+            unsafe {
+                prio::PR_Close(self.fd.cast());
+            }
         } else {
             // Need to hold the IO wrapper in scope until the close is done.
             let _io = self.io.wrap(&[]);
-            unsafe { prio::PR_Close(self.fd.cast()) };
+            unsafe {
+                prio::PR_Close(self.fd.cast());
+            }
         };
         let _output = self.io.take_output();
         self.fd = null_mut();
@@ -876,7 +882,7 @@ impl Client {
             token,
             len,
             info.as_mut_ptr(),
-            c_uint::try_from(mem::size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
+            c_uint::try_from(std::mem::size_of::<ssl::SSLResumptionTokenInfo>()).unwrap(),
         );
         if info_res.is_err() {
             // Ignore the token.
@@ -1016,7 +1022,7 @@ pub enum ZeroRttCheckResult {
 
 /// A `ZeroRttChecker` is used by the agent to validate the application token (as provided by
 /// `send_ticket`)
-pub trait ZeroRttChecker: std::fmt::Debug + std::marker::Unpin {
+pub trait ZeroRttChecker: std::fmt::Debug + Unpin {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult;
 }
 
@@ -1068,7 +1074,7 @@ impl Server {
                 return Err(Error::CertificateLoading);
             };
             let key_ptr = unsafe { p11::PK11_FindKeyByAnyCert(*cert, null_mut()) };
-            let Ok(key) = p11::PrivateKey::from_ptr(key_ptr) else {
+            let Ok(key) = PrivateKey::from_ptr(key_ptr) else {
                 return Err(Error::CertificateLoading);
             };
             secstatus_to_res(unsafe {
@@ -1213,8 +1219,8 @@ impl ::std::fmt::Display for Server {
 /// A generic container for Client or Server.
 #[derive(Debug)]
 pub enum Agent {
-    Client(crate::agent::Client),
-    Server(crate::agent::Server),
+    Client(Client),
+    Server(Server),
 }
 
 impl Deref for Agent {

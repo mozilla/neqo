@@ -193,7 +193,7 @@ impl<S: SocketRef> Socket<S> {
     /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
         Ok(Self {
-            state: quinn_udp::UdpSocketState::new((&socket).into())?,
+            state: UdpSocketState::new((&socket).into())?,
             inner: socket,
         })
     }
