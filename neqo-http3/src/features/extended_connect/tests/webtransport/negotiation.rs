@@ -105,7 +105,7 @@ fn zero_rtt(
     let mut server = default_http3_server(Http3Parameters::default().webtransport(server_resumed));
     client
         .enable_resumption(now(), &token)
-        .expect("Set resumption token.");
+        .expect("Set resumption token");
     assert_eq!(client.state(), Http3State::ZeroRtt);
 
     exchange_packets(&mut client, &mut server);

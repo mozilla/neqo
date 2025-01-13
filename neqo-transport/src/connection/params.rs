@@ -190,7 +190,7 @@ impl ConnectionParameters {
             (StreamType::BiDi, false) => self.max_stream_data_bidi_local,
             (StreamType::BiDi, true) => self.max_stream_data_bidi_remote,
             (StreamType::UniDi, false) => {
-                panic!("Can't get receive limit on a stream that can only be sent.")
+                panic!("Can't get receive limit on a stream that can only be sent")
             }
             (StreamType::UniDi, true) => self.max_stream_data_uni,
         }
@@ -213,7 +213,7 @@ impl ConnectionParameters {
                 self.max_stream_data_bidi_remote = v;
             }
             (StreamType::UniDi, false) => {
-                panic!("Can't set receive limit on a stream that can only be sent.")
+                panic!("Can't set receive limit on a stream that can only be sent")
             }
             (StreamType::UniDi, true) => {
                 self.max_stream_data_uni = v;

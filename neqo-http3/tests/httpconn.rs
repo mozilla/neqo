@@ -434,7 +434,7 @@ fn zerortt() {
     let mut hconn_c = default_http3_client();
     hconn_c
         .enable_resumption(now(), &token)
-        .expect("Set resumption token.");
+        .expect("Set resumption token");
     let mut hconn_s = default_http3_server();
 
     // Create a request.

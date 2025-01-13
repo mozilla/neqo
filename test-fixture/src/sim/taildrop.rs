@@ -178,8 +178,7 @@ impl Node for TailDrop {
 
     fn print_summary(&self, test_name: &str) {
         qinfo!(
-            "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name,
+            "{test_name}: taildrop: rx {} drop {} tx {} maxq {}",
             self.received,
             self.dropped,
             self.delivered,

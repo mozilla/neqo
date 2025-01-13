@@ -307,8 +307,7 @@ impl<'b> Handler<'b> {
                 qdebug!("READ[{stream_id}]: {} bytes", read_buffer.len());
             } else {
                 qdebug!(
-                    "READ[{}]: {}",
-                    stream_id,
+                    "READ[{stream_id}]: {}",
                     std::str::from_utf8(read_buffer).map_err(|_| Error::InvalidInput)?
                 );
             }

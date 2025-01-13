@@ -322,10 +322,8 @@ impl LossRecoverySpace {
         self.remove_old_lost(now, cleanup_delay);
 
         qtrace!(
-            "detect lost {}: now={:?} delay={:?}",
+            "detect lost {}: now={now:?} delay={loss_delay:?}",
             self.space,
-            now,
-            loss_delay,
         );
         self.first_ooo_time = None;
 
@@ -340,17 +338,14 @@ impl LossRecoverySpace {
             // Packets sent before now - loss_delay are deemed lost.
             if packet.time_sent() + loss_delay <= now {
                 qtrace!(
-                    "lost={}, time sent {:?} is before lost_delay {:?}",
+                    "lost={}, time sent {:?} is before lost_delay {loss_delay:?}",
                     packet.pn(),
-                    packet.time_sent(),
-                    loss_delay
+                    packet.time_sent()
                 );
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
                 qtrace!(
-                    "lost={}, is >= {} from largest acked {:?}",
-                    packet.pn(),
-                    PACKET_THRESHOLD,
-                    largest_acked
+                    "lost={}, is >= {PACKET_THRESHOLD} from largest acked {largest_acked:?}",
+                    packet.pn()
                 );
             } else {
                 if largest_acked.is_some() {
@@ -539,15 +534,13 @@ impl LossRecovery {
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket, now: Instant) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
-        qtrace!([self], "packet {}-{} sent", pn_space, sent_packet.pn());
+        qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(space) = self.spaces.get_mut(pn_space) {
             path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
             qwarn!(
-                [self],
-                "ignoring {}-{} from dropped space",
-                pn_space,
+                "[{self}] ignoring {pn_space}-{} from dropped space",
                 sent_packet.pn()
             );
         }
@@ -628,9 +621,7 @@ impl LossRecovery {
         }
 
         qdebug!(
-            [self],
-            "ACK for {} - largest_acked={}",
-            pn_space,
+            "[{self}] ACK for {pn_space} - largest_acked={}",
             largest_acked_pkt.pn()
         );
 
@@ -715,7 +706,7 @@ impl LossRecovery {
 
     /// Discard state for a given packet number space.
     pub fn discard(&mut self, primary_path: &PathRef, space: PacketNumberSpace, now: Instant) {
-        qdebug!([self], "Reset loss recovery state for {}", space);
+        qdebug!("[{self}] Reset loss recovery state for {space}");
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
             path.discard_packet(&p, now, &mut self.stats.borrow_mut());
@@ -742,12 +733,7 @@ impl LossRecovery {
         } else {
             None
         };
-        qtrace!(
-            [self],
-            "next_timeout loss={:?} pto={:?}",
-            loss_time,
-            pto_time
-        );
+        qtrace!("[{self}] next_timeout loss={loss_time:?} pto={pto_time:?}");
         match (loss_time, pto_time) {
             (Some(loss_time), Some(pto_time)) => Some(min(loss_time, pto_time)),
             (Some(loss_time), None) => Some(loss_time),
@@ -843,7 +829,7 @@ impl LossRecovery {
             if let Some(t) = self.pto_time(rtt, *pn_space) {
                 allow_probes[*pn_space] = true;
                 if t <= now {
-                    qdebug!([self], "PTO timer fired for {}", pn_space);
+                    qdebug!("[{self}] PTO timer fired for {pn_space}");
                     if let Some(space) = self.spaces.get_mut(*pn_space) {
                         lost.extend(
                             space
@@ -859,13 +845,13 @@ impl LossRecovery {
         // This has to happen outside the loop. Increasing the PTO count here causes the
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
-            qtrace!([self], "PTO {}, probing {:?}", pn_space, allow_probes);
+            qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
             self.fire_pto(pn_space, allow_probes, now);
         }
     }
 
     pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
-        qtrace!([self], "timeout {:?}", now);
+        qtrace!("[{self}] timeout {now:?}");
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
@@ -899,7 +885,7 @@ impl LossRecovery {
     /// what the current congestion window is, and what the pacer says.
     #[allow(clippy::option_if_let_else)]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
-        qtrace!([self], "get send profile {:?}", now);
+        qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
         if let Some(profile) = self

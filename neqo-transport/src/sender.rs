@@ -91,9 +91,8 @@ impl PacketSender {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
             qdebug!(
-                "PLPMTU changed from {} to {}, updating pacer",
-                self.pacer.mtu(),
-                current_mtu
+                "PLPMTU changed from {} to {current_mtu}, updating pacer",
+                self.pacer.mtu()
             );
             self.pacer.set_mtu(current_mtu);
         }

@@ -106,10 +106,9 @@ pub fn recv_inner<'a>(
     if log_enabled!(Level::Trace) {
         for meta in metas.iter().take(n) {
             qtrace!(
-                "received {} bytes from {} to {} in {} segments",
+                "received {} bytes from {} to {local_address} in {} segments",
                 meta.len,
                 meta.addr,
-                local_address,
                 if meta.stride == 0 {
                     0
                 } else {
@@ -312,7 +311,7 @@ mod tests {
                     assert_eq!(
                         SEGMENT_SIZE,
                         d.len(),
-                        "Expect received datagrams to have same length as sent datagrams."
+                        "Expect received datagrams to have same length as sent datagrams"
                     );
                     num_received += 1;
                 });
