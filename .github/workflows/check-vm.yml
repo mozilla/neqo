@@ -37,7 +37,7 @@ jobs:
       - run: curl -o rustup.sh --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
 
       - if: matrix.os == 'freebsd'
-        uses: vmactions/freebsd-vm@debf37ca7b7fa40e19c542ef7ba30d6054a706a4
+        uses: vmactions/freebsd-vm@848dac7e118679d08e2c2f9d42cd96608d834323
         with:
           usesh: true
           envs: "CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS"
