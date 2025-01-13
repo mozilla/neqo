@@ -463,7 +463,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                     self.socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -551,7 +551,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
-            qerror!("Resumption to {host} cannot work without at least 2 URLs.");
+            qerror!("Resumption to {host} cannot work without at least 2 URLs");
             exit(127);
         }
 
@@ -568,10 +568,8 @@ pub async fn client(mut args: Args) -> Res<()> {
         let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
         let real_local = socket.local_addr().unwrap();
         qinfo!(
-            "{} Client connecting: {:?} -> {:?}",
-            args.shared.alpn,
-            real_local,
-            remote_addr,
+            "{} Client connecting: {real_local:?} -> {remote_addr:?}",
+            args.shared.alpn
         );
 
         let hostname = format!("{host}");

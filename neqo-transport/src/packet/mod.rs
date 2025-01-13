@@ -859,7 +859,7 @@ impl<'a> PublicPacket<'a> {
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
-            qtrace!([rx], "decoded header: {:?}", header);
+            qtrace!("[{rx}] decoded header: {header:?}");
             let Some(rx) = crypto.rx(version, cspace, key_phase) else {
                 return Err(Error::DecryptError);
             };
@@ -880,7 +880,7 @@ impl<'a> PublicPacket<'a> {
         } else if crypto.rx_pending(cspace) {
             Err(Error::KeysPending(cspace))
         } else {
-            qtrace!("keys for {:?} already discarded", cspace);
+            qtrace!("keys for {cspace:?} already discarded");
             Err(Error::KeysDiscarded(cspace))
         }
     }

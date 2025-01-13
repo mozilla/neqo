@@ -196,7 +196,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 headers,
             }));
         } else {
-            unreachable!("There is only ExtendedConnectType::WebTransport.");
+            unreachable!("There is only ExtendedConnectType::WebTransport");
         }
     }
 
@@ -216,7 +216,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 },
             ));
         } else {
-            unreachable!("There are no other types.");
+            unreachable!("There are no other types");
         }
     }
 

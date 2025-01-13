@@ -252,7 +252,7 @@ impl ServerRunner {
                     socket.send(&dgram)?;
                 }
                 Output::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {:?}", new_timeout);
+                    qdebug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -361,7 +361,7 @@ pub async fn server(mut args: Args) -> Res<()> {
                 args.shared.quic_parameters.quic_version = vec![Version::Version1];
             }
         } else {
-            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions.");
+            qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
         }
 
         // These are the default for all tests except http3.

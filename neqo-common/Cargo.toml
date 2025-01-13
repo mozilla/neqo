@@ -18,7 +18,7 @@ workspace = true
 [dependencies]
 # Checked against https://searchfox.org/mozilla-central/source/Cargo.lock 2024-11-11
 enum-map = { workspace = true }
-env_logger = { version = "0.10", default-features = false }
+env_logger = { version = "0.10", default-features = false, features = ["auto-color", "regex"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
@@ -34,7 +34,7 @@ test-fixture = { path = "../test-fixture" }
 regex = { workspace = true }
 
 [features]
-bench = ["test-fixture/bench"]
+bench = ["neqo-crypto/bench", "test-fixture/bench"]
 build-fuzzing-corpus = ["hex"]
 ci = []
 test-fixture = []

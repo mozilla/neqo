@@ -163,9 +163,8 @@ impl QuicParameters {
         assert_eq!(
             opt.is_some(),
             addr.is_some(),
-            "unable to resolve '{}' to an {} address",
+            "unable to resolve '{}' to an {v} address",
             opt.as_ref().unwrap(),
-            v,
         );
         addr
     }
@@ -283,7 +282,7 @@ mod tests {
                     .unwrap()
                     .as_secs()
             ));
-            fs::create_dir(&dir).unwrap();
+            fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 

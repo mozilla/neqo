@@ -199,25 +199,25 @@ impl Simulator {
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
-                    qdebug!([self.name], "skipping {:?}", n.node);
+                    qdebug!("[{}] kipping {:?}", self.name, n.node);
                     continue;
                 }
 
-                qdebug!([self.name], "processing {:?}", n.node);
+                qdebug!("[{}] processing {:?}", self.name, n.node);
                 let res = n.process(dgram.take(), now);
                 n.state = match res {
                     Output::Datagram(d) => {
-                        qtrace!([self.name], " => datagram {}", d.len());
+                        qtrace!("[{}]  => datagram {}", self.name, d.len());
                         dgram = Some(d);
                         Active
                     }
                     Output::Callback(delay) => {
-                        qtrace!([self.name], " => callback {:?}", delay);
+                        qtrace!("[{}]  => callback {delay:?}", self.name);
                         assert_ne!(delay, Duration::new(0, 0));
                         Waiting(now + delay)
                     }
                     Output::None => {
-                        qtrace!([self.name], " => nothing");
+                        qtrace!("[{}]  => nothing", self.name);
                         assert!(n.done(), "nodes should be done when they go idle");
                         Idle
                     }
@@ -232,8 +232,8 @@ impl Simulator {
                 let next = self.next_time(now);
                 if next > now {
                     qinfo!(
-                        [self.name],
-                        "advancing time by {:?} to {:?}",
+                        "[{}] advancing time by {:?} to {:?}",
+                        self.name,
                         next - now,
                         next - start
                     );
@@ -249,7 +249,7 @@ impl Simulator {
 
         qinfo!("{}: seed {}", self.name, self.rng.borrow().seed_str());
         for n in &mut self.nodes {
-            n.init(self.rng.clone(), start);
+            n.init(Rc::clone(&self.rng), start);
         }
 
         let setup_start = Instant::now();
