@@ -533,8 +533,8 @@ impl Path {
             }
             Err(e) => {
                 qwarn!(
-                    "Failed to determine outbound interface for destination {}: {e}",
-                    remote.ip()
+                    "Failed to determine outbound interface for destination {ip}: {e}",
+                    ip = remote.ip()
                 );
                 None
             }
