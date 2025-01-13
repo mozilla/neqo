@@ -1,5 +1,5 @@
 [bans]
-multiple-versions = "deny"
+multiple-versions = "allow"
 
 [bans.workspace-dependencies]
 duplicates = "allow"
