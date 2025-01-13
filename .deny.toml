@@ -1,11 +1,8 @@
 [bans]
 multiple-versions = "deny"
-wildcards = "allow" # TODO: Is there a better way to allowlist local deps?
-allow-wildcard-paths = true
 
 [bans.workspace-dependencies]
 duplicates = "allow"
-include-path-dependencies = true
 unused = "allow"
 
 [licenses]
