@@ -468,7 +468,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Reducing MTU to {}", smaller_mtu);
+        qdebug!("Reducing MTU to {smaller_mtu}");
         // Drop packets > smaller_mtu until we need a probe again.
         while !pmtud.needs_probe() {
             let pn = prot.next_pn();
@@ -521,7 +521,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Increasing MTU to {}", larger_mtu);
+        qdebug!("Increasing MTU to {larger_mtu}");
         let now = now + PMTU_RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now, &mut stats);
         while pmtud.needs_probe() {

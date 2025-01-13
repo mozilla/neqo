@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, cmp::min, collections::VecDeque, fmt::Debug, rc::Rc};
 
-use neqo_common::{header::HeadersExt, qdebug, qinfo, qtrace, Header};
+use neqo_common::{header::HeadersExt as _, qdebug, qinfo, qtrace, Header};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{Connection, StreamId};
 
@@ -126,7 +126,7 @@ impl RecvMessage {
             RecvMessageState::WaitingForFinAfterTrailers {..} => {
                 return Err(Error::HttpFrameUnexpected);
             }
-            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state.")
+            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state")
          }
         Ok(())
     }
@@ -146,13 +146,13 @@ impl RecvMessage {
                     };
                 }
             }
-            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state.")
+            _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state")
         }
         Ok(())
     }
 
     fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
-        qtrace!([self], "Add new headers fin={}", fin);
+        qtrace!("[{self}] Add new headers fin={fin}");
         let interim = match self.message_type {
             MessageType::Request => false,
             MessageType::Response => is_interim(&headers)?,
@@ -199,7 +199,10 @@ impl RecvMessage {
     fn set_state_to_close_pending(&mut self, post_readable_event: bool) -> Res<()> {
         // Stream has received fin. Depending on headers state set header_ready
         // or data_readable event so that app can pick up the fin.
-        qtrace!([self], "set_state_to_close_pending: state={:?}", self.state);
+        qtrace!(
+            "[{self}] set_state_to_close_pending: state={:?}",
+            self.state
+        );
 
         match self.state {
             RecvMessageState::WaitingForResponseHeaders { .. } => {
@@ -212,7 +215,7 @@ impl RecvMessage {
                     self.conn_events.data_readable(self.get_stream_info());
                 }
             }
-            _ => unreachable!("Closing an already closed transaction."),
+            _ => unreachable!("Closing an already closed transaction"),
         }
         if !matches!(self.state, RecvMessageState::Closed) {
             self.state = RecvMessageState::ClosePending;
@@ -250,9 +253,8 @@ impl RecvMessage {
     }
 
     fn receive_internal(&mut self, conn: &mut Connection, post_readable_event: bool) -> Res<()> {
-        let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
         loop {
-            qdebug!([label], "state={:?}.", self.state);
+            qdebug!("[{self}] state={:?}", self.state);
             match &mut self.state {
                 // In the following 3 states we need to read frames.
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
@@ -268,11 +270,7 @@ impl RecvMessage {
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
                             qdebug!(
-                                [self],
-                                "A new frame has been received: {:?}; state={:?} fin={}",
-                                frame,
-                                self.state,
-                                fin,
+                                "[{self}] A new frame has been received: {frame:?}; state={:?} fin={fin}", self.state,
                             );
                             match frame {
                                 HFrame::Headers { header_block } => {
@@ -296,10 +294,7 @@ impl RecvMessage {
                         }
                     };
                 }
-                RecvMessageState::DecodingHeaders {
-                    ref header_block,
-                    fin,
-                } => {
+                RecvMessageState::DecodingHeaders { header_block, fin } => {
                     if self
                         .qpack_decoder
                         .borrow()
@@ -307,8 +302,7 @@ impl RecvMessage {
                         && !self.blocked_push_promise.is_empty()
                     {
                         qinfo!(
-                            [self],
-                            "decoding header is blocked waiting for a push_promise header block."
+                            "[{self}] decoding header is blocked waiting for a push_promise header block"
                         );
                         break Ok(());
                     }
@@ -326,7 +320,7 @@ impl RecvMessage {
                             break Ok(());
                         }
                     } else {
-                        qinfo!([self], "decoding header is blocked.");
+                        qinfo!("[{self}] decoding header is blocked");
                         break Ok(());
                     }
                 }

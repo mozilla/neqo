@@ -59,7 +59,7 @@ impl NeqoQlog {
             title,
             description,
             None,
-            std::time::Instant::now(),
+            Instant::now(),
             new_trace(role),
             qlog::events::EventImportance::Base,
             Box::new(BufWriter::new(file)),
@@ -149,11 +149,7 @@ impl NeqoQlog {
     {
         if let Some(inner) = self.inner.borrow_mut().as_mut() {
             if let Err(e) = f(&mut inner.streamer) {
-                crate::do_log!(
-                    ::log::Level::Error,
-                    "Qlog event generation failed with error {}; closing qlog.",
-                    e
-                );
+                log::error!("Qlog event generation failed with error {e}; closing qlog.");
                 *self.inner.borrow_mut() = None;
             }
         }
@@ -169,13 +165,13 @@ impl fmt::Debug for NeqoQlogShared {
 impl Drop for NeqoQlogShared {
     fn drop(&mut self) {
         if let Err(e) = self.streamer.finish_log() {
-            crate::do_log!(::log::Level::Error, "Error dropping NeqoQlog: {}", e);
+            log::error!("Error dropping NeqoQlog: {e}");
         }
     }
 }
 
 #[must_use]
-pub fn new_trace(role: Role) -> qlog::TraceSeq {
+pub fn new_trace(role: Role) -> TraceSeq {
     TraceSeq {
         vantage_point: VantagePoint {
             name: Some(format!("neqo-{role}")),
