@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_common::{qdebug, qinfo};
 use static_assertions::const_assert;
 
 use crate::{frame::FRAME_TYPE_PING, packet::PacketBuilder, recovery::SentPacket, Stats};
@@ -268,7 +268,7 @@ impl Pmtud {
 
         let largest_ok_idx = first_failed - 1;
         let largest_ok_mtu = self.search_table[largest_ok_idx];
-        qtrace!(
+        qdebug!(
             "PMTUD Packet of size > {largest_ok_mtu} lost >= {MAX_PROBES} times, state {:?}",
             self.probe_state
         );
@@ -291,9 +291,7 @@ impl Pmtud {
             Probe::Needed | Probe::Sent => {
                 // We saw multiple losses of packets > the current MTU during PMTU discovery, so
                 // we're done.
-                if largest_ok_mtu > self.mtu {
-                    self.stop(largest_ok_idx, now, stats);
-                }
+                self.stop(largest_ok_idx, now, stats);
             }
         }
     }
