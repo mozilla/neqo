@@ -18,15 +18,15 @@ use crate::cc::classic_cc::WindowAdjustment;
 /// > C is a constant fixed to determine the aggressiveness of window
 /// > increase  in high BDP networks.
 ///
-/// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.1>
+/// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.1>
 ///
 /// See discussion for rational for concrete value.
 ///
-/// <https://www.rfc-editor.org/rfc/rfc8312.html#section-5.1>
+/// <https://datatracker.ietf.org/doc/html/rfc8312#section-5.1>
 pub const CUBIC_C: f64 = 0.4;
 /// TCP-friendly region additive factor
 ///
-/// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.2>
+/// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
 pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
 
 /// CUBIC_BETA = 0.7;
@@ -37,7 +37,7 @@ pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
 /// > of this decision is slower convergence, especially under low statistical
 /// > multiplexing environments.
 ///
-/// <https://www.rfc-editor.org/rfc/rfc8312.html#section-3>
+/// <https://datatracker.ietf.org/doc/html/rfc8312#section-3>
 pub const CUBIC_BETA_USIZE_DIVIDEND: usize = 7;
 pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 
@@ -75,7 +75,7 @@ pub struct Cubic {
     /// > value of W_max before it updates W_max for the current congestion
     /// > event.
     ///
-    /// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.6>
+    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.6>
     last_max_cwnd: f64,
     /// Estimate of Standard TCP congestion window for Cubic's TCP-friendly
     /// Region.
@@ -85,22 +85,22 @@ pub struct Cubic {
     /// > these networks, we use the TCP-friendly region to ensure that CUBIC
     /// > achieves at least the same throughput as Standard TCP.
     ///
-    /// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.2>
+    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
     estimated_tcp_cwnd: f64,
     /// > K is the time period that the above function takes to increase the
     /// > current window size to W_max if there are no further congestion events
     ///
-    /// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.1>
+    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.1>
     k: f64,
     /// > W_max is the window size just before the window is reduced in the last
     /// > congestion event.
     ///
-    /// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.1>
+    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.1>
     w_max: f64,
     /// > the elapsed time from the beginning of the current congestion
     /// > avoidance
     ///
-    /// <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.1>
+    /// <https://datatracker.ietf.org/doc/html/rfc8312#section-4.1>
     ca_epoch_start: Option<Instant>,
     /// Number of bytes acked since the last Standard TCP congestion window increase.
     tcp_acked_bytes: f64,
@@ -201,8 +201,8 @@ impl WindowAdjustment for Cubic {
 
         // Cubic concave or convex region
         //
-        // <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.3>
-        // <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.4>
+        // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.3>
+        // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.4>
         let time_ca = self
             .ca_epoch_start
             .map_or(min_rtt, |t| {
@@ -219,7 +219,7 @@ impl WindowAdjustment for Cubic {
 
         // Cubic TCP-friendly region
         //
-        //  <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.2>
+        //  <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
         let max_datagram_size = convert_to_f64(max_datagram_size);
         let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
         let incr = (self.tcp_acked_bytes / tcp_cnt).floor();
@@ -236,7 +236,7 @@ impl WindowAdjustment for Cubic {
         // > less than W_est(t).  If so, CUBIC is in the TCP-friendly region and
         // > cwnd SHOULD be set to W_est(t) at each reception of an ACK.
         //
-        // <https://www.rfc-editor.org/rfc/rfc8312.html#section-4.2>
+        // <https://datatracker.ietf.org/doc/html/rfc8312#section-4.2>
         let target_cwnd = target_cubic.max(self.estimated_tcp_cwnd);
 
         // Calculate the number of bytes that would need to be acknowledged for an increase
