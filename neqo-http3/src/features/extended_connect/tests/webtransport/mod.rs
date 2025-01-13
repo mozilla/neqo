@@ -10,7 +10,7 @@ mod sessions;
 mod streams;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider, header::HeadersExt};
+use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType};
 use test_fixture::{
@@ -105,7 +105,7 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
     let out = server.process(out.dgram(), now());
-    std::mem::drop(client.process(out.dgram(), now()));
+    drop(client.process(out.dgram(), now()));
 }
 
 fn connect(

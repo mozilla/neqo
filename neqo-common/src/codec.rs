@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{fmt::Debug, mem::size_of};
+use std::fmt::Debug;
 
 use crate::hex_with_len;
 
@@ -111,7 +111,7 @@ impl<'a> Decoder<'a> {
     /// unsigned integer types: `u8`, `u16`, `u32`, or `u64`.
     /// Signed types will fail if the high bit is set.
     pub fn decode_uint<T: TryFrom<u64>>(&mut self) -> Option<T> {
-        let v = self.decode_n(size_of::<T>());
+        let v = self.decode_n(std::mem::size_of::<T>());
         v.and_then(|v| T::try_from(v).ok())
     }
 
@@ -120,9 +120,9 @@ impl<'a> Decoder<'a> {
         let b1 = self.decode_n(1)?;
         match b1 >> 6 {
             0 => Some(b1),
-            1 => Some((b1 & 0x3f) << 8 | self.decode_n(1)?),
-            2 => Some((b1 & 0x3f) << 24 | self.decode_n(3)?),
-            3 => Some((b1 & 0x3f) << 56 | self.decode_n(7)?),
+            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
+            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
+            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
             _ => unreachable!(),
         }
     }
