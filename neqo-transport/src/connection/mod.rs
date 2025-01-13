@@ -1824,17 +1824,17 @@ impl Connection {
 
                 self.zero_rtt_state =
                     if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
-                        qdebug!([self], "Accepted 0-RTT");
+                        qdebug!("[{self}] Accepted 0-RTT");
                         ZeroRttState::AcceptedServer
                     } else {
-                        qtrace!([self], "Rejected 0-RTT");
+                        qdebug!("[{self}] Rejected 0-RTT");
                         ZeroRttState::Rejected
                     };
 
                 // The server knows the final version if it has remote transport parameters.
                 self.tps.borrow().remote.is_some()
             } else {
-                qdebug!([self], "No original destination DCID");
+                qdebug!("[{self}] No original destination DCID");
                 false
             }
         } else {

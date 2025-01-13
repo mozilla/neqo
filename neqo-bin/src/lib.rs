@@ -164,7 +164,7 @@ impl QuicParameters {
             opt.is_some(),
             addr.is_some(),
             "unable to resolve '{:?}' to an {v} address",
-            opt.as_ref().unwrap(),
+            opt.as_ref()?,
         );
         addr
     }
