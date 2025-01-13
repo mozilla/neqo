@@ -23,7 +23,7 @@ permissions:
 env:
   LATEST: neqo-latest
   DELIM: ' vs. '
-  TIMEOUT: 20
+  TIMEOUT: 30
 
 jobs:
   docker-image:
