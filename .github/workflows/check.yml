@@ -14,9 +14,6 @@ on:
         type: boolean
         required: false
         default: false
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -84,6 +81,7 @@ jobs:
       - name: Run tests and determine coverage
         env:
           RUST_LOG: trace
+          RUST_BACKTRACE: 1
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
