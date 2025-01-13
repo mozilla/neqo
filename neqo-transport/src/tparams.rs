@@ -205,7 +205,7 @@ impl TransportParameter {
 
         // Connection ID (non-zero length)
         let cid = ConnectionId::from(d.decode_vec(1).ok_or(Error::NoMoreData)?);
-        if cid.len() == 0 || cid.len() > MAX_CONNECTION_ID_LEN {
+        if cid.is_empty() || cid.len() > MAX_CONNECTION_ID_LEN {
             return Err(Error::TransportParameterError);
         }
 

@@ -166,9 +166,7 @@ fn rebind(
         .unwrap()
         .borrow()
         .local_cid()
-        .unwrap()
-        .len()
-        == 0;
+        .unwrap().is_empty();
     let mut total_delay = Duration::new(0, 0);
     loop {
         let before = server.stats().frame_tx;
