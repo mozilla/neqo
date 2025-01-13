@@ -958,7 +958,6 @@ dependencies = [
 name = "neqo-udp"
 version = "0.11.0"
 dependencies = [
- "cfg_aliases",
  "log",
  "neqo-common",
  "quinn-udp",

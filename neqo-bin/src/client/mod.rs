@@ -30,7 +30,6 @@ use neqo_crypto::{
 };
 use neqo_http3::Output;
 use neqo_transport::{AppError, CloseReason, ConnectionId, Version};
-use neqo_udp::RecvBuf;
 use tokio::time::Sleep;
 use url::{Host, Origin, Url};
 
@@ -395,7 +394,7 @@ struct Runner<'a, H: Handler> {
     handler: H,
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
-    recv_buf: RecvBuf,
+    recv_buf: Vec<u8>,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -413,7 +412,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             handler,
             args,
             timeout: None,
-            recv_buf: RecvBuf::new(),
+            recv_buf: vec![0; neqo_udp::RECV_BUF_SIZE],
         }
     }
 
@@ -482,6 +481,9 @@ impl<'a, H: Handler> Runner<'a, H> {
             let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? else {
                 break;
             };
+            if dgrams.len() == 0 {
+                break;
+            }
             self.client.process_multiple_input(dgrams, Instant::now());
             self.process_output().await?;
         }
