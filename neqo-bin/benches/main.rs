@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unwrap_used)] // OK in a bench.
+
 use std::{env, path::PathBuf, str::FromStr as _};
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};

@@ -785,7 +785,8 @@ impl Http3Client {
     /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64())).unwrap())
+            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
+                .map_err(|_| Error::Internal)?)
     }
 
     /// Sets the `SendOrder` for a given stream

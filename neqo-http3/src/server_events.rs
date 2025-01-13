@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -22,7 +20,7 @@ use crate::{
     connection::{Http3State, WebTransportSessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect::SessionCloseReason,
-    Http3StreamInfo, Http3StreamType, Priority, Res,
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -378,7 +376,7 @@ impl WebTransportRequest {
             - u64::try_from(Encoder::varint_len(
                 self.stream_handler.stream_id().as_u64(),
             ))
-            .unwrap())
+            .map_err(|_| Error::Internal)?)
     }
 }
 
@@ -467,6 +465,7 @@ pub enum Http3ServerEvent {
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct Http3ServerEvents {
     events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
 }

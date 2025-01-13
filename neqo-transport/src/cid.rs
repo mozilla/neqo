@@ -557,7 +557,14 @@ impl ConnectionIdManager {
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {
-            debug_assert_eq!(self.generator.borrow_mut().generate_cid().unwrap().len(), 0);
+            debug_assert_eq!(
+                self.generator
+                    .borrow_mut()
+                    .generate_cid()
+                    .expect("OK in debug assert")
+                    .len(),
+                0
+            );
             return;
         }
 
