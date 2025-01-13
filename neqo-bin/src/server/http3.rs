@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fmt::{self, Display},
     rc::Rc,
     time::Instant,
@@ -18,6 +17,7 @@ use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{server::ValidateAddress, ConnectionIdGenerator};
+use rustc_hash::FxHashMap;
 
 use super::{qns_read_response, Args};
 use crate::send_data::SendData;
@@ -25,8 +25,8 @@ use crate::send_data::SendData;
 pub struct HttpServer {
     server: Http3Server,
     /// Progress writing to each stream.
-    remaining_data: HashMap<StreamId, SendData>,
-    posts: HashMap<Http3OrWebTransportStream, usize>,
+    remaining_data: FxHashMap<StreamId, SendData>,
+    posts: FxHashMap<Http3OrWebTransportStream, usize>,
     is_qns_test: bool,
 }
 
@@ -66,8 +66,8 @@ impl HttpServer {
         }
         Self {
             server,
-            remaining_data: HashMap::new(),
-            posts: HashMap::new(),
+            remaining_data: FxHashMap::default(),
+            posts: FxHashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
         }
     }
